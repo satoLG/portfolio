@@ -8,8 +8,8 @@ import { WebGPURenderer } from 'three/webgpu'
 import { PerformanceOptimizer } from './utils/PerformanceOptimizer.js'
 
 // Importação dos shaders GLSL
-import fragmentShader from '../resources/shaders/fragment.glsl'
-import customVertexShader from '../resources/shaders/customVertex.glsl'
+import fragmentShader from '../public/resources/shaders/fragment.glsl'
+import customVertexShader from '../public/resources/shaders/customVertex.glsl'
 
 import './style.css'
 
