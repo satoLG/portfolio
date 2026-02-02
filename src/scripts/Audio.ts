@@ -9,6 +9,9 @@ const BREEZE_MIN_DELAY = 10;           // Min seconds between breeze sounds
 const BREEZE_MAX_DELAY = 20;           // Max seconds between breeze sounds
 const FIREPLACE_VOLUME_MAX = 0.35;     // Fireplace target volume
 const FIREPLACE_FADE_DURATION = 1.5;   // Seconds to fade in fireplace (desktop only)
+const UNDERWATER_AMB_VOLUME = 0.25;    // Underwater ambient loop volume
+const TRANSITION_SFX_VOLUME = 0.1;     // Volume for dive/surface SFX
+const TRANSITION_SFX_DURATION = 400;  // How long to play transition SFX (ms)
 // ============================================
 
 // Pure HTML5 Audio elements - NO AudioContext connection
@@ -17,6 +20,14 @@ let waterAudio2: HTMLAudioElement | null = null;
 let activeWaterAudio: HTMLAudioElement | null = null;
 let breezeAudio: HTMLAudioElement | null = null;
 let fireplaceAudio: HTMLAudioElement | null = null;
+
+// Underwater audio elements
+let underwaterAmbAudio: HTMLAudioElement | null = null;
+let underwaterBubblesAudio: HTMLAudioElement | null = null;
+let surfaceSplashAudio: HTMLAudioElement | null = null;
+
+// Track underwater state for audio
+let isCurrentlyUnderwater = false;
 
 // Crossfade settings for seamless water loop
 const CROSSFADE_DURATION = 1.0;
@@ -32,6 +43,9 @@ let isRecoveringAudio = false;
 // Helper function to handle unexpected audio pause
 function handleAudioPause(audio: HTMLAudioElement | null, name: string): void {
     if (!audio || isRecoveringAudio || !audioInitialized) return;
+    
+    // Don't restart above-water sounds if we're underwater
+    if (isCurrentlyUnderwater && (name.includes('Water') || name.includes('Fireplace') || name.includes('Breeze'))) return;
     
     // Don't restart if we're intentionally fading or stopping
     if (name.includes('Fireplace') && (!fireplaceActive || fireplaceFading)) return;
@@ -50,6 +64,9 @@ function handleAudioPause(audio: HTMLAudioElement | null, name: string): void {
 function restartWaterAudio(): void {
     if (!waterAudio1 || !waterAudio2 || !audioInitialized) return;
     
+    // Don't restart if we're underwater
+    if (isCurrentlyUnderwater) return;
+    
     console.log('Restarting water audio loop');
     waterCrossfading = false;
     
@@ -65,7 +82,17 @@ function restartWaterAudio(): void {
 function checkAudioHealth(): void {
     if (!audioInitialized) return;
     
-    // Check water audio
+    // Don't restart above-water sounds if we're underwater
+    if (isCurrentlyUnderwater) {
+        // Check underwater ambient instead
+        if (underwaterAmbAudio && underwaterAmbAudio.paused) {
+            console.log('Health check: Underwater ambient stopped - restarting');
+            underwaterAmbAudio.play().catch(e => console.error('Failed to restart underwater ambient:', e));
+        }
+        return;
+    }
+    
+    // Check water audio (only when above water)
     if (activeWaterAudio && activeWaterAudio.paused && !waterCrossfading) {
         console.log('Health check: Water audio stopped - restarting');
         restartWaterAudio();
@@ -122,6 +149,22 @@ function createAudioElements(): void {
     fireplaceAudio.volume = isIOS ? FIREPLACE_VOLUME_MAX : 0;
     fireplaceAudio.preload = 'auto';
     
+    // Underwater audio elements
+    underwaterAmbAudio = new Audio('audio/366159__dcsfx__underwater-loop-amb.wav');
+    underwaterAmbAudio.loop = true;
+    underwaterAmbAudio.volume = 0;
+    underwaterAmbAudio.preload = 'auto';
+    
+    underwaterBubblesAudio = new Audio('audio/96742__robinhood76__01650-underwater-bubbles.wav');
+    underwaterBubblesAudio.loop = false;
+    underwaterBubblesAudio.volume = TRANSITION_SFX_VOLUME;
+    underwaterBubblesAudio.preload = 'auto';
+    
+    surfaceSplashAudio = new Audio('audio/327667__juan_merie_venter__getting-out-of-the-pool.wav');
+    surfaceSplashAudio.loop = false;
+    surfaceSplashAudio.volume = TRANSITION_SFX_VOLUME;
+    surfaceSplashAudio.preload = 'auto';
+    
     breezeAudio.addEventListener('ended', () => {
         scheduleBreezeSound();
     });
@@ -130,6 +173,8 @@ function createAudioElements(): void {
     // These MUST restart audio even if crossfade was in progress (it may have failed)
     waterAudio1.addEventListener('ended', () => {
         console.log('Water audio 1 ended');
+        // Don't restart if we're underwater
+        if (isCurrentlyUnderwater) return;
         // If this was the active audio and it ended, crossfade failed - restart
         if (activeWaterAudio === waterAudio1 && waterAudio2) {
             console.log('Crossfade failed - restarting from audio 2');
@@ -143,6 +188,8 @@ function createAudioElements(): void {
     
     waterAudio2.addEventListener('ended', () => {
         console.log('Water audio 2 ended');
+        // Don't restart if we're underwater
+        if (isCurrentlyUnderwater) return;
         // If this was the active audio and it ended, crossfade failed - restart
         if (activeWaterAudio === waterAudio2 && waterAudio1) {
             console.log('Crossfade failed - restarting from audio 1');
@@ -168,6 +215,9 @@ function createAudioElements(): void {
     waterAudio2.load();
     breezeAudio.load();
     fireplaceAudio.load();
+    underwaterAmbAudio.load();
+    underwaterBubblesAudio.load();
+    surfaceSplashAudio.load();
     
     console.log('HTML5 Audio elements created');
 }
@@ -399,6 +449,109 @@ export function startAudio(): void {
     initAudio();
 }
 
+// Pause above-water ambient sounds
+function pauseAboveWaterSounds(): void {
+    if (waterAudio1) waterAudio1.pause();
+    if (waterAudio2) waterAudio2.pause();
+    if (breezeAudio) breezeAudio.pause();
+    if (fireplaceAudio && fireplaceActive) fireplaceAudio.pause();
+    if (breezeTimeout) {
+        clearTimeout(breezeTimeout);
+        breezeTimeout = null;
+    }
+    console.log('Above-water sounds paused');
+}
+
+// Resume above-water ambient sounds
+function resumeAboveWaterSounds(): void {
+    if (activeWaterAudio) {
+        activeWaterAudio.play().catch(e => console.error('Failed to resume water:', e));
+    }
+    scheduleBreezeSound();
+    
+    // Only resume/start fireplace if it's night time
+    if (!isDayTime()) {
+        if (fireplaceActive && fireplaceAudio) {
+            fireplaceAudio.play().catch(e => console.error('Failed to resume fireplace:', e));
+        } else {
+            // Fireplace wasn't active but it's night, start it
+            startFireplaceSound();
+        }
+    }
+    console.log('Above-water sounds resumed');
+}
+
+// Start underwater ambient loop
+function startUnderwaterAmbient(): void {
+    if (!underwaterAmbAudio) return;
+    underwaterAmbAudio.currentTime = 0;
+    underwaterAmbAudio.volume = UNDERWATER_AMB_VOLUME;
+    underwaterAmbAudio.play().catch(e => console.error('Failed to start underwater ambient:', e));
+    console.log('Underwater ambient started');
+}
+
+// Stop underwater ambient loop
+function stopUnderwaterAmbient(): void {
+    if (!underwaterAmbAudio) return;
+    underwaterAmbAudio.pause();
+    underwaterAmbAudio.currentTime = 0;
+    console.log('Underwater ambient stopped');
+}
+
+// Play dive transition SFX (bubbles going down)
+export function playDiveSound(): void {
+    if (!underwaterBubblesAudio || !audioInitialized) return;
+    
+    underwaterBubblesAudio.currentTime = 0;
+    underwaterBubblesAudio.play().catch(e => console.error('Failed to play dive sound:', e));
+    
+    // Stop after 2 seconds
+    setTimeout(() => {
+        if (underwaterBubblesAudio) {
+            underwaterBubblesAudio.pause();
+            underwaterBubblesAudio.currentTime = 0;
+        }
+    }, TRANSITION_SFX_DURATION);
+    
+    console.log('Dive sound playing');
+}
+
+// Play surface transition SFX (coming out of water)
+export function playSurfaceSound(): void {
+    if (!surfaceSplashAudio || !audioInitialized) return;
+    
+    surfaceSplashAudio.currentTime = 0;
+    // surfaceSplashAudio.play().catch(e => console.error('Failed to play surface sound:', e));
+    
+    // Stop after 2 seconds
+    // setTimeout(() => {
+    //     if (surfaceSplashAudio) {
+    //         surfaceSplashAudio.pause();
+    //         surfaceSplashAudio.currentTime = 0;
+    //     }
+    // }, TRANSITION_SFX_DURATION);
+    
+    console.log('Surface sound playing');
+}
+
+// Called when transitioning to underwater
+export function transitionToUnderwater(): void {
+    if (!audioInitialized || isCurrentlyUnderwater) return;
+    isCurrentlyUnderwater = true;
+    
+    pauseAboveWaterSounds();
+    startUnderwaterAmbient();
+}
+
+// Called when transitioning to above water
+export function transitionToAboveWater(): void {
+    if (!audioInitialized || !isCurrentlyUnderwater) return;
+    isCurrentlyUnderwater = false;
+    
+    stopUnderwaterAmbient();
+    resumeAboveWaterSounds();
+}
+
 export function Start(): void {
     wasDay = isDayTime();
 }
@@ -416,12 +569,15 @@ export function Update(): void {
     
     const isDay = isDayTime();
     
-    if (wasDay && !isDay) {
-        startFireplaceSound();
-    }
-    
-    if (!wasDay && isDay) {
-        stopFireplaceSound();
+    // Only handle day/night transitions if we're above water
+    if (!isCurrentlyUnderwater) {
+        if (wasDay && !isDay) {
+            startFireplaceSound();
+        }
+        
+        if (!wasDay && isDay) {
+            stopFireplaceSound();
+        }
     }
     
     wasDay = isDay;
