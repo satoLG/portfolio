@@ -1,8 +1,16 @@
 import { body } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
-import { startAudio } from "./Audio";
+import { startAudio, playDiveSound, playSurfaceSound, transitionToUnderwater, transitionToAboveWater } from "./Audio";
+import { getIsUnderwater, diveUnderwater, surfaceAboveWater, getCameraY } from "./Control";
 
 const THEME_STORAGE_KEY = 'portfolio-theme-mode';
+
+// Dive/Surface button reference
+let diveButton: HTMLButtonElement | null = null;
+
+// Track previous camera Y for detecting surface crossing
+let previousCameraY = 1;
+let audioIsUnderwater = false;
 
 // Restore saved theme preference
 function restoreThemePreference(): void {
@@ -133,6 +141,49 @@ export function Start(): void {
         toggleDayNight();
         saveThemePreference(isDayTime());
     });
+    
+    // Dive/Surface button
+    diveButton = document.createElement("button");
+    diveButton.id = "dive-button";
+    diveButton.className = "dive-button";
+    diveButton.title = "Dive underwater";
+    diveButton.innerHTML = `
+        <!-- Bubbles icon (dive down) -->
+        <svg class="dive-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <circle cx="6" cy="8" r="2"/>
+            <circle cx="18" cy="16" r="2"/>
+            <circle cx="8" cy="18" r="1.5"/>
+            <circle cx="16" cy="6" r="1.5"/>
+            <path d="M12 19v3"/>
+            <path d="M10 21l2 2 2-2"/>
+        </svg>
+        <!-- Island icon (surface up) -->
+        <svg class="surface-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <ellipse cx="12" cy="18" rx="8" ry="3"/>
+            <path d="M12 18v-6"/>
+            <path d="M9 8c0-2 1.5-4 3-4s3 2 3 4"/>
+            <path d="M7 10c-1 0-2 .5-2 1.5s1 2.5 2 2.5"/>
+            <path d="M17 10c1 0 2 .5 2 1.5s-1 2.5-2 2.5"/>
+            <path d="M12 5v3"/>
+            <path d="M10 3l2-2 2 2"/>
+        </svg>
+    `;
+    diveButton.onclick = function() {
+        if (!document.body.classList.contains('started')) return;
+        
+        const isUnderwater = getIsUnderwater();
+        if (isUnderwater) {
+            // Surface: go up
+            surfaceAboveWater();
+            playSurfaceSound();
+        } else {
+            // Dive: go down
+            diveUnderwater();
+            playDiveSound();
+        }
+    };
+    document.body.appendChild(diveButton);
 }
 
 export function Update(): void {
@@ -147,5 +198,37 @@ export function Update(): void {
     } else {
         document.body.classList.remove('day-mode');
         document.body.classList.add('night-mode');
+    }
+    
+    // Update underwater state and audio transitions
+    const isUnderwater = getIsUnderwater();
+    const cameraY = getCameraY();
+    
+    // Detect when camera actually crosses the surface (Y = 0)
+    // Play transition sounds when button clicked, but switch ambient audio when crossing Y=0
+    const crossedToUnderwater = previousCameraY >= 0 && cameraY < 0;
+    const crossedToSurface = previousCameraY < 0 && cameraY >= 0;
+    
+    if (crossedToUnderwater && !audioIsUnderwater) {
+        audioIsUnderwater = true;
+        transitionToUnderwater();
+        document.body.classList.add('underwater');
+    } else if (crossedToSurface && audioIsUnderwater) {
+        audioIsUnderwater = false;
+        transitionToAboveWater();
+        document.body.classList.remove('underwater');
+    }
+    
+    previousCameraY = cameraY;
+    
+    // Update button icon based on underwater state
+    if (diveButton) {
+        if (isUnderwater) {
+            diveButton.classList.add('is-underwater');
+            diveButton.title = "Surface";
+        } else {
+            diveButton.classList.remove('is-underwater');
+            diveButton.title = "Dive underwater";
+        }
     }
 }

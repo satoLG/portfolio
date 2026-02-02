@@ -12,12 +12,44 @@ const moveSpeedExpMultiplier = 0;
 
 // Web page mode settings
 let webPageMode = true;  // Start in web page mode
-const webPageTopY = 1;      // Top camera position (above water)
-const webPageBottomY = -8;  // Bottom camera position (near sea floor)
+
+// ABOVE WATER zone (ocean surface is at Y=0)
+const aboveWaterTopY = 1.5;       // Top camera position above water
+const aboveWaterBottomY = 0.5; // Bottom limit above water (avoid looking at surface)
+
+// UNDERWATER zone
+const underwaterTopY = -0.5;   // Top limit underwater (avoid looking at surface from below)
+const underwaterBottomY = -8;   // Bottom camera position (near sea floor)
+
 const scrollSpeed = 0.005;    // How fast scroll moves camera
 const scrollSmooth = 10;      // Smoothing factor
-let targetY = webPageTopY;   // Target Y position
-let currentY = webPageTopY;  // Current Y position (for smoothing)
+let targetY = aboveWaterTopY;   // Target Y position
+let currentY = aboveWaterTopY;  // Current Y position (for smoothing)
+
+// Track if camera is underwater
+let isUnderwater = false;
+
+export function getIsUnderwater(): boolean {
+    return isUnderwater;
+}
+
+export function getCameraY(): number {
+    return currentY;
+}
+
+// Transition camera to underwater (called by UI button)
+export function diveUnderwater(): void {
+    if (!webPageMode || isUnderwater) return;
+    isUnderwater = true;
+    targetY = underwaterTopY;
+}
+
+// Transition camera to above water (called by UI button)
+export function surfaceAboveWater(): void {
+    if (!webPageMode || !isUnderwater) return;
+    isUnderwater = false;
+    targetY = aboveWaterBottomY;
+}
 
 export function isWebPageMode(): boolean {
     return webPageMode;
@@ -27,14 +59,20 @@ export function toggleCameraMode(): boolean {
     webPageMode = !webPageMode;
     if (webPageMode) {
         // Reset to top position when entering web page mode
-        targetY = webPageTopY;
+        targetY = aboveWaterTopY;
+        isUnderwater = false;
     }
     return webPageMode;
 }
 
 export function handleScroll(deltaY: number): void {
     if (webPageMode) {
-        targetY = MathUtils.clamp(targetY - deltaY * scrollSpeed, webPageBottomY, webPageTopY);
+        // Clamp scroll based on current zone
+        if (isUnderwater) {
+            targetY = MathUtils.clamp(targetY - deltaY * scrollSpeed, underwaterBottomY, underwaterTopY);
+        } else {
+            targetY = MathUtils.clamp(targetY - deltaY * scrollSpeed, aboveWaterBottomY, aboveWaterTopY);
+        }
     }
 }
 

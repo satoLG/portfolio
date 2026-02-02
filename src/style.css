@@ -539,3 +539,107 @@ a:visited
     color: #03c;
     text-decoration: none;
 }
+
+/* ============================================
+   DIVE/SURFACE BUTTON
+   ============================================ */
+.dive-button {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    z-index: 15;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 2px solid var(--text-color-night);
+    color: var(--text-color-night);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: 
+        all 0.4s ease,
+        bottom 0.5s ease,
+        top 0.5s ease,
+        color var(--transition-duration) ease,
+        border-color var(--transition-duration) ease;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Show button only after START */
+body.started .dive-button {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* Day mode button */
+body.day-mode .dive-button {
+    border-color: var(--text-color-day);
+    color: var(--text-color-day);
+    background: rgba(10, 37, 64, 0.1);
+}
+
+/* Night mode button */
+body.night-mode .dive-button {
+    border-color: var(--text-color-night);
+    color: var(--text-color-night);
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.dive-button:hover {
+    transform: translateX(-50%) scale(1.1);
+    background: rgba(255, 255, 255, 0.25);
+}
+
+body.day-mode .dive-button:hover {
+    background: rgba(10, 37, 64, 0.2);
+}
+
+.dive-button:active {
+    transform: translateX(-50%) scale(0.95);
+}
+
+/* Icon sizing */
+.dive-button svg {
+    width: 28px;
+    height: 28px;
+}
+
+/* Show dive icon, hide surface icon by default */
+.dive-button .dive-icon {
+    display: block;
+}
+
+.dive-button .surface-icon {
+    display: none;
+}
+
+/* When underwater: move button to top, switch icons */
+.dive-button.is-underwater {
+    bottom: auto;
+    top: 24px;
+}
+
+.dive-button.is-underwater .dive-icon {
+    display: none;
+}
+
+.dive-button.is-underwater .surface-icon {
+    display: block;
+}
+
+/* Underwater mode body class styling */
+body.underwater .dive-button {
+    border-color: rgba(255, 255, 255, 0.8);
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(30, 80, 120, 0.3);
+}
+
+body.underwater .dive-button:hover {
+    background: rgba(30, 80, 120, 0.5);
+}
