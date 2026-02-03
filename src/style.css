@@ -7,6 +7,280 @@ body
     user-select: none;
 }
 
+/* ============================================
+   MEDIA PLAYER (Bubble + Expanded states)
+   ============================================ */
+.media-player {
+    position: fixed;
+    z-index: 25;
+    font-family: 'Calibri', sans-serif;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+}
+
+/* BUBBLE STATE */
+.media-player.bubble {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    animation: bubble-float 2s ease-in-out infinite;
+}
+
+.media-player.bubble:hover {
+    background: rgba(255, 255, 255, 0.25);
+    border-color: rgba(255, 255, 255, 0.7);
+}
+
+.media-player.bubble .music-note {
+    font-size: 18px;
+    color: white;
+    opacity: 1;
+    transition: opacity 0.3s ease;
+}
+
+.media-player.bubble .player-expanded-content {
+    opacity: 0;
+    pointer-events: none;
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+}
+
+@keyframes bubble-float {
+    0%, 100% { margin-top: 0; }
+    50% { margin-top: -6px; }
+}
+
+/* Day mode bubble */
+body.day-mode .media-player.bubble {
+    background: rgba(10, 37, 64, 0.12);
+    border-color: rgba(10, 37, 64, 0.4);
+}
+
+body.day-mode .media-player.bubble:hover {
+    background: rgba(10, 37, 64, 0.2);
+    border-color: rgba(10, 37, 64, 0.6);
+}
+
+body.day-mode .media-player.bubble .music-note {
+    color: var(--text-color-day);
+}
+
+/* EXPANDED STATE */
+.media-player.expanded {
+    width: 240px;
+    height: auto;
+    border-radius: 16px;
+    background: rgba(20, 40, 60, 0.4);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    padding: 12px;
+    color: white;
+    cursor: default;
+    animation: none;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.media-player.expanded .music-note {
+    opacity: 0;
+    position: absolute;
+    pointer-events: none;
+}
+
+.media-player.expanded .player-expanded-content {
+    opacity: 1;
+    pointer-events: auto;
+    position: relative;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    transition: opacity 0.3s ease 0.1s;
+}
+
+/* Drag handle - invisible but grabbable area at top */
+.player-drag-handle {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 30px;  /* Leave room for close button */
+    height: 28px;
+    cursor: grab;
+    z-index: 5;
+}
+
+.player-drag-handle:active {
+    cursor: grabbing;
+}
+
+/* Day mode expanded - very transparent */
+body.day-mode .media-player.expanded {
+    background: rgba(240, 248, 255, 0.35);
+    border-color: rgba(10, 37, 64, 0.2);
+    color: var(--text-color-day);
+}
+
+/* Close button */
+.player-close {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 20px;
+    font-weight: 300;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    padding: 0;
+    line-height: 1;
+}
+
+.player-close:hover {
+    color: white;
+    transform: scale(1.1);
+    background: transparent;
+}
+
+.player-close:active {
+    background: transparent;
+}
+
+body.day-mode .player-close {
+    color: rgba(10, 37, 64, 0.4);
+}
+
+body.day-mode .player-close:hover {
+    color: var(--text-color-day);
+}
+
+/* Player content (cover + info) */
+.player-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    margin-top: 6px;
+}
+
+.player-cover {
+    width: 50px;
+    height: 50px;
+    border-radius: 6px;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.player-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.player-info {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.player-title {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 3px;
+}
+
+.player-artist {
+    font-size: 11px;
+    opacity: 0.6;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Player controls */
+.player-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.player-btn {
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.player-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.05);
+}
+
+.player-btn:active {
+    transform: scale(0.95);
+    background: rgba(255, 255, 255, 0.25);
+}
+
+.player-play {
+    width: 44px;
+    height: 44px;
+    background: rgba(74, 158, 255, 0.6);
+}
+
+.player-play:hover {
+    background: rgba(74, 158, 255, 0.8);
+}
+
+/* Day mode buttons */
+body.day-mode .player-btn {
+    background: rgba(10, 37, 64, 0.1);
+    color: var(--text-color-day);
+}
+
+body.day-mode .player-btn:hover {
+    background: rgba(10, 37, 64, 0.18);
+}
+
+body.day-mode .player-play {
+    background: rgba(30, 100, 180, 0.5);
+    color: white;
+}
+
+body.day-mode .player-play:hover {
+    background: rgba(30, 100, 180, 0.7);
+}
+
+/* Hide player before START */
+body:not(.started) .media-player {
+    display: none;
+}
+
 /* Start overlay */
 #start-overlay {
     position: fixed;
@@ -633,13 +907,45 @@ body.day-mode .dive-button:hover {
     display: block;
 }
 
-/* Underwater mode body class styling */
-body.underwater .dive-button {
+/* Underwater mode - day: use dark blue colors */
+body.underwater.day-mode .dive-button {
+    border-color: var(--text-color-day);
+    color: var(--text-color-day);
+    background: rgba(10, 37, 64, 0.2);
+}
+
+body.underwater.day-mode .dive-button:hover {
+    background: rgba(10, 37, 64, 0.35);
+}
+
+/* Underwater mode - night: use white colors */
+body.underwater.night-mode .dive-button {
     border-color: rgba(255, 255, 255, 0.8);
     color: rgba(255, 255, 255, 0.9);
     background: rgba(30, 80, 120, 0.3);
 }
 
-body.underwater .dive-button:hover {
+body.underwater.night-mode .dive-button:hover {
     background: rgba(30, 80, 120, 0.5);
+}
+
+/* Mobile / narrow screen: button stays at bottom right, never moves */
+.dive-button {
+    left: auto;
+    right: 16px;
+    bottom: 16px;
+    transform: none;
+}
+
+.dive-button.is-underwater {
+    bottom: 16px;
+    top: auto;
+}
+
+.dive-button:hover {
+    transform: scale(1.1);
+}
+
+.dive-button:active {
+    transform: scale(0.95);
 }

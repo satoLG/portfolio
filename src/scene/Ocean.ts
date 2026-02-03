@@ -17,6 +17,7 @@ export function Start(): void
 
     surface.geometry = surfaceGeometry;
     surface.material = oceanMaterials.surface;
+    surface.receiveShadow = false;  // No shadows on ocean
 
     const halfWidth = oceanWidth / 2;
     const halfDepth = oceanDepth / 2;

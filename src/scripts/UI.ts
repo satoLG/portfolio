@@ -149,24 +149,10 @@ export function Start(): void {
     diveButton.title = "Dive underwater";
     diveButton.innerHTML = `
         <!-- Bubbles icon (dive down) -->
-        <svg class="dive-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3"/>
-            <circle cx="6" cy="8" r="2"/>
-            <circle cx="18" cy="16" r="2"/>
-            <circle cx="8" cy="18" r="1.5"/>
-            <circle cx="16" cy="6" r="1.5"/>
-            <path d="M12 19v3"/>
-            <path d="M10 21l2 2 2-2"/>
+        <svg class="dive-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bubbles-icon lucide-bubbles"><path d="M7.001 15.085A1.5 1.5 0 0 1 9 16.5"/><circle cx="18.5" cy="8.5" r="3.5"/><circle cx="7.5" cy="16.5" r="5.5"/><circle cx="7.5" cy="4.5" r="2.5"/>
         </svg>
         <!-- Island icon (surface up) -->
-        <svg class="surface-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <ellipse cx="12" cy="18" rx="8" ry="3"/>
-            <path d="M12 18v-6"/>
-            <path d="M9 8c0-2 1.5-4 3-4s3 2 3 4"/>
-            <path d="M7 10c-1 0-2 .5-2 1.5s1 2.5 2 2.5"/>
-            <path d="M17 10c1 0 2 .5 2 1.5s-1 2.5-2 2.5"/>
-            <path d="M12 5v3"/>
-            <path d="M10 3l2-2 2 2"/>
+        <svg  class="surface-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-tree-palm-icon lucide-tree-palm"><path d="M13 8c0-2.76-2.46-5-5.5-5S2 5.24 2 8h2l1-1 1 1h4"/><path d="M13 7.14A5.82 5.82 0 0 1 16.5 6c3.04 0 5.5 2.24 5.5 5h-3l-1-1-1 1h-3"/><path d="M5.89 9.71c-2.15 2.15-2.3 5.47-.35 7.43l4.24-4.25.7-.7.71-.71 2.12-2.12c-1.95-1.96-5.27-1.8-7.42.35"/><path d="M11 15.5c.5 2.5-.17 4.5-1 6.5h4c2-5.5-.5-12-1-14"/>
         </svg>
     `;
     diveButton.onclick = function() {
@@ -211,12 +197,18 @@ export function Update(): void {
     
     if (crossedToUnderwater && !audioIsUnderwater) {
         audioIsUnderwater = true;
+        // Defer CSS change to next frame to avoid layout thrashing with audio ops
+        requestAnimationFrame(() => {
+            document.body.classList.add('underwater');
+        });
         transitionToUnderwater();
-        document.body.classList.add('underwater');
     } else if (crossedToSurface && audioIsUnderwater) {
         audioIsUnderwater = false;
+        // Defer CSS change to next frame to avoid layout thrashing with audio ops
+        requestAnimationFrame(() => {
+            document.body.classList.remove('underwater');
+        });
         transitionToAboveWater();
-        document.body.classList.remove('underwater');
     }
     
     previousCameraY = cameraY;
