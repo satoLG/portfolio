@@ -554,9 +554,8 @@ export function Update(): void {
     }
     
     // Calculate wind sway (to the left = negative X rotation from camera view = positive Z rotation)
-    const baseWind = Math.sin(windTime * WIND_SPEED) * 0.3;  // Subtle constant sway
+    // Base wind formula if needed: Math.sin(windTime * WIND_SPEED) * 0.3
     const gustWind = gustStrength * Math.sin(windTime * WIND_SPEED * 2) * 1.0;  // Stronger during gusts
-    const totalWind = (baseWind + gustWind) * WIND_STRENGTH;
     
     // Apply to grass patches
     grassPatches.forEach((patch, i) => {
