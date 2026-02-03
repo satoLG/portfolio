@@ -247,11 +247,34 @@ function createAudioElement(): void {
     }
 }
 
+// Expanded player dimensions (must match CSS)
+const EXPANDED_WIDTH = 240;
+const EXPANDED_HEIGHT = 200;  // Approximate height
+const EDGE_OFFSET = 16;  // Padding from viewport edges
+
 function expandPlayer(): void {
     if (isExpanded || !playerContainer) return;
     isExpanded = true;
-    hasBeenDragged = false;
+    hasBeenDragged = true;  // Mark as dragged so it doesn't snap back to radio
     
+    // Calculate position: place above the radio bubble, keep within viewport
+    let expandX = radioScreenX - EXPANDED_WIDTH / 2;
+    let expandY = radioScreenY - EXPANDED_HEIGHT + 50;  // 1px above bubble
+    
+    // Clamp to viewport with offset
+    const maxX = window.innerWidth - EXPANDED_WIDTH - EDGE_OFFSET;
+    const maxY = window.innerHeight - EXPANDED_HEIGHT - EDGE_OFFSET;
+    
+    expandX = Math.max(EDGE_OFFSET, Math.min(maxX, expandX));
+    expandY = Math.max(EDGE_OFFSET, Math.min(maxY, expandY));
+    
+    // Set position before transitioning
+    playerContainer.style.left = `${expandX}px`;
+    playerContainer.style.top = `${expandY}px`;
+    playerContainer.style.transform = 'none';
+    
+    // Restore full transitions for expand/collapse animation
+    playerContainer.style.transition = '';
     playerContainer.classList.remove('bubble');
     playerContainer.classList.add('expanded');
 }
@@ -260,12 +283,21 @@ function collapsePlayer(): void {
     if (!isExpanded || !playerContainer) return;
     isExpanded = false;
     
+    // Restore full transition for smooth animation back to bubble
+    playerContainer.style.transition = '';
+    
     playerContainer.classList.remove('expanded');
     playerContainer.classList.add('bubble');
     
-    // Reset to radio position
-    hasBeenDragged = false;
+    // Animate back to radio position
+    playerContainer.style.left = `${radioScreenX}px`;
+    playerContainer.style.top = `${radioScreenY}px`;
     playerContainer.style.transform = 'translate(-50%, -50%)';
+    
+    // Wait for animation to complete before letting Update() take over
+    setTimeout(() => {
+        hasBeenDragged = false;
+    }, 450);  // Slightly longer than 0.4s transition
     
     // If underwater, mark that we closed it underwater
     if (isUnderwater) {
@@ -376,8 +408,12 @@ export function Update(): void {
     // - Hide if closed while underwater (until surface)
     const shouldHideBubble = isUnderwater || isExpanded || !isInFront || closedWhileUnderwater;
     
-    // If not dragged, follow radio position
+    // If not dragged, follow radio position instantly (no transition lag)
     if (!hasBeenDragged && !isDragging) {
+        // Disable transition for position updates when following radio
+        if (!isExpanded) {
+            playerContainer.style.transition = 'opacity 0.3s ease, background 0.4s ease';
+        }
         playerContainer.style.left = `${radioScreenX}px`;
         playerContainer.style.top = `${radioScreenY}px`;
         playerContainer.style.transform = 'translate(-50%, -50%)';
