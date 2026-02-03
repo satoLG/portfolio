@@ -41,6 +41,7 @@ let isPlaying = false;
 let isExpanded = false;
 let isUnderwater = false;
 let closedWhileUnderwater = false;
+let isLoopEnabled = false;  // Loop current song or go to next
 
 // Drag state
 let isDragging = false;
@@ -100,6 +101,11 @@ function createPlayerUI(): void {
                         <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
                     </svg>
                 </button>
+                <button class="player-btn player-loop" title="Loop">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/>
+                    </svg>
+                </button>
             </div>
         </div>
     `;
@@ -143,6 +149,13 @@ function createPlayerUI(): void {
     nextBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         nextSong();
+    });
+    
+    // Loop button
+    const loopBtn = playerContainer.querySelector('.player-loop') as HTMLButtonElement;
+    loopBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleLoop();
     });
     
     // Drag functionality - only on drag handle
@@ -231,7 +244,7 @@ function stopDragging(): void {
 function createAudioElement(): void {
     audioElement = new Audio();
     audioElement.volume = 0.5;
-    audioElement.addEventListener('ended', () => nextSong());
+    audioElement.addEventListener('ended', () => handleSongEnded());
     audioElement.addEventListener('play', () => {
         isPlaying = true;
         updatePlayButton();
@@ -312,6 +325,34 @@ function togglePlay(): void {
         audioElement.pause();
     } else {
         audioElement.play().catch(e => console.error('Failed to play:', e));
+    }
+}
+
+function toggleLoop(): void {
+    isLoopEnabled = !isLoopEnabled;
+    updateLoopButton();
+}
+
+function updateLoopButton(): void {
+    if (!playerContainer) return;
+    const loopBtn = playerContainer.querySelector('.player-loop') as HTMLButtonElement;
+    if (isLoopEnabled) {
+        loopBtn.classList.add('active');
+    } else {
+        loopBtn.classList.remove('active');
+    }
+}
+
+function handleSongEnded(): void {
+    if (isLoopEnabled) {
+        // Loop the current song
+        if (audioElement) {
+            audioElement.currentTime = 0;
+            audioElement.play().catch(e => console.error('Failed to loop:', e));
+        }
+    } else {
+        // Go to next song (wraps to first when at end)
+        nextSong();
     }
 }
 

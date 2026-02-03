@@ -276,6 +276,23 @@ body.day-mode .player-play:hover {
     background: rgba(30, 100, 180, 0.7);
 }
 
+/* Loop button active state */
+.player-loop.active {
+    background: rgba(74, 158, 255, 0.5);
+}
+
+.player-loop.active:hover {
+    background: rgba(74, 158, 255, 0.7);
+}
+
+body.day-mode .player-loop.active {
+    background: rgba(30, 100, 180, 0.4);
+}
+
+body.day-mode .player-loop.active:hover {
+    background: rgba(30, 100, 180, 0.6);
+}
+
 /* Hide player before START */
 body:not(.started) .media-player {
     display: none;
