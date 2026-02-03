@@ -3,7 +3,7 @@ import { isDayTime } from "../scene/Skybox";
 // ============================================
 // AUDIO SETTINGS (easily tweakable)
 // ============================================
-const WATER_VOLUME = 0.035;              // Constant water ambience volume
+const WATER_VOLUME = 0.018;              // Constant water ambience volume (lowered for iOS)
 const BREEZE_VOLUME = 0.3;             // Soft breeze volume
 const BREEZE_MIN_DELAY = 10;           // Min seconds between breeze sounds
 const BREEZE_MAX_DELAY = 20;           // Max seconds between breeze sounds
