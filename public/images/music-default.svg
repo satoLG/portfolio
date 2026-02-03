@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+  <rect width="120" height="120" fill="#1a3a5c"/>
+  <circle cx="60" cy="55" r="30" fill="none" stroke="#4a9eff" stroke-width="3"/>
+  <circle cx="60" cy="55" r="12" fill="#4a9eff"/>
+  <rect x="55" y="25" width="10" height="35" fill="#4a9eff"/>
+  <text x="60" y="105" text-anchor="middle" fill="#6ab4ff" font-family="sans-serif" font-size="10">♪ Music ♪</text>
+</svg>

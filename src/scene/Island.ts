@@ -1,4 +1,4 @@
-import { Group, TextureLoader, RepeatWrapping, SRGBColorSpace, MeshStandardMaterial, Material, Texture } from "three";
+import { Group, TextureLoader, RepeatWrapping, SRGBColorSpace, MeshStandardMaterial, Material, Texture, Object3D } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { oceanAbsorptionUniform } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
@@ -6,6 +6,12 @@ import { deltaTime } from "../scripts/Time";
 
 export const island = new Group();
 export const firecamp = new Group();
+export const palmtree = new Group();
+export const radio = new Group();
+export const grassPatches: Group[] = [];
+
+// Store palm tree leaves for wind animation
+const palmLeaves: Object3D[] = [];
 
 const loader = new GLTFLoader();
 const textureLoader = new TextureLoader();
@@ -93,9 +99,29 @@ export function getCurrentTexture(): string {
 
 const islandPosition = { x: 0, y: -0.115, z: -3.3 };
 const firecampOffset = { x: 0, y: 0.2, z: 0.4 };
+const palmtreeOffset = { x: -0.35, y: 0.1, z: -0.3 };
+const radioOffset = { x: -0.65, y: 0.2, z: 0.15 };  // In front of firecamp, left of center
 
 const islandScale = 1.5;
 const firecampScale = 0.4;
+const palmtreeScale = 0.75;
+const radioScale = 0.22;
+
+// GRASS SETTINGS - easily tweakable
+const GRASS_COUNT = 8;  // Number of grass patches
+const grassScale = 0.22;
+const grassSpread = 0.85;  // How far grass spreads from palm tree
+const grassBaseOffset = { x: 0.0, y: 0.05, z: 0.68 };  // Base position near palm tree
+
+// WIND SETTINGS - easily tweakable
+const WIND_STRENGTH = 0.0;      // How far things sway (rotation in radians)
+const WIND_SPEED = 0.0;          // Base speed of wind oscillation
+const WIND_GUST_INTERVAL = 0.0;  // Seconds between wind gusts
+const WIND_GUST_DURATION = 0.0;  // How long a gust lasts
+let windTime = 0;
+let gustTimer = 0;
+let gustActive = false;
+let gustStrength = 0;
 
 const oceanLightingPars = /*glsl*/`
     uniform vec3 uLight;
@@ -309,6 +335,8 @@ function applyIslandTextures(model: Group): void {
     model.traverse((child) => {
         if ((child as any).isMesh && (child as any).material) {
             const mesh = child as any;
+            // Enable shadow receiving on the mesh itself
+            mesh.receiveShadow = true;
             const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
             
             materials.forEach((material: any) => {
@@ -372,9 +400,118 @@ export function Start(): void {
             console.error('Error loading firecamp:', error);
         }
     );
+
+    loader.load(
+        'models/palmtree.glb',
+        (gltf) => {
+            applyOceanLightingToModel(gltf.scene);
+            // Enable shadow casting and find leaves
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    // Try to identify leaves by name (common naming conventions)
+                    const name = child.name.toLowerCase();
+                    if (name.includes('leaf') || name.includes('leaves') || name.includes('frond') || name.includes('palm') && !name.includes('trunk')) {
+                        palmLeaves.push(child);
+                        console.log('Found palm leaf:', child.name);
+                    }
+                }
+            });
+            // If no leaves found by name, use all meshes except the lowest one (trunk)
+            if (palmLeaves.length === 0) {
+                const meshes: Object3D[] = [];
+                gltf.scene.traverse((child) => {
+                    if ((child as any).isMesh) {
+                        meshes.push(child);
+                    }
+                });
+                // Sort by Y position, take upper meshes as leaves
+                meshes.sort((a, b) => a.position.y - b.position.y);
+                if (meshes.length > 1) {
+                    // Skip the bottom mesh (trunk), add rest as leaves
+                    for (let i = 1; i < meshes.length; i++) {
+                        palmLeaves.push(meshes[i]);
+                    }
+                    console.log('Auto-detected', palmLeaves.length, 'palm leaf meshes');
+                } else if (meshes.length === 1) {
+                    // Only one mesh, animate the whole thing
+                    palmLeaves.push(meshes[0]);
+                    console.log('Single mesh palm tree, animating entire model');
+                }
+            }
+            palmtree.add(gltf.scene);
+            palmtree.position.set(
+                islandPosition.x + palmtreeOffset.x,
+                islandPosition.y + palmtreeOffset.y,
+                islandPosition.z + palmtreeOffset.z
+            );
+            palmtree.scale.setScalar(palmtreeScale);
+            console.log('Palm tree loaded with ocean lighting');
+        },
+        (progress) => {
+            console.log('Palm tree loading:', (progress.loaded / progress.total * 100) + '%');
+        },
+        (error) => {
+            console.error('Error loading palm tree:', error);
+        }
+    );
+
+    // Load grass patches around the palm tree
+    loader.load(
+        'models/grass.glb',
+        (gltf) => {
+            for (let i = 0; i < GRASS_COUNT; i++) {
+                const grassPatch = new Group();
+                const grassModel = gltf.scene.clone();
+                applyOceanLightingToModel(grassModel);
+                grassPatch.add(grassModel);
+                
+                // Spread grass around palm tree in a semicircle
+                const angle = (i / GRASS_COUNT) * Math.PI - Math.PI / 2;
+                const spreadX = Math.cos(angle) * grassSpread;
+                const spreadZ = Math.sin(angle) * grassSpread * 0.5;
+                
+                grassPatch.position.set(
+                    islandPosition.x + palmtreeOffset.x + grassBaseOffset.x + spreadX,
+                    islandPosition.y + grassBaseOffset.y,
+                    islandPosition.z + palmtreeOffset.z + grassBaseOffset.z + spreadZ
+                );
+                grassPatch.scale.setScalar(grassScale);
+                grassPatch.rotation.y = Math.random() * Math.PI * 2;  // Random rotation
+                grassPatches.push(grassPatch);
+            }
+            console.log(`${GRASS_COUNT} grass patches loaded`);
+        },
+        undefined,
+        (error) => {
+            console.error('Error loading grass:', error);
+        }
+    );
+
+    // Load radio in front of firecamp
+    loader.load(
+        'models/radio.glb',
+        (gltf) => {
+            applyOceanLightingToModel(gltf.scene);
+            radio.add(gltf.scene);
+            radio.position.set(
+                islandPosition.x + radioOffset.x,
+                islandPosition.y + radioOffset.y,
+                islandPosition.z + radioOffset.z
+            );
+            radio.scale.setScalar(radioScale);
+            radio.rotation.y = 0.3;  // Angle it slightly
+            console.log('Radio loaded with ocean lighting');
+        },
+        undefined,
+        (error) => {
+            console.error('Error loading radio:', error);
+        }
+    );
 }
 
 export function Update(): void {
+    // Texture blend animation
     if (textureBlend !== targetBlend) {
         const diff = targetBlend - textureBlend;
         const step = blendSpeed * deltaTime;
@@ -389,4 +526,51 @@ export function Update(): void {
             blendUniform.value = textureBlend;
         });
     }
+    
+    // Wind animation for grass and palm tree
+    windTime += deltaTime;
+    gustTimer += deltaTime;
+    
+    // Trigger gusts periodically
+    if (!gustActive && gustTimer > WIND_GUST_INTERVAL) {
+        gustActive = true;
+        gustTimer = 0;
+    }
+    
+    // Gust strength ramps up and down
+    if (gustActive) {
+        const gustProgress = gustTimer / WIND_GUST_DURATION;
+        if (gustProgress < 0.3) {
+            gustStrength = gustProgress / 0.3;  // Ramp up
+        } else if (gustProgress < 0.7) {
+            gustStrength = 1.0;  // Hold
+        } else if (gustProgress < 1.0) {
+            gustStrength = (1.0 - gustProgress) / 0.3;  // Ramp down
+        } else {
+            gustActive = false;
+            gustStrength = 0;
+            gustTimer = 0;
+        }
+    }
+    
+    // Calculate wind sway (to the left = negative X rotation from camera view = positive Z rotation)
+    // Base wind formula if needed: Math.sin(windTime * WIND_SPEED) * 0.3
+    const gustWind = gustStrength * Math.sin(windTime * WIND_SPEED * 2) * 1.0;  // Stronger during gusts
+    
+    // Apply to grass patches
+    grassPatches.forEach((patch, i) => {
+        // Each grass patch has slightly different phase
+        const phase = i * 0.5;
+        const patchWind = Math.sin(windTime * WIND_SPEED + phase) * 0.3 + gustWind;
+        patch.rotation.z = patchWind * WIND_STRENGTH;
+        patch.rotation.x = patchWind * WIND_STRENGTH * 0.3;  // Slight forward/back
+    });
+    
+    // Apply to palm tree leaves only (not the trunk)
+    palmLeaves.forEach((leaf, i) => {
+        const phase = i * 0.3;
+        const leafWind = Math.sin(windTime * WIND_SPEED + phase) * 0.3 + gustWind;
+        leaf.rotation.z = leafWind * WIND_STRENGTH * 0.5;
+        leaf.rotation.x = leafWind * WIND_STRENGTH * 0.15;
+    });
 }

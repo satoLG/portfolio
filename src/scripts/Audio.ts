@@ -3,7 +3,7 @@ import { isDayTime } from "../scene/Skybox";
 // ============================================
 // AUDIO SETTINGS (easily tweakable)
 // ============================================
-const WATER_VOLUME = 0.15;              // Constant water ambience volume
+const WATER_VOLUME = 0.09;              // Constant water ambience volume
 const BREEZE_VOLUME = 0.3;             // Soft breeze volume
 const BREEZE_MIN_DELAY = 10;           // Min seconds between breeze sounds
 const BREEZE_MAX_DELAY = 20;           // Max seconds between breeze sounds
@@ -469,13 +469,25 @@ function resumeAboveWaterSounds(): void {
     }
     scheduleBreezeSound();
     
-    // Only resume/start fireplace if it's night time
+    // Handle fireplace based on current day/night state
     if (!isDayTime()) {
+        // It's night - resume or start fireplace
         if (fireplaceActive && fireplaceAudio) {
             fireplaceAudio.play().catch(e => console.error('Failed to resume fireplace:', e));
         } else {
             // Fireplace wasn't active but it's night, start it
             startFireplaceSound();
+        }
+    } else {
+        // It's day - make sure fireplace is fully stopped
+        // (it may have been left in "active but paused" state from diving at night)
+        if (fireplaceActive) {
+            fireplaceActive = false;
+            fireplaceFading = false;
+            if (fireplaceAudio) {
+                fireplaceAudio.pause();
+                fireplaceAudio.currentTime = 0;
+            }
         }
     }
     console.log('Above-water sounds resumed');
@@ -539,8 +551,14 @@ export function transitionToUnderwater(): void {
     if (!audioInitialized || isCurrentlyUnderwater) return;
     isCurrentlyUnderwater = true;
     
-    pauseAboveWaterSounds();
-    startUnderwaterAmbient();
+    // Defer audio operations to prevent frame drops on mobile
+    // Spread work across multiple frames
+    requestAnimationFrame(() => {
+        pauseAboveWaterSounds();
+        requestAnimationFrame(() => {
+            startUnderwaterAmbient();
+        });
+    });
 }
 
 // Called when transitioning to above water
@@ -548,8 +566,14 @@ export function transitionToAboveWater(): void {
     if (!audioInitialized || !isCurrentlyUnderwater) return;
     isCurrentlyUnderwater = false;
     
-    stopUnderwaterAmbient();
-    resumeAboveWaterSounds();
+    // Defer audio operations to prevent frame drops on mobile
+    // Spread work across multiple frames
+    requestAnimationFrame(() => {
+        stopUnderwaterAmbient();
+        requestAnimationFrame(() => {
+            resumeAboveWaterSounds();
+        });
+    });
 }
 
 export function Start(): void {

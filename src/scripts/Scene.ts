@@ -1,11 +1,13 @@
-import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from "three";
+import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector3, WebGLRenderer, PCFSoftShadowMap } from "three";
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
 import * as SeaFloor from "../scene/SeaFloor";
 import * as Island from "../scene/Island";
 import * as Fire from "../scene/Fire.ts";
+import * as Fish from "../scene/Fish.ts";
 import * as Audio from "./Audio.ts";
 import * as UI from "./UI.ts";
+import * as MediaPlayer from "./MediaPlayer.ts";
 import * as Underwater from "../effects/Underwater.ts";
 import * as Bubbles from "../effects/Bubbles.ts";
 import { axes } from "./Debug.ts";
@@ -74,6 +76,8 @@ export function Start(): void
     renderer.setSize(width, height, false);
     (renderer as unknown as { antialias: boolean }).antialias = antialias;
     renderer.autoClearColor = false;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = PCFSoftShadowMap;
     body.appendChild(renderer.domElement);
     
     camera.fov = fov;
@@ -119,7 +123,23 @@ export function Start(): void
     scene.add(ambientLight);
     
     directionalLight = new DirectionalLight(0xffffff, 1.0);
-    directionalLight.position.copy(Skybox.dirToLight).multiplyScalar(100);
+    // Position light relative to island for proper shadow casting
+    directionalLight.position.set(2, 4, -1);  // Offset from island at z=-3.3
+    directionalLight.castShadow = true;
+    directionalLight.shadow.mapSize.width = 2048;
+    directionalLight.shadow.mapSize.height = 2048;
+    directionalLight.shadow.camera.near = 0.1;
+    directionalLight.shadow.camera.far = 15;
+    directionalLight.shadow.camera.left = -2;
+    directionalLight.shadow.camera.right = 2;
+    directionalLight.shadow.camera.top = 2;
+    directionalLight.shadow.camera.bottom = -6;
+    directionalLight.shadow.bias = -0.0001;
+    directionalLight.shadow.normalBias = 0.02;
+    directionalLight.shadow.radius = 7;  // TWEAK: 1-10, higher = softer/blurrier shadow
+    // Point at island center
+    directionalLight.target.position.set(0, 0, -2.5);
+    scene.add(directionalLight.target);
     scene.add(directionalLight);
 
     Ocean.Start();
@@ -135,6 +155,15 @@ export function Start(): void
     Island.Start();
     scene.add(Island.island);
     scene.add(Island.firecamp);
+    scene.add(Island.palmtree);
+    scene.add(Island.radio);
+    // Grass patches are added after loading completes
+    const addGrassInterval = setInterval(() => {
+        if (Island.grassPatches.length > 0) {
+            Island.grassPatches.forEach(patch => scene.add(patch));
+            clearInterval(addGrassInterval);
+        }
+    }, 100);
 
     // Add fire effect to firecamp
     Fire.Start();
@@ -146,6 +175,14 @@ export function Start(): void
     // Initialize bubble effect
     Bubbles.Start();
 
+    // Initialize fish
+    Fish.Start();
+    scene.add(Fish.clownFish);
+    scene.add(Fish.doriFish);
+
+    // Initialize media player (for radio)
+    MediaPlayer.Start();
+
     // Initialize audio system
     Audio.Start();
 }
@@ -156,18 +193,28 @@ export function Update(): void
     Ocean.Update();
     SeaFloor.Update();
     Island.Update();
+    Fish.Update();
     Fire.Update();
     Audio.Update();
     UI.Update();
+    MediaPlayer.Update();
     Underwater.Update(camera.position.y);
     Bubbles.Update(camera.position.y);
 
     // Sync lights with skybox sun position and intensity
-    directionalLight.position.copy(Skybox.dirToLight).multiplyScalar(100);
+    // Keep light close enough for shadow mapping to work
+    const lightDir = Skybox.dirToLight.clone();
+    directionalLight.position.set(
+        lightDir.x * 8 - 5.3,
+        lightDir.y * 8 + 2,
+        lightDir.z * 8 - 5.3
+    );
     const sunVisible = sunVisibilityUniform.value; // 0 when sun hidden, 1 when fully visible
     const lightIntensity = lightUniform.value.x;
     // Directional light only active when sun is visible
     directionalLight.intensity = sunVisible * lightIntensity * 2.0;
+    // Shadows only during day
+    directionalLight.castShadow = sunVisible > 0.1;
     // Ambient stays very dim at night
     ambientLight.intensity = 0.05 + sunVisible * lightIntensity * 0.5;
 
