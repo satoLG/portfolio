@@ -124,7 +124,7 @@ body.day-mode .media-player.bubble .music-note {
 
 /* Day mode expanded - very transparent */
 body.day-mode .media-player.expanded {
-    background: rgba(240, 248, 255, 0.35);
+    background: rgb(240 248 255 / 23%);
     border-color: rgba(10, 37, 64, 0.2);
     color: var(--text-color-day);
 }
