@@ -3,10 +3,10 @@ import { isDayTime } from "../scene/Skybox";
 // ============================================
 // AUDIO SETTINGS (easily tweakable)
 // ============================================
-const WATER_VOLUME = 0.018;              // Constant water ambience volume (lowered for iOS)
+const WATER_VOLUME = 0.7;              // Constant water ambience volume (lowered for iOS)
 const BREEZE_VOLUME = 0.3;             // Soft breeze volume
-const BREEZE_MIN_DELAY = 10;           // Min seconds between breeze sounds
-const BREEZE_MAX_DELAY = 20;           // Max seconds between breeze sounds
+const BREEZE_MIN_DELAY = 5;           // Min seconds between breeze sounds
+const BREEZE_MAX_DELAY = 10;           // Max seconds between breeze sounds
 const FIREPLACE_VOLUME_MAX = 0.35;     // Fireplace target volume
 const FIREPLACE_FADE_DURATION = 1.5;   // Seconds to fade in fireplace (desktop only)
 const UNDERWATER_AMB_VOLUME = 0.25;    // Underwater ambient loop volume
@@ -574,6 +574,115 @@ export function transitionToAboveWater(): void {
             resumeAboveWaterSounds();
         });
     });
+}
+
+// ============================================
+// MUTE CONTROLS
+// ============================================
+let natureMuted = false;
+let musicMuted = false;
+let interfaceMuted = false;
+
+export function isNatureMuted(): boolean {
+    return natureMuted;
+}
+
+export function isMusicMuted(): boolean {
+    return musicMuted;
+}
+
+export function isInterfaceMuted(): boolean {
+    return interfaceMuted;
+}
+
+export function setNatureMuted(muted: boolean): void {
+    natureMuted = muted;
+    
+    // Apply to all nature audio elements
+    if (waterAudio1) waterAudio1.muted = muted;
+    if (waterAudio2) waterAudio2.muted = muted;
+    if (breezeAudio) breezeAudio.muted = muted;
+    if (fireplaceAudio) fireplaceAudio.muted = muted;
+    if (underwaterAmbAudio) underwaterAmbAudio.muted = muted;
+    if (underwaterBubblesAudio) underwaterBubblesAudio.muted = muted;
+    if (surfaceSplashAudio) surfaceSplashAudio.muted = muted;
+}
+
+export function setMusicMuted(muted: boolean): void {
+    musicMuted = muted;
+    // Music is controlled by MediaPlayer - dispatch custom event
+    window.dispatchEvent(new CustomEvent('musicMuteChanged', { detail: { muted } }));
+}
+
+export function setInterfaceMuted(muted: boolean): void {
+    interfaceMuted = muted;
+}
+
+// ============================================
+// UI SOUND EFFECTS
+// ============================================
+const UI_SOUND_VOLUME = 0.4;
+
+// Pre-loaded UI sounds
+let uiSoundSwitchDay: HTMLAudioElement | null = null;
+let uiSoundSwitchNight: HTMLAudioElement | null = null;
+let uiSoundButton: HTMLAudioElement | null = null;
+let uiSoundBubbleExpand: HTMLAudioElement | null = null;
+let uiSoundBubbleCollapse: HTMLAudioElement | null = null;
+
+export function preloadUISounds(): void {
+    // Day/night toggle sounds
+    uiSoundSwitchDay = new Audio('/audio/ui/dragon-studio-light-switch-on-382714.mp3');
+    uiSoundSwitchDay.volume = UI_SOUND_VOLUME;
+    uiSoundSwitchDay.preload = 'auto';
+    
+    uiSoundSwitchNight = new Audio('/audio/ui/dragon-studio-light-switch-382712.mp3');
+    uiSoundSwitchNight.volume = UI_SOUND_VOLUME;
+    uiSoundSwitchNight.preload = 'auto';
+    
+    // Play/pause button sound
+    uiSoundButton = new Audio('/audio/ui/soundreality-button-202966.mp3');
+    uiSoundButton.volume = UI_SOUND_VOLUME;
+    uiSoundButton.preload = 'auto';
+    
+    // Bubble expand/collapse sounds
+    uiSoundBubbleExpand = new Audio('/audio/ui/universfield-bubble-pop-293342.mp3');
+    uiSoundBubbleExpand.volume = UI_SOUND_VOLUME;
+    uiSoundBubbleExpand.preload = 'auto';
+    
+    uiSoundBubbleCollapse = new Audio('/audio/ui/universfield-bubble-pop-06-351337.mp3');
+    uiSoundBubbleCollapse.volume = UI_SOUND_VOLUME;
+    uiSoundBubbleCollapse.preload = 'auto';
+}
+
+export function playUISwitchDay(): void {
+    if (interfaceMuted || !uiSoundSwitchDay) return;
+    uiSoundSwitchDay.currentTime = 0;
+    uiSoundSwitchDay.play().catch(() => {});
+}
+
+export function playUISwitchNight(): void {
+    if (interfaceMuted || !uiSoundSwitchNight) return;
+    uiSoundSwitchNight.currentTime = 0;
+    uiSoundSwitchNight.play().catch(() => {});
+}
+
+export function playUIButton(): void {
+    if (interfaceMuted || !uiSoundButton) return;
+    uiSoundButton.currentTime = 0;
+    uiSoundButton.play().catch(() => {});
+}
+
+export function playUIBubbleExpand(): void {
+    if (interfaceMuted || !uiSoundBubbleExpand) return;
+    uiSoundBubbleExpand.currentTime = 0;
+    uiSoundBubbleExpand.play().catch(() => {});
+}
+
+export function playUIBubbleCollapse(): void {
+    if (interfaceMuted || !uiSoundBubbleCollapse) return;
+    uiSoundBubbleCollapse.currentTime = 0;
+    uiSoundBubbleCollapse.play().catch(() => {});
 }
 
 export function Start(): void {

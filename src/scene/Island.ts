@@ -1,4 +1,4 @@
-import { Group, TextureLoader, RepeatWrapping, SRGBColorSpace, MeshStandardMaterial, Material, Texture, Object3D } from "three";
+import { Group, TextureLoader, RepeatWrapping, SRGBColorSpace, MeshStandardMaterial, Material, Texture, Object3D, LoadingManager } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { oceanAbsorptionUniform } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
@@ -13,7 +13,37 @@ export const grassPatches: Group[] = [];
 // Store palm tree leaves for wind animation
 const palmLeaves: Object3D[] = [];
 
-const loader = new GLTFLoader();
+// Loading manager for progress tracking
+const loadingManager = new LoadingManager();
+let loadingProgress = 0;
+let onLoadingProgress: ((progress: number) => void) | null = null;
+
+loadingManager.onProgress = (_url, loaded, total) => {
+    // Update progress based on items loaded
+    loadingProgress = loaded / total;
+    if (onLoadingProgress) {
+        onLoadingProgress(loadingProgress);
+    }
+};
+
+loadingManager.onLoad = () => {
+    loadingProgress = 1;
+    if (onLoadingProgress) {
+        onLoadingProgress(1);
+    }
+};
+
+// Export function to set loading callback
+export function setLoadingCallback(callback: (progress: number) => void): void {
+    onLoadingProgress = callback;
+}
+
+// Export to get current loading progress
+export function getLoadingProgress(): number {
+    return loadingProgress;
+}
+
+const loader = new GLTFLoader(loadingManager);
 const textureLoader = new TextureLoader();
 
 const SAND_TEXTURE_PATH = 'textures/sand_04_2k/';

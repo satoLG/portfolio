@@ -44,8 +44,8 @@ export const smallIterationsUniform = new Uniform(2.0);
 
 export const normalMapScaleUniform = new Uniform(0.15);
 export const normalMapStrengthUniform = new Uniform(0.85);
-export const waveVelocity1Uniform = new Uniform({ x: 0.035, y: 0.0 });
-export const waveVelocity2Uniform = new Uniform({ x: 0.0, y: 0.035 });
+export const waveVelocity1Uniform = new Uniform({ x: 0.065, y: 0.0 });
+export const waveVelocity2Uniform = new Uniform({ x: 0.0, y: 0.065 });
 
 export const oceanHalfSizeUniform = new Uniform({ x: 200.0, y: 200.0 });
 export const edgeFadeDistanceUniform = new Uniform(1.0);

@@ -26,6 +26,32 @@ const scrollSmooth = 10;      // Smoothing factor
 let targetY = aboveWaterTopY;   // Target Y position
 let currentY = aboveWaterTopY;  // Current Y position (for smoothing)
 
+// ============================================
+// INTRO CAMERA DESCENT SETTINGS
+// ============================================
+const introStartY = 5;         // Camera starts high above scene (can't see island)
+const introEndY = aboveWaterTopY;  // Camera ends at normal top position
+const introSmooth = 3;         // How fast intro camera descends (lower = slower, higher = faster)
+let introProgress = 0;         // Loading progress (0 to 1)
+let introActive = true;        // Whether intro descent is active
+let scrollEnabled = false;     // Prevent scrolling until button clicked
+
+// Set intro loading progress (called from UI.ts)
+export function setIntroProgress(progress: number): void {
+    introProgress = Math.min(1, Math.max(0, progress));
+    if (introActive) {
+        targetY = introStartY - (introProgress * (introStartY - introEndY));
+    }
+}
+
+// Enable normal scroll (called when start button clicked)
+export function enableScroll(): void {
+    scrollEnabled = true;
+    introActive = false;
+    // Ensure we end at the correct position
+    targetY = introEndY;
+}
+
 // Track if camera is underwater
 let isUnderwater = false;
 
@@ -66,6 +92,7 @@ export function toggleCameraMode(): boolean {
 }
 
 export function handleScroll(deltaY: number): void {
+    if (!scrollEnabled) return;  // Block scroll during intro
     if (webPageMode) {
         // Clamp scroll based on current zone
         if (isUnderwater) {
@@ -127,7 +154,9 @@ export function changeDownState(down: boolean): void
 
 export function Start(): void
 {
-
+    // Initialize camera at intro start position (high above scene)
+    targetY = introStartY;
+    currentY = introStartY;
 }
 
 export function Update(): void
@@ -303,7 +332,9 @@ export function Update(): void
 
     // Web page mode: override Y position with smooth scroll
     if (webPageMode) {
-        currentY = MathUtils.damp(currentY, targetY, scrollSmooth, deltaTime);
+        // Use different smoothing for intro vs normal scroll
+        const smoothFactor = introActive ? introSmooth : scrollSmooth;
+        currentY = MathUtils.damp(currentY, targetY, smoothFactor, deltaTime);
         camera.position.y = currentY;
         // Keep camera at edge of ocean (where surface is fully transparent)
         camera.position.x = 0;
