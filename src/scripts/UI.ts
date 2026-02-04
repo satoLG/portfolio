@@ -1,7 +1,9 @@
 import { body } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
-import { startAudio, playDiveSound, playSurfaceSound, transitionToUnderwater, transitionToAboveWater } from "./Audio";
-import { getIsUnderwater, diveUnderwater, surfaceAboveWater, getCameraY } from "./Control";
+import { startAudio, playDiveSound, playSurfaceSound, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, preloadUISounds, playUISwitchDay, playUISwitchNight } from "./Audio";
+import { getIsUnderwater, diveUnderwater, surfaceAboveWater, getCameraY, setIntroProgress, enableScroll } from "./Control";
+import { setLoadingCallback } from "../scene/Island";
+import { renderer } from "./Scene";
 
 const THEME_STORAGE_KEY = 'portfolio-theme-mode';
 
@@ -34,24 +36,56 @@ export function Start(): void {
     // Restore theme before UI is created
     restoreThemePreference();
     
-    // Create blur overlay (colored overlay that fades out)
-    const blurOverlay = document.createElement("div");
-    blurOverlay.id = "blur-overlay";
-    document.body.appendChild(blurOverlay);
+    // ============================================
+    // BLUR & INTRO SETTINGS - Tweak these values:
+    // ============================================
+    const BLUR_FIXED = 60;       // Fixed blur amount during loading
+    const BLUR_CLEAR_SPEED = 1.5; // How fast blur clears after click (px per frame)
+    // ============================================
     
-    // Start overlay with START button
+    const canvas = renderer.domElement;
+    let currentBlur = BLUR_FIXED;
+    let targetBlur = BLUR_FIXED;  // Stays at 60 until button clicked
+    canvas.style.filter = `blur(${BLUR_FIXED}px)`;
+    
+    // Animate blur smoothly towards target (called every frame)
+    function animateBlur(): void {
+        if (currentBlur > targetBlur) {
+            currentBlur = Math.max(targetBlur, currentBlur - BLUR_CLEAR_SPEED);
+            canvas.style.filter = `blur(${currentBlur}px)`;
+        }
+        if (currentBlur > 0) {
+            requestAnimationFrame(animateBlur);
+        }
+    }
+    requestAnimationFrame(animateBlur);
+    
+    // Track loading progress to control camera descent (NOT blur)
+    setLoadingCallback((progress: number) => {
+        setIntroProgress(progress);
+    });
+    
+    // Start overlay with circular headphone button
     const startOverlay = document.createElement("div");
     startOverlay.id = "start-overlay";
     
     const startButton = document.createElement("button");
     startButton.id = "start-button";
-    startButton.textContent = "START";
+    startButton.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/>
+        </svg>
+    `;
     startButton.onclick = function() {
         // Start audio (must happen synchronously in click handler)
         startAudio();
         
-        // Fade out the blur overlay
-        blurOverlay.classList.add('hidden');
+        // Preload UI sounds
+        preloadUISounds();
+        
+        // Enable scrolling and clear blur
+        enableScroll();
+        targetBlur = 0;
         
         // Mark as started
         document.body.classList.add('started');
@@ -59,22 +93,43 @@ export function Start(): void {
         // Hide the start button overlay
         startOverlay.classList.add('hidden');
         
-        // Remove overlays from DOM after transition
+        // Trigger bouncy pop-in for header elements with stagger
+        setTimeout(() => {
+            document.body.classList.add('header-visible');
+            
+            // Start typewriter effect for name after header pops in
+            setTimeout(() => {
+                typewriterEffect();
+            }, 400);
+        }, 300);  // Shorter delay - blur clears faster now
+        
+        // Trigger bouncy pop-in for dive button
+        setTimeout(() => {
+            document.body.classList.add('dive-visible');
+        }, 600);
+        
+        // Trigger bouncy pop-in for music bubble
+        setTimeout(() => {
+            document.body.classList.add('music-visible');
+        }, 800);
+        
+        // Remove overlay from DOM after animation completes
         setTimeout(() => {
             startOverlay.remove();
-            blurOverlay.remove();
-        }, 3000);
+            // Remove filter completely
+            canvas.style.filter = '';
+        }, 2500);
     };
     
     startOverlay.appendChild(startButton);
     document.body.appendChild(startOverlay);
     
-    // Header container
+    // Header container (hidden initially)
     const header = document.createElement("header");
     header.className = "site-header";
     body.appendChild(header);
 
-    // Name display on top left
+    // Name display on top left (text hidden initially for typewriter effect)
     const nameDisplay = document.createElement("div");
     nameDisplay.className = "name-display";
     nameDisplay.innerHTML = `
@@ -92,9 +147,13 @@ export function Start(): void {
             <g transform="translate(153.29719935275716 190.35925028615236) rotate(313.22858131591363 -20.2546601161624 33.09458545165097)" stroke="none"><path fill="#1971c2" d="M 22.44,5.92 Q 22.44,5.92 15.96,12.15 9.47,18.39 2.73,24.10 -4.01,29.81 -12.45,36.88 -20.89,43.94 -26.04,49.23 -31.19,54.53 -36.13,58.61 -41.08,62.69 -45.51,66.41 -49.95,70.12 -49.82,70.80 -49.68,71.48 -50.71,72.45 -51.74,73.43 -53.02,74.02 -54.31,74.62 -55.72,74.78 -57.13,74.93 -58.51,74.63 -59.89,74.32 -61.11,73.59 -62.32,72.87 -63.24,71.79 -64.16,70.71 -64.69,69.39 -65.21,68.08 -65.29,66.66 -65.37,65.25 -64.99,63.88 -64.61,62.51 -63.82,61.34 -63.03,60.17 -61.90,59.31 -60.77,58.45 -59.43,58.00 -58.09,57.54 -56.67,57.54 -55.25,57.54 -53.91,57.99 -52.57,58.44 -51.44,59.30 -50.31,60.16 -49.51,61.33 -48.72,62.50 -48.34,63.86 -47.96,65.23 -48.03,66.64 -48.11,68.06 -48.63,69.38 -49.15,70.69 -50.07,71.77 -50.99,72.85 -52.20,73.59 -53.41,74.32 -54.80,74.62 -56.18,74.93 -57.59,74.78 -59.00,74.62 -60.28,74.03 -61.57,73.44 -62.60,72.46 -63.63,71.49 -64.29,70.24 -64.96,68.99 -65.19,67.59 -65.42,66.19 -65.19,64.79 -64.96,63.39 -64.30,62.14 -63.64,60.89 -63.64,60.89 -63.64,60.89 -60.94,58.19 -58.25,55.49 -53.97,53.27 -49.68,51.05 -45.16,48.13 -40.64,45.21 -35.10,39.62 -29.56,34.04 -21.55,26.70 -13.54,19.35 -7.67,13.56 -1.79,7.77 4.03,0.92 9.86,-5.92 10.66,-6.59 11.46,-7.25 12.40,-7.71 13.33,-8.16 14.35,-8.38 15.37,-8.60 16.41,-8.57 17.45,-8.54 18.46,-8.26 19.46,-7.98 20.37,-7.47 21.27,-6.96 22.03,-6.24 22.79,-5.53 23.36,-4.65 23.92,-3.78 24.26,-2.79 24.60,-1.81 24.70,-0.77 24.79,0.26 24.63,1.29 24.48,2.32 24.08,3.28 23.68,4.24 23.06,5.08 22.44,5.92 22.44,5.92 L 22.44,5.92 Z"></path></g>
             <g transform="translate(108.65155053824537 72.83118723604764) rotate(250.27110855087375 -20.2546601161624 33.09458545165097)" stroke="none"><path fill="#257433" d="M 22.44,5.92 Q 22.44,5.92 15.96,12.15 9.47,18.39 2.73,24.10 -4.01,29.81 -12.45,36.88 -20.89,43.94 -26.04,49.23 -31.19,54.53 -36.13,58.61 -41.08,62.69 -45.51,66.41 -49.95,70.12 -49.82,70.80 -49.68,71.48 -50.71,72.45 -51.74,73.43 -53.02,74.02 -54.31,74.62 -55.72,74.78 -57.13,74.93 -58.51,74.63 -59.89,74.32 -61.11,73.59 -62.32,72.87 -63.24,71.79 -64.16,70.71 -64.69,69.39 -65.21,68.08 -65.29,66.66 -65.37,65.25 -64.99,63.88 -64.61,62.51 -63.82,61.34 -63.03,60.17 -61.90,59.31 -60.77,58.45 -59.43,58.00 -58.09,57.54 -56.67,57.54 -55.25,57.54 -53.91,57.99 -52.57,58.44 -51.44,59.30 -50.31,60.16 -49.51,61.33 -48.72,62.50 -48.34,63.86 -47.96,65.23 -48.03,66.64 -48.11,68.06 -48.63,69.38 -49.15,70.69 -50.07,71.77 -50.99,72.85 -52.20,73.59 -53.41,74.32 -54.80,74.62 -56.18,74.93 -57.59,74.78 -59.00,74.62 -60.28,74.03 -61.57,73.44 -62.60,72.46 -63.63,71.49 -64.29,70.24 -64.96,68.99 -65.19,67.59 -65.42,66.19 -65.19,64.79 -64.96,63.39 -64.30,62.14 -63.64,60.89 -63.64,60.89 -63.64,60.89 -60.94,58.19 -58.25,55.49 -53.97,53.27 -49.68,51.05 -45.16,48.13 -40.64,45.21 -35.10,39.62 -29.56,34.04 -21.55,26.70 -13.54,19.35 -7.67,13.56 -1.79,7.77 4.03,0.92 9.86,-5.92 10.66,-6.59 11.46,-7.25 12.40,-7.71 13.33,-8.16 14.35,-8.38 15.37,-8.60 16.41,-8.57 17.45,-8.54 18.46,-8.26 19.46,-7.98 20.37,-7.47 21.27,-6.96 22.03,-6.24 22.79,-5.53 23.36,-4.65 23.92,-3.78 24.26,-2.79 24.60,-1.81 24.70,-0.77 24.79,0.26 24.63,1.29 24.48,2.32 24.08,3.28 23.68,4.24 23.06,5.08 22.44,5.92 22.44,5.92 L 22.44,5.92 Z"></path></g>
         </svg>
-        <span class="name-text">leosato.</span>
+        <span class="name-text"></span>
     `;
     header.appendChild(nameDisplay);
+
+    // Header right controls container
+    const headerControls = document.createElement("div");
+    headerControls.className = "header-controls";
 
     // Theme toggle (sun/moon)
     const themeToggle = document.createElement("label");
@@ -130,7 +189,7 @@ export function Start(): void {
             </g>
         </svg>
     `;
-    header.appendChild(themeToggle);
+    headerControls.appendChild(themeToggle);
     
     // Get the checkbox input and sync with day/night
     const themeInput = themeToggle.querySelector('input') as HTMLInputElement;
@@ -138,8 +197,126 @@ export function Start(): void {
     themeInput.checked = !isDayTime();
     
     themeInput.addEventListener('change', function() {
+        // Play appropriate sound before toggling
+        if (isDayTime()) {
+            playUISwitchNight();  // Going to night
+        } else {
+            playUISwitchDay();    // Going to day
+        }
         toggleDayNight();
         saveThemePreference(isDayTime());
+    });
+    
+    // Settings menu (right of theme toggle)
+    const settingsContainer = document.createElement("div");
+    settingsContainer.className = "settings-container";
+    
+    const settingsButton = document.createElement("button");
+    settingsButton.className = "settings-button";
+    settingsButton.title = "Settings";
+    settingsButton.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+            <circle cx="12" cy="12" r="4"/>
+        </svg>
+    `;
+    settingsContainer.appendChild(settingsButton);
+    
+    const settingsPanel = document.createElement("div");
+    settingsPanel.className = "settings-panel";
+    settingsPanel.innerHTML = `
+        <div class="settings-row">
+            <span class="settings-label">Nature</span>
+            <button class="settings-toggle nature-toggle" data-active="true">
+                <svg class="icon-on" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/>
+                    <path d="M16 9a5 5 0 0 1 0 6"/>
+                    <path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>
+                </svg>
+                <svg class="icon-off" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/>
+                    <line x1="22" x2="16" y1="9" y2="15"/>
+                    <line x1="16" x2="22" y1="9" y2="15"/>
+                </svg>
+            </button>
+        </div>
+        <div class="settings-row">
+            <span class="settings-label">Music</span>
+            <button class="settings-toggle music-toggle" data-active="true">
+                <svg class="icon-on" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/>
+                    <path d="M16 9a5 5 0 0 1 0 6"/>
+                    <path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>
+                </svg>
+                <svg class="icon-off" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/>
+                    <line x1="22" x2="16" y1="9" y2="15"/>
+                    <line x1="16" x2="22" y1="9" y2="15"/>
+                </svg>
+            </button>
+        </div>
+        <div class="settings-row">
+            <span class="settings-label">Interface</span>
+            <button class="settings-toggle interface-toggle" data-active="true">
+                <svg class="icon-on" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/>
+                    <path d="M16 9a5 5 0 0 1 0 6"/>
+                    <path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>
+                </svg>
+                <svg class="icon-off" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/>
+                    <line x1="22" x2="16" y1="9" y2="15"/>
+                    <line x1="16" x2="22" y1="9" y2="15"/>
+                </svg>
+            </button>
+        </div>
+    `;
+    settingsContainer.appendChild(settingsPanel);
+    headerControls.appendChild(settingsContainer);
+    header.appendChild(headerControls);
+    
+    // Settings button click - toggle panel
+    let settingsOpen = false;
+    settingsButton.addEventListener('click', () => {
+        settingsOpen = !settingsOpen;
+        settingsPanel.classList.toggle('open', settingsOpen);
+        settingsButton.classList.toggle('active', settingsOpen);
+    });
+    
+    // Close settings when clicking outside
+    document.addEventListener('click', (e) => {
+        if (settingsOpen && !settingsContainer.contains(e.target as Node)) {
+            settingsOpen = false;
+            settingsPanel.classList.remove('open');
+            settingsButton.classList.remove('active');
+        }
+    });
+    
+    // Nature toggle
+    const natureToggle = settingsPanel.querySelector('.nature-toggle') as HTMLButtonElement;
+    natureToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isActive = natureToggle.dataset.active === 'true';
+        natureToggle.dataset.active = (!isActive).toString();
+        setNatureMuted(isActive);  // If was active, now mute it
+    });
+    
+    // Music toggle
+    const musicToggle = settingsPanel.querySelector('.music-toggle') as HTMLButtonElement;
+    musicToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isActive = musicToggle.dataset.active === 'true';
+        musicToggle.dataset.active = (!isActive).toString();
+        setMusicMuted(isActive);  // If was active, now mute it
+    });
+    
+    // Interface toggle
+    const interfaceToggle = settingsPanel.querySelector('.interface-toggle') as HTMLButtonElement;
+    interfaceToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isActive = interfaceToggle.dataset.active === 'true';
+        interfaceToggle.dataset.active = (!isActive).toString();
+        setInterfaceMuted(isActive);  // If was active, now mute it
     });
     
     // Dive/Surface button
@@ -223,4 +400,24 @@ export function Update(): void {
             diveButton.title = "Dive underwater";
         }
     }
+}
+
+// Typewriter effect for name
+function typewriterEffect(): void {
+    const nameText = document.querySelector('.name-text') as HTMLElement;
+    if (!nameText) return;
+    
+    const text = 'leosato.';
+    let i = 0;
+    const speed = 100;  // ms per character
+    
+    function type(): void {
+        if (i < text.length) {
+            nameText.textContent += text.charAt(i);
+            i++;
+            setTimeout(type, speed);
+        }
+    }
+    
+    type();
 }

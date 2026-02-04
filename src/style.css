@@ -5,6 +5,11 @@ body
     font-family: Calibri;
     touch-action: none;
     user-select: none;
+    background: #0a1628;  /* Dark blue background to prevent white blur edges */
+}
+
+body.day-mode {
+    background: #1a5a8a;  /* Lighter blue for day mode */
 }
 
 /* ============================================
@@ -25,7 +30,8 @@ body
     background: rgba(255, 255, 255, 0.15);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    border: 2px solid rgba(255, 255, 255, 0.4);
+    border: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -36,7 +42,7 @@ body
 
 .media-player.bubble:hover {
     background: rgba(255, 255, 255, 0.25);
-    border-color: rgba(255, 255, 255, 0.7);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .media-player.bubble .music-note {
@@ -63,12 +69,12 @@ body
 /* Day mode bubble */
 body.day-mode .media-player.bubble {
     background: rgba(10, 37, 64, 0.12);
-    border-color: rgba(10, 37, 64, 0.4);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 body.day-mode .media-player.bubble:hover {
     background: rgba(10, 37, 64, 0.2);
-    border-color: rgba(10, 37, 64, 0.6);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 body.day-mode .media-player.bubble .music-note {
@@ -112,7 +118,7 @@ body.day-mode .media-player.bubble .music-note {
     position: absolute;
     top: 0;
     left: 0;
-    right: 30px;  /* Leave room for close button */
+    right: 60px;  /* Leave room for close button and playlist toggle */
     height: 28px;
     cursor: grab;
     z-index: 5;
@@ -293,9 +299,284 @@ body.day-mode .player-loop.active:hover {
     background: rgba(30, 100, 180, 0.6);
 }
 
-/* Hide player before START */
-body:not(.started) .media-player {
+/* Waveform container */
+.player-waveform-container {
+    margin-top: 10px;
+    margin-bottom: 4px;
+}
+
+#waveform {
+    width: 100%;
+    height: 32px;
+    border-radius: 4px;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.player-time {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    opacity: 0.6;
+    margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Playlist toggle button */
+.player-playlist-toggle {
+    position: absolute;
+    top: 4px;
+    right: 32px;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    padding: 0;
+    border-radius: 4px;
+}
+
+.player-playlist-toggle:hover {
+    color: white;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.player-playlist-toggle.active {
+    color: rgba(74, 158, 255, 0.9);
+    background: rgba(74, 158, 255, 0.15);
+}
+
+body.day-mode .player-playlist-toggle {
+    color: rgba(10, 37, 64, 0.4);
+}
+
+body.day-mode .player-playlist-toggle:hover {
+    color: var(--text-color-day);
+    background: rgba(10, 37, 64, 0.1);
+}
+
+body.day-mode .player-playlist-toggle.active {
+    color: rgba(30, 100, 180, 0.9);
+    background: rgba(30, 100, 180, 0.1);
+}
+
+/* Playlist container - hidden by default */
+.player-playlist {
     display: none;
+    flex-direction: column;
+    margin-top: 12px;
+    max-height: 300px;
+    overflow: hidden;
+}
+
+/* Show playlist when in playlist view */
+.media-player.playlist-view .player-playlist {
+    display: flex;
+}
+
+/* Expand player width when playlist is visible */
+.media-player.playlist-view {
+    width: 320px;
+}
+
+.playlist-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 8px;
+}
+
+body.day-mode .playlist-header {
+    border-bottom-color: rgba(10, 37, 64, 0.1);
+}
+
+.playlist-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    opacity: 0.7;
+}
+
+.playlist-count {
+    font-size: 11px;
+    opacity: 0.5;
+}
+
+.playlist-items {
+    overflow-y: auto;
+    max-height: 250px;
+    padding-right: 4px;
+}
+
+/* Custom scrollbar for playlist */
+.playlist-items::-webkit-scrollbar {
+    width: 4px;
+}
+
+.playlist-items::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 2px;
+}
+
+.playlist-items::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+}
+
+.playlist-items::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+body.day-mode .playlist-items::-webkit-scrollbar-track {
+    background: rgba(10, 37, 64, 0.05);
+}
+
+body.day-mode .playlist-items::-webkit-scrollbar-thumb {
+    background: rgba(10, 37, 64, 0.15);
+}
+
+body.day-mode .playlist-items::-webkit-scrollbar-thumb:hover {
+    background: rgba(10, 37, 64, 0.25);
+}
+
+/* Playlist item */
+.playlist-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-bottom: 4px;
+}
+
+.playlist-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.playlist-item.active {
+    background: rgba(74, 158, 255, 0.2);
+}
+
+.playlist-item.active:hover {
+    background: rgba(74, 158, 255, 0.25);
+}
+
+body.day-mode .playlist-item:hover {
+    background: rgba(10, 37, 64, 0.06);
+}
+
+body.day-mode .playlist-item.active {
+    background: rgba(30, 100, 180, 0.15);
+}
+
+body.day-mode .playlist-item.active:hover {
+    background: rgba(30, 100, 180, 0.2);
+}
+
+/* Drag handle */
+.playlist-item-drag {
+    flex-shrink: 0;
+    width: 16px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+    opacity: 0.3;
+    transition: opacity 0.2s ease;
+}
+
+.playlist-item:hover .playlist-item-drag {
+    opacity: 0.6;
+}
+
+.playlist-item-drag:active {
+    cursor: grabbing;
+}
+
+/* Playlist item cover */
+.playlist-item-cover {
+    width: 36px;
+    height: 36px;
+    border-radius: 4px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+body.day-mode .playlist-item-cover {
+    background: rgba(10, 37, 64, 0.08);
+}
+
+/* Playlist item info */
+.playlist-item-info {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.playlist-item-name {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 2px;
+}
+
+.playlist-item-artist {
+    font-size: 10px;
+    opacity: 0.5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Drag and drop states */
+.playlist-item.dragging {
+    opacity: 0.5;
+    transform: scale(0.98);
+}
+
+.playlist-item.drag-over {
+    border-top: 2px solid rgba(74, 158, 255, 0.6);
+    padding-top: 6px;
+}
+
+body.day-mode .playlist-item.drag-over {
+    border-top-color: rgba(30, 100, 180, 0.6);
+}
+
+/* Hide player before START and before music-visible */
+body:not(.started) .media-player,
+body:not(.music-visible) .media-player {
+    display: none;
+}
+
+/* Show bubble when music-visible */
+body.music-visible .media-player.bubble {
+    display: flex;
+}
+
+/* Initial pop-in class (applied once via JS) */
+.media-player.bubble.pop-in-animate {
+    animation: bouncy-pop-in-bubble 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Hide bubble when underwater */
+body.underwater .media-player.bubble {
+    opacity: 0 !important;
+    pointer-events: none !important;
 }
 
 /* Start overlay */
@@ -310,82 +591,65 @@ body:not(.started) .media-player {
     justify-content: center;
     z-index: 1000;
     pointer-events: auto;
+    transition: opacity 0.5s ease;
 }
 
 #start-overlay.hidden {
     pointer-events: none;
     opacity: 0;
-    transition: opacity 0.5s ease;
 }
 
+/* Circular headphone button */
 #start-button {
-    font-family: 'Calibri', sans-serif;
-    font-size: 48px;
-    font-weight: 700;
-    letter-spacing: 8px;
-    color: var(--text-color-night);
-    background: transparent;
-    border: 3px solid var(--text-color-night);
-    padding: 20px 60px;
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    border: none;
     cursor: pointer;
-    text-transform: uppercase;
-    transition: all 0.3s ease, color var(--transition-duration) ease, border-color var(--transition-duration) ease;
-    /* text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
-    box-shadow: 0 0 30px rgba(255, 255, 255, 0.2); */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease, background var(--transition-duration) ease;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    color: var(--text-color-night);
+    /* Start at scale 0, pop in on load */
+    opacity: 0;
+    transform: scale(0);
+    animation: bouncy-pop-in 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 0.3s forwards;
+}
+
+#start-button svg {
+    width: 48px;
+    height: 48px;
 }
 
 /* Day mode start button */
 body.day-mode #start-button {
+    background: rgba(10, 37, 64, 0.12);
     color: var(--text-color-day);
-    border-color: var(--text-color-day);
-    text-shadow: 0 0 20px rgba(10, 37, 64, 0.3);
-    box-shadow: 0 0 30px rgba(10, 37, 64, 0.15);
 }
 
 body.day-mode #start-button:hover {
-    background: rgba(10, 37, 64, 0.1);
-    box-shadow: 0 0 50px rgba(10, 37, 64, 0.25);
+    background: rgba(10, 37, 64, 0.25);
+    transform: scale(1.05);
 }
 
 /* Night mode start button */
 body.night-mode #start-button {
+    background: rgba(255, 255, 255, 0.15);
     color: var(--text-color-night);
-    border-color: var(--text-color-night);
 }
 
 #start-button:hover {
-    background: rgba(255, 255, 255, 0.1);
-    box-shadow: 0 0 50px rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.25);
+    transform: scale(1.05);
 }
 
 #start-button:active {
-    background: rgba(255, 255, 255, 0.2);
-}
-
-/* Blur overlay - colored overlay that fades out on start */
-#blur-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 5;
-    pointer-events: none;
-    background-color: var(--blur-color-night);
-    opacity: 1;
-    transition: opacity 2.5s ease-out, background-color var(--transition-duration) ease;
-}
-
-body.day-mode #blur-overlay {
-    background-color: var(--blur-color-day);
-}
-
-body.night-mode #blur-overlay {
-    background-color: var(--blur-color-night);
-}
-
-#blur-overlay.hidden {
-    opacity: 0;
+    transform: scale(0.95);
 }
 
 /* ============================================
@@ -400,6 +664,74 @@ body.night-mode #blur-overlay {
     --blur-color-day: #87ceeb;      /* Light blue for day blur */
     --blur-color-night: #0a2540;    /* Dark marine blue for night blur */
     --transition-duration: 0.8s;
+}
+
+/* ============================================
+   BOUNCY POP-IN ANIMATION
+   ============================================ */
+@keyframes bouncy-pop-in {
+    0% {
+        opacity: 0;
+        transform: scale(0);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.15);
+    }
+    70% {
+        transform: scale(0.95);
+    }
+    85% {
+        transform: scale(1.05);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* Centered button version (maintains translateX) */
+@keyframes bouncy-pop-in-centered {
+    0% {
+        opacity: 0;
+        transform: translateX(-50%) scale(0);
+    }
+    50% {
+        opacity: 1;
+        transform: translateX(-50%) scale(1.15);
+    }
+    70% {
+        transform: translateX(-50%) scale(0.95);
+    }
+    85% {
+        transform: translateX(-50%) scale(1.05);
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(-50%) scale(1);
+    }
+}
+
+/* Bubble version (maintains translate(-50%, -50%) for radio centering) */
+@keyframes bouncy-pop-in-bubble {
+    0% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0);
+    }
+    50% {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1.15);
+    }
+    70% {
+        transform: translate(-50%, -50%) scale(0.95);
+    }
+    85% {
+        transform: translate(-50%, -50%) scale(1.05);
+    }
+    100% {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
 }
 
 /* ============================================
@@ -418,8 +750,31 @@ body.night-mode #blur-overlay {
     pointer-events: none;
 }
 
+/* Header children start invisible and at scale 0 */
+.site-header .name-display,
+.site-header .theme-toggle {
+    opacity: 0;
+    transform: scale(0);
+}
+
+/* Header visible after start button clicked - bouncy pop-in */
+body.header-visible .site-header .name-display {
+    animation: bouncy-pop-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+body.header-visible .site-header .theme-toggle {
+    animation: bouncy-pop-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.15s forwards;
+}
+
 .site-header > * {
     pointer-events: auto;
+}
+
+/* Header right controls */
+.header-controls {
+    display: flex;
+    align-items: center;
+    gap: 0;
 }
 
 .name-display
@@ -502,6 +857,171 @@ canvas
     border: none;
     background: none;
     padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ============================================
+   SETTINGS MENU
+   ============================================ */
+.settings-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.site-header .settings-container {
+    opacity: 0;
+    transform: scale(0);
+}
+
+body.header-visible .site-header .settings-container {
+    animation: bouncy-pop-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.25s forwards;
+}
+
+.settings-button {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-color-night);
+    transition: background 0.3s ease, color var(--transition-duration) ease, transform 0.3s ease;
+    margin-left: 12px;
+}
+
+.settings-button:hover {
+    background: rgba(255, 255, 255, 0.25);
+    transform: scale(1.05);
+}
+
+.settings-button.active {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.settings-button svg {
+    width: 20px;
+    height: 20px;
+}
+
+body.day-mode .settings-button {
+    background: rgba(10, 37, 64, 0.12);
+    color: var(--text-color-day);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+body.day-mode .settings-button:hover {
+    background: rgba(10, 37, 64, 0.2);
+}
+
+body.day-mode .settings-button.active {
+    background: rgba(10, 37, 64, 0.25);
+}
+
+.settings-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 160px;
+    padding: 12px;
+    border-radius: 12px;
+    background: rgba(20, 40, 60, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    transform: translateY(-10px) scale(0.95);
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.settings-panel.open {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+}
+
+body.day-mode .settings-panel {
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 6px 0;
+}
+
+.settings-row:not(:last-child) {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+body.day-mode .settings-row:not(:last-child) {
+    border-bottom-color: rgba(0, 0, 0, 0.1);
+}
+
+.settings-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+body.day-mode .settings-label {
+    color: var(--text-color-day);
+}
+
+.settings-toggle {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.9);
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.settings-toggle:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.settings-toggle .icon-off {
+    display: none;
+}
+
+.settings-toggle[data-active="false"] .icon-on {
+    display: none;
+}
+
+.settings-toggle[data-active="false"] .icon-off {
+    display: block;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+body.day-mode .settings-toggle {
+    background: rgba(10, 37, 64, 0.1);
+    color: var(--text-color-day);
+}
+
+body.day-mode .settings-toggle:hover {
+    background: rgba(10, 37, 64, 0.2);
+}
+
+body.day-mode .settings-toggle[data-active="false"] .icon-off {
+    color: rgba(10, 37, 64, 0.4);
 }
 
 .theme-toggle input {
@@ -526,6 +1046,7 @@ canvas
 .theme-toggle__classic {
     width: 2rem;
     height: 2rem;
+    display: block;
     color: var(--icon-color-night);
     transition: color var(--transition-duration) ease;
 }
@@ -838,7 +1359,7 @@ a:visited
     position: fixed;
     left: 50%;
     bottom: 24px;
-    transform: translateX(-50%);
+    transform: translateX(-50%) scale(0);
     z-index: 15;
     width: 56px;
     height: 56px;
@@ -846,53 +1367,54 @@ a:visited
     background: rgba(255, 255, 255, 0.15);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    border: 2px solid var(--text-color-night);
+    border: none;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
     color: var(--text-color-night);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: 
-        all 0.4s ease,
-        bottom 0.5s ease,
-        top 0.5s ease,
-        color var(--transition-duration) ease,
-        border-color var(--transition-duration) ease;
+        background 0.4s ease,
+        box-shadow 0.3s ease,
+        color var(--transition-duration) ease;
     opacity: 0;
     pointer-events: none;
 }
 
-/* Show button only after START */
-body.started .dive-button {
-    opacity: 1;
+/* Show button with bouncy pop-in after dive-visible class added */
+body.dive-visible .dive-button {
+    animation: bouncy-pop-in-centered 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
     pointer-events: auto;
 }
 
 /* Day mode button */
 body.day-mode .dive-button {
-    border-color: var(--text-color-day);
     color: var(--text-color-day);
     background: rgba(10, 37, 64, 0.1);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 }
 
 /* Night mode button */
 body.night-mode .dive-button {
-    border-color: var(--text-color-night);
     color: var(--text-color-night);
     background: rgba(255, 255, 255, 0.15);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 
 .dive-button:hover {
-    transform: translateX(-50%) scale(1.1);
+    transform: translateX(-50%) scale(1.1) !important;
     background: rgba(255, 255, 255, 0.25);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
 }
 
 body.day-mode .dive-button:hover {
     background: rgba(10, 37, 64, 0.2);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
 }
 
 .dive-button:active {
-    transform: translateX(-50%) scale(0.95);
+    transform: translateX(-50%) scale(0.95) !important;
 }
 
 /* Icon sizing */
@@ -949,7 +1471,7 @@ body.underwater.night-mode .dive-button:hover {
 /* Mobile / narrow screen: button stays at bottom right, never moves */
 .dive-button {
     left: auto;
-    right: 16px;
+    right: -12px;
     bottom: 16px;
     transform: none;
 }
