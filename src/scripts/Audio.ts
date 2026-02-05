@@ -14,6 +14,66 @@ const TRANSITION_SFX_VOLUME = 0.1;     // Volume for dive/surface SFX
 const TRANSITION_SFX_DURATION = 400;  // How long to play transition SFX (ms)
 // ============================================
 
+// ============================================
+// SAFE AUDIO PLAY/PAUSE SYSTEM
+// Prevents "play() interrupted by pause()" errors
+// ============================================
+const pendingPlayPromises = new WeakMap<HTMLAudioElement, Promise<void>>();
+
+// Safe play function that tracks pending promises
+async function safePlay(audio: HTMLAudioElement | null, name: string = 'audio'): Promise<boolean> {
+    if (!audio) return false;
+    
+    // If there's already a pending play, wait for it first
+    const pendingPromise = pendingPlayPromises.get(audio);
+    if (pendingPromise) {
+        try {
+            await pendingPromise;
+        } catch {
+            // Previous play was interrupted, that's fine
+        }
+    }
+    
+    // Create and track the new play promise
+    const playPromise = audio.play();
+    pendingPlayPromises.set(audio, playPromise);
+    
+    try {
+        await playPromise;
+        return true;
+    } catch (e) {
+        // Only log if it's not an AbortError (which is expected during transitions)
+        if (e instanceof Error && e.name !== 'AbortError') {
+            console.error(`Failed to play ${name}:`, e);
+        }
+        return false;
+    } finally {
+        // Clean up the tracking if this was the most recent promise
+        if (pendingPlayPromises.get(audio) === playPromise) {
+            pendingPlayPromises.delete(audio);
+        }
+    }
+}
+
+// Safe pause function that waits for pending play to complete
+async function safePause(audio: HTMLAudioElement | null, _name: string = 'audio'): Promise<void> {
+    if (!audio) return;
+    
+    // Wait for any pending play promise to settle before pausing
+    const pendingPromise = pendingPlayPromises.get(audio);
+    if (pendingPromise) {
+        try {
+            await pendingPromise;
+        } catch {
+            // Play was interrupted, that's fine
+        }
+    }
+    
+    audio.pause();
+}
+
+// ============================================
+
 // Pure HTML5 Audio elements - NO AudioContext connection
 let waterAudio1: HTMLAudioElement | null = null;
 let waterAudio2: HTMLAudioElement | null = null;
@@ -55,8 +115,7 @@ function handleAudioPause(audio: HTMLAudioElement | null, name: string): void {
     if (audio.currentTime > 0 && audio.currentTime < audio.duration - 0.1) {
         console.log(`${name} paused unexpectedly at ${audio.currentTime}s - attempting restart`);
         isRecoveringAudio = true;
-        audio.play().catch(e => console.error(`Failed to restart ${name}:`, e))
-            .finally(() => isRecoveringAudio = false);
+        safePlay(audio, name).finally(() => isRecoveringAudio = false);
     }
 }
 
@@ -74,7 +133,7 @@ function restartWaterAudio(): void {
     if (activeWaterAudio) {
         activeWaterAudio.currentTime = 0;
         activeWaterAudio.volume = WATER_VOLUME;
-        activeWaterAudio.play().catch(e => console.error('Failed to restart water audio:', e));
+        safePlay(activeWaterAudio, 'water audio');
     }
 }
 
@@ -87,7 +146,7 @@ function checkAudioHealth(): void {
         // Check underwater ambient instead
         if (underwaterAmbAudio && underwaterAmbAudio.paused) {
             console.log('Health check: Underwater ambient stopped - restarting');
-            underwaterAmbAudio.play().catch(e => console.error('Failed to restart underwater ambient:', e));
+            safePlay(underwaterAmbAudio, 'underwater ambient');
         }
         return;
     }
@@ -102,7 +161,7 @@ function checkAudioHealth(): void {
     if (fireplaceAudio && fireplaceActive && !fireplaceFading && fireplaceAudio.paused) {
         console.log('Health check: Fireplace audio stopped - restarting');
         fireplaceAudio.volume = FIREPLACE_VOLUME_MAX;
-        fireplaceAudio.play().catch(e => console.error('Failed to restart fireplace:', e));
+        safePlay(fireplaceAudio, 'fireplace');
     }
 }
 
@@ -182,7 +241,7 @@ function createAudioElements(): void {
             activeWaterAudio = waterAudio2;
             waterAudio2.currentTime = 0;
             waterAudio2.volume = WATER_VOLUME;
-            waterAudio2.play().catch(e => console.error('Failed to start water 2:', e));
+            safePlay(waterAudio2, 'water 2');
         }
     });
     
@@ -197,7 +256,7 @@ function createAudioElements(): void {
             activeWaterAudio = waterAudio1;
             waterAudio1.currentTime = 0;
             waterAudio1.volume = WATER_VOLUME;
-            waterAudio1.play().catch(e => console.error('Failed to start water 1:', e));
+            safePlay(waterAudio1, 'water 1');
         }
     });
     
@@ -236,7 +295,7 @@ function setupWaterCrossfade(currentAudio: HTMLAudioElement, nextAudio: HTMLAudi
             
             nextAudio.currentTime = 0;
             nextAudio.volume = 0;
-            nextAudio.play().catch(() => {});
+            safePlay(nextAudio, 'crossfade next');
             
             const fadeStartTime = performance.now();
             
@@ -244,7 +303,7 @@ function setupWaterCrossfade(currentAudio: HTMLAudioElement, nextAudio: HTMLAudi
             // setInterval is less throttled when tab is backgrounded
             if (crossfadeInterval) clearInterval(crossfadeInterval);
             
-            crossfadeInterval = setInterval(() => {
+            crossfadeInterval = setInterval(async () => {
                 const elapsed = (performance.now() - fadeStartTime) / 1000;
                 const progress = Math.min(elapsed / CROSSFADE_DURATION, 1);
                 
@@ -256,7 +315,7 @@ function setupWaterCrossfade(currentAudio: HTMLAudioElement, nextAudio: HTMLAudi
                         clearInterval(crossfadeInterval);
                         crossfadeInterval = null;
                     }
-                    currentAudio.pause();
+                    await safePause(currentAudio, 'crossfade current');
                     currentAudio.currentTime = 0;
                     currentAudio.volume = WATER_VOLUME;
                     activeWaterAudio = nextAudio;
@@ -285,22 +344,22 @@ function setupMediaSession(): void {
     navigator.mediaSession.playbackState = 'playing';
     
     navigator.mediaSession.setActionHandler('play', () => {
-        if (activeWaterAudio) activeWaterAudio.play().catch(() => {});
-        if (fireplaceActive && fireplaceAudio) fireplaceAudio.play().catch(() => {});
+        if (activeWaterAudio) safePlay(activeWaterAudio, 'media session water');
+        if (fireplaceActive && fireplaceAudio) safePlay(fireplaceAudio, 'media session fireplace');
         navigator.mediaSession.playbackState = 'playing';
     });
     
-    navigator.mediaSession.setActionHandler('pause', () => {
-        if (waterAudio1) waterAudio1.pause();
-        if (waterAudio2) waterAudio2.pause();
-        if (fireplaceAudio) fireplaceAudio.pause();
+    navigator.mediaSession.setActionHandler('pause', async () => {
+        await safePause(waterAudio1, 'media session water1');
+        await safePause(waterAudio2, 'media session water2');
+        await safePause(fireplaceAudio, 'media session fireplace');
         navigator.mediaSession.playbackState = 'paused';
     });
     
-    navigator.mediaSession.setActionHandler('stop', () => {
-        if (waterAudio1) { waterAudio1.pause(); waterAudio1.currentTime = 0; }
-        if (waterAudio2) { waterAudio2.pause(); waterAudio2.currentTime = 0; }
-        if (fireplaceAudio) { fireplaceAudio.pause(); fireplaceAudio.currentTime = 0; }
+    navigator.mediaSession.setActionHandler('stop', async () => {
+        if (waterAudio1) { await safePause(waterAudio1, 'media session water1'); waterAudio1.currentTime = 0; }
+        if (waterAudio2) { await safePause(waterAudio2, 'media session water2'); waterAudio2.currentTime = 0; }
+        if (fireplaceAudio) { await safePause(fireplaceAudio, 'media session fireplace'); fireplaceAudio.currentTime = 0; }
         navigator.mediaSession.playbackState = 'none';
     });
     
@@ -356,10 +415,8 @@ function startWaterSound(): void {
     waterAudio1.volume = WATER_VOLUME;
     waterAudio1.currentTime = 0;
     
-    waterAudio1.play().then(() => {
-        console.log('Water sound started playing');
-    }).catch((error) => {
-        console.error('Failed to play water sound:', error);
+    safePlay(waterAudio1, 'water sound').then((success) => {
+        if (success) console.log('Water sound started playing');
     });
 }
 
@@ -379,10 +436,9 @@ function playBreezeSound(): void {
     if (!breezeAudio) return;
     
     breezeAudio.currentTime = 0;
-    breezeAudio.play().then(() => {
-        console.log('Breeze sound playing');
-    }).catch((error) => {
-        console.error('Failed to play breeze sound:', error);
+    safePlay(breezeAudio, 'breeze sound').then((success) => {
+        if (success) console.log('Breeze sound playing');
+        // Schedule next breeze regardless of success
         scheduleBreezeSound();
     });
 }
@@ -401,10 +457,8 @@ function startFireplaceSound(): void {
         fireplaceFading = true;
     }
     
-    fireplaceAudio.play().then(() => {
-        console.log('Fireplace sound started' + (isIOS ? ' (iOS - no fade)' : ' (fading in)'));
-    }).catch((error) => {
-        console.error('Failed to play fireplace sound:', error);
+    safePlay(fireplaceAudio, 'fireplace sound').then((success) => {
+        if (success) console.log('Fireplace sound started' + (isIOS ? ' (iOS - no fade)' : ' (fading in)'));
     });
     
     fireplaceActive = true;
@@ -450,11 +504,14 @@ export function startAudio(): void {
 }
 
 // Pause above-water ambient sounds
-function pauseAboveWaterSounds(): void {
-    if (waterAudio1) waterAudio1.pause();
-    if (waterAudio2) waterAudio2.pause();
-    if (breezeAudio) breezeAudio.pause();
-    if (fireplaceAudio && fireplaceActive) fireplaceAudio.pause();
+async function pauseAboveWaterSounds(): Promise<void> {
+    // Use safePause to avoid interrupting pending play() calls
+    await Promise.all([
+        safePause(waterAudio1, 'water1'),
+        safePause(waterAudio2, 'water2'),
+        safePause(breezeAudio, 'breeze'),
+        fireplaceActive ? safePause(fireplaceAudio, 'fireplace') : Promise.resolve()
+    ]);
     if (breezeTimeout) {
         clearTimeout(breezeTimeout);
         breezeTimeout = null;
@@ -463,9 +520,9 @@ function pauseAboveWaterSounds(): void {
 }
 
 // Resume above-water ambient sounds
-function resumeAboveWaterSounds(): void {
+async function resumeAboveWaterSounds(): Promise<void> {
     if (activeWaterAudio) {
-        activeWaterAudio.play().catch(e => console.error('Failed to resume water:', e));
+        await safePlay(activeWaterAudio, 'water');
     }
     scheduleBreezeSound();
     
@@ -473,7 +530,7 @@ function resumeAboveWaterSounds(): void {
     if (!isDayTime()) {
         // It's night - resume or start fireplace
         if (fireplaceActive && fireplaceAudio) {
-            fireplaceAudio.play().catch(e => console.error('Failed to resume fireplace:', e));
+            await safePlay(fireplaceAudio, 'fireplace');
         } else {
             // Fireplace wasn't active but it's night, start it
             startFireplaceSound();
@@ -485,7 +542,7 @@ function resumeAboveWaterSounds(): void {
             fireplaceActive = false;
             fireplaceFading = false;
             if (fireplaceAudio) {
-                fireplaceAudio.pause();
+                await safePause(fireplaceAudio, 'fireplace');
                 fireplaceAudio.currentTime = 0;
             }
         }
@@ -494,38 +551,39 @@ function resumeAboveWaterSounds(): void {
 }
 
 // Start underwater ambient loop
-function startUnderwaterAmbient(): void {
+async function startUnderwaterAmbient(): Promise<void> {
     if (!underwaterAmbAudio) return;
     underwaterAmbAudio.currentTime = 0;
     underwaterAmbAudio.volume = UNDERWATER_AMB_VOLUME;
-    underwaterAmbAudio.play().catch(e => console.error('Failed to start underwater ambient:', e));
-    console.log('Underwater ambient started');
+    const success = await safePlay(underwaterAmbAudio, 'underwater ambient');
+    if (success) console.log('Underwater ambient started');
 }
 
 // Stop underwater ambient loop
-function stopUnderwaterAmbient(): void {
+async function stopUnderwaterAmbient(): Promise<void> {
     if (!underwaterAmbAudio) return;
-    underwaterAmbAudio.pause();
+    await safePause(underwaterAmbAudio, 'underwater ambient');
     underwaterAmbAudio.currentTime = 0;
     console.log('Underwater ambient stopped');
 }
 
 // Play dive transition SFX (bubbles going down)
-export function playDiveSound(): void {
+export async function playDiveSound(): Promise<void> {
     if (!underwaterBubblesAudio || !audioInitialized) return;
     
     underwaterBubblesAudio.currentTime = 0;
-    underwaterBubblesAudio.play().catch(e => console.error('Failed to play dive sound:', e));
+    const success = await safePlay(underwaterBubblesAudio, 'dive sound');
     
-    // Stop after 2 seconds
-    setTimeout(() => {
-        if (underwaterBubblesAudio) {
-            underwaterBubblesAudio.pause();
-            underwaterBubblesAudio.currentTime = 0;
-        }
-    }, TRANSITION_SFX_DURATION);
-    
-    console.log('Dive sound playing');
+    if (success) {
+        console.log('Dive sound playing');
+        // Stop after transition duration
+        setTimeout(async () => {
+            if (underwaterBubblesAudio) {
+                await safePause(underwaterBubblesAudio, 'dive sound');
+                underwaterBubblesAudio.currentTime = 0;
+            }
+        }, TRANSITION_SFX_DURATION);
+    }
 }
 
 // Play surface transition SFX (coming out of water)
@@ -552,12 +610,10 @@ export function transitionToUnderwater(): void {
     isCurrentlyUnderwater = true;
     
     // Defer audio operations to prevent frame drops on mobile
-    // Spread work across multiple frames
-    requestAnimationFrame(() => {
-        pauseAboveWaterSounds();
-        requestAnimationFrame(() => {
-            startUnderwaterAmbient();
-        });
+    // Use async to ensure proper sequencing
+    requestAnimationFrame(async () => {
+        await pauseAboveWaterSounds();
+        await startUnderwaterAmbient();
     });
 }
 
@@ -567,12 +623,10 @@ export function transitionToAboveWater(): void {
     isCurrentlyUnderwater = false;
     
     // Defer audio operations to prevent frame drops on mobile
-    // Spread work across multiple frames
-    requestAnimationFrame(() => {
-        stopUnderwaterAmbient();
-        requestAnimationFrame(() => {
-            resumeAboveWaterSounds();
-        });
+    // Use async to ensure proper sequencing
+    requestAnimationFrame(async () => {
+        await stopUnderwaterAmbient();
+        await resumeAboveWaterSounds();
     });
 }
 

@@ -13,17 +13,36 @@ body.day-mode {
 }
 
 /* ============================================
-   INTRO BLUR (GPU-friendly with will-change)
+   INTRO BLUR OVERLAY
+   Uses opacity transition (works reliably on iOS)
+   instead of filter transition (broken on iOS canvas)
    ============================================ */
-canvas.intro-blur {
-    filter: blur(60px);
-    will-change: filter;
+#blur-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 5;
+    backdrop-filter: blur(60px);
+    -webkit-backdrop-filter: blur(60px);
+    background: rgba(10, 22, 40, 0.3);
+    opacity: 1;
+    transition: opacity 0.8s ease-out;
+    will-change: opacity;
 }
 
-canvas.intro-clear {
-    filter: blur(0px);
-    transition: filter 0.8s ease-out;
-    will-change: filter;
+body.day-mode #blur-overlay {
+    background: rgba(26, 90, 138, 0.3);
+}
+
+#blur-overlay.fade-out {
+    opacity: 0;
+}
+
+#blur-overlay.hidden {
+    display: none;
 }
 
 /* ============================================

@@ -3,7 +3,6 @@ import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from 
 import { startAudio, playDiveSound, playSurfaceSound, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, preloadUISounds, playUISwitchDay, playUISwitchNight } from "./Audio";
 import { getIsUnderwater, diveUnderwater, surfaceAboveWater, getCameraY, setIntroProgress, enableScroll } from "./Control";
 import { setLoadingCallback } from "../scene/Island";
-import { renderer } from "./Scene";
 
 const THEME_STORAGE_KEY = 'portfolio-theme-mode';
 
@@ -36,11 +35,11 @@ export function Start(): void {
     // Restore theme before UI is created
     restoreThemePreference();
     
-    const canvas = renderer.domElement;
-    
-    // Use CSS class-based blur transition (much more performant on iOS)
-    // The blur is on an overlay element, not the canvas itself
-    canvas.classList.add('intro-blur');
+    // Create blur overlay (uses opacity transition which works on iOS)
+    // This is more reliable than trying to transition filter on canvas
+    const blurOverlay = document.createElement("div");
+    blurOverlay.id = "blur-overlay";
+    document.body.appendChild(blurOverlay);
     
     // Track loading progress to control camera descent (NOT blur)
     setLoadingCallback((progress: number) => {
@@ -68,9 +67,8 @@ export function Start(): void {
         // Mark as started
         document.body.classList.add('started');
         
-        // Clear blur using CSS transition (GPU-accelerated)
-        canvas.classList.remove('intro-blur');
-        canvas.classList.add('intro-clear');
+        // Fade out blur overlay (opacity transition works perfectly on iOS)
+        blurOverlay.classList.add('fade-out');
         
         // Hide the start button overlay
         startOverlay.classList.add('hidden');
@@ -100,11 +98,10 @@ export function Start(): void {
             document.body.classList.add('music-visible');
         }, 800);
         
-        // Remove overlay from DOM after animation completes
+        // Remove overlays from DOM after animation completes
         setTimeout(() => {
             startOverlay.remove();
-            // Remove blur classes completely
-            canvas.classList.remove('intro-clear');
+            blurOverlay.classList.add('hidden');
         }, 2500);
     };
     
