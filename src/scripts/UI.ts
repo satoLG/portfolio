@@ -36,29 +36,11 @@ export function Start(): void {
     // Restore theme before UI is created
     restoreThemePreference();
     
-    // ============================================
-    // BLUR & INTRO SETTINGS - Tweak these values:
-    // ============================================
-    const BLUR_FIXED = 60;       // Fixed blur amount during loading
-    const BLUR_CLEAR_SPEED = 1.5; // How fast blur clears after click (px per frame)
-    // ============================================
-    
     const canvas = renderer.domElement;
-    let currentBlur = BLUR_FIXED;
-    let targetBlur = BLUR_FIXED;  // Stays at 60 until button clicked
-    canvas.style.filter = `blur(${BLUR_FIXED}px)`;
     
-    // Animate blur smoothly towards target (called every frame)
-    function animateBlur(): void {
-        if (currentBlur > targetBlur) {
-            currentBlur = Math.max(targetBlur, currentBlur - BLUR_CLEAR_SPEED);
-            canvas.style.filter = `blur(${currentBlur}px)`;
-        }
-        if (currentBlur > 0) {
-            requestAnimationFrame(animateBlur);
-        }
-    }
-    requestAnimationFrame(animateBlur);
+    // Use CSS class-based blur transition (much more performant on iOS)
+    // The blur is on an overlay element, not the canvas itself
+    canvas.classList.add('intro-blur');
     
     // Track loading progress to control camera descent (NOT blur)
     setLoadingCallback((progress: number) => {
@@ -77,21 +59,26 @@ export function Start(): void {
         </svg>
     `;
     startButton.onclick = function() {
-        // Start audio (must happen synchronously in click handler)
+        // Start audio (must happen synchronously in click handler for iOS)
         startAudio();
         
-        // Preload UI sounds
-        preloadUISounds();
-        
-        // Enable scrolling and clear blur
+        // Enable scrolling
         enableScroll();
-        targetBlur = 0;
         
         // Mark as started
         document.body.classList.add('started');
         
+        // Clear blur using CSS transition (GPU-accelerated)
+        canvas.classList.remove('intro-blur');
+        canvas.classList.add('intro-clear');
+        
         // Hide the start button overlay
         startOverlay.classList.add('hidden');
+        
+        // Defer UI sounds preload to not compete with critical audio
+        setTimeout(() => {
+            preloadUISounds();
+        }, 1000);
         
         // Trigger bouncy pop-in for header elements with stagger
         setTimeout(() => {
@@ -101,7 +88,7 @@ export function Start(): void {
             setTimeout(() => {
                 typewriterEffect();
             }, 400);
-        }, 300);  // Shorter delay - blur clears faster now
+        }, 300);
         
         // Trigger bouncy pop-in for dive button
         setTimeout(() => {
@@ -116,8 +103,8 @@ export function Start(): void {
         // Remove overlay from DOM after animation completes
         setTimeout(() => {
             startOverlay.remove();
-            // Remove filter completely
-            canvas.style.filter = '';
+            // Remove blur classes completely
+            canvas.classList.remove('intro-clear');
         }, 2500);
     };
     
@@ -402,7 +389,7 @@ export function Update(): void {
     }
 }
 
-// Typewriter effect for name
+// Typewriter effect for name (optimized for mobile)
 function typewriterEffect(): void {
     const nameText = document.querySelector('.name-text') as HTMLElement;
     if (!nameText) return;
@@ -410,14 +397,21 @@ function typewriterEffect(): void {
     const text = 'leosato.';
     let i = 0;
     const speed = 100;  // ms per character
+    let lastTime = 0;
     
-    function type(): void {
-        if (i < text.length) {
+    function type(currentTime: number): void {
+        if (i >= text.length) return;
+        
+        if (currentTime - lastTime >= speed) {
             nameText.textContent += text.charAt(i);
             i++;
-            setTimeout(type, speed);
+            lastTime = currentTime;
+        }
+        
+        if (i < text.length) {
+            requestAnimationFrame(type);
         }
     }
     
-    type();
+    requestAnimationFrame(type);
 }

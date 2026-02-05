@@ -13,6 +13,20 @@ body.day-mode {
 }
 
 /* ============================================
+   INTRO BLUR (GPU-friendly with will-change)
+   ============================================ */
+canvas.intro-blur {
+    filter: blur(60px);
+    will-change: filter;
+}
+
+canvas.intro-clear {
+    filter: blur(0px);
+    transition: filter 0.8s ease-out;
+    will-change: filter;
+}
+
+/* ============================================
    MEDIA PLAYER (Bubble + Expanded states)
    ============================================ */
 .media-player {
@@ -38,6 +52,7 @@ body.day-mode {
     cursor: pointer;
     padding: 0;
     animation: bubble-float 2s ease-in-out infinite;
+    will-change: transform, opacity;
 }
 
 .media-player.bubble:hover {
@@ -571,6 +586,7 @@ body.music-visible .media-player.bubble {
 /* Initial pop-in class (applied once via JS) */
 .media-player.bubble.pop-in-animate {
     animation: bouncy-pop-in-bubble 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    will-change: transform, opacity;
 }
 
 /* Hide bubble when underwater */
@@ -619,6 +635,7 @@ body.underwater .media-player.bubble {
     opacity: 0;
     transform: scale(0);
     animation: bouncy-pop-in 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 0.3s forwards;
+    will-change: transform, opacity;
 }
 
 #start-button svg {
@@ -672,21 +689,21 @@ body.night-mode #start-button {
 @keyframes bouncy-pop-in {
     0% {
         opacity: 0;
-        transform: scale(0);
+        transform: scale(0) translateZ(0);
     }
     50% {
         opacity: 1;
-        transform: scale(1.15);
+        transform: scale(1.15) translateZ(0);
     }
     70% {
-        transform: scale(0.95);
+        transform: scale(0.95) translateZ(0);
     }
     85% {
-        transform: scale(1.05);
+        transform: scale(1.05) translateZ(0);
     }
     100% {
         opacity: 1;
-        transform: scale(1);
+        transform: scale(1) translateZ(0);
     }
 }
 
@@ -694,21 +711,21 @@ body.night-mode #start-button {
 @keyframes bouncy-pop-in-centered {
     0% {
         opacity: 0;
-        transform: translateX(-50%) scale(0);
+        transform: translateX(-50%) scale(0) translateZ(0);
     }
     50% {
         opacity: 1;
-        transform: translateX(-50%) scale(1.15);
+        transform: translateX(-50%) scale(1.15) translateZ(0);
     }
     70% {
-        transform: translateX(-50%) scale(0.95);
+        transform: translateX(-50%) scale(0.95) translateZ(0);
     }
     85% {
-        transform: translateX(-50%) scale(1.05);
+        transform: translateX(-50%) scale(1.05) translateZ(0);
     }
     100% {
         opacity: 1;
-        transform: translateX(-50%) scale(1);
+        transform: translateX(-50%) scale(1) translateZ(0);
     }
 }
 
@@ -716,21 +733,21 @@ body.night-mode #start-button {
 @keyframes bouncy-pop-in-bubble {
     0% {
         opacity: 0;
-        transform: translate(-50%, -50%) scale(0);
+        transform: translate(-50%, -50%) scale(0) translateZ(0);
     }
     50% {
         opacity: 1;
-        transform: translate(-50%, -50%) scale(1.15);
+        transform: translate(-50%, -50%) scale(1.15) translateZ(0);
     }
     70% {
-        transform: translate(-50%, -50%) scale(0.95);
+        transform: translate(-50%, -50%) scale(0.95) translateZ(0);
     }
     85% {
-        transform: translate(-50%, -50%) scale(1.05);
+        transform: translate(-50%, -50%) scale(1.05) translateZ(0);
     }
     100% {
         opacity: 1;
-        transform: translate(-50%, -50%) scale(1);
+        transform: translate(-50%, -50%) scale(1) translateZ(0);
     }
 }
 
@@ -755,6 +772,7 @@ body.night-mode #start-button {
 .site-header .theme-toggle {
     opacity: 0;
     transform: scale(0);
+    will-change: transform, opacity;
 }
 
 /* Header visible after start button clicked - bouncy pop-in */
@@ -1380,6 +1398,7 @@ a:visited
         color var(--transition-duration) ease;
     opacity: 0;
     pointer-events: none;
+    will-change: transform, opacity;
 }
 
 /* Show button with bouncy pop-in after dive-visible class added */
