@@ -15,7 +15,7 @@ export let transitionSpeed = 1.0;  // Higher = faster transition (was ~0.65 effe
 // Sun direction for lighting (fixed, no rotation)
 // Angled to cast visible shadows on the island
 // Y is height (1 = overhead), X/Z control horizontal angle
-const sunDirection = new Vector3(0.4, 0.8, 0.3).normalize();
+const sunDirection = new Vector3(0.4, 0.4, 0.4).normalize();
 
 // Blend value: 0 = day, 1 = night
 export let dayNightBlend = 0;

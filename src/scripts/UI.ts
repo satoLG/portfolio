@@ -41,22 +41,82 @@ export function Start(): void {
     blurOverlay.id = "blur-overlay";
     document.body.appendChild(blurOverlay);
     
-    // Track loading progress to control camera descent (NOT blur)
-    setLoadingCallback((progress: number) => {
-        setIntroProgress(progress);
-    });
-    
     // Start overlay with circular headphone button
     const startOverlay = document.createElement("div");
     startOverlay.id = "start-overlay";
     
     const startButton = document.createElement("button");
     startButton.id = "start-button";
+    startButton.disabled = true; // Disabled until loading complete
     startButton.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <div class="water-fill">
+            <svg class="wave-svg" viewBox="0 0 800 20" preserveAspectRatio="none">
+                <path class="wave wave2" d="M0 8 Q 10 3, 20 8 T 40 8 T 60 8 T 80 8 T 100 8 T 120 8 T 140 8 T 160 8 T 180 8 T 200 8 T 220 8 T 240 8 T 260 8 T 280 8 T 300 8 T 320 8 T 340 8 T 360 8 T 380 8 T 400 8 T 420 8 T 440 8 T 460 8 T 480 8 T 500 8 T 520 8 T 540 8 T 560 8 T 580 8 T 600 8 T 620 8 T 640 8 T 660 8 T 680 8 T 700 8 T 720 8 T 740 8 T 760 8 T 780 8 T 800 8 V 20 H 0 Z"/>
+            </svg>
+        </div>
+        <span class="loading-percent">0</span>
+        <svg class="headphone-icon" xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/>
         </svg>
     `;
+    
+    // Track animated progress (for smooth animation even on fast loads)
+    let displayedProgress = 0;
+    let targetProgress = 0;
+    let loadingComplete = false;
+    const minAnimationDuration = 6000; // Minimum 6 seconds to see the animation
+    const startTime = performance.now();
+    
+    const percentText = startButton.querySelector('.loading-percent') as HTMLElement;
+    const waterFill = startButton.querySelector('.water-fill') as HTMLElement;
+    
+    // Animation loop for smooth progress
+    function animateProgress() {
+        const elapsed = performance.now() - startTime;
+        const timeProgress = Math.min(elapsed / minAnimationDuration, 1);
+        
+        // Use the slower of time-based or actual loading progress
+        // This ensures animation takes at least minAnimationDuration
+        const effectiveTarget = Math.min(targetProgress, timeProgress + (targetProgress * 0.3));
+        
+        if (displayedProgress < effectiveTarget) {
+            // Smooth increment
+            const diff = effectiveTarget - displayedProgress;
+            const increment = Math.max(0.005, diff * 0.08);
+            displayedProgress = Math.min(displayedProgress + increment, effectiveTarget);
+        }
+        
+        const percent = Math.floor(displayedProgress * 100);
+        percentText.textContent = String(percent);
+        // Fill to 110% so waves go past the top and aren't visible
+        waterFill.style.setProperty('--fill-level', `${displayedProgress * 110}%`);
+        
+        // Check if we've reached 100% and both conditions are met
+        if (displayedProgress >= 0.99 && targetProgress >= 1 && !loadingComplete) {
+            displayedProgress = 1;
+            percentText.textContent = '100';
+            waterFill.style.setProperty('--fill-level', '110%');
+            loadingComplete = true;
+            // Transition to headphone icon
+            setTimeout(() => {
+                startButton.classList.add('loaded');
+                startButton.disabled = false;
+            }, 400);
+        }
+        
+        if (!loadingComplete) {
+            requestAnimationFrame(animateProgress);
+        }
+    }
+    
+    // Start animation loop
+    requestAnimationFrame(animateProgress);
+    
+    // Track loading progress
+    setLoadingCallback((progress: number) => {
+        setIntroProgress(progress);
+        targetProgress = progress;
+    });
     startButton.onclick = function() {
         // Start audio (must happen synchronously in click handler for iOS)
         startAudio();
@@ -67,11 +127,18 @@ export function Start(): void {
         // Mark as started
         document.body.classList.add('started');
         
-        // Fade out blur overlay (opacity transition works perfectly on iOS)
-        blurOverlay.classList.add('fade-out');
+        // Bounce out animation for the button
+        startButton.classList.add('bounce-out');
         
-        // Hide the start button overlay
-        startOverlay.classList.add('hidden');
+        // Fade out blur overlay after button bounce-out animation
+        setTimeout(() => {
+            blurOverlay.classList.add('fade-out');
+        }, 400);
+        
+        // Hide the start button overlay after bounce-out
+        setTimeout(() => {
+            startOverlay.classList.add('hidden');
+        }, 600);
         
         // Defer UI sounds preload to not compete with critical audio
         setTimeout(() => {

@@ -31,7 +31,7 @@ let currentY = aboveWaterTopY;  // Current Y position (for smoothing)
 // ============================================
 const introStartY = 5;         // Camera starts high above scene (can't see island)
 const introEndY = aboveWaterTopY;  // Camera ends at normal top position
-const introSmooth = 3;         // How fast intro camera descends (lower = slower, higher = faster)
+const introSmooth = 0.8;       // How fast intro camera descends (lower = slower, higher = faster)
 let introProgress = 0;         // Loading progress (0 to 1)
 let introActive = true;        // Whether intro descent is active
 let scrollEnabled = false;     // Prevent scrolling until button clicked

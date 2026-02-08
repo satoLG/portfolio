@@ -1,8 +1,9 @@
-import { Group, TextureLoader, RepeatWrapping, SRGBColorSpace, MeshStandardMaterial, Material, Texture, Object3D, LoadingManager } from "three";
+import { Group, TextureLoader, RepeatWrapping, SRGBColorSpace, MeshStandardMaterial, Material, Texture, Object3D, LoadingManager, RingGeometry, MeshBasicMaterial, Mesh, DoubleSide } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { oceanAbsorptionUniform } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime } from "../scripts/Time";
+import { getIsPlaying } from "../scripts/MediaPlayer";
 
 export const island = new Group();
 export const firecamp = new Group();
@@ -12,6 +13,17 @@ export const grassPatches: Group[] = [];
 
 // Store palm tree leaves for wind animation
 const palmLeaves: Object3D[] = [];
+
+// Sound wave arcs for radio
+interface SoundWave {
+    mesh: Mesh;
+    progress: number;  // 0 to 1
+    side: 'left' | 'right';
+    isTrailing: boolean;  // Is this the second wave in a pair
+}
+const soundWaves: SoundWave[] = [];
+const WAVE_COUNT = 8;  // Max waves at a time (pairs of 2 on each side)
+let lastBounceUp = false;  // Track bounce direction to spawn on peaks
 
 // Loading manager for progress tracking
 const loadingManager = new LoadingManager();
@@ -136,6 +148,12 @@ const islandScale = 1.5;
 const firecampScale = 0.4;
 const palmtreeScale = 0.75;
 const radioScale = 0.22;
+
+// Radio vibration settings
+let radioTime = 0;
+const radioBaseY = islandPosition.y + radioOffset.y;
+const radioVibeStrength = 0.003;  // Very subtle bounce
+const radioVibeSpeed = 12;  // Quick vibration
 
 // GRASS SETTINGS - easily tweakable
 const GRASS_COUNT = 8;  // Number of grass patches
@@ -603,4 +621,111 @@ export function Update(): void {
         leaf.rotation.z = leafWind * WIND_STRENGTH * 0.5;
         leaf.rotation.x = leafWind * WIND_STRENGTH * 0.15;
     });
+    
+    // Radio vibration when music is playing
+    if (radio.children.length > 0) {
+        if (getIsPlaying()) {
+            radioTime += deltaTime;
+            // Multi-frequency vibration for more organic feel
+            const vibe1 = Math.sin(radioTime * radioVibeSpeed) * radioVibeStrength;
+            const vibe2 = Math.sin(radioTime * radioVibeSpeed * 1.7) * radioVibeStrength * 0.5;
+            const vibe3 = Math.abs(Math.sin(radioTime * radioVibeSpeed * 0.5)) * radioVibeStrength * 0.3;
+            const totalVibe = vibe1 + vibe2 + vibe3;
+            radio.position.y = radioBaseY + totalVibe;
+            // Subtle rotation wobble
+            radio.rotation.z = Math.sin(radioTime * radioVibeSpeed * 0.8) * 0.015;
+            
+            // Spawn waves on bounce peaks (when going up and crossing threshold)
+            const bounceUp = totalVibe > radioVibeStrength * 0.5;
+            if (bounceUp && !lastBounceUp && soundWaves.length < WAVE_COUNT) {
+                spawnSoundWave('left');
+                spawnSoundWave('right');
+            }
+            lastBounceUp = bounceUp;
+        } else {
+            // Smoothly return to base position
+            radio.position.y += (radioBaseY - radio.position.y) * 0.1;
+            radio.rotation.z *= 0.9;
+            lastBounceUp = false;
+        }
+    }
+    
+    // Update sound waves
+    updateSoundWaves();
+}
+
+// Create a sound wave arc (symmetric half rings)
+function spawnSoundWave(side: 'left' | 'right', isTrailing: boolean = false): void {
+    // Both arcs point UPWARD at ~45 degree angles
+    const thetaLength = Math.PI * 0.55;  // ~100 degree arc
+    // Left: arc in upper-left quadrant, Right: arc in upper-right quadrant
+    const thetaStart = side === 'left' 
+        ? Math.PI * 0.45   // Starts at ~80°, spans to ~180° (upper-left)
+        : -Math.PI * 0.1;  // Starts at ~-18°, spans to ~80° (upper-right)
+    
+    // Thin ring, always white
+    const geometry = new RingGeometry(0.02, 0.024, 24, 1, thetaStart, thetaLength);
+    const material = new MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 1.0,  // Max opacity
+        side: DoubleSide,
+        depthWrite: false
+    });
+    const arc = new Mesh(geometry, material);
+    
+    // Position further from radio (spawn point)
+    const sideOffset = side === 'left' ? -0.1 : 0.1;
+    arc.position.copy(radio.position);
+    arc.position.y += 0.18;
+    arc.position.x += sideOffset;
+    
+    // Face camera
+    arc.rotation.x = -Math.PI * 0.1;
+    
+    radio.parent?.add(arc);
+    soundWaves.push({ mesh: arc, progress: isTrailing ? -0.15 : 0, side: side, isTrailing: isTrailing });
+    
+    // Spawn trailing wave after main wave (only if this is the main wave)
+    if (!isTrailing) {
+        spawnSoundWave(side, true);
+    }
+}
+
+// Update all sound waves
+function updateSoundWaves(): void {
+    const WAVE_DURATION = 1.0;  // seconds for wave to complete
+    const MAX_SCALE = 5;  // How much the arc grows
+    const MOVE_DISTANCE = 0.04;  // Shorter travel distance
+    
+    for (let i = soundWaves.length - 1; i >= 0; i--) {
+        const wave = soundWaves[i];
+        wave.progress += deltaTime / WAVE_DURATION;
+        
+        if (wave.progress >= 1) {
+            // Remove completed wave
+            wave.mesh.parent?.remove(wave.mesh);
+            wave.mesh.geometry.dispose();
+            (wave.mesh.material as MeshBasicMaterial).dispose();
+            soundWaves.splice(i, 1);
+        } else if (wave.progress < 0) {
+            // Trailing wave waiting to start - keep hidden
+            wave.mesh.visible = false;
+        } else {
+            // Wave is active
+            wave.mesh.visible = true;
+            
+            // Scale up and fade out
+            const scale = 1 + wave.progress * MAX_SCALE;
+            wave.mesh.scale.setScalar(scale);
+            (wave.mesh.material as MeshBasicMaterial).opacity = 1.0 * (1 - wave.progress);
+            
+            // Move outward and upward (shorter distance)
+            const sideOffset = wave.side === 'left' ? -0.1 : 0.1;
+            const moveOffset = wave.progress * MOVE_DISTANCE * (wave.side === 'left' ? -1 : 1);
+            wave.mesh.position.copy(radio.position);
+            wave.mesh.position.y += 0.18 + wave.progress * 0.03;
+            wave.mesh.position.x += sideOffset + moveOffset;
+        }
+    }
 }
