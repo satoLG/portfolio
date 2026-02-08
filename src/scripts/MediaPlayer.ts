@@ -1069,10 +1069,6 @@ export function Update(): void {
     // BUT: don't hide during surfacing animation!
     const shouldHideBubble = !isUnderwater && !isSurfacingAnimation && ((!isInFront || closedWhileUnderwater) || isExpanded);
     
-    // Get current bubble size for centering
-    // During surfacing animation, keep using 56px since underwater-position class is still applied
-    const bubbleSize = (isUnderwater || isSurfacingAnimation) ? 56 : 36;
-    
     // ABOVE WATER: Follow radio position (or animate back from underwater)
     if (!isUnderwater && !isExpanded) {
         if (!hasBeenDragged && !isDragging) {
