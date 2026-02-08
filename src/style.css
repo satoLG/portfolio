@@ -29,7 +29,7 @@ body.day-mode {
     -webkit-backdrop-filter: blur(60px);
     background: rgba(10, 22, 40, 0.3);
     opacity: 1;
-    transition: opacity 0.8s ease-out;
+    transition: opacity 1.5s ease-out;
     will-change: opacity;
 }
 
@@ -71,7 +71,8 @@ body.day-mode #blur-overlay {
     cursor: pointer;
     padding: 0;
     animation: bubble-float 2s ease-in-out infinite;
-    will-change: transform, opacity;
+    will-change: opacity;
+    transition: opacity 0.3s ease, background 0.4s ease, box-shadow 0.3s ease, width 0.3s ease, height 0.3s ease;
 }
 
 .media-player.bubble:hover {
@@ -80,9 +81,31 @@ body.day-mode #blur-overlay {
 }
 
 .media-player.bubble .music-note {
-    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     color: white;
     opacity: 1;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.media-player.bubble .music-note svg {
+    width: 20px;
+    height: 20px;
+}
+
+/* Bubble cover image (hidden by default) */
+.media-player.bubble .bubble-cover {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
     transition: opacity 0.3s ease;
 }
 
@@ -98,6 +121,27 @@ body.day-mode #blur-overlay {
 @keyframes bubble-float {
     0%, 100% { margin-top: 0; }
     50% { margin-top: -6px; }
+}
+
+/* Underwater position - fixed to bottom left */
+.media-player.bubble.underwater-position {
+    width: 56px;
+    height: 56px;
+    transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.media-player.bubble.underwater-position .music-note {
+    font-size: 24px;
+}
+
+.media-player.bubble.underwater-position .bubble-cover {
+    width: 56px;
+    height: 56px;
+}
+
+/* Expanded player should NEVER have underwater-position styles */
+.media-player.expanded {
+    bottom: auto !important;
 }
 
 /* Day mode bubble */
@@ -135,6 +179,10 @@ body.day-mode .media-player.bubble .music-note {
     opacity: 0;
     position: absolute;
     pointer-events: none;
+}
+
+.media-player.expanded .bubble-cover {
+    display: none !important;
 }
 
 .media-player.expanded .player-expanded-content {
@@ -337,6 +385,8 @@ body.day-mode .player-loop.active:hover {
 .player-waveform-container {
     margin-top: 10px;
     margin-bottom: 4px;
+    opacity: 1;
+    transition: opacity 0.2s ease;
 }
 
 #waveform {
@@ -345,6 +395,10 @@ body.day-mode .player-loop.active:hover {
     border-radius: 4px;
     overflow: hidden;
     cursor: pointer;
+}
+
+#waveform canvas {
+    transition: opacity 0.15s ease;
 }
 
 .player-time {
@@ -608,10 +662,17 @@ body.music-visible .media-player.bubble {
     will-change: transform, opacity;
 }
 
-/* Hide bubble when underwater */
-body.underwater .media-player.bubble {
+/* Hide bubble when underwater UNLESS it has underwater-position class */
+body.underwater .media-player.bubble:not(.underwater-position) {
     opacity: 0 !important;
     pointer-events: none !important;
+}
+
+/* Force visibility when underwater-position is set */
+body.underwater .media-player.bubble.underwater-position {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    z-index: 100 !important;
 }
 
 /* Start overlay */
@@ -634,8 +695,9 @@ body.underwater .media-player.bubble {
     opacity: 0;
 }
 
-/* Circular headphone button */
+/* Circular headphone button with water fill effect */
 #start-button {
+    --fill-level: 0%;
     width: 100px;
     height: 100px;
     border-radius: 50%;
@@ -645,7 +707,7 @@ body.underwater .media-player.bubble {
     align-items: center;
     justify-content: center;
     transition: all 0.3s ease, background var(--transition-duration) ease;
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.08);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
@@ -655,37 +717,177 @@ body.underwater .media-player.bubble {
     transform: scale(0);
     animation: bouncy-pop-in 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 0.3s forwards;
     will-change: transform, opacity;
+    position: relative;
+    overflow: hidden;
 }
 
-#start-button svg {
+#start-button:disabled {
+    cursor: default;
+}
+
+#start-button:not(:disabled):hover {
+    background: rgba(255, 255, 255, 0.25);
+    box-shadow: 0 4px 16px rgba(137, 137, 137, 0.388) !important;
+}
+
+#start-button:not(:disabled):active {
+    transform: scale(0.95);
+}
+
+/* Bounce out animation when clicked */
+#start-button.bounce-out {
+    animation: bounce-out 1s cubic-bezier(0.34, 1.56, 0.64, 1) forwards !important;
+    pointer-events: none;
+}
+
+@keyframes bounce-out {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    40% {
+        transform: scale(1.25);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(0);
+        opacity: 0;
+    }
+}
+
+/* Water fill container */
+#start-button .water-fill {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: var(--fill-level);
+    background: rgba(64, 164, 255, 1);
+    border-radius: 0 0 50px 50px;
+    transition: height 0.15s ease-out;
+    overflow: visible;
+    animation: water-bob 2s ease-in-out infinite;
+}
+
+@keyframes water-bob {
+    0%, 100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-2px);
+    }
+}
+
+/* Wave SVG at top of water */
+#start-button .wave-svg {
+    position: absolute;
+    top: -15px;
+    left: -300%;
+    width: 800%;
+    height: 20px;
+    overflow: visible;
+}
+
+#start-button .wave {
+    fill: rgba(64, 164, 255, 1);
+}
+
+#start-button .wave1 {
+    animation: wave-horizontal 6s linear infinite;
+    fill: rgba(64, 164, 255, 1);
+}
+
+#start-button .wave2 {
+    animation: wave-horizontal 6s linear infinite;
+    fill: rgba(64, 164, 255, 1);
+}
+
+@keyframes wave-horizontal {
+    0% {
+        transform: translateX(0);
+    }
+    100% {
+        transform: translateX(-50%);
+    }
+}
+
+/* Loading percentage text */
+#start-button .loading-percent {
+    position: relative;
+    z-index: 2;
+    font-size: 24px;
+    font-weight: bold;
+    color: inherit;
+    opacity: 1;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+#start-button .loading-percent::after {
+    content: '%';
+    font-size: 14px;
+    margin-left: 1px;
+}
+
+/* Headphone icon (hidden during loading) */
+#start-button .headphone-icon {
+    position: absolute;
     width: 48px;
     height: 48px;
+    opacity: 0;
+    transform: scale(0.5);
+    transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    z-index: 2;
+}
+
+/* Loaded state - show headphone, hide percent */
+#start-button.loaded .loading-percent {
+    opacity: 0;
+    transform: scale(0.5);
+}
+
+#start-button.loaded .headphone-icon {
+    opacity: 1;
+    transform: scale(1);
+}
+
+/* Keep water fill visible but hide the waves */
+#start-button.loaded .wave-svg {
+    opacity: 0;
+    transition: opacity 0.7s ease;
 }
 
 /* Day mode start button */
 body.day-mode #start-button {
-    background: rgba(10, 37, 64, 0.12);
+    background: rgba(10, 37, 64, 0.08);
     color: var(--text-color-day);
 }
 
-body.day-mode #start-button:hover {
+body.day-mode #start-button:not(:disabled):hover {
     background: rgba(10, 37, 64, 0.25);
     transform: scale(1.05);
 }
 
+body.day-mode #start-button .water-fill {
+    background: rgba(50, 140, 210, 1);
+    /* background: linear-gradient(to top, 
+        rgba(25, 113, 194, 0.7) 0%, 
+        rgba(50, 140, 210, 0.5) 60%,
+        rgba(80, 160, 220, 0.4) 100%
+    ); */
+}
+
+body.day-mode #start-button .wave1 {
+    fill: rgba(50, 140, 210, 1);
+}
+
+body.day-mode #start-button .wave2 {
+    fill: rgba(50, 140, 210, 1);
+}
+
 /* Night mode start button */
 body.night-mode #start-button {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.08);
     color: var(--text-color-night);
-}
-
-#start-button:hover {
-    background: rgba(255, 255, 255, 0.25);
-    transform: scale(1.05);
-}
-
-#start-button:active {
-    transform: scale(0.95);
 }
 
 /* ============================================

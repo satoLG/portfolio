@@ -138,6 +138,17 @@ let audioElement: HTMLAudioElement | null = null;
 let currentSongIndex = 0;
 let isPlaying = false;
 let isExpanded = false;
+
+// Export isPlaying state for other modules
+export function getIsPlaying(): boolean {
+    return isPlaying;
+}
+
+// Get current song cover
+export function getCurrentCover(): string | undefined {
+    if (playlist.length === 0) return undefined;
+    return playlist[currentSongIndex].cover;
+}
 let isPlaylistView = false;  // Expanded playlist view
 let isUnderwater = false;
 let closedWhileUnderwater = false;
@@ -154,6 +165,7 @@ let elementStartY = 0;
 // Radio screen position (for returning after drag)
 let radioScreenX = 0;
 let radioScreenY = 0;
+let hasInitialPosition = false;  // Track if we've set the initial position
 
 // DOM Elements
 let playerContainer: HTMLDivElement | null = null;
@@ -179,9 +191,12 @@ export function Start(): void {
 
 function createPlayerUI(): void {
     playerContainer = document.createElement('div');
-    playerContainer.className = 'media-player bubble pop-in-animate';
+    playerContainer.className = 'media-player bubble';
+    // Hide until initial position is set (prevents flash at wrong position)
+    playerContainer.style.opacity = '0';
     playerContainer.innerHTML = `
-        <span class="music-note">♪</span>
+        <span class="music-note"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
+        <img class="bubble-cover" src="" alt="" />
         <div class="player-expanded-content">
             <div class="player-drag-handle"></div>
             <button class="player-close" title="Close">×</button>
@@ -257,8 +272,9 @@ function createPlayerUI(): void {
     // Bubble click to expand
     playerContainer.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
-        // Only expand if clicking on the bubble itself (music note or container when in bubble mode)
-        if (!isExpanded && !isDragging && (target === playerContainer || target.classList.contains('music-note'))) {
+        // Only expand if clicking on the bubble itself (music note, its SVG children, or container when in bubble mode)
+        const clickedMusicNote = target.closest('.music-note');
+        if (!isExpanded && !isDragging && (target === playerContainer || clickedMusicNote)) {
             expandPlayer();
         }
     });
@@ -393,10 +409,12 @@ function createAudioElement(): void {
     audioElement.addEventListener('play', () => {
         isPlaying = true;
         updatePlayButton();
+        updateBubblePlayingState();
     });
     audioElement.addEventListener('pause', () => {
         isPlaying = false;
         updatePlayButton();
+        updateBubblePlayingState();
     });
     
     // Don't load first song here - wavesurfer will handle it
@@ -432,6 +450,19 @@ function initWavesurfer(): void {
         updateTimeDisplay();
         updateWaveformColors();
     });
+    
+    // Handle resize with requestAnimationFrame for smooth, lag-free updates
+    // Skip during animations to prevent lag on expand/collapse
+    const resizeObserver = new ResizeObserver(() => {
+        if (wavesurfer && isExpanded && !isAnimating) {
+            requestAnimationFrame(() => {
+                if (wavesurfer && isExpanded && !isAnimating) {
+                    wavesurfer.setOptions({ height: 32 });
+                }
+            });
+        }
+    });
+    resizeObserver.observe(waveformContainer);
     
     // Load first song waveform
     if (playlist.length > 0) {
@@ -483,18 +514,35 @@ function updateWaveformColors(): void {
 const EXPANDED_WIDTH = 240;
 const EXPANDED_HEIGHT = 200;  // Approximate height
 const EDGE_OFFSET = 16;  // Padding from viewport edges
+let isAnimating = false;  // Block resize during expand/collapse animation
 
 function expandPlayer(): void {
     if (isExpanded || !playerContainer) return;
     isExpanded = true;
+    isAnimating = true;  // Block resize during animation
     hasBeenDragged = true;  // Mark as dragged so it doesn't snap back to radio
     
     // Play expand sound
     playUIBubbleExpand();
     
+    // Clear any conflicting inline styles from underwater positioning
+    playerContainer.style.bottom = '';
+    playerContainer.style.right = '';
+    playerContainer.style.position = '';
+    
     // Calculate position: place above the radio bubble, keep within viewport
-    let expandX = radioScreenX - EXPANDED_WIDTH / 2;
-    let expandY = radioScreenY - EXPANDED_HEIGHT + 50;  // 1px above bubble
+    // When underwater, position from current bubble location (bottom-left)
+    let expandX: number;
+    let expandY: number;
+    
+    if (isUnderwater) {
+        // Position above the bottom-left bubble
+        expandX = EDGE_OFFSET;
+        expandY = window.innerHeight - EXPANDED_HEIGHT - 80;  // Above the bubble
+    } else {
+        expandX = radioScreenX - EXPANDED_WIDTH / 2;
+        expandY = radioScreenY - EXPANDED_HEIGHT - 20;  // Position higher so radio is visible
+    }
     
     // Clamp to viewport with offset
     const maxX = window.innerWidth - EXPANDED_WIDTH - EDGE_OFFSET;
@@ -511,7 +559,17 @@ function expandPlayer(): void {
     // Restore full transitions for expand/collapse animation
     playerContainer.style.transition = '';
     playerContainer.classList.remove('bubble');
+    playerContainer.classList.remove('underwater-position');
     playerContainer.classList.add('expanded');
+    
+    // Allow resize after animation completes (400ms transition)
+    setTimeout(() => {
+        isAnimating = false;
+        // Trigger one resize now that animation is done
+        if (wavesurfer && isExpanded) {
+            wavesurfer.setOptions({ height: 32 });
+        }
+    }, 400);
 }
 
 function collapsePlayer(): void {
@@ -659,6 +717,9 @@ function updatePlayerDisplay(): void {
     coverImg.src = song.cover || DEFAULT_COVER;
     titleEl.textContent = song.name || DEFAULT_NAME;
     artistEl.textContent = song.artist || DEFAULT_ARTIST;
+    
+    // Update bubble cover as well
+    updateBubbleCover();
     
     // Update playlist view if visible
     updatePlaylistHighlight();
@@ -895,8 +956,51 @@ function updatePlayButton(): void {
     }
 }
 
+// Update bubble state when playing/paused
+function updateBubblePlayingState(): void {
+    if (!playerContainer) return;
+    
+    if (isPlaying) {
+        playerContainer.classList.add('is-playing');
+    } else {
+        playerContainer.classList.remove('is-playing');
+    }
+    
+    // Update bubble cover separately (not tied to playing state)
+    updateBubbleCover();
+}
+
+// Update bubble cover image - shows cover only when playing
+function updateBubbleCover(): void {
+    if (!playerContainer) return;
+    
+    const bubbleCover = playerContainer.querySelector('.bubble-cover') as HTMLImageElement;
+    const musicNote = playerContainer.querySelector('.music-note') as HTMLElement;
+    
+    const cover = playlist[currentSongIndex]?.cover;
+    
+    // Only show cover if playing AND song has a cover
+    if (isPlaying && cover && bubbleCover) {
+        // Preload new image before switching
+        const newImg = new Image();
+        newImg.onload = () => {
+            bubbleCover.src = cover;
+            bubbleCover.style.display = 'block';
+            if (musicNote) musicNote.style.display = 'none';
+        };
+        newImg.src = cover;
+    } else {
+        // Not playing or no cover - show music icon
+        if (bubbleCover) bubbleCover.style.display = 'none';
+        if (musicNote) musicNote.style.display = '';
+    }
+}
+
 // Track day mode for waveform color updates
 let wasDayMode = false;
+let surfacingAnimationTimer = 0;  // Timer to keep transition during surfacing animation
+let surfacingTargetX = 0;  // Fixed target X when surfacing
+let surfacingTargetY = 0;  // Fixed target Y when surfacing
 
 // Update position to follow radio in 3D space
 export function Update(): void {
@@ -913,51 +1017,114 @@ export function Update(): void {
     const wasUnderwater = isUnderwater;
     isUnderwater = document.body.classList.contains('underwater');
     
+    // Track surfacing animation timer
+    if (surfacingAnimationTimer > 0) {
+        surfacingAnimationTimer -= 0.016;  // ~60fps frame time
+        
+        // When surfacing animation completes, remove underwater class
+        if (surfacingAnimationTimer <= 0) {
+            playerContainer.classList.remove('underwater-position');
+        }
+    }
+    
     // If just surfaced and was closed underwater, show bubble again
     if (wasUnderwater && !isUnderwater && closedWhileUnderwater) {
         closedWhileUnderwater = false;
     }
     
-    // Get radio world position
+    // Get radio world position FIRST (need it for surfacing target)
     const radioPos = new Vector3();
     radio.getWorldPosition(radioPos);
-    
-    // Add offset above the radio
     radioPos.y += 0.35;
-    
-    // Project to screen coordinates
     const screenPos = radioPos.clone().project(camera);
-    
-    // Convert to CSS pixels
     radioScreenX = (screenPos.x * 0.5 + 0.5) * window.innerWidth;
     radioScreenY = (-screenPos.y * 0.5 + 0.5) * window.innerHeight;
+    
+    // Detect just surfaced moment - start animation timer
+    const justSurfaced = wasUnderwater && !isUnderwater;
+    if (justSurfaced) {
+        surfacingAnimationTimer = 0.6;  // 600ms animation time
+        // Capture target position NOW - don't update it during animation
+        surfacingTargetX = radioScreenX;
+        surfacingTargetY = radioScreenY;
+        // Set transition for surfacing animation immediately
+        playerContainer.style.transition = 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)';
+    }
+    
+    // Handle underwater class for CSS sizing
+    // KEEP the class during surfacing animation so size doesn't jump
+    const isSurfacingAnimation = surfacingAnimationTimer > 0;
+    if (isUnderwater && !isExpanded) {
+        playerContainer.classList.add('underwater-position');
+    } else if (!isSurfacingAnimation) {
+        // Only remove after surfacing animation completes (handled in timer above)
+        playerContainer.classList.remove('underwater-position');
+    }
     
     // Check if radio is in front of camera (z < 1)
     const isInFront = screenPos.z < 1 && screenPos.z > 0;
     
-    // Visibility logic:
-    // - Hide bubble when underwater
-    // - Hide bubble when expanded
-    // - Hide when radio is behind camera
-    // - Hide if closed while underwater (until surface)
-    const shouldHideBubble = isUnderwater || isExpanded || !isInFront || closedWhileUnderwater;
+    // When underwater, always show bubble at fixed position
+    // When above water, follow radio position or stay hidden appropriately
+    // BUT: don't hide during surfacing animation!
+    const shouldHideBubble = !isUnderwater && !isSurfacingAnimation && ((!isInFront || closedWhileUnderwater) || isExpanded);
     
-    // If not dragged, follow radio position instantly (no transition lag)
-    if (!hasBeenDragged && !isDragging) {
-        // Disable transition for position updates when following radio
-        if (!isExpanded) {
-            playerContainer.style.transition = 'opacity 0.3s ease, background 0.4s ease';
+    // Get current bubble size for centering
+    // During surfacing animation, keep using 56px since underwater-position class is still applied
+    const bubbleSize = (isUnderwater || isSurfacingAnimation) ? 56 : 36;
+    
+    // ABOVE WATER: Follow radio position (or animate back from underwater)
+    if (!isUnderwater && !isExpanded) {
+        if (!hasBeenDragged && !isDragging) {
+            if (isSurfacingAnimation) {
+                // During surfacing animation - use FIXED target captured when surfacing started
+                // Don't update position every frame or it won't animate!
+                playerContainer.style.left = `${surfacingTargetX}px`;
+                playerContainer.style.top = `${surfacingTargetY}px`;
+                playerContainer.style.transform = 'translate(-50%, -50%)';
+            } else {
+                // Normal following - no position transition (would be janky)
+                playerContainer.style.transition = 'opacity 0.3s ease, background 0.4s ease, box-shadow 0.3s ease';
+                playerContainer.style.left = `${radioScreenX}px`;
+                playerContainer.style.top = `${radioScreenY}px`;
+                playerContainer.style.transform = 'translate(-50%, -50%)';
+                
+                // First time position is set - show bubble with pop-in animation
+                if (!hasInitialPosition) {
+                    hasInitialPosition = true;
+                    playerContainer.style.opacity = '1';
+                    playerContainer.classList.add('pop-in-animate');
+                }
+            }
         }
-        playerContainer.style.left = `${radioScreenX}px`;
-        playerContainer.style.top = `${radioScreenY}px`;
-        playerContainer.style.transform = 'translate(-50%, -50%)';
+        
+        // Handle visibility - but NOT during surfacing animation
+        if (shouldHideBubble) {
+            playerContainer.style.opacity = '0';
+            playerContainer.style.pointerEvents = 'none';
+        } else {
+            playerContainer.style.opacity = '1';
+            playerContainer.style.pointerEvents = 'auto';
+        }
     }
     
-    // Handle visibility
-    if (shouldHideBubble && !isExpanded) {
-        playerContainer.style.opacity = '0';
-        playerContainer.style.pointerEvents = 'none';
-    } else {
+    // UNDERWATER: Animate to bottom-left corner
+    if (isUnderwater && !isExpanded) {
+        // Calculate target position as CENTER point (since we use translate(-50%, -50%))
+        const underwaterBubbleSize = 56;
+        // We want the bubble at left:16, so center is at 16 + 28 = 44
+        // We want bottom:16, so center is at windowHeight - 16 - 28
+        const targetX = 16 + underwaterBubbleSize / 2;
+        const targetY = window.innerHeight - 16 - underwaterBubbleSize / 2;
+        
+        // Enable smooth transition when first going underwater
+        if (!wasUnderwater) {
+            playerContainer.style.transition = 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)';
+        }
+        
+        playerContainer.style.left = `${targetX}px`;
+        playerContainer.style.top = `${targetY}px`;
+        playerContainer.style.transform = 'translate(-50%, -50%)';  // Same as above water!
         playerContainer.style.opacity = '1';
         playerContainer.style.pointerEvents = 'auto';
     }
