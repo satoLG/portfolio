@@ -1,8 +1,18 @@
+/* ============================================
+   WOTFARD FONT IMPORT
+   ============================================ */
+@import url('https://fonts.cdnfonts.com/css/wotfard');
+
+/* Global font enforcement */
+*, *::before, *::after {
+    font-family: 'Wotfard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif !important;
+}
+
 body
 {
     margin: 0px;
     overflow: hidden;
-    font-family: Calibri;
+    font-family: 'Wotfard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
     touch-action: none;
     user-select: none;
     background: #0a1628;  /* Dark blue background to prevent white blur edges */
@@ -51,7 +61,7 @@ body.day-mode #blur-overlay {
 .media-player {
     position: fixed;
     z-index: 25;
-    font-family: 'Calibri', sans-serif;
+    font-family: 'Wotfard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
 }
 
@@ -161,18 +171,21 @@ body.day-mode .media-player.bubble .music-note {
 
 /* EXPANDED STATE */
 .media-player.expanded {
-    width: 240px;
+    width: 320px;
     height: auto;
-    border-radius: 16px;
-    background: rgba(20, 40, 60, 0.4);
+    min-height: 240px;
+    border-radius: 12px;
+    background: rgba(40, 40, 45, 0.58);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    padding: 12px;
+    border: 1px solid rgba(80, 80, 85, 0.5);
+    padding: 0;
     color: white;
     cursor: default;
     animation: none;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    font-size: 14px;
+    overflow: hidden;
 }
 
 .media-player.expanded .music-note {
@@ -190,18 +203,44 @@ body.day-mode .media-player.bubble .music-note {
     pointer-events: auto;
     position: relative;
     width: auto;
-    height: auto;
+    height: 100%;
     overflow: visible;
     transition: opacity 0.3s ease 0.1s;
+    display: flex;
+    flex-direction: column;
 }
 
-/* Drag handle - invisible but grabbable area at top */
+/* Header bar - window title bar at top, no padding */
+.player-header-bar {
+    position: relative;
+    width: 100%;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 8px;
+    background: linear-gradient(180deg, rgba(60, 60, 65, 0.95) 0%, rgba(45, 45, 50, 0.95) 100%);
+    border-radius: 12px 12px 0 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.3);
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+
+/* Player body - contains all content with padding */
+.player-body {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+/* Drag handle - fills most of header bar */
 .player-drag-handle {
     position: absolute;
     top: 0;
     left: 0;
-    right: 60px;  /* Leave room for close button and playlist toggle */
-    height: 28px;
+    right: 56px;
+    height: 100%;
     cursor: grab;
     z-index: 5;
 }
@@ -210,65 +249,65 @@ body.day-mode .media-player.bubble .music-note {
     cursor: grabbing;
 }
 
-/* Day mode expanded - very transparent */
+/* Day mode expanded - radio style */
 body.day-mode .media-player.expanded {
-    background: rgb(240 248 255 / 23%);
-    border-color: rgba(10, 37, 64, 0.2);
-    color: var(--text-color-day);
+    background: rgba(170, 169, 169, 0.46);
+    border-color: rgba(150, 150, 155, 0.5);
+    color: #1a1a1a;
 }
 
-/* Close button */
+body.day-mode .player-header-bar {
+    background: linear-gradient(180deg, rgba(200, 200, 205, 0.95) 0%, rgba(180, 180, 185, 0.95) 100%);
+    border-bottom-color: rgba(0, 0, 0, 0.15);
+}
+
+/* Close button (collapse icon) */
 .player-close {
-    position: absolute;
-    top: 4px;
-    right: 6px;
+    position: relative;
     width: 24px;
     height: 24px;
     border: none;
     background: transparent;
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 20px;
-    font-weight: 300;
+    color: rgba(255, 255, 255, 0.6);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.2s ease;
     padding: 0;
-    line-height: 1;
+    border-radius: 4px;
 }
 
 .player-close:hover {
     color: white;
-    transform: scale(1.1);
-    background: transparent;
+    background: rgba(255, 255, 255, 0.15);
 }
 
 .player-close:active {
-    background: transparent;
+    background: rgba(255, 255, 255, 0.2);
 }
 
 body.day-mode .player-close {
-    color: rgba(10, 37, 64, 0.4);
+    color: rgba(0, 0, 0, 0.5);
 }
 
 body.day-mode .player-close:hover {
-    color: var(--text-color-day);
+    color: #1a1a1a;
+    background: rgba(0, 0, 0, 0.1);
 }
 
 /* Player content (cover + info) */
 .player-content {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
     margin-bottom: 12px;
-    margin-top: 6px;
 }
 
 .player-cover {
-    width: 50px;
-    height: 50px;
-    border-radius: 6px;
+    width: 60px;
+    height: 60px;
+    border-radius: 8px;
     overflow: hidden;
     flex-shrink: 0;
     background: rgba(255, 255, 255, 0.1);
@@ -287,114 +326,39 @@ body.day-mode .player-close:hover {
 }
 
 .player-title {
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    margin-bottom: 3px;
+    margin-bottom: 4px;
 }
 
 .player-artist {
-    font-size: 11px;
+    font-size: 13px;
     opacity: 0.6;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-/* Player controls */
-.player-controls {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-}
-
-.player-btn {
-    width: 36px;
-    height: 36px;
-    border: none;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.1);
-    color: white;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-}
-
-.player-btn:hover {
-    background: rgba(255, 255, 255, 0.2);
-    transform: scale(1.05);
-}
-
-.player-btn:active {
-    transform: scale(0.95);
-    background: rgba(255, 255, 255, 0.25);
-}
-
-.player-play {
-    width: 44px;
-    height: 44px;
-    background: rgba(74, 158, 255, 0.6);
-}
-
-.player-play:hover {
-    background: rgba(74, 158, 255, 0.8);
-}
-
-/* Day mode buttons */
-body.day-mode .player-btn {
-    background: rgba(10, 37, 64, 0.1);
-    color: var(--text-color-day);
-}
-
-body.day-mode .player-btn:hover {
-    background: rgba(10, 37, 64, 0.18);
-}
-
-body.day-mode .player-play {
-    background: rgba(30, 100, 180, 0.5);
-    color: white;
-}
-
-body.day-mode .player-play:hover {
-    background: rgba(30, 100, 180, 0.7);
-}
-
-/* Loop button active state */
-.player-loop.active {
-    background: rgba(74, 158, 255, 0.5);
-}
-
-.player-loop.active:hover {
-    background: rgba(74, 158, 255, 0.7);
-}
-
-body.day-mode .player-loop.active {
-    background: rgba(30, 100, 180, 0.4);
-}
-
-body.day-mode .player-loop.active:hover {
-    background: rgba(30, 100, 180, 0.6);
-}
-
-/* Waveform container */
+/* Waveform container - now before controls */
 .player-waveform-container {
-    margin-top: 10px;
-    margin-bottom: 4px;
+    margin-bottom: 12px;
     opacity: 1;
     transition: opacity 0.2s ease;
 }
 
 #waveform {
     width: 100%;
-    height: 32px;
-    border-radius: 4px;
+    height: 52px;
+    border-radius: 6px;
     overflow: hidden;
     cursor: pointer;
+    background: #000000b3;
+    border: 1px solid rgba(60, 60, 65, 0.8);
+    padding: 6px 10px;
+    box-sizing: border-box;
 }
 
 #waveform canvas {
@@ -404,22 +368,156 @@ body.day-mode .player-loop.active:hover {
 .player-time {
     display: flex;
     justify-content: space-between;
-    font-size: 10px;
+    font-size: 12px;
     opacity: 0.6;
-    margin-top: 4px;
+    margin-top: 6px;
     font-variant-numeric: tabular-nums;
+}
+
+/* Player controls - now below waveform with 3D pressed effect */
+.player-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding-bottom: 4px;
+}
+
+.player-btn {
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 8px;
+    background: linear-gradient(180deg, rgba(70, 70, 75, 1) 0%, rgba(50, 50, 55, 1) 100%);
+    color: rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.1s ease;
+    box-shadow: 
+        0 4px 0 rgba(25, 25, 28, 1),
+        0 6px 10px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    position: relative;
+    top: 0;
+}
+
+.player-btn:hover {
+    background: linear-gradient(180deg, rgba(80, 80, 85, 1) 0%, rgba(60, 60, 65, 1) 100%);
+    box-shadow: 
+        0 4px 0 rgba(25, 25, 28, 1),
+        0 6px 12px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.player-btn:active {
+    top: 3px;
+    box-shadow: 
+        0 1px 0 rgba(25, 25, 28, 1),
+        0 2px 4px rgba(0, 0, 0, 0.25),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.player-play {
+    width: 52px;
+    height: 52px;
+    background: linear-gradient(180deg, #e53935 0%, #c62828 100%);
+    color: white;
+    box-shadow: 
+        0 5px 0 #8e0000,
+        0 8px 15px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.player-play:hover {
+    background: linear-gradient(180deg, #ef5350 0%, #e53935 100%);
+    box-shadow: 
+        0 5px 0 #8e0000,
+        0 8px 18px rgba(0, 0, 0, 0.45),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.player-play:active {
+    top: 4px;
+    box-shadow: 
+        0 1px 0 #8e0000,
+        0 2px 6px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* Day mode buttons with 3D effect */
+body.day-mode .player-btn {
+    background: linear-gradient(180deg, rgba(200, 200, 205, 1) 0%, rgba(170, 170, 175, 1) 100%);
+    color: #1a1a1a;
+    box-shadow: 
+        0 4px 0 rgba(130, 130, 135, 1),
+        0 6px 10px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+body.day-mode .player-btn:hover {
+    background: linear-gradient(180deg, rgba(210, 210, 215, 1) 0%, rgba(180, 180, 185, 1) 100%);
+    /* box-shadow: 
+        0 4px 0 rgba(130, 130, 135, 1),
+        0 6px 12px rgba(0, 0, 0, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7); */
+}
+
+body.day-mode .player-btn:active {
+    box-shadow: 
+        0 1px 0 rgba(130, 130, 135, 1),
+        0 2px 4px rgba(0, 0, 0, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+body.day-mode .player-play {
+    background: linear-gradient(180deg, #e53935 0%, #c62828 100%);
+    color: white;
+    box-shadow: 
+        0 5px 0 #8e0000,
+        0 8px 15px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+body.day-mode .player-play:hover {
+    background: linear-gradient(180deg, #ef5350 0%, #e53935 100%);
+}
+
+body.day-mode .player-play:active {
+    box-shadow: 
+        0 1px 0 #8e0000,
+        0 2px 6px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* Loop button active state */
+.player-loop.active {
+    background: linear-gradient(180deg, #e53935 0%, #c62828 100%);
+    color: white;
+}
+
+.player-loop.active:hover {
+    background: linear-gradient(180deg, #ef5350 0%, #e53935 100%);
+}
+
+body.day-mode .player-loop.active {
+    background: linear-gradient(180deg, #e53935 0%, #c62828 100%);
+    color: white;
+}
+
+body.day-mode .player-loop.active:hover {
+    background: linear-gradient(180deg, #ef5350 0%, #e53935 100%);
 }
 
 /* Playlist toggle button */
 .player-playlist-toggle {
-    position: absolute;
-    top: 4px;
-    right: 32px;
+    position: relative;
     width: 24px;
     height: 24px;
     border: none;
     background: transparent;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.6);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -427,37 +525,61 @@ body.day-mode .player-loop.active:hover {
     transition: all 0.2s ease;
     padding: 0;
     border-radius: 4px;
+    margin-right: 4px;
 }
 
 .player-playlist-toggle:hover {
     color: white;
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.15);
 }
 
 .player-playlist-toggle.active {
-    color: rgba(74, 158, 255, 0.9);
-    background: rgba(74, 158, 255, 0.15);
+    color: #e53935;
+    background: rgba(229, 57, 53, 0.15);
 }
 
 body.day-mode .player-playlist-toggle {
-    color: rgba(10, 37, 64, 0.4);
+    color: rgba(0, 0, 0, 0.5);
 }
 
 body.day-mode .player-playlist-toggle:hover {
-    color: var(--text-color-day);
-    background: rgba(10, 37, 64, 0.1);
+    color: #1a1a1a;
+    background: rgba(0, 0, 0, 0.1);
 }
 
 body.day-mode .player-playlist-toggle.active {
-    color: rgba(30, 100, 180, 0.9);
-    background: rgba(30, 100, 180, 0.1);
+    color: #c62828;
+    background: rgba(198, 40, 40, 0.1);
+}
+
+/* Resize handles */
+.player-resize-handle {
+    position: absolute;
+    background: transparent;
+    z-index: 10;
+}
+
+.player-resize-e {
+    top: 40px;
+    right: -4px;
+    width: 8px;
+    height: calc(100% - 48px);
+    cursor: ew-resize;
+}
+
+.player-resize-w {
+    top: 40px;
+    left: -4px;
+    width: 8px;
+    height: calc(100% - 48px);
+    cursor: ew-resize;
 }
 
 /* Playlist container - hidden by default */
 .player-playlist {
     display: none;
     flex-direction: column;
-    margin-top: 12px;
+    margin-top: 14px;
     max-height: 300px;
     overflow: hidden;
 }
@@ -469,7 +591,7 @@ body.day-mode .player-playlist-toggle.active {
 
 /* Expand player width when playlist is visible */
 .media-player.playlist-view {
-    width: 320px;
+    width: 400px;
 }
 
 .playlist-header {
@@ -486,7 +608,7 @@ body.day-mode .playlist-header {
 }
 
 .playlist-title {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -494,7 +616,7 @@ body.day-mode .playlist-header {
 }
 
 .playlist-count {
-    font-size: 11px;
+    font-size: 12px;
     opacity: 0.5;
 }
 
@@ -524,15 +646,15 @@ body.day-mode .playlist-header {
 }
 
 body.day-mode .playlist-items::-webkit-scrollbar-track {
-    background: rgba(10, 37, 64, 0.05);
+    background: rgba(0, 0, 0, 0.05);
 }
 
 body.day-mode .playlist-items::-webkit-scrollbar-thumb {
-    background: rgba(10, 37, 64, 0.15);
+    background: rgba(0, 0, 0, 0.15);
 }
 
 body.day-mode .playlist-items::-webkit-scrollbar-thumb:hover {
-    background: rgba(10, 37, 64, 0.25);
+    background: rgba(0, 0, 0, 0.25);
 }
 
 /* Playlist item */
@@ -552,23 +674,23 @@ body.day-mode .playlist-items::-webkit-scrollbar-thumb:hover {
 }
 
 .playlist-item.active {
-    background: rgba(74, 158, 255, 0.2);
+    background: rgba(229, 57, 53, 0.2);
 }
 
 .playlist-item.active:hover {
-    background: rgba(74, 158, 255, 0.25);
+    background: rgba(229, 57, 53, 0.25);
 }
 
 body.day-mode .playlist-item:hover {
-    background: rgba(10, 37, 64, 0.06);
+    background: rgba(0, 0, 0, 0.06);
 }
 
 body.day-mode .playlist-item.active {
-    background: rgba(30, 100, 180, 0.15);
+    background: rgba(198, 40, 40, 0.15);
 }
 
 body.day-mode .playlist-item.active:hover {
-    background: rgba(30, 100, 180, 0.2);
+    background: rgba(198, 40, 40, 0.2);
 }
 
 /* Drag handle */
@@ -594,16 +716,16 @@ body.day-mode .playlist-item.active:hover {
 
 /* Playlist item cover */
 .playlist-item-cover {
-    width: 36px;
-    height: 36px;
-    border-radius: 4px;
+    width: 40px;
+    height: 40px;
+    border-radius: 6px;
     object-fit: cover;
     flex-shrink: 0;
     background: rgba(255, 255, 255, 0.1);
 }
 
 body.day-mode .playlist-item-cover {
-    background: rgba(10, 37, 64, 0.08);
+    background: rgba(0, 0, 0, 0.08);
 }
 
 /* Playlist item info */
@@ -614,7 +736,7 @@ body.day-mode .playlist-item-cover {
 }
 
 .playlist-item-name {
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
@@ -623,7 +745,7 @@ body.day-mode .playlist-item-cover {
 }
 
 .playlist-item-artist {
-    font-size: 10px;
+    font-size: 12px;
     opacity: 0.5;
     white-space: nowrap;
     overflow: hidden;
@@ -637,12 +759,12 @@ body.day-mode .playlist-item-cover {
 }
 
 .playlist-item.drag-over {
-    border-top: 2px solid rgba(74, 158, 255, 0.6);
+    border-top: 2px solid rgba(229, 57, 53, 0.6);
     padding-top: 6px;
 }
 
 body.day-mode .playlist-item.drag-over {
-    border-top-color: rgba(30, 100, 180, 0.6);
+    border-top-color: rgba(198, 40, 40, 0.6);
 }
 
 /* Hide player before START and before music-visible */
@@ -822,12 +944,6 @@ body.underwater .media-player.bubble.underwater-position {
     transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
-#start-button .loading-percent::after {
-    content: '%';
-    font-size: 14px;
-    margin-left: 1px;
-}
-
 /* Headphone icon (hidden during loading) */
 #start-button .headphone-icon {
     position: absolute;
@@ -868,7 +984,7 @@ body.day-mode #start-button:not(:disabled):hover {
 }
 
 body.day-mode #start-button .water-fill {
-    background: rgba(50, 140, 210, 1);
+    background: rgba(50, 141, 210, 0.99);
     /* background: linear-gradient(to top, 
         rgba(25, 113, 194, 0.7) 0%, 
         rgba(50, 140, 210, 0.5) 60%,
@@ -877,11 +993,11 @@ body.day-mode #start-button .water-fill {
 }
 
 body.day-mode #start-button .wave1 {
-    fill: rgba(50, 140, 210, 1);
+    fill: rgba(50, 141, 210, 0.99);
 }
 
 body.day-mode #start-button .wave2 {
-    fill: rgba(50, 140, 210, 1);
+    fill: rgba(50, 141, 210, 0.99);
 }
 
 /* Night mode start button */
@@ -1018,7 +1134,7 @@ body.header-visible .site-header .theme-toggle {
 
 .name-display
 {
-    font-family: monospace;
+    font-family: 'Wotfard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
     font-size: 25px;
     font-weight: 700;
     color: var(--text-color-night);

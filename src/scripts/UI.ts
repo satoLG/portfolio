@@ -88,14 +88,14 @@ export function Start(): void {
         
         const percent = Math.floor(displayedProgress * 100);
         percentText.textContent = String(percent);
-        // Fill to 110% so waves go past the top and aren't visible
-        waterFill.style.setProperty('--fill-level', `${displayedProgress * 110}%`);
+        // Fill to 105% so waves go past the top and aren't visible
+        waterFill.style.setProperty('--fill-level', `${displayedProgress * 105}%`);
         
         // Check if we've reached 100% and both conditions are met
         if (displayedProgress >= 0.99 && targetProgress >= 1 && !loadingComplete) {
             displayedProgress = 1;
             percentText.textContent = '100';
-            waterFill.style.setProperty('--fill-level', '110%');
+            waterFill.style.setProperty('--fill-level', '105%');
             loadingComplete = true;
             // Transition to headphone icon
             setTimeout(() => {
@@ -250,9 +250,9 @@ export function Start(): void {
     themeInput.addEventListener('change', function() {
         // Play appropriate sound before toggling
         if (isDayTime()) {
-            playUISwitchNight();  // Going to night
+            playUISwitchDay();  // Going to night
         } else {
-            playUISwitchDay();    // Going to day
+            playUISwitchNight();    // Going to day
         }
         toggleDayNight();
         saveThemePreference(isDayTime());
