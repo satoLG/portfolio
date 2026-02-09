@@ -8,6 +8,7 @@ import {
 import { camera, scene } from "../scripts/Scene";
 import { deltaTime, time } from "../scripts/Time";
 import { UNDERWATER_Y_THRESHOLD } from "./Underwater";
+import { playDiveSound } from "../scripts/Audio";
 
 // ============================================
 // BUBBLE SETTINGS (tweak these!)
@@ -21,6 +22,12 @@ export const BUBBLE_LIFETIME = 2.5;       // Seconds before fade
 export const BUBBLE_SPAWN_RATE = 0.02;    // Seconds between spawns
 export const BUBBLE_SPAWN_DISTANCE = 0.8; // Distance from camera to spawn
 export const BUBBLE_SPREAD = 0.05;        // Random spread at spawn
+
+// Ambient underwater bubble settings
+export const AMBIENT_BUBBLE_INTERVAL = 2.0;   // Seconds between ambient bubble groups
+export const AMBIENT_BUBBLE_GROUP_SIZE = 12;   // Bubbles per ambient group (2-3)
+export const AMBIENT_SOUND_INTERVAL = 10.0;   // Seconds between bubble sounds
+export const ENTRY_BUBBLE_COUNT = 35;          // Bubbles to spawn when entering water
 // ============================================
 
 interface Bubble {
@@ -37,6 +44,11 @@ const sphereGeo = new SphereGeometry(1, 8, 6);
 let initialized = false;
 let lastSpawnTime = 0;
 let isUnderwater = false;
+let wasUnderwater = false;
+
+// Ambient bubble timing
+let lastAmbientBubbleTime = 0;
+let lastAmbientSoundTime = 0;
 
 // Track mouse position
 const mousePosition = { x: 0, y: 0 };
@@ -119,6 +131,66 @@ function spawnBubble(position: Vector3): void {
     }
 }
 
+// Get a spawn position at given screen coordinates (NDC: -1 to 1)
+function getSpawnPositionAtNDC(ndcX: number, ndcY: number): Vector3 {
+    const forward = new Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    const right = new Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    const up = new Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+    
+    const fovRad = (camera.fov * Math.PI) / 180;
+    const halfHeight = Math.tan(fovRad / 2) * BUBBLE_SPAWN_DISTANCE;
+    const halfWidth = halfHeight * camera.aspect;
+    
+    const offsetX = ndcX * halfWidth;
+    const offsetY = ndcY * halfHeight;
+    
+    const pos = camera.position.clone()
+        .add(forward.clone().multiplyScalar(BUBBLE_SPAWN_DISTANCE))
+        .add(right.clone().multiplyScalar(offsetX))
+        .add(up.clone().multiplyScalar(offsetY));
+    
+    pos.add(new Vector3(
+        (Math.random() - 0.5) * BUBBLE_SPREAD,
+        (Math.random() - 0.5) * BUBBLE_SPREAD,
+        (Math.random() - 0.5) * BUBBLE_SPREAD
+    ));
+    
+    return pos;
+}
+
+// Spawn bubbles spread across the screen (for water entry)
+function spawnEntryBubbles(): void {
+    for (let i = 0; i < ENTRY_BUBBLE_COUNT; i++) {
+        // Random position across the screen
+        const ndcX = (Math.random() - 0.5) * 1.6; // Spread across 80% of screen width
+        const ndcY = (Math.random() - 0.5) * 1.6; // Spread across 80% of screen height
+        const pos = getSpawnPositionAtNDC(ndcX, ndcY);
+        
+        if (pos.y < UNDERWATER_Y_THRESHOLD) {
+            spawnBubble(pos);
+        }
+    }
+}
+
+// Spawn a small group of ambient bubbles at a random screen position
+function spawnAmbientBubbleGroup(): void {
+    // Random position on screen (avoid edges)
+    const ndcX = (Math.random() - 0.5) * 1.4;
+    const ndcY = (Math.random() - 0.5) * 1.4;
+    
+    // Spawn 2-3 bubbles close together
+    const groupSize = 2 + Math.floor(Math.random() * 2); // 2 or 3
+    for (let i = 0; i < groupSize; i++) {
+        const offsetX = ndcX + (Math.random() - 0.5) * 0.15;
+        const offsetY = ndcY + (Math.random() - 0.5) * 0.15;
+        const pos = getSpawnPositionAtNDC(offsetX, offsetY);
+        
+        if (pos.y < UNDERWATER_Y_THRESHOLD) {
+            spawnBubble(pos);
+        }
+    }
+}
+
 function getSpawnPosition(): Vector3 | null {
     if (!mouseInitialized) return null;
     
@@ -194,6 +266,14 @@ export function Update(cameraY: number): void {
         }
     }
     
+    // Detect entering underwater - spawn burst of bubbles
+    if (isUnderwater && !wasUnderwater) {
+        spawnEntryBubbles();
+        lastAmbientBubbleTime = time;
+        lastAmbientSoundTime = time;
+    }
+    wasUnderwater = isUnderwater;
+    
     // Spawn new bubbles when moving underwater
     if (isUnderwater && mouseInitialized) {
         const dx = mousePosition.x - lastMousePosition.x;
@@ -210,5 +290,17 @@ export function Update(cameraY: number): void {
         
         lastMousePosition.x = mousePosition.x;
         lastMousePosition.y = mousePosition.y;
+        
+        // Ambient bubble groups every few seconds
+        if (time - lastAmbientBubbleTime > AMBIENT_BUBBLE_INTERVAL) {
+            spawnAmbientBubbleGroup();
+            lastAmbientBubbleTime = time;
+        }
+        
+        // Play bubble sound periodically
+        if (time - lastAmbientSoundTime > AMBIENT_SOUND_INTERVAL) {
+            playDiveSound();
+            lastAmbientSoundTime = time;
+        }
     }
 }

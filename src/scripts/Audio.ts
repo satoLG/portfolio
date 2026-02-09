@@ -326,45 +326,7 @@ function setupWaterCrossfade(currentAudio: HTMLAudioElement, nextAudio: HTMLAudi
     });
 }
 
-function setupMediaSession(): void {
-    if (!('mediaSession' in navigator)) {
-        console.log('Media Session API not supported');
-        return;
-    }
-    
-    navigator.mediaSession.metadata = new MediaMetadata({
-        title: 'Ocean Ambience',
-        artist: 'Leo Sato',
-        album: 'Three.js Ocean Scene',
-        artwork: [
-            { src: 'images/sand.png', sizes: '512x512', type: 'image/png' }
-        ]
-    });
-    
-    navigator.mediaSession.playbackState = 'playing';
-    
-    navigator.mediaSession.setActionHandler('play', () => {
-        if (activeWaterAudio) safePlay(activeWaterAudio, 'media session water');
-        if (fireplaceActive && fireplaceAudio) safePlay(fireplaceAudio, 'media session fireplace');
-        navigator.mediaSession.playbackState = 'playing';
-    });
-    
-    navigator.mediaSession.setActionHandler('pause', async () => {
-        await safePause(waterAudio1, 'media session water1');
-        await safePause(waterAudio2, 'media session water2');
-        await safePause(fireplaceAudio, 'media session fireplace');
-        navigator.mediaSession.playbackState = 'paused';
-    });
-    
-    navigator.mediaSession.setActionHandler('stop', async () => {
-        if (waterAudio1) { await safePause(waterAudio1, 'media session water1'); waterAudio1.currentTime = 0; }
-        if (waterAudio2) { await safePause(waterAudio2, 'media session water2'); waterAudio2.currentTime = 0; }
-        if (fireplaceAudio) { await safePause(fireplaceAudio, 'media session fireplace'); fireplaceAudio.currentTime = 0; }
-        navigator.mediaSession.playbackState = 'none';
-    });
-    
-    console.log('Media Session API configured');
-}
+// Media Session is now handled by MediaPlayer.ts for music playback
 
 function initAudio(): void {
     if (audioInitialized) return;
@@ -382,7 +344,6 @@ function initAudio(): void {
         startFireplaceSound();
     }
     
-    setupMediaSession();
     setupVisibilityHandler();
     
     audioInitialized = true;

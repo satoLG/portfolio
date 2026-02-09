@@ -4,9 +4,125 @@
 
 import { camera } from "./Scene";
 import { radio } from "../scene/Island";
-import { Vector3 } from "three";
+import { Vector3, PerspectiveCamera } from "three";
 import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse } from "./Audio";
 import WaveSurfer from 'wavesurfer.js';
+
+// ============================================
+// MEDIA SESSION API INTEGRATION
+// ============================================
+
+// Default metadata for the site
+const DEFAULT_MEDIA_METADATA = {
+    title: 'leosato.',
+    artist: 'Interactive 3D Portfolio',
+    album: '',
+    artwork: [
+        { src: '/icons/icon-96x96.png', sizes: '96x96', type: 'image/png' },
+        { src: '/icons/icon-128x128.png', sizes: '128x128', type: 'image/png' },
+        { src: '/icons/icon-192x192.png', sizes: '192x192', type: 'image/png' },
+        { src: '/icons/icon-384x384.png', sizes: '384x384', type: 'image/png' },
+        { src: '/icons/icon-512x512.png', sizes: '512x512', type: 'image/png' }
+    ]
+};
+
+function setMediaSessionMetadata(title: string, artist: string, artwork: MediaImage[]): void {
+    if (!('mediaSession' in navigator)) return;
+    
+    navigator.mediaSession.metadata = new MediaMetadata({
+        title,
+        artist,
+        artwork
+    });
+}
+
+function setDefaultMediaSession(): void {
+    setMediaSessionMetadata(
+        DEFAULT_MEDIA_METADATA.title,
+        DEFAULT_MEDIA_METADATA.artist,
+        DEFAULT_MEDIA_METADATA.artwork
+    );
+    if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'none';
+    }
+}
+
+function updateMediaSessionForSong(song: SongData): void {
+    if (!('mediaSession' in navigator)) return;
+    
+    const artwork: MediaImage[] = song.cover 
+        ? [{ src: song.cover, sizes: '512x512', type: 'image/jpeg' }]
+        : DEFAULT_MEDIA_METADATA.artwork;
+    
+    setMediaSessionMetadata(song.name || 'Unknown Track', song.artist || 'Unknown Artist', artwork);
+}
+
+function updateMediaSessionPlaybackState(playing: boolean): void {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+}
+
+function updateMediaSessionPosition(): void {
+    if (!('mediaSession' in navigator) || !audioElement) return;
+    
+    try {
+        navigator.mediaSession.setPositionState({
+            duration: audioElement.duration || 0,
+            playbackRate: audioElement.playbackRate,
+            position: audioElement.currentTime || 0
+        });
+    } catch {
+        // Some browsers may not support setPositionState
+    }
+}
+
+function setupMediaSessionHandlers(): void {
+    if (!('mediaSession' in navigator)) return;
+    
+    navigator.mediaSession.setActionHandler('play', () => {
+        if (wavesurfer) {
+            wavesurfer.play();
+        } else if (audioElement) {
+            audioElement.play();
+        }
+    });
+    
+    navigator.mediaSession.setActionHandler('pause', () => {
+        if (wavesurfer) {
+            wavesurfer.pause();
+        } else if (audioElement) {
+            audioElement.pause();
+        }
+    });
+    
+    navigator.mediaSession.setActionHandler('previoustrack', () => {
+        previousSong(isPlaying);
+    });
+    
+    navigator.mediaSession.setActionHandler('nexttrack', () => {
+        nextSong(isPlaying);
+    });
+    
+    navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime !== undefined) {
+            if (wavesurfer) {
+                const duration = wavesurfer.getDuration();
+                if (duration > 0) {
+                    wavesurfer.seekTo(details.seekTime / duration);
+                }
+            } else if (audioElement) {
+                audioElement.currentTime = details.seekTime;
+            }
+            updateMediaSessionPosition();
+        }
+    });
+    
+    // Set default metadata initially
+    setDefaultMediaSession();
+}
+
+// Above water camera Y position (must match Control.ts)
+const ABOVE_WATER_CAMERA_Y = 0.5;  // aboveWaterBottomY from Control.ts
 
 // Song metadata map - add your songs here!
 interface SongData {
@@ -22,31 +138,25 @@ let playlist: SongData[] = [
         file: 'audio/music/320526__benpm__ambient-piano-music-3.wav',
         name: 'Ambient Piano Music 3',
         artist: 'benpm',
-        cover: undefined
+        cover: 'images/music/ben.jpg'
     },
     {
         file: 'audio/music/595751__yellowtree__late-nights-in-osaka.wav',
         name: 'Late Nights in Osaka',
         artist: 'yellowtree',
-        cover: undefined
+        cover: 'images/music/yellowtree.jpg'
     },
     {
         file: 'audio/music/Aventure - Afternoon Coffee (freetouse.com).mp3',
         name: 'Afternoon Coffee',
         artist: 'Aventure',
-        cover: undefined
+        cover: 'images/music/afternooncoffee.webp'
     },
     {
         file: 'audio/music/Aventure - Chill Walk (freetouse.com).mp3',
         name: 'Chill Walk',
         artist: 'Aventure',
-        cover: undefined
-    },
-    {
-        file: 'audio/music/Aventure - Moody Weather (freetouse.com).mp3',
-        name: 'Moody Weather',
-        artist: 'Aventure',
-        cover: undefined
+        cover: 'images/music/chillwalk.webp'
     },
     {
         file: 'audio/music/Hazelwood - Reflection (freetouse.com).mp3',
@@ -55,34 +165,22 @@ let playlist: SongData[] = [
         cover: 'images/music/reflection.webp'
     },
     {
-        file: 'audio/music/Hoffy Beats - Riding the Waves (freetouse.com).mp3',
-        name: 'Riding the Waves',
-        artist: 'Hoffy Beats',
-        cover: undefined
-    },
-    {
-        file: 'audio/music/Lukrembo - Spaceship (freetouse.com).mp3',
-        name: 'Spaceship',
-        artist: 'Lukrembo',
-        cover: undefined
-    },
-    {
         file: 'audio/music/massobeats - breeze (freetouse.com).mp3',
-        name: 'Breeze',
+        name: 'breeze',
         artist: 'massobeats',
-        cover: 'images/music/massobeats.webp'
+        cover: 'images/music/breeze.webp'
     },
     {
         file: 'audio/music/massobeats - honey jam (freetouse.com).mp3',
-        name: 'Honey Jam',
+        name: 'honey jam',
         artist: 'massobeats',
         cover: 'images/music/massobeats.webp'
     },
     {
         file: 'audio/music/massobeats - ocean (freetouse.com).mp3',
-        name: 'Ocean',
+        name: 'ocean',
         artist: 'massobeats',
-        cover: 'images/music/massobeats.webp'
+        cover: 'images/music/ocean.webp'
     },
     {
         file: 'audio/music/Moavii - City Lights (freetouse.com).mp3',
@@ -97,28 +195,10 @@ let playlist: SongData[] = [
         cover: 'images/music/flywithme.webp'
     },
     {
-        file: 'audio/music/Moavii - Midnight Bliss (freetouse.com).mp3',
-        name: 'Midnight Bliss',
-        artist: 'Moavii',
-        cover: undefined
-    },
-    {
-        file: 'audio/music/Moavii - Sprinkles (freetouse.com).mp3',
-        name: 'Sprinkles',
-        artist: 'Moavii',
-        cover: undefined
-    },
-    {
         file: 'audio/music/Moavii - Stranded (freetouse.com).mp3',
         name: 'Stranded',
         artist: 'Moavii',
-        cover: undefined
-    },
-    {
-        file: 'audio/music/Moavii - Sunset Dreams (freetouse.com).mp3',
-        name: 'Sunset Dreams',
-        artist: 'Moavii',
-        cover: undefined
+        cover: 'images/music/stranded.webp'
     },
     {
         file: 'audio/music/Moavii - Umbrella (freetouse.com).mp3',
@@ -179,6 +259,7 @@ export function Start(): void {
     createAudioElement();
     initWavesurfer();
     updatePlayerDisplay();
+    setupMediaSessionHandlers();
     
     // Listen for mute changes from settings
     window.addEventListener('musicMuteChanged', (e: Event) => {
@@ -198,24 +279,41 @@ function createPlayerUI(): void {
         <span class="music-note"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
         <img class="bubble-cover" src="" alt="" />
         <div class="player-expanded-content">
-            <div class="player-drag-handle"></div>
-            <button class="player-close" title="Close">×</button>
-            <button class="player-playlist-toggle" title="Show playlist">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 15V6"/>
-                    <path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/>
-                    <path d="M12 12H3"/>
-                    <path d="M16 6H3"/>
-                    <path d="M12 18H3"/>
-                </svg>
-            </button>
-            <div class="player-content">
-                <div class="player-cover">
-                    <img src="${DEFAULT_COVER}" alt="Album cover" />
+            <div class="player-header-bar">
+                <div class="player-drag-handle"></div>
+                <button class="player-playlist-toggle" title="Show playlist">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15V6"/>
+                        <path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/>
+                        <path d="M12 12H3"/>
+                        <path d="M16 6H3"/>
+                        <path d="M12 18H3"/>
+                    </svg>
+                </button>
+                <button class="player-close" title="Minimize">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="4 14 10 14 10 20"/>
+                        <polyline points="20 10 14 10 14 4"/>
+                        <line x1="14" y1="10" x2="21" y2="3"/>
+                        <line x1="3" y1="21" x2="10" y2="14"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="player-body">
+                <div class="player-content">
+                    <div class="player-cover">
+                        <img src="${DEFAULT_COVER}" alt="Album cover" />
+                    </div>
+                    <div class="player-info">
+                        <div class="player-title">${DEFAULT_NAME}</div>
+                        <div class="player-artist">${DEFAULT_ARTIST}</div>
+                    </div>
                 </div>
-                <div class="player-info">
-                    <div class="player-title">${DEFAULT_NAME}</div>
-                    <div class="player-artist">${DEFAULT_ARTIST}</div>
+            <div class="player-waveform-container">
+                <div id="waveform"></div>
+                <div class="player-time">
+                    <span class="time-current">0:00</span>
+                    <span class="time-total">0:00</span>
                 </div>
             </div>
             <div class="player-controls">
@@ -243,13 +341,6 @@ function createPlayerUI(): void {
                     </svg>
                 </button>
             </div>
-            <div class="player-waveform-container">
-                <div id="waveform"></div>
-                <div class="player-time">
-                    <span class="time-current">0:00</span>
-                    <span class="time-total">0:00</span>
-                </div>
-            </div>
             <div class="player-playlist">
                 <div class="playlist-header">
                     <span class="playlist-title">Playlist</span>
@@ -257,6 +348,9 @@ function createPlayerUI(): void {
                 </div>
                 <div class="playlist-items"></div>
             </div>
+            </div>
+            <div class="player-resize-handle player-resize-e"></div>
+            <div class="player-resize-handle player-resize-w"></div>
         </div>
     `;
     
@@ -321,6 +415,9 @@ function createPlayerUI(): void {
     
     // Drag functionality - only on drag handle
     setupDragListeners();
+    
+    // Resize functionality
+    setupResizeListeners();
 }
 
 function setupDragListeners(): void {
@@ -402,6 +499,175 @@ function stopDragging(): void {
     document.body.style.userSelect = '';
 }
 
+// Resize state
+let isResizing = false;
+let resizeDirection = '';
+let resizeStartX = 0;
+let resizeStartWidth = 0;
+let resizeStartLeft = 0;
+
+const MIN_WIDTH = 280;
+const MAX_WIDTH = 500;
+
+// Pinch zoom state
+let initialPinchDistance = 0;
+let initialPinchWidth = 0;
+
+function setupResizeListeners(): void {
+    if (!playerContainer) return;
+    
+    const resizeHandles = playerContainer.querySelectorAll('.player-resize-handle');
+    
+    resizeHandles.forEach(handle => {
+        // Mouse resize
+        handle.addEventListener('mousedown', (e: Event) => {
+            const mouseEvent = e as MouseEvent;
+            if (!isExpanded || !playerContainer) return;
+            mouseEvent.preventDefault();
+            mouseEvent.stopPropagation();
+            const dir = getResizeDirection(handle as HTMLElement);
+            startResizing(mouseEvent.clientX, mouseEvent.clientY, dir);
+        });
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        updateResize(e.clientX, e.clientY);
+    });
+    
+    document.addEventListener('mouseup', stopResizing);
+    
+    // Touch resize on handles
+    resizeHandles.forEach(handle => {
+        handle.addEventListener('touchstart', (e: Event) => {
+            const touchEvent = e as TouchEvent;
+            if (!isExpanded || !playerContainer || touchEvent.touches.length === 0) return;
+            touchEvent.preventDefault();
+            touchEvent.stopPropagation();
+            const touch = touchEvent.touches[0];
+            const dir = getResizeDirection(handle as HTMLElement);
+            startResizing(touch.clientX, touch.clientY, dir);
+        }, { passive: false });
+    });
+    
+    document.addEventListener('touchmove', (e) => {
+        if (!isResizing || e.touches.length === 0) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        updateResize(touch.clientX, touch.clientY);
+    }, { passive: false });
+    
+    document.addEventListener('touchend', stopResizing);
+    
+    // Pinch to zoom on the player itself (horizontal only)
+    playerContainer.addEventListener('touchstart', (e) => {
+        if (!isExpanded || !playerContainer || e.touches.length !== 2) return;
+        e.preventDefault();
+        initialPinchDistance = getPinchDistance(e.touches);
+        initialPinchWidth = playerContainer.offsetWidth;
+    }, { passive: false });
+    
+    playerContainer.addEventListener('touchmove', (e) => {
+        if (!isExpanded || !playerContainer || e.touches.length !== 2 || initialPinchDistance === 0) return;
+        e.preventDefault();
+        
+        const currentDistance = getPinchDistance(e.touches);
+        const scale = currentDistance / initialPinchDistance;
+        
+        let newWidth = Math.round(initialPinchWidth * scale);
+        
+        // Clamp width
+        newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, newWidth));
+        
+        // Keep within viewport
+        const rect = playerContainer.getBoundingClientRect();
+        if (rect.left + newWidth > window.innerWidth) {
+            newWidth = window.innerWidth - rect.left;
+        }
+        
+        playerContainer.style.width = `${newWidth}px`;
+    }, { passive: false });
+    
+    playerContainer.addEventListener('touchend', () => {
+        initialPinchDistance = 0;
+    });
+}
+
+function getPinchDistance(touches: TouchList): number {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+function getResizeDirection(handle: HTMLElement): string {
+    if (handle.classList.contains('player-resize-e')) return 'e';
+    if (handle.classList.contains('player-resize-w')) return 'w';
+    return '';
+}
+
+function startResizing(clientX: number, _clientY: number, direction: string): void {
+    if (!playerContainer) return;
+    
+    isResizing = true;
+    resizeDirection = direction;
+    resizeStartX = clientX;
+    
+    const rect = playerContainer.getBoundingClientRect();
+    resizeStartWidth = rect.width;
+    resizeStartLeft = rect.left;
+    
+    playerContainer.style.transition = 'none';
+    document.body.style.userSelect = 'none';
+}
+
+function updateResize(clientX: number, _clientY: number): void {
+    if (!isResizing || !playerContainer) return;
+    
+    const deltaX = clientX - resizeStartX;
+    
+    let newWidth = resizeStartWidth;
+    let newLeft = resizeStartLeft;
+    
+    // Calculate new width based on direction (horizontal only)
+    if (resizeDirection.includes('e')) {
+        newWidth = resizeStartWidth + deltaX;
+    }
+    if (resizeDirection.includes('w')) {
+        newWidth = resizeStartWidth - deltaX;
+        newLeft = resizeStartLeft + deltaX;
+    }
+    
+    // Clamp width
+    newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, newWidth));
+    
+    // Adjust left position if width was clamped during west resize
+    if (resizeDirection.includes('w')) {
+        const widthDiff = resizeStartWidth - newWidth;
+        newLeft = resizeStartLeft + widthDiff;
+    }
+    
+    // Keep within viewport
+    if (newLeft < 0) {
+        newWidth += newLeft;
+        newLeft = 0;
+    }
+    if (newLeft + newWidth > window.innerWidth) {
+        newWidth = window.innerWidth - newLeft;
+    }
+    
+    playerContainer.style.width = `${newWidth}px`;
+    playerContainer.style.left = `${newLeft}px`;
+}
+
+function stopResizing(): void {
+    if (!isResizing || !playerContainer) return;
+    
+    isResizing = false;
+    resizeDirection = '';
+    playerContainer.style.transition = '';
+    document.body.style.userSelect = '';
+}
+
 function createAudioElement(): void {
     audioElement = new Audio();
     audioElement.volume = 0.5;
@@ -410,11 +676,21 @@ function createAudioElement(): void {
         isPlaying = true;
         updatePlayButton();
         updateBubblePlayingState();
+        // Update Media Session with current song info
+        if (playlist.length > 0) {
+            updateMediaSessionForSong(playlist[currentSongIndex]);
+        }
+        updateMediaSessionPlaybackState(true);
     });
     audioElement.addEventListener('pause', () => {
         isPlaying = false;
         updatePlayButton();
         updateBubblePlayingState();
+        updateMediaSessionPlaybackState(false);
+        // If music is paused and at the beginning, reset to default metadata
+        if (audioElement && audioElement.currentTime === 0) {
+            setDefaultMediaSession();
+        }
     });
     
     // Don't load first song here - wavesurfer will handle it
@@ -429,14 +705,14 @@ function initWavesurfer(): void {
     // Create wavesurfer instance
     wavesurfer = WaveSurfer.create({
         container: waveformContainer,
-        waveColor: 'rgba(255, 255, 255, 0.3)',
-        progressColor: 'rgba(74, 158, 255, 0.8)',
-        cursorColor: 'rgba(255, 255, 255, 0.5)',
-        cursorWidth: 1,
+        waveColor: 'rgba(255, 255, 255, 0.8)',
+        progressColor: '#e53935',
+        cursorColor: '#e53935',
+        cursorWidth: 3,
         barWidth: 2,
         barGap: 1,
         barRadius: 2,
-        height: 32,
+        height: 40,
         normalize: true,
         hideScrollbar: true,
         fillParent: true,
@@ -444,11 +720,21 @@ function initWavesurfer(): void {
     });
     
     // Update time display
-    wavesurfer.on('audioprocess', updateTimeDisplay);
-    wavesurfer.on('seeking', updateTimeDisplay);
+    wavesurfer.on('audioprocess', () => {
+        updateTimeDisplay();
+        // Update Media Session position every second (throttled)
+        if (audioElement && Math.floor(audioElement.currentTime) !== Math.floor(audioElement.currentTime - 0.25)) {
+            updateMediaSessionPosition();
+        }
+    });
+    wavesurfer.on('seeking', () => {
+        updateTimeDisplay();
+        updateMediaSessionPosition();
+    });
     wavesurfer.on('ready', () => {
         updateTimeDisplay();
         updateWaveformColors();
+        updateMediaSessionPosition();
     });
     
     // Handle resize with requestAnimationFrame for smooth, lag-free updates
@@ -457,7 +743,7 @@ function initWavesurfer(): void {
         if (wavesurfer && isExpanded && !isAnimating) {
             requestAnimationFrame(() => {
                 if (wavesurfer && isExpanded && !isAnimating) {
-                    wavesurfer.setOptions({ height: 32 });
+                    wavesurfer.setOptions({ height: 40 });
                 }
             });
         }
@@ -493,26 +779,18 @@ function formatTime(seconds: number): string {
 function updateWaveformColors(): void {
     if (!wavesurfer) return;
     
-    const isDayMode = document.body.classList.contains('day-mode');
-    
-    if (isDayMode) {
-        wavesurfer.setOptions({
-            waveColor: 'rgba(10, 37, 64, 0.25)',
-            progressColor: 'rgba(30, 100, 180, 0.7)',
-            cursorColor: 'rgba(10, 37, 64, 0.4)',
-        });
-    } else {
-        wavesurfer.setOptions({
-            waveColor: 'rgba(255, 255, 255, 0.3)',
-            progressColor: 'rgba(74, 158, 255, 0.8)',
-            cursorColor: 'rgba(255, 255, 255, 0.5)',
-        });
-    }
+    // Always use white waveform with red progress (radio frequency style)
+    // Day/night mode only affects the container, not the waveform colors
+    wavesurfer.setOptions({
+        waveColor: 'rgba(255, 255, 255, 0.8)',
+        progressColor: '#e53935',
+        cursorColor: '#e53935',
+    });
 }
 
 // Expanded player dimensions (must match CSS)
-const EXPANDED_WIDTH = 240;
-const EXPANDED_HEIGHT = 200;  // Approximate height
+const EXPANDED_WIDTH = 320;
+const EXPANDED_HEIGHT = 280;  // Approximate height
 const EDGE_OFFSET = 16;  // Padding from viewport edges
 let isAnimating = false;  // Block resize during expand/collapse animation
 
@@ -522,8 +800,8 @@ function expandPlayer(): void {
     isAnimating = true;  // Block resize during animation
     hasBeenDragged = true;  // Mark as dragged so it doesn't snap back to radio
     
-    // Play expand sound
-    playUIBubbleExpand();
+    // Play collapse sound (inverted)
+    playUIBubbleCollapse();
     
     // Clear any conflicting inline styles from underwater positioning
     playerContainer.style.bottom = '';
@@ -567,7 +845,7 @@ function expandPlayer(): void {
         isAnimating = false;
         // Trigger one resize now that animation is done
         if (wavesurfer && isExpanded) {
-            wavesurfer.setOptions({ height: 32 });
+            wavesurfer.setOptions({ height: 40 });
         }
     }, 400);
 }
@@ -584,11 +862,15 @@ function collapsePlayer(): void {
         if (toggleBtn) toggleBtn.classList.remove('active');
     }
     
-    // Play collapse sound
-    playUIBubbleCollapse();
+    // Play expand sound (inverted)
+    playUIBubbleExpand();
     
     // Remove pop-in class so it doesn't replay animation on collapse
     playerContainer.classList.remove('pop-in-animate');
+    
+    // Reset any custom width/height from resize
+    playerContainer.style.width = '';
+    playerContainer.style.height = '';
     
     // Restore full transition for smooth animation back to bubble
     playerContainer.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
@@ -1044,9 +1326,21 @@ export function Update(): void {
     const justSurfaced = wasUnderwater && !isUnderwater;
     if (justSurfaced) {
         surfacingAnimationTimer = 0.6;  // 600ms animation time
-        // Capture target position NOW - don't update it during animation
+        
+        // Calculate where radio WILL BE when camera reaches final position
+        const currentCameraY = camera.position.y;
+        const cameraYDiff = ABOVE_WATER_CAMERA_Y - currentCameraY;
+        
+        // For perspective projection, objects below camera move up on screen when camera moves up
+        // Approximate screen Y offset based on camera Y movement
+        // The radio is below camera, so camera moving UP means radio appears LOWER on screen
+        const fov = (camera as PerspectiveCamera).fov * Math.PI / 180;
+        const distance = radioPos.distanceTo(camera.position);
+        const screenOffsetY = (cameraYDiff / distance) * (window.innerHeight / (2 * Math.tan(fov / 2)));
+        
         surfacingTargetX = radioScreenX;
-        surfacingTargetY = radioScreenY;
+        surfacingTargetY = radioScreenY + screenOffsetY;
+        
         // Set transition for surfacing animation immediately
         playerContainer.style.transition = 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)';
     }
