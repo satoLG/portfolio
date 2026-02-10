@@ -18,8 +18,17 @@ export const fire = new Group();
 
 export const fireLight = new PointLight(0xff6622, 0, 8, 2);
 
-const FIRE_SCALE = 1.2;
-const FIRE_HEIGHT_OFFSET = 0.5;
+// Configure shadow casting for fire light
+fireLight.castShadow = true;
+fireLight.shadow.mapSize.width = 1024;
+fireLight.shadow.mapSize.height = 1024;
+fireLight.shadow.camera.near = 0.1;
+fireLight.shadow.camera.far = 5;
+fireLight.shadow.bias = -0.001;  // Negative bias for PCF
+fireLight.shadow.normalBias = 0.1;  // TWEAK: Higher = smoother edges (0.02-0.15)
+
+const FIRE_SCALE = 0.25;
+const FIRE_HEIGHT_OFFSET = 0.13;
 const FIRE_LIGHT_INTENSITY = 3.0;
 const FIRE_LIGHT_FLICKER = 0.3;
 const FADE_SPEED = 1.5;
