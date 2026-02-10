@@ -6,6 +6,7 @@ import { camera } from "./Scene";
 import { radio } from "../scene/Island";
 import { Vector3, PerspectiveCamera } from "three";
 import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse } from "./Audio";
+import { zoomToRadio, zoomOutFromRadio, getSavedCameraPosition, DEFAULT_CAMERA_X, DEFAULT_CAMERA_Z } from "./Control";
 import WaveSurfer from 'wavesurfer.js';
 
 // ============================================
@@ -803,6 +804,11 @@ function expandPlayer(): void {
     // Play collapse sound (inverted)
     playUIBubbleCollapse();
     
+    // Zoom camera to radio when above water
+    if (!isUnderwater) {
+        zoomToRadio();
+    }
+    
     // Clear any conflicting inline styles from underwater positioning
     playerContainer.style.bottom = '';
     playerContainer.style.right = '';
@@ -818,8 +824,10 @@ function expandPlayer(): void {
         expandX = EDGE_OFFSET;
         expandY = window.innerHeight - EXPANDED_HEIGHT - 80;  // Above the bubble
     } else {
-        expandX = radioScreenX - EXPANDED_WIDTH / 2;
-        expandY = radioScreenY - EXPANDED_HEIGHT - 20;  // Position higher so radio is visible
+        // When zooming to radio, position media player in upper half of screen
+        // Use percentage to work better on mobile
+        expandX = (window.innerWidth - EXPANDED_WIDTH) / 2;  // Center horizontally
+        expandY = Math.max(EDGE_OFFSET + 50, window.innerHeight * 0.12);  // ~12% from top, minimum 66px
     }
     
     // Clamp to viewport with offset
@@ -865,6 +873,11 @@ function collapsePlayer(): void {
     // Play expand sound (inverted)
     playUIBubbleExpand();
     
+    // Zoom out from radio when above water
+    if (!isUnderwater) {
+        zoomOutFromRadio();
+    }
+    
     // Remove pop-in class so it doesn't replay animation on collapse
     playerContainer.classList.remove('pop-in-animate');
     
@@ -878,9 +891,44 @@ function collapsePlayer(): void {
     playerContainer.classList.remove('expanded');
     playerContainer.classList.add('bubble');
     
-    // Animate back to radio position
-    playerContainer.style.left = `${radioScreenX}px`;
-    playerContainer.style.top = `${radioScreenY}px`;
+    // Calculate where radio WILL BE after camera zooms out
+    let targetRadioX = radioScreenX;
+    let targetRadioY = radioScreenY;
+    
+    if (!isUnderwater) {
+        // Get saved camera position (where camera will return to)
+        const savedCam = getSavedCameraPosition();
+        
+        // Temporarily move camera to saved position to calculate correct projection
+        const currentCamX = camera.position.x;
+        const currentCamY = camera.position.y;
+        const currentCamZ = camera.position.z;
+        
+        // Set camera to saved position
+        camera.position.x = savedCam.x !== undefined ? savedCam.x : DEFAULT_CAMERA_X;
+        camera.position.y = savedCam.y;
+        camera.position.z = savedCam.z !== undefined ? savedCam.z : DEFAULT_CAMERA_Z;
+        camera.updateMatrixWorld();
+        
+        // Now project radio position with camera at saved position
+        const radioPos = new Vector3();
+        radio.getWorldPosition(radioPos);
+        radioPos.y += 0.35;  // Same offset used in Update
+        
+        const screenPos = radioPos.clone().project(camera);
+        targetRadioX = (screenPos.x * 0.5 + 0.5) * window.innerWidth;
+        targetRadioY = (-screenPos.y * 0.5 + 0.5) * window.innerHeight;
+        
+        // Restore camera to current position
+        camera.position.x = currentCamX;
+        camera.position.y = currentCamY;
+        camera.position.z = currentCamZ;
+        camera.updateMatrixWorld();
+    }
+    
+    // Animate back to calculated radio position
+    playerContainer.style.left = `${targetRadioX}px`;
+    playerContainer.style.top = `${targetRadioY}px`;
     playerContainer.style.transform = 'translate(-50%, -50%)';
     
     // Wait for animation to complete before letting Update() take over

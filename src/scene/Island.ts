@@ -1,14 +1,16 @@
-import { Group, TextureLoader, RepeatWrapping, SRGBColorSpace, MeshStandardMaterial, Material, Texture, Object3D, LoadingManager, RingGeometry, MeshBasicMaterial, Mesh, DoubleSide } from "three";
+import { Group, TextureLoader, RepeatWrapping, SRGBColorSpace, MeshStandardMaterial, Material, Texture, Object3D, LoadingManager, RingGeometry, MeshBasicMaterial, Mesh, DoubleSide, Uniform, Vector2, Vector3, Raycaster } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { oceanAbsorptionUniform } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
-import { deltaTime } from "../scripts/Time";
+import { deltaTime, time } from "../scripts/Time";
 import { getIsPlaying } from "../scripts/MediaPlayer";
+import { camera } from "../scripts/Scene";
 
 export const island = new Group();
 export const firecamp = new Group();
 export const palmtree = new Group();
 export const radio = new Group();
+export const sword = new Group();
 export const grassPatches: Group[] = [];
 
 // Store palm tree leaves for wind animation
@@ -140,14 +142,16 @@ export function getCurrentTexture(): string {
 }
 
 const islandPosition = { x: 0, y: -0.115, z: -3.3 };
-const firecampOffset = { x: 0, y: 0.2, z: 0.4 };
+const firecampOffset = { x: 0, y: 0.25, z: 0.4 };
 const palmtreeOffset = { x: -0.35, y: 0.1, z: -0.3 };
-const radioOffset = { x: -0.65, y: 0.2, z: 0.15 };  // In front of firecamp, left of center
+const radioOffset = { x: -0.65, y: 0.22, z: 0.20 };  // In front of firecamp, left of center
+const swordOffset = { x: 0.08, y: 0.58, z: 0.4 };  // Stuck in the middle of the bonfire
 
 const islandScale = 1.5;
-const firecampScale = 0.4;
+const firecampScale = 1.4;
 const palmtreeScale = 0.75;
 const radioScale = 0.22;
+const swordScale = 0.25;
 
 // Radio vibration settings
 let radioTime = 0;
@@ -155,11 +159,44 @@ const radioBaseY = islandPosition.y + radioOffset.y;
 const radioVibeStrength = 0.003;  // Very subtle bounce
 const radioVibeSpeed = 12;  // Quick vibration
 
+// GRASS/CLOVER SPAWN SETTINGS
+const MIN_DISTANCE_FROM_CENTER = 0.35;  // TWEAK: Minimum distance to avoid bonfire
+const MAX_DISTANCE = 0.65;  // TWEAK: Maximum spread distance
+
 // GRASS SETTINGS - easily tweakable
-const GRASS_COUNT = 8;  // Number of grass patches
+const GRASS_COUNT = 32;  // Number of grass patches
 const grassScale = 0.22;
-const grassSpread = 0.85;  // How far grass spreads from palm tree
-const grassBaseOffset = { x: 0.0, y: 0.05, z: 0.68 };  // Base position near palm tree
+const grassBaseOffset = { x: 0.4, y: 0.07, z: 0.6 };  // Base position near palm tree
+
+// CLOVER SETTINGS
+const CLOVER_COUNT = 10;  // Number of clover patches
+const cloverScale = 0.15;
+const cloverBaseOffset = { x: 0.4, y: 0.08, z: 0.6 };  // Same Y as grass for consistency
+
+// PALM TREE WIND SETTINGS - easily tweakable
+const PALM_WIND_STRENGTH = 0.05;    // TWEAK: How much leaves sway (0.05-0.3)
+const PALM_WIND_SPEED = 0.7;       // TWEAK: Speed of wind oscillation (0.5-3.0)
+const PALM_LEAF_START_Y = 0.015;     // TWEAK: Y height where leaves start swaying (local coords)
+const PALM_LEAF_FULL_Y = 0.30;      // TWEAK: Y height where full sway happens
+
+// Wind uniforms for shader
+const palmWindTimeUniform = new Uniform(0.0);
+const palmWindStrengthUniform = new Uniform(PALM_WIND_STRENGTH);
+const palmLeafStartYUniform = new Uniform(PALM_LEAF_START_Y);
+const palmLeafFullYUniform = new Uniform(PALM_LEAF_FULL_Y);
+
+// FOLIAGE (GRASS/CLOVER) WIND SETTINGS - independent from palm
+const FOLIAGE_WIND_STRENGTH = 0.035;  // TWEAK: Very subtle sway
+// const FOLIAGE_WIND_SPEED = 0.8;       // TWEAK: Slow gentle movement
+const foliageWindStrengthUniform = new Uniform(FOLIAGE_WIND_STRENGTH);
+
+// Mouse interaction for grass
+const raycaster = new Raycaster();
+const mouse = new Vector2();
+const mouseWorldPos = new Uniform(new Vector3(0, -100, 0));  // Far away by default
+const mouseInfluenceRadius = new Uniform(0.25);  // TWEAK: Small area
+const mouseInfluenceStrength = new Uniform(0.025);  // TWEAK: Very subtle bend
+// let isMouseOverGrass = false;
 
 // WIND SETTINGS - easily tweakable
 const WIND_STRENGTH = 0.0;      // How far things sway (rotation in radians)
@@ -379,6 +416,154 @@ function applyOceanLightingToModel(model: Group): void {
     });
 }
 
+// Apply wind animation shader to palm tree
+function applyPalmWindShader(model: Group): void {
+    model.traverse((child) => {
+        if ((child as any).isMesh && (child as any).material) {
+            const mesh = child as any;
+            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            materials.forEach((mat: any) => {
+                if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial || mat.isMeshBasicMaterial) {
+                    mat.customProgramCacheKey = () => 'palm_wind_' + mat.uuid;
+                    mat.onBeforeCompile = (shader: any) => {
+                        console.log('🌴 Palm wind shader compiling!');
+                        // Add ocean lighting uniforms
+                        shader.uniforms.uLight = lightUniform;
+                        shader.uniforms.uAbsorption = oceanAbsorptionUniform;
+                        shader.uniforms.uSunVisibility = sunVisibilityUniform;
+                        // Add wind uniforms
+                        shader.uniforms.uWindTime = palmWindTimeUniform;
+                        shader.uniforms.uWindStrength = palmWindStrengthUniform;
+                        shader.uniforms.uLeafStartY = palmLeafStartYUniform;
+                        shader.uniforms.uLeafFullY = palmLeafFullYUniform;
+                        
+                        // Vertex shader - add wind sway
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <common>',
+                            `#include <common>
+                            uniform float uWindTime;
+                            uniform float uWindStrength;
+                            uniform float uLeafStartY;
+                            uniform float uLeafFullY;
+                            varying vec3 vWorldPosition;`
+                        );
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <begin_vertex>',
+                            `#include <begin_vertex>
+                            // Wind sway based on Y position
+                            float heightFactor = smoothstep(uLeafStartY, uLeafFullY, position.y);
+                            float windSway = sin(uWindTime * 2.0 + position.x * 3.0) * uWindStrength * heightFactor;
+                            float windSwayZ = cos(uWindTime * 1.5 + position.z * 2.0) * uWindStrength * 0.5 * heightFactor;
+                            transformed.x += windSway;
+                            transformed.z += windSwayZ;`
+                        );
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <worldpos_vertex>',
+                            `#include <worldpos_vertex>
+                            vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;`
+                        );
+                        
+                        // Fragment shader - ocean lighting
+                        shader.fragmentShader = shader.fragmentShader.replace(
+                            '#include <common>',
+                            `#include <common>
+                            varying vec3 vWorldPosition;
+                            ${oceanLightingPars}`
+                        );
+                        shader.fragmentShader = shader.fragmentShader.replace(
+                            '#include <dithering_fragment>',
+                            `${oceanLightingFragment}
+                            #include <dithering_fragment>`
+                        );
+                    };
+                    mat.needsUpdate = true;
+                }
+            });
+        }
+    });
+}
+
+// Apply wind animation shader to grass/clover with mouse interaction
+function applyFoliageWindShader(model: Group): void {
+    model.traverse((child) => {
+        if ((child as any).isMesh && (child as any).material) {
+            const mesh = child as any;
+            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            materials.forEach((mat: any) => {
+                if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial || mat.isMeshBasicMaterial) {
+                    // Fix transparency/depth issues
+                    mat.depthWrite = true;
+                    mat.alphaTest = 0.5;
+                    mat.transparent = false;  // Disable transparency to fix flickering
+                    mesh.renderOrder = 1;  // Render after ground
+                    
+                    mat.customProgramCacheKey = () => 'foliage_wind_' + mat.uuid;
+                    mat.onBeforeCompile = (shader: any) => {
+                        // Add ocean lighting uniforms
+                        shader.uniforms.uLight = lightUniform;
+                        shader.uniforms.uAbsorption = oceanAbsorptionUniform;
+                        shader.uniforms.uSunVisibility = sunVisibilityUniform;
+                        // Add wind uniforms - independent for foliage
+                        shader.uniforms.uWindTime = palmWindTimeUniform;
+                        shader.uniforms.uWindStrength = foliageWindStrengthUniform;
+                        // Add mouse interaction uniforms
+                        shader.uniforms.uMouseWorldPos = mouseWorldPos;
+                        shader.uniforms.uMouseRadius = mouseInfluenceRadius;
+                        shader.uniforms.uMouseStrength = mouseInfluenceStrength;
+                        
+                        // Vertex shader - add wind sway with mouse interaction
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <common>',
+                            `#include <common>
+                            uniform float uWindTime;
+                            uniform float uWindStrength;
+                            uniform vec3 uMouseWorldPos;
+                            uniform float uMouseRadius;
+                            uniform float uMouseStrength;
+                            varying vec3 vWorldPosition;`
+                        );
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <begin_vertex>',
+                            `#include <begin_vertex>
+                            // Subtle wind sway - gentle tilt left/right only
+                            float heightFactor = smoothstep(0.0, 0.15, position.y);  // Gradual height influence
+                            float windSway = sin(uWindTime * 1.5 + position.x * 3.0) * uWindStrength * heightFactor;
+                            transformed.x += windSway;
+                            
+                            // Mouse interaction - very subtle push away from cursor
+                            vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                            vec2 toMouse = worldPos.xz - uMouseWorldPos.xz;
+                            float mouseDist = length(toMouse);
+                            float mouseInfluence = smoothstep(uMouseRadius, 0.0, mouseDist) * heightFactor;
+                            vec2 pushDir = normalize(toMouse + vec2(0.001));
+                            transformed.x += pushDir.x * mouseInfluence * uMouseStrength;`
+                        );
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <worldpos_vertex>',
+                            `#include <worldpos_vertex>
+                            vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;`
+                        );
+                        
+                        // Fragment shader - ocean lighting
+                        shader.fragmentShader = shader.fragmentShader.replace(
+                            '#include <common>',
+                            `#include <common>
+                            varying vec3 vWorldPosition;
+                            ${oceanLightingPars}`
+                        );
+                        shader.fragmentShader = shader.fragmentShader.replace(
+                            '#include <dithering_fragment>',
+                            `${oceanLightingFragment}
+                            #include <dithering_fragment>`
+                        );
+                    };
+                    mat.needsUpdate = true;
+                }
+            });
+        }
+    });
+}
+
 function applyIslandTextures(model: Group): void {
     model.traverse((child) => {
         if ((child as any).isMesh && (child as any).material) {
@@ -429,9 +614,15 @@ export function Start(): void {
     );
 
     loader.load(
-        'models/firecamp.glb',
+        'models/bonfire.glb',
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
+            // Enable shadow casting for firecamp
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                }
+            });
             firecamp.add(gltf.scene);
             firecamp.position.set(
                 islandPosition.x + firecampOffset.x,
@@ -439,7 +630,7 @@ export function Start(): void {
                 islandPosition.z + firecampOffset.z
             );
             firecamp.scale.setScalar(firecampScale);
-            console.log('Firecamp loaded with ocean lighting');
+            console.log('Firecamp loaded with ocean lighting and shadow casting');
         },
         (progress) => {
             console.log('Firecamp loading:', (progress.loaded / progress.total * 100) + '%');
@@ -452,16 +643,29 @@ export function Start(): void {
     loader.load(
         'models/palmtree.glb',
         (gltf) => {
-            applyOceanLightingToModel(gltf.scene);
-            // Enable shadow casting and find leaves
+            // Apply wind shader instead of just ocean lighting
+            applyPalmWindShader(gltf.scene);
+            // Enable shadow casting
             gltf.scene.traverse((child) => {
                 if ((child as any).isMesh) {
                     child.castShadow = true;
+                    const mesh = child as any;
+                    // Compute bounding box to see vertex Y range
+                    mesh.geometry.computeBoundingBox();
+                    const bbox = mesh.geometry.boundingBox;
+                    // Log all mesh info for debugging
+                    console.log('🌴 Palm mesh found:', {
+                        name: child.name,
+                        position: { x: mesh.position.x.toFixed(2), y: mesh.position.y.toFixed(2), z: mesh.position.z.toFixed(2) },
+                        materialName: mesh.material?.name || 'unnamed',
+                        vertexCount: mesh.geometry?.attributes?.position?.count || 0,
+                        boundingBoxY: bbox ? { min: bbox.min.y.toFixed(2), max: bbox.max.y.toFixed(2) } : 'N/A'
+                    });
                     // Try to identify leaves by name (common naming conventions)
                     const name = child.name.toLowerCase();
                     if (name.includes('leaf') || name.includes('leaves') || name.includes('frond') || name.includes('palm') && !name.includes('trunk')) {
                         palmLeaves.push(child);
-                        console.log('Found palm leaf:', child.name);
+                        console.log('  ↳ Identified as LEAF');
                     }
                 }
             });
@@ -511,13 +715,14 @@ export function Start(): void {
             for (let i = 0; i < GRASS_COUNT; i++) {
                 const grassPatch = new Group();
                 const grassModel = gltf.scene.clone();
-                applyOceanLightingToModel(grassModel);
+                applyFoliageWindShader(grassModel);  // Wind shader synced with palm
                 grassPatch.add(grassModel);
                 
-                // Spread grass around palm tree in a semicircle
-                const angle = (i / GRASS_COUNT) * Math.PI - Math.PI / 2;
-                const spreadX = Math.cos(angle) * grassSpread;
-                const spreadZ = Math.sin(angle) * grassSpread * 0.5;
+                // Spread grass in full circle with min/max distance from center
+                const angle = Math.random() * Math.PI * 2;  // Random angle around full circle
+                const distance = MIN_DISTANCE_FROM_CENTER + Math.random() * (MAX_DISTANCE - MIN_DISTANCE_FROM_CENTER);
+                const spreadX = Math.cos(angle) * distance;
+                const spreadZ = Math.sin(angle) * distance;
                 
                 grassPatch.position.set(
                     islandPosition.x + palmtreeOffset.x + grassBaseOffset.x + spreadX,
@@ -536,11 +741,50 @@ export function Start(): void {
         }
     );
 
+    // Load clover patches alongside grass
+    loader.load(
+        'models/clover.glb',
+        (gltf) => {
+            for (let i = 0; i < CLOVER_COUNT; i++) {
+                const cloverPatch = new Group();
+                const cloverModel = gltf.scene.clone();
+                applyFoliageWindShader(cloverModel);  // Wind shader synced with palm
+                cloverPatch.add(cloverModel);
+                
+                // Spread clover in full circle with min/max distance from center
+                const angle = Math.random() * Math.PI * 2;  // Random angle around full circle
+                const distance = MIN_DISTANCE_FROM_CENTER + Math.random() * (MAX_DISTANCE - MIN_DISTANCE_FROM_CENTER);
+                const spreadX = Math.cos(angle) * distance;
+                const spreadZ = Math.sin(angle) * distance;
+                
+                cloverPatch.position.set(
+                    islandPosition.x + palmtreeOffset.x + cloverBaseOffset.x + spreadX,
+                    islandPosition.y + cloverBaseOffset.y,
+                    islandPosition.z + palmtreeOffset.z + cloverBaseOffset.z + spreadZ
+                );
+                cloverPatch.scale.setScalar(cloverScale);
+                cloverPatch.rotation.y = Math.random() * Math.PI * 2;  // Random rotation
+                grassPatches.push(cloverPatch);  // Add to same array for scene management
+            }
+            console.log(`${CLOVER_COUNT} clover patches loaded`);
+        },
+        undefined,
+        (error) => {
+            console.error('Error loading clover:', error);
+        }
+    );
+
     // Load radio in front of firecamp
     loader.load(
         'models/radio.glb',
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
+            // Enable shadow casting for radio
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                }
+            });
             radio.add(gltf.scene);
             radio.position.set(
                 islandPosition.x + radioOffset.x,
@@ -549,16 +793,106 @@ export function Start(): void {
             );
             radio.scale.setScalar(radioScale);
             radio.rotation.y = 0.3;  // Angle it slightly
-            console.log('Radio loaded with ocean lighting');
+            console.log('Radio loaded with ocean lighting and shadow casting');
         },
         undefined,
         (error) => {
             console.error('Error loading radio:', error);
         }
     );
+
+    // Load sword stuck in the middle of the bonfire
+    loader.load(
+        'models/sword.glb',
+        (gltf) => {
+            applyOceanLightingToModel(gltf.scene);
+            // Enable shadow casting for sword
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                }
+            });
+            sword.add(gltf.scene);
+            sword.position.set(
+                islandPosition.x + swordOffset.x,
+                islandPosition.y + swordOffset.y,
+                islandPosition.z + swordOffset.z
+            );
+            sword.scale.setScalar(swordScale);
+            // Upside down and tilted diagonally towards the bonfire
+            sword.rotation.set(
+                Math.PI + 0.3,  // Upside down + tilt forward
+                0.2,            // Slight rotation on Y axis
+                -0.15           // Tilt to the side
+            );
+            console.log('Sword loaded with ocean lighting and shadow casting');
+        },
+        undefined,
+        (error) => {
+            console.error('Error loading sword:', error);
+        }
+    );
+
+    // Setup mouse/touch event listeners for grass interaction
+    setupGrassInteraction();
+}
+
+// Setup mouse and touch events for grass interaction
+function setupGrassInteraction(): void {
+    const canvas = document.querySelector('canvas');
+    if (!canvas) return;
+
+    // Mouse move handler
+    const onMouseMove = (event: MouseEvent) => {
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        updateMouseWorldPosition();
+    };
+
+    // Touch move handler
+    const onTouchMove = (event: TouchEvent) => {
+        if (event.touches.length > 0) {
+            const touch = event.touches[0];
+            mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
+            updateMouseWorldPosition();
+        }
+    };
+
+    // Mouse leave handler - reset position to far away
+    const onMouseLeave = () => {
+        mouseWorldPos.value.set(0, -100, 0);
+    };
+
+    canvas.addEventListener('mousemove', onMouseMove);
+    canvas.addEventListener('touchmove', onTouchMove);
+    canvas.addEventListener('mouseleave', onMouseLeave);
+    canvas.addEventListener('touchend', onMouseLeave);
+}
+
+// Raycast to find mouse position on island/grass
+function updateMouseWorldPosition(): void {
+    if (!camera) return;
+    
+    raycaster.setFromCamera(mouse, camera);
+    
+    // Raycast against island and grass patches
+    const targets: Object3D[] = [island, ...grassPatches];
+    const intersects = raycaster.intersectObjects(targets, true);
+    
+    if (intersects.length > 0) {
+        const hit = intersects[0];
+        mouseWorldPos.value.copy(hit.point);
+    } else {
+        // If not hitting anything, move mouse position far away
+        mouseWorldPos.value.set(0, -100, 0);
+    }
 }
 
 export function Update(): void {
+    // Update palm tree wind shader time
+    palmWindTimeUniform.value = time * PALM_WIND_SPEED;
+    
     // Texture blend animation
     if (textureBlend !== targetBlend) {
         const diff = targetBlend - textureBlend;

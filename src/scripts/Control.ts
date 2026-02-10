@@ -52,6 +52,72 @@ export function enableScroll(): void {
     targetY = introEndY;
 }
 
+// ============================================
+// RADIO ZOOM MODE (for media player)
+// ============================================
+let radioZoomActive = false;
+
+// Saved camera state before zoom
+let savedCameraX = 0;
+let savedCameraY = 0;
+let savedCameraZ = 0;
+let savedTargetY = 0;
+
+// Current interpolated camera position for zoom
+let currentZoomX = 0;
+let currentZoomY = 0;
+let currentZoomZ = 0;
+
+// Target position when zoomed to radio (camera looks at a point above the radio)
+// Radio world position: x ≈ -0.975, y ≈ 0.085, z ≈ -3.075
+const RADIO_ZOOM_TARGET_X = -0.6;   // Slightly to the left to see radio
+const RADIO_ZOOM_TARGET_Y = 0.65;   // Above the radio, looking down slightly
+const RADIO_ZOOM_TARGET_Z = -1.9;   // Closer to the radio
+const RADIO_ZOOM_SMOOTH = 5;        // Smoothing for zoom animation
+
+export function isRadioZoomActive(): boolean {
+    return radioZoomActive;
+}
+
+// Zoom camera to focus on radio (called when expanding media player above water)
+export function zoomToRadio(): void {
+    if (radioZoomActive || isUnderwater) return;
+    
+    // Save current camera state
+    savedCameraX = camera.position.x;
+    savedCameraY = currentY;
+    savedCameraZ = camera.position.z;
+    savedTargetY = targetY;
+    
+    // Initialize zoom position from current camera position
+    currentZoomX = savedCameraX;
+    currentZoomY = savedCameraY;
+    currentZoomZ = savedCameraZ;
+    
+    radioZoomActive = true;
+}
+
+// Return camera to previous position (called when collapsing media player)
+export function zoomOutFromRadio(): void {
+    if (!radioZoomActive) return;
+    
+    radioZoomActive = false;
+    targetY = savedTargetY;  // Restore saved Y target for normal scrolling
+}
+
+// Get saved camera position (for calculating where radio will be after zoomout)
+export function getSavedCameraPosition(): { x: number, y: number, z: number } {
+    return {
+        x: savedCameraX,
+        y: savedCameraY,
+        z: savedCameraZ
+    };
+}
+
+// Get default camera position (when not zooming)
+export const DEFAULT_CAMERA_X = 0;
+export const DEFAULT_CAMERA_Z = 0.9;
+
 // Track if camera is underwater
 let isUnderwater = false;
 
@@ -93,6 +159,7 @@ export function toggleCameraMode(): boolean {
 
 export function handleScroll(deltaY: number): void {
     if (!scrollEnabled) return;  // Block scroll during intro
+    if (radioZoomActive) return;  // Block scroll during radio zoom
     if (webPageMode) {
         // Clamp scroll based on current zone
         if (isUnderwater) {
@@ -330,15 +397,44 @@ export function Update(): void
     camera.position.add(new Vector3().copy(new Vector3(0, 1, 0)).multiplyScalar(moveVector.y * moveSpeed * deltaTime));
     camera.position.add(new Vector3().copy(cameraForward).multiplyScalar(moveVector.z * moveSpeed * deltaTime));
 
-    // Web page mode: override Y position with smooth scroll
+    // Web page mode: override camera position with smooth scroll/zoom
     if (webPageMode) {
-        // Use different smoothing for intro vs normal scroll
-        const smoothFactor = introActive ? introSmooth : scrollSmooth;
-        currentY = MathUtils.damp(currentY, targetY, smoothFactor, deltaTime);
-        camera.position.y = currentY;
-        // Keep camera at edge of ocean (where surface is fully transparent)
-        camera.position.x = 0;
-        camera.position.z = .9; //(body.clientWidth * 0.01) + 2
+        if (radioZoomActive) {
+            // RADIO ZOOM MODE: Smoothly move camera to zoom position (all axes)
+            currentZoomX = MathUtils.damp(currentZoomX, RADIO_ZOOM_TARGET_X, RADIO_ZOOM_SMOOTH, deltaTime);
+            currentZoomY = MathUtils.damp(currentZoomY, RADIO_ZOOM_TARGET_Y, RADIO_ZOOM_SMOOTH, deltaTime);
+            currentZoomZ = MathUtils.damp(currentZoomZ, RADIO_ZOOM_TARGET_Z, RADIO_ZOOM_SMOOTH, deltaTime);
+            
+            camera.position.x = currentZoomX;
+            camera.position.y = currentZoomY;
+            camera.position.z = currentZoomZ;
+            
+            // Keep currentY in sync for when we exit zoom
+            currentY = currentZoomY;
+        } else {
+            // NORMAL MODE: Smooth Y scrolling, fixed X and Z
+            let smoothFactor = introActive ? introSmooth : scrollSmooth;
+            
+            // When exiting zoom, also smoothly return X and Z to default
+            if (currentZoomX !== 0 || currentZoomZ !== 0.9) {
+                currentZoomX = MathUtils.damp(currentZoomX, 0, RADIO_ZOOM_SMOOTH, deltaTime);
+                currentZoomZ = MathUtils.damp(currentZoomZ, 0.9, RADIO_ZOOM_SMOOTH, deltaTime);
+                camera.position.x = currentZoomX;
+                camera.position.z = currentZoomZ;
+                
+                // Snap when close enough
+                if (Math.abs(currentZoomX) < 0.01 && Math.abs(currentZoomZ - 0.9) < 0.01) {
+                    currentZoomX = 0;
+                    currentZoomZ = 0.9;
+                }
+            } else {
+                camera.position.x = 0;
+                camera.position.z = 0.9;
+            }
+            
+            currentY = MathUtils.damp(currentY, targetY, smoothFactor, deltaTime);
+            camera.position.y = currentY;
+        }
     }
 
     if (!touchControls && !webPageMode)

@@ -77,7 +77,7 @@ export function Start(): void
     (renderer as unknown as { antialias: boolean }).antialias = antialias;
     renderer.autoClearColor = false;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = PCFSoftShadowMap;
+    renderer.shadowMap.type = PCFSoftShadowMap;  // Stable soft shadows
     body.appendChild(renderer.domElement);
     
     camera.fov = fov;
@@ -123,22 +123,21 @@ export function Start(): void
     scene.add(ambientLight);
     
     directionalLight = new DirectionalLight(0xffffff, 1.0);
-    // Position light relative to island for proper shadow casting
-    directionalLight.position.set(2, 4, -1);  // Offset from island at z=-3.3
+    // Position light behind island so shadows go forward towards camera
+    directionalLight.position.set(1, 4, -6);  // Behind island at z=-3.3
     directionalLight.castShadow = true;
-    directionalLight.shadow.mapSize.width = 2048;
-    directionalLight.shadow.mapSize.height = 2048;
+    directionalLight.shadow.mapSize.width = 4096;
+    directionalLight.shadow.mapSize.height = 4096;
     directionalLight.shadow.camera.near = 0.1;
-    directionalLight.shadow.camera.far = 15;
-    directionalLight.shadow.camera.left = -2;
-    directionalLight.shadow.camera.right = 2;
-    directionalLight.shadow.camera.top = 2;
-    directionalLight.shadow.camera.bottom = -6;
-    directionalLight.shadow.bias = -0.0001;
-    directionalLight.shadow.normalBias = 0.02;
-    directionalLight.shadow.radius = 7;  // TWEAK: 1-10, higher = softer/blurrier shadow
-    // Point at island center
-    directionalLight.target.position.set(0, 0, -2.5);
+    directionalLight.shadow.camera.far = 20;
+    directionalLight.shadow.camera.left = -4;
+    directionalLight.shadow.camera.right = 4;
+    directionalLight.shadow.camera.top = 4;
+    directionalLight.shadow.camera.bottom = -8;
+    directionalLight.shadow.bias = -0.0003;  // Negative bias for PCF
+    directionalLight.shadow.normalBias = 0.08;  // TWEAK: Higher = smoother edges but shadows may detach (0.02-0.15)
+    // Point at island center (firecamp is at z=-2.9)
+    directionalLight.target.position.set(0, 0, -3.0);
     scene.add(directionalLight.target);
     scene.add(directionalLight);
 
@@ -157,6 +156,7 @@ export function Start(): void
     scene.add(Island.firecamp);
     scene.add(Island.palmtree);
     scene.add(Island.radio);
+    scene.add(Island.sword);
     // Grass patches are added after loading completes
     const addGrassInterval = setInterval(() => {
         if (Island.grassPatches.length > 0) {
@@ -205,18 +205,18 @@ export function Update(): void
     // Keep light close enough for shadow mapping to work
     const lightDir = Skybox.dirToLight.clone();
     directionalLight.position.set(
-        lightDir.x * 8 - 5.3,
+        lightDir.x * 8 - 7,
         lightDir.y * 8 + 2,
-        lightDir.z * 8 - 5.3
+        lightDir.z * 8 - 4.5
     );
     const sunVisible = sunVisibilityUniform.value; // 0 when sun hidden, 1 when fully visible
     const lightIntensity = lightUniform.value.x;
     // Directional light only active when sun is visible
-    directionalLight.intensity = sunVisible * lightIntensity * 2.0;
+    directionalLight.intensity = sunVisible * lightIntensity * 1.1;  // TWEAK: Lower = lighter shadows
     // Shadows only during day
     directionalLight.castShadow = sunVisible > 0.1;
-    // Ambient stays very dim at night
-    ambientLight.intensity = 0.05 + sunVisible * lightIntensity * 0.5;
+    // Ambient light - higher = lighter/softer shadows
+    ambientLight.intensity = 0.15 + sunVisible * lightIntensity * 0.8;  // TWEAK: Higher base = lighter shadows
 
     Underwater.renderScene(renderer, scene, camera);
     renderer.render(axes, staticCamera);
