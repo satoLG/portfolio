@@ -1,4 +1,4 @@
-import { Group, TextureLoader, RepeatWrapping, SRGBColorSpace, MeshStandardMaterial, Material, Texture, Object3D, LoadingManager, RingGeometry, MeshBasicMaterial, Mesh, DoubleSide, Uniform, Vector2, Vector3, Raycaster } from "three";
+import { Group, TextureLoader, RepeatWrapping, SRGBColorSpace, MeshStandardMaterial, Material, Texture, Object3D, LoadingManager, RingGeometry, MeshBasicMaterial, Mesh, DoubleSide, Uniform, Vector2, Vector3, Raycaster, BoxGeometry, ShadowMaterial } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { oceanAbsorptionUniform } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
@@ -144,7 +144,7 @@ export function getCurrentTexture(): string {
 const islandPosition = { x: 0, y: -0.115, z: -3.3 };
 const firecampOffset = { x: 0, y: 0.25, z: 0.4 };
 const palmtreeOffset = { x: -0.35, y: 0.1, z: -0.3 };
-const radioOffset = { x: -0.65, y: 0.22, z: 0.20 };  // In front of firecamp, left of center
+const radioOffset = { x: -0.65, y: 0.23, z: 0.20 };  // In front of firecamp, left of center
 const swordOffset = { x: 0.08, y: 0.58, z: 0.4 };  // Stuck in the middle of the bonfire
 
 const islandScale = 1.5;
@@ -171,11 +171,11 @@ const grassBaseOffset = { x: 0.4, y: 0.07, z: 0.6 };  // Base position near palm
 // CLOVER SETTINGS
 const CLOVER_COUNT = 10;  // Number of clover patches
 const cloverScale = 0.15;
-const cloverBaseOffset = { x: 0.4, y: 0.08, z: 0.6 };  // Same Y as grass for consistency
+const cloverBaseOffset = { x: 0.4, y: 0.14, z: 0.6 };  // Same Y as grass for consistency
 
 // PALM TREE WIND SETTINGS - easily tweakable
-const PALM_WIND_STRENGTH = 0.05;    // TWEAK: How much leaves sway (0.05-0.3)
-const PALM_WIND_SPEED = 0.7;       // TWEAK: Speed of wind oscillation (0.5-3.0)
+const PALM_WIND_STRENGTH = 0.03;    // TWEAK: How much leaves sway (0.05-0.3)
+const PALM_WIND_SPEED = 0.5;       // TWEAK: Speed of wind oscillation (0.5-3.0)
 const PALM_LEAF_START_Y = 0.015;     // TWEAK: Y height where leaves start swaying (local coords)
 const PALM_LEAF_FULL_Y = 0.30;      // TWEAK: Y height where full sway happens
 
@@ -779,12 +779,44 @@ export function Start(): void {
         'models/radio.glb',
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
-            // Enable shadow casting for radio
+            
+            // Count meshes and decide shadow strategy
+            const meshes: any[] = [];
             gltf.scene.traverse((child) => {
                 if ((child as any).isMesh) {
-                    child.castShadow = true;
+                    meshes.push(child);
                 }
             });
+            
+            console.log(`Radio has ${meshes.length} mesh(es)`);
+            
+            // If only 1-2 meshes, keep their shadows (simple model)
+            // If many meshes (>2), use simplified shadow
+            if (meshes.length <= 2) {
+                // Simple model - enable shadows on all meshes
+                meshes.forEach(mesh => {
+                    mesh.castShadow = true;
+                });
+                console.log('Radio: using mesh shadows (simple model)');
+            } else {
+                // Complex model - use simplified box shadow
+                meshes.forEach(mesh => {
+                    mesh.castShadow = false;
+                });
+                
+                // Create a simple shadow caster
+                const shadowBox = new BoxGeometry(0.8, 0.5, 0.6);
+                const shadowMat = new ShadowMaterial({ opacity: 0.5 });
+                shadowMat.transparent = true;
+                const shadowMesh = new Mesh(shadowBox, shadowMat);
+                shadowMesh.castShadow = true;
+                shadowMesh.receiveShadow = false;
+                shadowMesh.position.y = 0.25;
+                shadowMesh.visible = false;
+                radio.add(shadowMesh);
+                console.log('Radio: using simplified box shadow (complex model)');
+            }
+            
             radio.add(gltf.scene);
             radio.position.set(
                 islandPosition.x + radioOffset.x,
@@ -792,8 +824,8 @@ export function Start(): void {
                 islandPosition.z + radioOffset.z
             );
             radio.scale.setScalar(radioScale);
-            radio.rotation.y = 0.3;  // Angle it slightly
-            console.log('Radio loaded with ocean lighting and shadow casting');
+            radio.rotation.y = 0.0;
+            console.log('Radio loaded with ocean lighting');
         },
         undefined,
         (error) => {

@@ -86,6 +86,10 @@ let underwaterAmbAudio: HTMLAudioElement | null = null;
 let underwaterBubblesAudio: HTMLAudioElement | null = null;
 let surfaceSplashAudio: HTMLAudioElement | null = null;
 
+// Water splash interaction audio
+let waterSplashAudio: HTMLAudioElement | null = null;
+const WATER_SPLASH_VOLUME = 0.3;
+
 // Track underwater state for audio
 let isCurrentlyUnderwater = false;
 
@@ -223,6 +227,12 @@ function createAudioElements(): void {
     surfaceSplashAudio.loop = false;
     surfaceSplashAudio.volume = TRANSITION_SFX_VOLUME;
     surfaceSplashAudio.preload = 'auto';
+    
+    // Water splash interaction audio
+    waterSplashAudio = new Audio('audio/274060__junggle__water-splash-11.wav');
+    waterSplashAudio.loop = false;
+    waterSplashAudio.volume = WATER_SPLASH_VOLUME;
+    waterSplashAudio.preload = 'auto';
     
     breezeAudio.addEventListener('ended', () => {
         scheduleBreezeSound();
@@ -563,6 +573,15 @@ export function playSurfaceSound(): void {
     // }, TRANSITION_SFX_DURATION);
     
     console.log('Surface sound playing');
+}
+
+// Play water splash interaction sound (clicking ocean surface)
+export function playWaterSplash(): void {
+    if (!audioInitialized || !waterSplashAudio || isNatureMuted() || isCurrentlyUnderwater) return;
+    
+    // Restart if already playing
+    waterSplashAudio.currentTime = 0;
+    safePlay(waterSplashAudio, 'water splash');
 }
 
 // Called when transitioning to underwater

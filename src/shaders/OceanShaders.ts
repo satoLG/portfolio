@@ -30,6 +30,13 @@ export const surfaceFragment =
     uniform float _FoamIslandRadius;
     uniform float _FoamWidth;
     uniform float _FoamIntensity;
+    
+    uniform float _Ripples[15];  // MAX_RIPPLES * 3 (x, z, time)
+    uniform int _RippleCount;
+    uniform float _RippleSpeed;
+    uniform float _RippleLifetime;
+    uniform float _RippleAmplitude;
+    uniform float _RippleWidth;
 
     varying vec2 _worldPos;
     varying vec2 _uv;
@@ -56,6 +63,49 @@ export const surfaceFragment =
         
         return foam * _FoamIntensity;
     }
+    
+    // Calculate ripple normal perturbation and subtle foam
+    vec3 calcRippleNormal(vec2 worldPos, out float rippleFoam) {
+        vec3 normalOffset = vec3(0.0);
+        rippleFoam = 0.0;
+        
+        for (int i = 0; i < 5; i++) {  // MAX_RIPPLES
+            if (i >= _RippleCount) break;
+            
+            float rippleX = _Ripples[i * 3 + 0];
+            float rippleZ = _Ripples[i * 3 + 1];
+            float rippleTime = _Ripples[i * 3 + 2];
+            
+            if (rippleTime < 0.0) continue;  // Inactive ripple
+            
+            vec2 rippleCenter = vec2(rippleX, rippleZ);
+            vec2 toCenter = worldPos - rippleCenter;
+            float dist = length(toCenter);
+            float radius = rippleTime * _RippleSpeed;
+            
+            // Wave pattern - circular rings
+            float wave = abs(dist - radius);
+            float mask = smoothstep(_RippleWidth, 0.0, wave);
+            float fade = 1.0 - (rippleTime / _RippleLifetime);
+            fade = fade * fade;
+            
+            // Create radial normal distortion (like circular water ripple)
+            vec2 direction = normalize(toCenter);
+            float angle = (dist - radius) * 15.0;  // Wave frequency
+            float waveHeight = sin(angle) * mask * fade;
+            
+            // Stronger normal perturbation for visibility
+            normalOffset.x += direction.x * waveHeight * 5.0;
+            normalOffset.z += direction.y * waveHeight * 5.0;
+            
+            // Very subtle foam on wave crests (not pure white)
+            float crest = smoothstep(-0.3, 0.3, sin(angle)) * mask * fade;
+            rippleFoam += crest * 0.15;  // Very subtle, just 15% foam
+        }
+        
+        rippleFoam = clamp(rippleFoam, 0.0, 1.0);
+        return normalOffset;
+    }
 
     void main()
     {
@@ -63,6 +113,11 @@ export const surfaceFragment =
         if (edgeFade <= 0.0) discard;
         
         float foam = calcFoam(_worldPos);
+        
+        // Add ripple normal perturbation with subtle foam
+        float rippleFoam = 0.0;
+        vec3 rippleNormalOffset = calcRippleNormal(_worldPos, rippleFoam);
+        foam = clamp(foam + rippleFoam, 0.0, 1.0);
 
         vec3 viewVec = vec3(_worldPos.x, _elevation, _worldPos.y) - cameraPosition;
         float viewLen = length(viewVec);
@@ -72,6 +127,7 @@ export const surfaceFragment =
         normal += texture2D(_NormalMap2, _uv + _WaveVelocity2 * _Time).xyz * 2.0 - 1.0;
         normal *= _NormalMapStrength;
         normal += vec3(0.0, 0.0, 1.0);
+        normal += rippleNormalOffset;  // Add ripple normal perturbation
         normal = normalize(normal).xzy;
 
         sampleDither(gl_FragCoord.xy);

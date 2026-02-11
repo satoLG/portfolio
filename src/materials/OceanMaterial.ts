@@ -55,6 +55,63 @@ export const foamIslandRadiusUniform = new Uniform(1.25);
 export const foamWidthUniform = new Uniform(0.01);
 export const foamIntensityUniform = new Uniform(0.65);
 
+// Ripple system - interactive circular waves
+interface Ripple {
+    x: number;
+    z: number;
+    time: number;
+}
+
+const MAX_RIPPLES = 5;
+const ripples: Ripple[] = [];
+export const ripplesUniform = new Uniform(new Float32Array(MAX_RIPPLES * 3)); // x, z, time for each ripple
+export const rippleCountUniform = new Uniform(3);
+export const rippleSpeedUniform = new Uniform(1.0);      // How fast ripples expand
+export const rippleLifetimeUniform = new Uniform(1.5);   // How long ripples last
+export const rippleAmplitudeUniform = new Uniform(0.85); // Height of ripple wave
+export const rippleWidthUniform = new Uniform(0.15);      // Width of the wave band
+
+export function addRipple(x: number, z: number): void {
+    // Remove oldest ripple if at max capacity
+    if (ripples.length >= MAX_RIPPLES) {
+        ripples.shift();
+    }
+    
+    ripples.push({ x, z, time: 0 });
+    updateRippleUniforms();
+}
+
+function updateRippleUniforms(): void {
+    const data = ripplesUniform.value as Float32Array;
+    
+    for (let i = 0; i < MAX_RIPPLES; i++) {
+        if (i < ripples.length) {
+            data[i * 3 + 0] = ripples[i].x;
+            data[i * 3 + 1] = ripples[i].z;
+            data[i * 3 + 2] = ripples[i].time;
+        } else {
+            data[i * 3 + 0] = 0;
+            data[i * 3 + 1] = 0;
+            data[i * 3 + 2] = -999; // Inactive
+        }
+    }
+    
+    rippleCountUniform.value = ripples.length;
+}
+
+export function updateRipples(deltaTime: number): void {
+    for (let i = ripples.length - 1; i >= 0; i--) {
+        ripples[i].time += deltaTime;
+        
+        // Remove expired ripples
+        if (ripples[i].time > rippleLifetimeUniform.value) {
+            ripples.splice(i, 1);
+        }
+    }
+    
+    updateRippleUniforms();
+}
+
 export function SetOceanColor(r: number, g: number, b: number): void {
     oceanAbsorptionUniform.value.set(r, g, b);
 }
@@ -88,7 +145,13 @@ export function Start(): void
         _FoamIslandCenter: foamIslandCenterUniform,
         _FoamIslandRadius: foamIslandRadiusUniform,
         _FoamWidth: foamWidthUniform,
-        _FoamIntensity: foamIntensityUniform
+        _FoamIntensity: foamIntensityUniform,
+        _Ripples: ripplesUniform,
+        _RippleCount: rippleCountUniform,
+        _RippleSpeed: rippleSpeedUniform,
+        _RippleLifetime: rippleLifetimeUniform,
+        _RippleAmplitude: rippleAmplitudeUniform,
+        _RippleWidth: rippleWidthUniform
     };
     SetSkyboxUniforms(surface);
     

@@ -325,7 +325,7 @@ export function Start(): void {
     fire.add(embers);
     
     fireLight.position.copy(fire.position);
-    fireLight.position.y += 0.05;
+    fireLight.position.y += 0.05;  // TWEAK: Height offset above firecamp
     fire.add(fireLight);
     
     fireIntensity = 0.0;
