@@ -1,7 +1,7 @@
 import { body } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
 import { startAudio, playDiveSound, playSurfaceSound, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, preloadUISounds, playUISwitchDay, playUISwitchNight } from "./Audio";
-import { getIsUnderwater, diveUnderwater, surfaceAboveWater, getCameraY, setIntroProgress, enableScroll } from "./Control";
+import { getIsUnderwater, diveUnderwater, surfaceAboveWater, getCameraY, setIntroProgress, enableScroll, isRadioZoomActive } from "./Control";
 import { setLoadingCallback } from "../scene/Island";
 
 const THEME_STORAGE_KEY = 'portfolio-theme-mode';
@@ -155,10 +155,10 @@ export function Start(): void {
             }, 400);
         }, 300);
         
-        // Trigger bouncy pop-in for dive button
-        setTimeout(() => {
-            document.body.classList.add('dive-visible');
-        }, 600);
+        // Dive button will appear after scrolling down, not during intro
+        // setTimeout(() => {
+        //     document.body.classList.add('dive-visible');
+        // }, 600);
         
         // Trigger bouncy pop-in for music bubble
         setTimeout(() => {
@@ -398,6 +398,34 @@ export function Start(): void {
         }
     };
     document.body.appendChild(diveButton);
+    
+    // Show dive button after scrolling down OR after a delay if already started
+    let diveButtonShown = false;
+    
+    const showDiveButton = () => {
+        if (!diveButtonShown && document.body.classList.contains('started')) {
+            diveButtonShown = true;
+            document.body.classList.add('dive-visible');
+        }
+    };
+    
+    // Show on scroll
+    window.addEventListener('scroll', () => {
+        if (!diveButtonShown && window.scrollY > 50) {
+            showDiveButton();
+        }
+    });
+    
+    // Also show after a delay when started (fallback if user doesn't scroll)
+    const checkStarted = setInterval(() => {
+        if (document.body.classList.contains('started')) {
+            clearInterval(checkStarted);
+            // Wait a bit after start animation, then show
+            setTimeout(() => {
+                showDiveButton();
+            }, 2000);
+        }
+    }, 100);
 }
 
 export function Update(): void {
@@ -449,6 +477,19 @@ export function Update(): void {
         } else {
             diveButton.classList.remove('is-underwater');
             diveButton.title = "Dive underwater";
+        }
+        
+        // Hide dive button when radio zoom is active
+        const radioZoomed = isRadioZoomActive();
+        const isDiveVisible = document.body.classList.contains('dive-visible');
+        
+        if (radioZoomed) {
+            diveButton.style.setProperty('opacity', '0', 'important');
+            diveButton.style.setProperty('pointer-events', 'none', 'important');
+        } else if (isDiveVisible) {
+            // Only show if dive-visible class has been added
+            diveButton.style.setProperty('opacity', '1', 'important');
+            diveButton.style.setProperty('pointer-events', 'auto', 'important');
         }
     }
 }

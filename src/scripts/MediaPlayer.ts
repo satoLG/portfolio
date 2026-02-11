@@ -235,13 +235,9 @@ let isUnderwater = false;
 let closedWhileUnderwater = false;
 let isLoopEnabled = false;  // Loop current song or go to next
 
-// Drag state
+// Drag state (drag disabled, only keeping minimal state)
 let isDragging = false;
 let hasBeenDragged = false;
-let dragStartX = 0;
-let dragStartY = 0;
-let elementStartX = 0;
-let elementStartY = 0;
 
 // Radio screen position (for returning after drag)
 let radioScreenX = 0;
@@ -250,7 +246,6 @@ let hasInitialPosition = false;  // Track if we've set the initial position
 
 // DOM Elements
 let playerContainer: HTMLDivElement | null = null;
-let dragHandle: HTMLDivElement | null = null;
 
 // Wavesurfer instance
 let wavesurfer: WaveSurfer | null = null;
@@ -281,7 +276,6 @@ function createPlayerUI(): void {
         <img class="bubble-cover" src="" alt="" />
         <div class="player-expanded-content">
             <div class="player-header-bar">
-                <div class="player-drag-handle"></div>
                 <button class="player-playlist-toggle" title="Show playlist">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15V6"/>
@@ -350,8 +344,6 @@ function createPlayerUI(): void {
                 <div class="playlist-items"></div>
             </div>
             </div>
-            <div class="player-resize-handle player-resize-e"></div>
-            <div class="player-resize-handle player-resize-w"></div>
         </div>
     `;
     
@@ -362,7 +354,7 @@ function createPlayerUI(): void {
     const prevBtn = playerContainer.querySelector('.player-prev') as HTMLButtonElement;
     const playBtn = playerContainer.querySelector('.player-play') as HTMLButtonElement;
     const nextBtn = playerContainer.querySelector('.player-next') as HTMLButtonElement;
-    dragHandle = playerContainer.querySelector('.player-drag-handle') as HTMLDivElement;
+    // dragHandle removed - drag functionality disabled
     
     // Bubble click to expand
     playerContainer.addEventListener('click', (e) => {
@@ -414,13 +406,12 @@ function createPlayerUI(): void {
     // Build playlist items
     buildPlaylistItems();
     
-    // Drag functionality - only on drag handle
-    setupDragListeners();
-    
-    // Resize functionality
-    setupResizeListeners();
+    // Drag and resize functionality DISABLED - player stays centered
+    // setupDragListeners();
+    // setupResizeListeners();
 }
 
+/* DRAG DISABLED - Media player is now fixed position
 function setupDragListeners(): void {
     if (!dragHandle) return;
     
@@ -455,7 +446,9 @@ function setupDragListeners(): void {
     
     document.addEventListener('touchend', stopDragging);
 }
+*/
 
+/* DRAG HELPER FUNCTIONS - No longer used
 function startDragging(clientX: number, clientY: number): void {
     if (!playerContainer) return;
     
@@ -499,21 +492,9 @@ function stopDragging(): void {
     playerContainer.style.transition = '';
     document.body.style.userSelect = '';
 }
+*/
 
-// Resize state
-let isResizing = false;
-let resizeDirection = '';
-let resizeStartX = 0;
-let resizeStartWidth = 0;
-let resizeStartLeft = 0;
-
-const MIN_WIDTH = 280;
-const MAX_WIDTH = 500;
-
-// Pinch zoom state
-let initialPinchDistance = 0;
-let initialPinchWidth = 0;
-
+/* RESIZE DISABLED - Media player has fixed width
 function setupResizeListeners(): void {
     if (!playerContainer) return;
     
@@ -593,7 +574,9 @@ function setupResizeListeners(): void {
         initialPinchDistance = 0;
     });
 }
+*/
 
+/* RESIZE HELPER FUNCTIONS - No longer used
 function getPinchDistance(touches: TouchList): number {
     const dx = touches[0].clientX - touches[1].clientX;
     const dy = touches[0].clientY - touches[1].clientY;
@@ -668,6 +651,7 @@ function stopResizing(): void {
     playerContainer.style.transition = '';
     document.body.style.userSelect = '';
 }
+*/
 
 function createAudioElement(): void {
     audioElement = new Audio();
@@ -791,7 +775,6 @@ function updateWaveformColors(): void {
 
 // Expanded player dimensions (must match CSS)
 const EXPANDED_WIDTH = 320;
-const EXPANDED_HEIGHT = 280;  // Approximate height
 const EDGE_OFFSET = 16;  // Padding from viewport edges
 let isAnimating = false;  // Block resize during expand/collapse animation
 
@@ -809,38 +792,27 @@ function expandPlayer(): void {
         zoomToRadio();
     }
     
-    // Clear any conflicting inline styles from underwater positioning
+    // Clear any conflicting inline styles
     playerContainer.style.bottom = '';
     playerContainer.style.right = '';
     playerContainer.style.position = '';
+    playerContainer.style.transform = '';
     
-    // Calculate position: place above the radio bubble, keep within viewport
-    // When underwater, position from current bubble location (bottom-left)
-    let expandX: number;
-    let expandY: number;
+    // SIMPLIFIED POSITIONING: Always centered horizontally, top portion of screen
+    // Works both above water and underwater
+    const centerX = (window.innerWidth - EXPANDED_WIDTH) / 2;
+    const topY = Math.max(EDGE_OFFSET + 20, window.innerHeight * 0.15);  // 15% from top
     
-    if (isUnderwater) {
-        // Position above the bottom-left bubble
-        expandX = EDGE_OFFSET;
-        expandY = window.innerHeight - EXPANDED_HEIGHT - 80;  // Above the bubble
-    } else {
-        // When zooming to radio, position media player in upper half of screen
-        // Use percentage to work better on mobile
-        expandX = (window.innerWidth - EXPANDED_WIDTH) / 2;  // Center horizontally
-        expandY = Math.max(EDGE_OFFSET + 50, window.innerHeight * 0.12);  // ~12% from top, minimum 66px
-    }
-    
-    // Clamp to viewport with offset
+    // Clamp to ensure it stays within viewport
     const maxX = window.innerWidth - EXPANDED_WIDTH - EDGE_OFFSET;
-    const maxY = window.innerHeight - EXPANDED_HEIGHT - EDGE_OFFSET;
+    const maxY = window.innerHeight - 240 - EDGE_OFFSET;  // Min height 240px
     
-    expandX = Math.max(EDGE_OFFSET, Math.min(maxX, expandX));
-    expandY = Math.max(EDGE_OFFSET, Math.min(maxY, expandY));
+    const finalX = Math.max(EDGE_OFFSET, Math.min(maxX, centerX));
+    const finalY = Math.max(EDGE_OFFSET, Math.min(maxY, topY));
     
     // Set position before transitioning
-    playerContainer.style.left = `${expandX}px`;
-    playerContainer.style.top = `${expandY}px`;
-    playerContainer.style.transform = 'none';
+    playerContainer.style.left = `${finalX}px`;
+    playerContainer.style.top = `${finalY}px`;
     
     // Restore full transitions for expand/collapse animation
     playerContainer.style.transition = '';

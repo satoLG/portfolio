@@ -1,4 +1,4 @@
-import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector3, WebGLRenderer, PCFSoftShadowMap } from "three";
+import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap } from "three";
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
 import * as SeaFloor from "../scene/SeaFloor";
@@ -119,7 +119,7 @@ export function Start(): void
     scene.add(Skybox.skybox);
 
     // Add lighting for 3D models - synced with skybox
-    ambientLight = new AmbientLight(0xffffff, 0.4);
+    ambientLight = new AmbientLight(0xffffff, 0.6);  // TWEAK: Base ambient brightness
     scene.add(ambientLight);
     
     directionalLight = new DirectionalLight(0xffffff, 1.0);
@@ -134,8 +134,13 @@ export function Start(): void
     directionalLight.shadow.camera.right = 4;
     directionalLight.shadow.camera.top = 4;
     directionalLight.shadow.camera.bottom = -8;
-    directionalLight.shadow.bias = -0.0003;  // Negative bias for PCF
-    directionalLight.shadow.normalBias = 0.08;  // TWEAK: Higher = smoother edges but shadows may detach (0.02-0.15)
+    
+    // Shadow bias configuration for models with subdivision surfaces
+    // Negative bias works better with PCF, positive with VSM
+    directionalLight.shadow.bias = -0.0001;  // Very small to prevent shadow acne
+    directionalLight.shadow.normalBias = 0.02;  // Lower value to keep shadows attached to surface
+    directionalLight.shadow.radius = 1.5;  // Soft edge blur (only works with VSM/PCFSoft)
+    
     // Point at island center (firecamp is at z=-2.9)
     directionalLight.target.position.set(0, 0, -3.0);
     scene.add(directionalLight.target);
@@ -157,12 +162,15 @@ export function Start(): void
     scene.add(Island.palmtree);
     scene.add(Island.radio);
     scene.add(Island.sword);
-    // Grass patches are added after loading completes
-    const addGrassInterval = setInterval(() => {
-        if (Island.grassPatches.length > 0) {
-            Island.grassPatches.forEach(patch => scene.add(patch));
-            clearInterval(addGrassInterval);
-        }
+    // Grass and clover patches are added dynamically as they load
+    const addedPatches = new Set<any>();
+    setInterval(() => {
+        Island.grassPatches.forEach(patch => {
+            if (!addedPatches.has(patch)) {
+                scene.add(patch);
+                addedPatches.add(patch);
+            }
+        });
     }, 100);
 
     // Add fire effect to firecamp
@@ -216,8 +224,51 @@ export function Update(): void
     // Shadows only during day
     directionalLight.castShadow = sunVisible > 0.1;
     // Ambient light - higher = lighter/softer shadows
-    ambientLight.intensity = 0.15 + sunVisible * lightIntensity * 0.8;  // TWEAK: Higher base = lighter shadows
+    ambientLight.intensity = 0.3 + sunVisible * lightIntensity * 0.9;  // TWEAK: Higher base = brighter scene
 
     Underwater.renderScene(renderer, scene, camera);
     renderer.render(axes, staticCamera);
+}
+
+// Shadow configuration helpers
+export type ShadowMapType = 'basic' | 'pcf' | 'pcfsoft' | 'vsm';
+
+export function setShadowMapType(type: ShadowMapType): void {
+    switch (type) {
+        case 'basic':
+            renderer.shadowMap.type = BasicShadowMap;
+            break;
+        case 'pcf':
+            renderer.shadowMap.type = PCFShadowMap;
+            break;
+        case 'pcfsoft':
+            renderer.shadowMap.type = PCFSoftShadowMap;
+            break;
+        case 'vsm':
+            renderer.shadowMap.type = VSMShadowMap;
+            break;
+    }
+    renderer.shadowMap.needsUpdate = true;
+}
+
+export function setShadowBias(bias: number): void {
+    if (directionalLight) {
+        directionalLight.shadow.bias = bias;
+    }
+}
+
+export function setShadowNormalBias(normalBias: number): void {
+    if (directionalLight) {
+        directionalLight.shadow.normalBias = normalBias;
+    }
+}
+
+export function setShadowRadius(radius: number): void {
+    if (directionalLight) {
+        directionalLight.shadow.radius = radius;
+    }
+}
+
+export function getShadowLight(): DirectionalLight {
+    return directionalLight;
 }
