@@ -82,7 +82,12 @@ body.day-mode #blur-overlay {
     padding: 0;
     animation: bubble-float 2s ease-in-out infinite;
     will-change: opacity;
-    transition: opacity 0.3s ease, background 0.4s ease, box-shadow 0.3s ease, width 0.3s ease, height 0.3s ease;
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+               height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+               border-radius 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+               background 0.4s ease,
+               box-shadow 0.3s ease,
+               opacity 0.3s ease;
 }
 
 .media-player.bubble:hover {
@@ -174,7 +179,7 @@ body.day-mode .media-player.bubble .music-note {
     width: 320px;
     height: auto;
     min-height: 240px;
-    max-height: 85vh;  /* Limit to 85% of viewport height */
+    max-height: calc(100vh - 80px);  /* Leave 80px margin from edges */
     border-radius: 12px;
     background: rgba(40, 40, 45, 0.58);
     backdrop-filter: blur(12px);
@@ -187,6 +192,8 @@ body.day-mode .media-player.bubble .music-note {
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     font-size: 14px;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
 .media-player.expanded .music-note {
@@ -211,15 +218,16 @@ body.day-mode .media-player.bubble .music-note {
     flex-direction: column;
 }
 
-/* Header bar - window title bar at top, no padding */
+/* Header bar - window title bar at top */
 .player-header-bar {
     position: relative;
     width: 100%;
-    height: 32px;
+    height: 36px;
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    padding: 0 8px;
+    gap: 2px;
+    padding: 0 6px;
     background: linear-gradient(180deg, rgba(60, 60, 65, 0.95) 0%, rgba(45, 45, 50, 0.95) 100%);
     border-radius: 12px 12px 0 0;
     border-bottom: 1px solid rgba(0, 0, 0, 0.3);
@@ -233,6 +241,8 @@ body.day-mode .media-player.bubble .music-note {
     display: flex;
     flex-direction: column;
     flex: 1;
+    min-height: 0;  /* Allow flex child to shrink below content size */
+    overflow-y: auto;
 }
 
 /* Drag handle - fills most of header bar */
@@ -265,8 +275,8 @@ body.day-mode .player-header-bar {
 /* Close button (collapse icon) */
 .player-close {
     position: relative;
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     border: none;
     background: transparent;
     color: rgba(255, 255, 255, 0.6);
@@ -277,6 +287,11 @@ body.day-mode .player-header-bar {
     transition: all 0.2s ease;
     padding: 0;
     border-radius: 4px;
+}
+
+.player-close svg {
+    width: 18px;
+    height: 18px;
 }
 
 .player-close:hover {
@@ -514,8 +529,8 @@ body.day-mode .player-loop.active:hover {
 /* Playlist toggle button */
 .player-playlist-toggle {
     position: relative;
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     border: none;
     background: transparent;
     color: rgba(255, 255, 255, 0.6);
@@ -526,7 +541,11 @@ body.day-mode .player-loop.active:hover {
     transition: all 0.2s ease;
     padding: 0;
     border-radius: 4px;
-    margin-right: 4px;
+}
+
+.player-playlist-toggle svg {
+    width: 18px;
+    height: 18px;
 }
 
 .player-playlist-toggle:hover {
@@ -576,24 +595,29 @@ body.day-mode .player-playlist-toggle.active {
     cursor: ew-resize;
 }
 
-/* Playlist container - hidden by default */
+/* Playlist container - hidden by max-height, always in DOM for smooth transitions */
 .player-playlist {
-    display: none;
+    display: flex;
     flex-direction: column;
-    margin-top: 14px;
-    max-height: 300px;
+    max-height: 0;
     overflow: hidden;
+    opacity: 0;
+    margin-top: 0;
+    transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+               opacity 0.25s ease,
+               margin-top 0.3s ease;
 }
 
 /* Show playlist when in playlist view */
 .media-player.playlist-view .player-playlist {
-    display: flex;
+    max-height: 350px;
+    opacity: 1;
+    margin-top: 14px;
 }
 
-/* Playlist view: Only expand vertically, keep same width */
+/* Playlist view: no changes to player position or size, just let content grow */
 .media-player.playlist-view {
-    /* No width change - stays at 320px */
-    max-height: 80vh;  /* Limit height to 80% of viewport */
+    /* Player handles its own max-height via .expanded */
 }
 
 .playlist-header {
@@ -624,7 +648,8 @@ body.day-mode .playlist-header {
 
 .playlist-items {
     overflow-y: auto;
-    max-height: 250px;
+    flex: 1;
+    min-height: 0;
     padding-right: 4px;
 }
 

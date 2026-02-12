@@ -12,12 +12,14 @@ const FIREPLACE_FADE_DURATION = 1.5;   // Seconds to fade in fireplace (desktop 
 const UNDERWATER_AMB_VOLUME = 0.25;    // Underwater ambient loop volume
 const TRANSITION_SFX_VOLUME = 0.1;     // Volume for dive/surface SFX
 const TRANSITION_SFX_DURATION = 400;  // How long to play transition SFX (ms)
+const UI_SOUND_THROTTLE = 100;         // Minimum ms between UI sounds (mobile fix)
 // ============================================
 
 // ============================================
 // SAFE AUDIO PLAY/PAUSE SYSTEM
 // Prevents "play() interrupted by pause()" errors
 // ============================================
+let lastUISoundTime = 0;
 const pendingPlayPromises = new WeakMap<HTMLAudioElement, Promise<void>>();
 
 // Safe play function that tracks pending promises
@@ -475,6 +477,7 @@ export function startAudio(): void {
 }
 
 // Pause above-water ambient sounds
+// @ts-ignore: Used internally by transition functions
 async function pauseAboveWaterSounds(): Promise<void> {
     // Use safePause to avoid interrupting pending play() calls
     await Promise.all([
@@ -491,6 +494,7 @@ async function pauseAboveWaterSounds(): Promise<void> {
 }
 
 // Resume above-water ambient sounds
+// @ts-ignore: Used internally by transition functions
 async function resumeAboveWaterSounds(): Promise<void> {
     if (activeWaterAudio) {
         await safePlay(activeWaterAudio, 'water');
@@ -522,6 +526,7 @@ async function resumeAboveWaterSounds(): Promise<void> {
 }
 
 // Start underwater ambient loop
+// @ts-ignore: Used internally by transition functions
 async function startUnderwaterAmbient(): Promise<void> {
     if (!underwaterAmbAudio) return;
     underwaterAmbAudio.currentTime = 0;
@@ -531,6 +536,7 @@ async function startUnderwaterAmbient(): Promise<void> {
 }
 
 // Stop underwater ambient loop
+// @ts-ignore: Used internally by transition functions
 async function stopUnderwaterAmbient(): Promise<void> {
     if (!underwaterAmbAudio) return;
     await safePause(underwaterAmbAudio, 'underwater ambient');
@@ -589,12 +595,25 @@ export function transitionToUnderwater(): void {
     if (!audioInitialized || isCurrentlyUnderwater) return;
     isCurrentlyUnderwater = true;
     
-    // Defer audio operations to prevent frame drops on mobile
-    // Use async to ensure proper sequencing
-    requestAnimationFrame(async () => {
-        await pauseAboveWaterSounds();
-        await startUnderwaterAmbient();
-    });
+    // Batch audio operations to minimize individual reflows
+    // Use single async batch instead of sequential awaits
+    setTimeout(() => {
+        // Pause above water sounds
+        if (waterAudio1 && !waterAudio1.paused) waterAudio1.pause();
+        if (waterAudio2 && !waterAudio2.paused) waterAudio2.pause();
+        if (breezeAudio && !breezeAudio.paused) breezeAudio.pause();
+        if (fireplaceAudio && !fireplaceAudio.paused) fireplaceAudio.pause();
+        
+        // Start underwater sounds immediately after
+        if (underwaterAmbAudio && underwaterAmbAudio.paused && !isNatureMuted()) {
+            underwaterAmbAudio.currentTime = 0;
+            underwaterAmbAudio.play().catch(() => {});
+        }
+        if (underwaterBubblesAudio && underwaterBubblesAudio.paused && !isNatureMuted()) {
+            underwaterBubblesAudio.currentTime = 0;
+            underwaterBubblesAudio.play().catch(() => {});
+        }
+    }, 0);
 }
 
 // Called when transitioning to above water
@@ -602,12 +621,29 @@ export function transitionToAboveWater(): void {
     if (!audioInitialized || !isCurrentlyUnderwater) return;
     isCurrentlyUnderwater = false;
     
-    // Defer audio operations to prevent frame drops on mobile
-    // Use async to ensure proper sequencing
-    requestAnimationFrame(async () => {
-        await stopUnderwaterAmbient();
-        await resumeAboveWaterSounds();
-    });
+    // Batch audio operations
+    setTimeout(() => {
+        // Stop underwater sounds
+        if (underwaterAmbAudio && !underwaterAmbAudio.paused) {
+            underwaterAmbAudio.pause();
+            underwaterAmbAudio.currentTime = 0;
+        }
+        if (underwaterBubblesAudio && !underwaterBubblesAudio.paused) {
+            underwaterBubblesAudio.pause();
+            underwaterBubblesAudio.currentTime = 0;
+        }
+        
+        // Resume above water sounds
+        if (waterAudio1 && waterAudio1.paused && !isNatureMuted()) {
+            waterAudio1.play().catch(() => {});
+        }
+        if (waterAudio2 && waterAudio2.paused && !isNatureMuted()) {
+            waterAudio2.play().catch(() => {});
+        }
+        if (breezeAudio && breezeAudio.paused && !isNatureMuted()) {
+            breezeAudio.play().catch(() => {});
+        }
+    }, 0);
 }
 
 // ============================================
@@ -616,6 +652,10 @@ export function transitionToAboveWater(): void {
 let natureMuted = false;
 let musicMuted = false;
 let interfaceMuted = false;
+
+export function isBreezeActive(): boolean {
+    return breezeAudio !== null && !breezeAudio.paused;
+}
 
 export function isNatureMuted(): boolean {
     return natureMuted;
@@ -690,31 +730,56 @@ export function preloadUISounds(): void {
 }
 
 export function playUISwitchDay(): void {
+    const now = performance.now();
+    if (now - lastUISoundTime < UI_SOUND_THROTTLE) return;
     if (interfaceMuted || !uiSoundSwitchDay) return;
+    
+    lastUISoundTime = now;
+    if (!uiSoundSwitchDay.paused) uiSoundSwitchDay.pause();
     uiSoundSwitchDay.currentTime = 0;
     uiSoundSwitchDay.play().catch(() => {});
 }
 
 export function playUISwitchNight(): void {
+    const now = performance.now();
+    if (now - lastUISoundTime < UI_SOUND_THROTTLE) return;
     if (interfaceMuted || !uiSoundSwitchNight) return;
+    
+    lastUISoundTime = now;
+    if (!uiSoundSwitchNight.paused) uiSoundSwitchNight.pause();
     uiSoundSwitchNight.currentTime = 0;
     uiSoundSwitchNight.play().catch(() => {});
 }
 
 export function playUIButton(): void {
+    const now = performance.now();
+    if (now - lastUISoundTime < UI_SOUND_THROTTLE) return;
     if (interfaceMuted || !uiSoundButton) return;
+    
+    lastUISoundTime = now;
+    if (!uiSoundButton.paused) uiSoundButton.pause();
     uiSoundButton.currentTime = 0;
     uiSoundButton.play().catch(() => {});
 }
 
 export function playUIBubbleExpand(): void {
+    const now = performance.now();
+    if (now - lastUISoundTime < UI_SOUND_THROTTLE) return;
     if (interfaceMuted || !uiSoundBubbleExpand) return;
+    
+    lastUISoundTime = now;
+    if (!uiSoundBubbleExpand.paused) uiSoundBubbleExpand.pause();
     uiSoundBubbleExpand.currentTime = 0;
     uiSoundBubbleExpand.play().catch(() => {});
 }
 
 export function playUIBubbleCollapse(): void {
+    const now = performance.now();
+    if (now - lastUISoundTime < UI_SOUND_THROTTLE) return;
     if (interfaceMuted || !uiSoundBubbleCollapse) return;
+    
+    lastUISoundTime = now;
+    if (!uiSoundBubbleCollapse.paused) uiSoundBubbleCollapse.pause();
     uiSoundBubbleCollapse.currentTime = 0;
     uiSoundBubbleCollapse.play().catch(() => {});
 }

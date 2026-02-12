@@ -20,7 +20,8 @@ export function Start(): void
 {
     oceanMaterials.Start();
 
-    const surfaceGeometry = new PlaneGeometry(oceanWidth, oceanDepth, 512, 512);
+    // Reduced from 512x512 to 256x256 for better mobile performance (4x fewer vertices)
+    const surfaceGeometry = new PlaneGeometry(oceanWidth, oceanDepth, 256, 256);
     surfaceGeometry.rotateX(-Math.PI / 2);
 
     surface.geometry = surfaceGeometry;
@@ -78,30 +79,16 @@ function setupRippleInteraction(): void {
         
         raycaster.setFromCamera(mouse, camera);
         
-        // Check all objects in the scene to see what was clicked
-        const allIntersects = raycaster.intersectObjects(scene.children, true);
+        // Test only the ocean surface mesh for better performance
+        const oceanIntersects = raycaster.intersectObject(surface, false);
         
-        if (allIntersects.length > 0) {
-            // Get the first (closest) object that was hit
-            const firstHit = allIntersects[0];
+        if (oceanIntersects.length > 0) {
+            // Now check if anything is blocking (island, etc) by testing full scene
+            const allIntersects = raycaster.intersectObjects(scene.children, true);
             
-            // Check if the first hit is the ocean surface (not island or other objects)
-            // We need to traverse up to find if it's the ocean surface mesh
-            let hitObject = firstHit.object;
-            let isOceanSurface = false;
-            
-            // Check if the hit object is the ocean surface or its child
-            while (hitObject) {
-                if (hitObject === surface) {
-                    isOceanSurface = true;
-                    break;
-                }
-                hitObject = hitObject.parent as any;
-            }
-            
-            // Only create ripple if we actually hit the ocean surface (not blocked by island)
-            if (isOceanSurface) {
-                const point = firstHit.point;
+            // If ocean is the closest hit (not blocked by island), create ripple
+            if (allIntersects.length > 0 && allIntersects[0].object === surface) {
+                const point = allIntersects[0].point;
                 oceanMaterials.addRipple(point.x, point.z);
                 Audio.playWaterSplash();
             }

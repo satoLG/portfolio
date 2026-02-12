@@ -154,32 +154,37 @@ export function Start(): void
 
 export function Update(dayNightBlend: number, dt: number): void
 {
-    // dayNightBlend: 0 = day, 1 = night
-    sunVisibility.value = 1 - dayNightBlend;
+    // Always update sunVisibility smoothly - no threshold checks
+    // This avoids first-transition stutter from batched updates
+    const newSunVisibility = 1 - dayNightBlend;
+    sunVisibility.value = newSunVisibility;
     
     // Twilight effect - smooth transition through sunset colors
-    // twilightTime: 1 = early/yellow twilight, 0 = late/orange twilight
-    // Goes from yellow to orange as we transition to night
     twilightTime.value = 1 - dayNightBlend;
     
-    // twilightVisibility: peaks in middle of transition, smooth bell curve
-    // Using smoothstep-like curve that peaks at blend=0.5
-    const t = dayNightBlend * 2; // 0 to 2
-    twilightVisibility.value = t < 1 
-        ? t * t * (3 - 2 * t)  // Smooth rise 0→1
-        : (2 - t) * (2 - t) * (3 - 2 * (2 - t));  // Smooth fall 1→0
+    // twilightVisibility: peaks in middle of transition
+    // Simplified calculation - avoid double smoothstep
+    const t = dayNightBlend;
+    twilightVisibility.value = 4 * t * (1 - t); // Simpler parabola, peaks at 0.5
+    
+    // Update light uniform
+    l = Math.min(newSunVisibility + 0.333, 1);
+    lightUniform.value.set(l, l, l);
     
     // Stars timer: independent of day/night transition
-    // Accumulates during night, resets instantly when going to day
-    if (dayNightBlend < 0.5) {
-        // Day mode - instant reset
-        starsTimer = 0;
-    } else {
+    // Use smoother transition instead of instant reset
+    if (dayNightBlend < 0.4) {
+        // Day mode - smooth fade out instead of instant reset
+        if (starsTimer > 0) {
+            starsTimer = Math.max(0, starsTimer - dt / (STARS_APPEAR_DURATION * 0.3));
+            starsTransition.value = starsTimer;
+        }
+    } else if (dayNightBlend > 0.6) {
         // Night mode - accumulate timer
-        starsTimer = Math.min(starsTimer + dt / STARS_APPEAR_DURATION, 1);
+        const newTimer = Math.min(starsTimer + dt / STARS_APPEAR_DURATION, 1);
+        if (Math.abs(newTimer - starsTimer) > 0.001) {
+            starsTimer = newTimer;
+            starsTransition.value = starsTimer;
+        }
     }
-    starsTransition.value = starsTimer;
-    
-    l = Math.min(sunVisibility.value + 0.333, 1);
-    lightUniform.value.set(l, l, l);
 }
