@@ -69,7 +69,7 @@ export const surfaceFragment =
         vec3 normalOffset = vec3(0.0);
         rippleFoam = 0.0;
         
-        for (int i = 0; i < 5; i++) {  // MAX_RIPPLES
+        for (int i = 0; i < 3; i++) {  // MAX_RIPPLES - reduced for mobile performance
             if (i >= _RippleCount) break;
             
             float rippleX = _Ripples[i * 3 + 0];

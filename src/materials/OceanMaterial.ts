@@ -62,12 +62,12 @@ interface Ripple {
     time: number;
 }
 
-const MAX_RIPPLES = 5;
+const MAX_RIPPLES = 3;  // Reduced from 5 for better mobile performance
 const ripples: Ripple[] = [];
 export const ripplesUniform = new Uniform(new Float32Array(MAX_RIPPLES * 3)); // x, z, time for each ripple
 export const rippleCountUniform = new Uniform(3);
 export const rippleSpeedUniform = new Uniform(1.0);      // How fast ripples expand
-export const rippleLifetimeUniform = new Uniform(1.5);   // How long ripples last
+export const rippleLifetimeUniform = new Uniform(1.2);   // Reduced from 1.5 for faster cleanup
 export const rippleAmplitudeUniform = new Uniform(0.85); // Height of ripple wave
 export const rippleWidthUniform = new Uniform(0.15);      // Width of the wave band
 

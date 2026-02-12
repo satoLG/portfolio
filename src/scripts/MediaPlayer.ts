@@ -97,11 +97,11 @@ function setupMediaSessionHandlers(): void {
     });
     
     navigator.mediaSession.setActionHandler('previoustrack', () => {
-        previousSong(isPlaying);
+        previousSong(!audioElement?.paused);
     });
     
     navigator.mediaSession.setActionHandler('nexttrack', () => {
-        nextSong(isPlaying);
+        nextSong(!audioElement?.paused);
     });
     
     navigator.mediaSession.setActionHandler('seekto', (details) => {
@@ -218,6 +218,7 @@ const DEFAULT_ARTIST = 'Unknown Artist';
 let audioElement: HTMLAudioElement | null = null;
 let currentSongIndex = 0;
 let isPlaying = false;
+let pendingPlayOnReady = false;  // When true, auto-play when wavesurfer fires 'ready'
 let isExpanded = false;
 
 // Export isPlaying state for other modules
@@ -250,6 +251,9 @@ let playerContainer: HTMLDivElement | null = null;
 // Wavesurfer instance
 let wavesurfer: WaveSurfer | null = null;
 
+// Preloading system for faster song transitions
+let preloadedAudios: Map<number, HTMLAudioElement> = new Map();
+
 export function Start(): void {
     createPlayerUI();
     createAudioElement();
@@ -277,7 +281,7 @@ function createPlayerUI(): void {
         <div class="player-expanded-content">
             <div class="player-header-bar">
                 <button class="player-playlist-toggle" title="Show playlist">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15V6"/>
                         <path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/>
                         <path d="M12 12H3"/>
@@ -286,7 +290,7 @@ function createPlayerUI(): void {
                     </svg>
                 </button>
                 <button class="player-close" title="Minimize">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="4 14 10 14 10 20"/>
                         <polyline points="20 10 14 10 14 4"/>
                         <line x1="14" y1="10" x2="21" y2="3"/>
@@ -376,7 +380,7 @@ function createPlayerUI(): void {
     // Control buttons
     prevBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        previousSong();
+        previousSong(!audioElement?.paused);
     });
     
     playBtn.addEventListener('click', (e) => {
@@ -386,7 +390,7 @@ function createPlayerUI(): void {
     
     nextBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        nextSong();
+        nextSong(!audioElement?.paused);
     });
     
     // Loop button
@@ -657,28 +661,54 @@ function createAudioElement(): void {
     audioElement = new Audio();
     audioElement.volume = 0.5;
     audioElement.addEventListener('ended', () => handleSongEnded());
-    audioElement.addEventListener('play', () => {
-        isPlaying = true;
-        updatePlayButton();
-        updateBubblePlayingState();
-        // Update Media Session with current song info
+    // Single source of truth: sync isPlaying from the actual audio element state
+    audioElement.addEventListener('play', () => syncPlayState());
+    audioElement.addEventListener('pause', () => syncPlayState());
+}
+
+// Read the real state from the audio element and update everything to match
+function syncPlayState(): void {
+    if (!audioElement) return;
+    const playing = !audioElement.paused;
+    if (playing === isPlaying) return;  // No change, skip DOM updates
+    isPlaying = playing;
+    updatePlayButton();
+    updateBubblePlayingState();
+    if (playing) {
         if (playlist.length > 0) {
             updateMediaSessionForSong(playlist[currentSongIndex]);
         }
         updateMediaSessionPlaybackState(true);
-    });
-    audioElement.addEventListener('pause', () => {
-        isPlaying = false;
-        updatePlayButton();
-        updateBubblePlayingState();
+    } else {
         updateMediaSessionPlaybackState(false);
-        // If music is paused and at the beginning, reset to default metadata
-        if (audioElement && audioElement.currentTime === 0) {
+        if (audioElement.currentTime === 0) {
             setDefaultMediaSession();
+        }
+    }
+}
+
+// Preload adjacent songs into browser cache using fetch (no audio element swap)
+function preloadAdjacentSongs(): void {
+    if (playlist.length <= 1) return;
+    
+    const nextIndex = (currentSongIndex + 1) % playlist.length;
+    const prevIndex = currentSongIndex === 0 ? playlist.length - 1 : currentSongIndex - 1;
+    
+    // Fetch files to prime browser cache - wavesurfer.load() will use cached version
+    [nextIndex, prevIndex].forEach(idx => {
+        if (idx !== currentSongIndex && playlist[idx] && !preloadedAudios.has(idx)) {
+            fetch(playlist[idx].file).then(() => {
+                preloadedAudios.set(idx, true as any); // Mark as cached
+            }).catch(() => {});
         }
     });
     
-    // Don't load first song here - wavesurfer will handle it
+    // Clean old entries
+    for (const [index] of preloadedAudios.entries()) {
+        if (index !== nextIndex && index !== prevIndex) {
+            preloadedAudios.delete(index);
+        }
+    }
 }
 
 function initWavesurfer(): void {
@@ -702,6 +732,8 @@ function initWavesurfer(): void {
         hideScrollbar: true,
         fillParent: true,
         media: audioElement!,
+        interact: true,        // Enable all interactions
+        dragToSeek: true,      // Enable smooth drag to seek
     });
     
     // Update time display
@@ -720,6 +752,12 @@ function initWavesurfer(): void {
         updateTimeDisplay();
         updateWaveformColors();
         updateMediaSessionPosition();
+        preloadAdjacentSongs();
+        // Auto-play if a song switch requested it
+        if (pendingPlayOnReady && wavesurfer) {
+            pendingPlayOnReady = false;
+            wavesurfer.play();
+        }
     });
     
     // Handle resize with requestAnimationFrame for smooth, lag-free updates
@@ -840,6 +878,9 @@ function collapsePlayer(): void {
         playerContainer.classList.remove('playlist-view');
         const toggleBtn = playerContainer.querySelector('.player-playlist-toggle') as HTMLButtonElement;
         if (toggleBtn) toggleBtn.classList.remove('active');
+        // Clear inline max-height so CSS max-height:0 takes effect on next expand
+        const playlistEl = playerContainer.querySelector('.player-playlist') as HTMLDivElement;
+        if (playlistEl) playlistEl.style.maxHeight = '';
     }
     
     // Play expand sound (inverted)
@@ -985,27 +1026,51 @@ function nextSong(autoPlay: boolean = false): void {
 function loadSong(index: number, forcePlay: boolean = false): void {
     if (playlist.length === 0) return;
     
-    const wasPlaying = isPlaying;
+    // Decide if we should auto-play: either forced or was already playing
+    const shouldPlay = forcePlay || !audioElement?.paused;
     const songFile = playlist[index].file;
+    
+    // Store intent so the wavesurfer 'ready' handler can auto-play
+    pendingPlayOnReady = shouldPlay;
     
     updatePlayerDisplay();
     
-    // Use wavesurfer to load (it controls the audio element)
-    if (wavesurfer) {
-        // Wait for wavesurfer to be ready before playing
-        wavesurfer.once('ready', () => {
-            if (wasPlaying || forcePlay) {
-                wavesurfer!.play();
-            }
-        });
-        wavesurfer.load(songFile);
-    } else if (audioElement) {
-        // Fallback if wavesurfer not available
-        audioElement.src = songFile;
-        if (wasPlaying || forcePlay) {
-            audioElement.play().catch(e => console.error('Failed to play:', e));
-        }
+    // Reset time display to 0:00 immediately
+    if (playerContainer) {
+        const currentEl = playerContainer.querySelector('.time-current') as HTMLSpanElement;
+        if (currentEl) currentEl.textContent = '0:00';
     }
+    
+    // wavesurfer.load() sets audioElement.src internally (they share the same element).
+    // Let wavesurfer be the single owner of .src to avoid double-set conflicts.
+    if (wavesurfer) {
+        try {
+            wavesurfer.load(songFile);
+        } catch {
+            // Fallback if wavesurfer.load fails: set src directly
+            if (audioElement) {
+                audioElement.src = songFile;
+                if (shouldPlay) audioElement.play().catch(() => {});
+            }
+        }
+    } else if (audioElement) {
+        audioElement.src = songFile;
+        if (shouldPlay) audioElement.play().catch(() => {});
+    }
+    
+    // Mobile fallback: if wavesurfer 'ready' doesn't fire (e.g. screen locked),
+    // start playback directly after a short delay
+    if (shouldPlay && audioElement) {
+        setTimeout(() => {
+            if (pendingPlayOnReady && audioElement && audioElement.paused) {
+                pendingPlayOnReady = false;
+                audioElement.play().catch(() => {});
+            }
+        }, 1500);
+    }
+    
+    // Preload adjacent songs into browser cache
+    setTimeout(() => preloadAdjacentSongs(), 100);
 }
 
 function updatePlayerDisplay(): void {
@@ -1037,19 +1102,28 @@ function togglePlaylistView(): void {
     isPlaylistView = !isPlaylistView;
     
     if (isPlaylistView) {
+        // Calculate available space for the playlist based on player position
+        const rect = playerContainer.getBoundingClientRect();
+        const playlistEl = playerContainer.querySelector('.player-playlist') as HTMLDivElement;
+        
+        if (playlistEl) {
+            // Space from bottom of current player content to bottom of viewport (with margin)
+            const bottomMargin = 40;
+            const availableBelow = window.innerHeight - rect.bottom - bottomMargin;
+            // Clamp between a minimum useful height and max desired
+            const playlistMaxHeight = Math.max(100, Math.min(350, availableBelow));
+            playlistEl.style.maxHeight = `${playlistMaxHeight}px`;
+        }
+        
         playerContainer.classList.add('playlist-view');
         updatePlaylistCount();
-        
-        // Adjust position if player would go off-screen with wider playlist view
-        const PLAYLIST_WIDTH = 320;
-        const currentLeft = parseFloat(playerContainer.style.left) || 0;
-        const maxX = window.innerWidth - PLAYLIST_WIDTH - EDGE_OFFSET;
-        
-        if (currentLeft > maxX) {
-            playerContainer.style.left = `${maxX}px`;
-        }
     } else {
         playerContainer.classList.remove('playlist-view');
+        // Reset inline max-height so CSS takes over next time
+        const playlistEl = playerContainer.querySelector('.player-playlist') as HTMLDivElement;
+        if (playlistEl) {
+            playlistEl.style.maxHeight = '';
+        }
     }
     
     // Update toggle button state

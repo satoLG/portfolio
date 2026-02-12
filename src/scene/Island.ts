@@ -4,6 +4,7 @@ import { oceanAbsorptionUniform } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../scripts/Time";
 import { getIsPlaying } from "../scripts/MediaPlayer";
+import { isBreezeActive } from "../scripts/Audio";
 import { camera } from "../scripts/Scene";
 
 export const island = new Group();
@@ -198,15 +199,12 @@ const mouseInfluenceRadius = new Uniform(0.25);  // TWEAK: Small area
 const mouseInfluenceStrength = new Uniform(0.025);  // TWEAK: Very subtle bend
 // let isMouseOverGrass = false;
 
-// WIND SETTINGS - easily tweakable
-const WIND_STRENGTH = 0.0;      // How far things sway (rotation in radians)
-const WIND_SPEED = 0.0;          // Base speed of wind oscillation
-const WIND_GUST_INTERVAL = 0.0;  // Seconds between wind gusts
-const WIND_GUST_DURATION = 0.0;  // How long a gust lasts
+// BREEZE-DRIVEN WIND SETTINGS
+const BREEZE_RAMP_UP = 3.0;           // Seconds to ramp up wind when breeze starts
+const BREEZE_RAMP_DOWN = 4.0;         // Seconds to fade out wind after breeze ends
+const BREEZE_GRASS_STRENGTH = 0.06;   // How far grass patches sway (rotation radians)
 let windTime = 0;
-let gustTimer = 0;
-let gustActive = false;
-let gustStrength = 0;
+let breezeIntensity = 0;              // 0-1 smoothed breeze envelope
 
 const oceanLightingPars = /*glsl*/`
     uniform vec3 uLight;
@@ -450,10 +448,15 @@ function applyPalmWindShader(model: Group): void {
                         shader.vertexShader = shader.vertexShader.replace(
                             '#include <begin_vertex>',
                             `#include <begin_vertex>
-                            // Wind sway based on Y position
+                            // Only leaves sway — smoothstep filters by vertex Y
                             float heightFactor = smoothstep(uLeafStartY, uLeafFullY, position.y);
-                            float windSway = sin(uWindTime * 2.0 + position.x * 3.0) * uWindStrength * heightFactor;
-                            float windSwayZ = cos(uWindTime * 1.5 + position.z * 2.0) * uWindStrength * 0.5 * heightFactor;
+                            // Multi-frequency flickering for natural chaotic wind
+                            float flicker = sin(uWindTime * 2.5 + position.x * 2.0) * 0.5
+                                          + sin(uWindTime * 5.8 + position.z * 1.5) * 0.3
+                                          + sin(uWindTime * 9.2 + position.x * 0.8 + position.z) * 0.15;
+                            float windSway = flicker * uWindStrength * heightFactor;
+                            float windSwayZ = flicker * uWindStrength * 0.4 * heightFactor
+                                            * cos(uWindTime * 3.1 + position.z * 1.8);
                             transformed.x += windSway;
                             transformed.z += windSwayZ;`
                         );
@@ -941,52 +944,38 @@ export function Update(): void {
         });
     }
     
-    // Wind animation for grass and palm tree
+    // Breeze-driven wind animation for grass and palm tree
     windTime += deltaTime;
-    gustTimer += deltaTime;
     
-    // Trigger gusts periodically
-    if (!gustActive && gustTimer > WIND_GUST_INTERVAL) {
-        gustActive = true;
-        gustTimer = 0;
+    // Smooth breeze intensity envelope — ramps up when breeze audio plays, fades out after
+    const breezeActive = isBreezeActive();
+    if (breezeActive) {
+        breezeIntensity = Math.min(1.0, breezeIntensity + deltaTime / BREEZE_RAMP_UP);
+    } else {
+        breezeIntensity = Math.max(0.0, breezeIntensity - deltaTime / BREEZE_RAMP_DOWN);
     }
     
-    // Gust strength ramps up and down
-    if (gustActive) {
-        const gustProgress = gustTimer / WIND_GUST_DURATION;
-        if (gustProgress < 0.3) {
-            gustStrength = gustProgress / 0.3;  // Ramp up
-        } else if (gustProgress < 0.7) {
-            gustStrength = 1.0;  // Hold
-        } else if (gustProgress < 1.0) {
-            gustStrength = (1.0 - gustProgress) / 0.3;  // Ramp down
-        } else {
-            gustActive = false;
-            gustStrength = 0;
-            gustTimer = 0;
-        }
-    }
+    // Update shader uniforms so vertex wind also syncs with breeze
+    palmWindTimeUniform.value = windTime;
+    palmWindStrengthUniform.value = PALM_WIND_STRENGTH * breezeIntensity;
+    foliageWindStrengthUniform.value = FOLIAGE_WIND_STRENGTH * breezeIntensity;
     
-    // Calculate wind sway (to the left = negative X rotation from camera view = positive Z rotation)
-    // Base wind formula if needed: Math.sin(windTime * WIND_SPEED) * 0.3
-    const gustWind = gustStrength * Math.sin(windTime * WIND_SPEED * 2) * 1.0;  // Stronger during gusts
-    
+    // Flickering wind: overlapping inharmonic sine waves for chaotic, natural feel
     // Apply to grass patches
     grassPatches.forEach((patch, i) => {
-        // Each grass patch has slightly different phase
         const phase = i * 0.5;
-        const patchWind = Math.sin(windTime * WIND_SPEED + phase) * 0.3 + gustWind;
-        patch.rotation.z = patchWind * WIND_STRENGTH;
-        patch.rotation.x = patchWind * WIND_STRENGTH * 0.3;  // Slight forward/back
+        const flicker = Math.sin(windTime * 3.7 + phase) * 0.4
+                       + Math.sin(windTime * 7.3 + phase * 1.3) * 0.25
+                       + Math.sin(windTime * 11.1 + phase * 0.7) * 0.15
+                       + Math.sin(windTime * 17.0 + phase * 2.1) * 0.1;
+        const patchWind = flicker * breezeIntensity;
+        patch.rotation.z = patchWind * BREEZE_GRASS_STRENGTH;
+        patch.rotation.x = patchWind * BREEZE_GRASS_STRENGTH * 0.3;
     });
     
-    // Apply to palm tree leaves only (not the trunk)
-    palmLeaves.forEach((leaf, i) => {
-        const phase = i * 0.3;
-        const leafWind = Math.sin(windTime * WIND_SPEED + phase) * 0.3 + gustWind;
-        leaf.rotation.z = leafWind * WIND_STRENGTH * 0.5;
-        leaf.rotation.x = leafWind * WIND_STRENGTH * 0.15;
-    });
+    // Palm tree wind is handled entirely by the vertex shader (applyPalmWindShader)
+    // which uses smoothstep(uLeafStartY, uLeafFullY, position.y) to only move leaves,
+    // not the trunk. No JS rotation needed here.
     
     // Radio vibration when music is playing
     if (radio.children.length > 0) {

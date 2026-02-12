@@ -453,14 +453,14 @@ export function Update(): void {
     
     if (crossedToUnderwater && !audioIsUnderwater) {
         audioIsUnderwater = true;
-        // Defer CSS change to next frame to avoid layout thrashing with audio ops
+        // Defer CSS change to next frame to avoid layout thrashing
         requestAnimationFrame(() => {
             document.body.classList.add('underwater');
         });
         transitionToUnderwater();
     } else if (crossedToSurface && audioIsUnderwater) {
         audioIsUnderwater = false;
-        // Defer CSS change to next frame to avoid layout thrashing with audio ops
+        // Defer CSS change to next frame to avoid layout thrashing
         requestAnimationFrame(() => {
             document.body.classList.remove('underwater');
         });
