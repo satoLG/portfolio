@@ -1,6 +1,6 @@
-import { body } from "./Scene";
+import { body, antialias, shadowsEnabled, pixelSizeValue, SetPixelSize, setShadowsEnabled } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
-import { startAudio, playDiveSound, playSurfaceSound, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, preloadUISounds, playUISwitchDay, playUISwitchNight } from "./Audio";
+import { startAudio, playDiveSound, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, preloadUISounds, playUISwitchDay, playUISwitchNight } from "./Audio";
 import { getIsUnderwater, diveUnderwater, surfaceAboveWater, getCameraY, setIntroProgress, enableScroll, isRadioZoomActive } from "./Control";
 import { setLoadingCallback } from "../scene/Island";
 
@@ -275,56 +275,110 @@ export function Start(): void {
     
     const settingsPanel = document.createElement("div");
     settingsPanel.className = "settings-panel";
+    
+    // SVG icon templates
+    const volumeOnSvg = `<svg class="icon-on" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/></svg>`;
+    const volumeOffSvg = `<svg class="icon-off" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/></svg>`;
+    const toggleOnSvg = `<svg class="icon-on" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+    const toggleOffSvg = `<svg class="icon-off" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>`;
+    const tabArrowSvg = `<svg class="tab-arrow" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`;
+    
+    // Current settings for initial UI state
+    const currentAudioMode = localStorage.getItem('portfolio-audio-mode') || 'api';
+    const curAA = antialias;
+    const curShadows = shadowsEnabled;
+    const curPixel = pixelSizeValue;
+    const curPreset = (curAA && curShadows) ? 'high' : (!curAA && !curShadows) ? 'low' : 'custom';
+    
     settingsPanel.innerHTML = `
-        <div class="settings-row">
-            <span class="settings-label">Nature</span>
-            <button class="settings-toggle nature-toggle" data-active="true">
-                <svg class="icon-on" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/>
-                    <path d="M16 9a5 5 0 0 1 0 6"/>
-                    <path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>
-                </svg>
-                <svg class="icon-off" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/>
-                    <line x1="22" x2="16" y1="9" y2="15"/>
-                    <line x1="16" x2="22" y1="9" y2="15"/>
-                </svg>
+        <div class="settings-tab open">
+            <button class="settings-tab-header">
+                <span>Audio</span>
+                ${tabArrowSvg}
             </button>
+            <div class="settings-tab-content">
+                <div class="settings-row" style="padding-bottom:2px">
+                    <span class="settings-label">Audio Mode</span>
+                </div>
+                <div class="settings-row" style="padding-top:2px">
+                    <div class="settings-mode-switch audio-mode-switch">
+                        <button class="mode-option${currentAudioMode === 'api' ? ' active' : ''}" data-value="api">Web Audio API</button>
+                        <button class="mode-option${currentAudioMode === 'tag' ? ' active' : ''}" data-value="tag">Audio Tag</button>
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label">Nature</span>
+                    <button class="settings-toggle nature-toggle" data-active="true">${volumeOnSvg}${volumeOffSvg}</button>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label">Music</span>
+                    <button class="settings-toggle music-toggle" data-active="true">${volumeOnSvg}${volumeOffSvg}</button>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label">Interface</span>
+                    <button class="settings-toggle interface-toggle" data-active="true">${volumeOnSvg}${volumeOffSvg}</button>
+                </div>
+            </div>
         </div>
-        <div class="settings-row">
-            <span class="settings-label">Music</span>
-            <button class="settings-toggle music-toggle" data-active="true">
-                <svg class="icon-on" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/>
-                    <path d="M16 9a5 5 0 0 1 0 6"/>
-                    <path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>
-                </svg>
-                <svg class="icon-off" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/>
-                    <line x1="22" x2="16" y1="9" y2="15"/>
-                    <line x1="16" x2="22" y1="9" y2="15"/>
-                </svg>
+        <div class="settings-tab">
+            <button class="settings-tab-header">
+                <span>Graphics</span>
+                ${tabArrowSvg}
             </button>
+            <div class="settings-tab-content">
+                <div class="settings-row" style="padding-bottom:2px">
+                    <span class="settings-label">Preset</span>
+                </div>
+                <div class="settings-row" style="padding-top:2px">
+                    <div class="settings-mode-switch preset-switch">
+                        <button class="mode-option${curPreset === 'low' ? ' active' : ''}" data-value="low">Low</button>
+                        <button class="mode-option${curPreset === 'custom' ? ' active' : ''}" data-value="custom">Custom</button>
+                        <button class="mode-option${curPreset === 'high' ? ' active' : ''}" data-value="high">High</button>
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label">Antialias</span>
+                    <button class="settings-toggle antialias-toggle" data-active="${curAA}">${toggleOnSvg}${toggleOffSvg}</button>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label">Shadows</span>
+                    <button class="settings-toggle shadows-toggle" data-active="${curShadows}">${toggleOnSvg}${toggleOffSvg}</button>
+                </div>
+            </div>
         </div>
-        <div class="settings-row">
-            <span class="settings-label">Interface</span>
-            <button class="settings-toggle interface-toggle" data-active="true">
-                <svg class="icon-on" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/>
-                    <path d="M16 9a5 5 0 0 1 0 6"/>
-                    <path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>
-                </svg>
-                <svg class="icon-off" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/>
-                    <line x1="22" x2="16" y1="9" y2="15"/>
-                    <line x1="16" x2="22" y1="9" y2="15"/>
-                </svg>
+        <div class="settings-tab">
+            <button class="settings-tab-header">
+                <span>Misc</span>
+                ${tabArrowSvg}
             </button>
+            <div class="settings-tab-content">
+                <div class="settings-row settings-slider-row">
+                    <span class="settings-label">Pixel Size</span>
+                    <div class="settings-slider-container">
+                        <div class="custom-slider pixel-slider" data-min="0" data-max="100" data-value="${curPixel}">
+                            <div class="custom-slider-track">
+                                <div class="custom-slider-fill"></div>
+                            </div>
+                            <div class="custom-slider-thumb"></div>
+                        </div>
+                        <span class="settings-slider-value pixel-slider-value">${curPixel}px</span>
+                    </div>
+                </div>
+            </div>
         </div>
     `;
     settingsContainer.appendChild(settingsPanel);
     headerControls.appendChild(settingsContainer);
     header.appendChild(headerControls);
+    
+    // Collapsible tab headers
+    settingsPanel.querySelectorAll('.settings-tab-header').forEach(tabHeader => {
+        tabHeader.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const tab = (tabHeader as HTMLElement).parentElement!;
+            tab.classList.toggle('open');
+        });
+    });
     
     // Settings button click - toggle panel
     let settingsOpen = false;
@@ -343,31 +397,223 @@ export function Start(): void {
         }
     });
     
-    // Nature toggle
+    // ---- Confirmation Modal ----
+    const modalOverlay = document.createElement('div');
+    modalOverlay.className = 'confirm-modal-overlay';
+    modalOverlay.innerHTML = `
+        <div class="confirm-modal">
+            <div class="confirm-modal-title"></div>
+            <div class="confirm-modal-text"></div>
+            <div class="confirm-modal-buttons">
+                <button class="confirm-modal-btn cancel">Cancel</button>
+                <button class="confirm-modal-btn confirm">Confirm</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modalOverlay);
+    
+    const modalTitle = modalOverlay.querySelector('.confirm-modal-title') as HTMLElement;
+    const modalText = modalOverlay.querySelector('.confirm-modal-text') as HTMLElement;
+    const modalCancel = modalOverlay.querySelector('.confirm-modal-btn.cancel') as HTMLButtonElement;
+    const modalConfirm = modalOverlay.querySelector('.confirm-modal-btn.confirm') as HTMLButtonElement;
+    
+    let modalResolve: ((confirmed: boolean) => void) | null = null;
+    
+    function showConfirmModal(title: string, text: string): Promise<boolean> {
+        modalTitle.textContent = title;
+        modalText.textContent = text;
+        modalOverlay.classList.add('open');
+        return new Promise((resolve) => {
+            modalResolve = resolve;
+        });
+    }
+    
+    function closeModal(confirmed: boolean) {
+        modalOverlay.classList.remove('open');
+        if (modalResolve) {
+            modalResolve(confirmed);
+            modalResolve = null;
+        }
+    }
+    
+    modalCancel.addEventListener('click', () => closeModal(false));
+    modalConfirm.addEventListener('click', () => closeModal(true));
+    modalOverlay.addEventListener('click', (e) => {
+        if (e.target === modalOverlay) closeModal(false);
+    });
+    
+    // ---- Audio Mode Switch ----
+    const audioModeSwitch = settingsPanel.querySelector('.audio-mode-switch') as HTMLElement;
+    audioModeSwitch.querySelectorAll('.mode-option').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const newMode = (btn as HTMLElement).dataset.value!;
+            const oldMode = localStorage.getItem('portfolio-audio-mode') || 'api';
+            if (newMode === oldMode) return;
+            
+            const confirmed = await showConfirmModal(
+                'Change Audio Mode',
+                newMode === 'api'
+                    ? 'Web Audio API mode provides superior sound quality and reliability, especially on mobile devices. Audio plays exclusively within the site — no background playback or media controls. The page will reload to apply this change.'
+                    : 'Audio Tag mode uses standard HTML5 audio elements with background playback support and OS media controls integration. Audio quality may vary on some devices. The page will reload to apply this change.'
+            );
+            
+            if (confirmed) {
+                localStorage.setItem('portfolio-audio-mode', newMode);
+                window.location.reload();
+            }
+        });
+    });
+    
+    // ---- Audio Toggles ----
     const natureToggle = settingsPanel.querySelector('.nature-toggle') as HTMLButtonElement;
     natureToggle.addEventListener('click', (e) => {
         e.stopPropagation();
         const isActive = natureToggle.dataset.active === 'true';
         natureToggle.dataset.active = (!isActive).toString();
-        setNatureMuted(isActive);  // If was active, now mute it
+        setNatureMuted(isActive);
     });
     
-    // Music toggle
     const musicToggle = settingsPanel.querySelector('.music-toggle') as HTMLButtonElement;
     musicToggle.addEventListener('click', (e) => {
         e.stopPropagation();
         const isActive = musicToggle.dataset.active === 'true';
         musicToggle.dataset.active = (!isActive).toString();
-        setMusicMuted(isActive);  // If was active, now mute it
+        setMusicMuted(isActive);
     });
     
-    // Interface toggle
     const interfaceToggle = settingsPanel.querySelector('.interface-toggle') as HTMLButtonElement;
     interfaceToggle.addEventListener('click', (e) => {
         e.stopPropagation();
         const isActive = interfaceToggle.dataset.active === 'true';
         interfaceToggle.dataset.active = (!isActive).toString();
-        setInterfaceMuted(isActive);  // If was active, now mute it
+        setInterfaceMuted(isActive);
+    });
+    
+    // ---- Graphics Controls ----
+    const presetSwitch = settingsPanel.querySelector('.preset-switch') as HTMLElement;
+    const antialiasToggle = settingsPanel.querySelector('.antialias-toggle') as HTMLButtonElement;
+    const shadowsToggle = settingsPanel.querySelector('.shadows-toggle') as HTMLButtonElement;
+    
+    function updatePresetIndicator() {
+        const aa = antialiasToggle.dataset.active === 'true';
+        const shd = shadowsToggle.dataset.active === 'true';
+        presetSwitch.querySelectorAll('.mode-option').forEach(b => b.classList.remove('active'));
+        if (aa && shd) {
+            presetSwitch.querySelector('[data-value="high"]')?.classList.add('active');
+        } else if (!aa && !shd) {
+            presetSwitch.querySelector('[data-value="low"]')?.classList.add('active');
+        } else {
+            presetSwitch.querySelector('[data-value="custom"]')?.classList.add('active');
+        }
+    }
+    
+    // Preset switch
+    presetSwitch.querySelectorAll('.mode-option').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const preset = (btn as HTMLElement).dataset.value!;
+            if (preset === 'custom') return; // Custom is just an indicator
+            const isLow = preset === 'low';
+            const newAA = !isLow;
+            const newShadows = !isLow;
+            const currentAA = antialiasToggle.dataset.active === 'true';
+            
+            if (newAA !== currentAA) {
+                const confirmed = await showConfirmModal(
+                    `Switch to ${isLow ? 'Low' : 'High'} Preset`,
+                    `This will ${isLow ? 'disable' : 'enable'} antialias and ${isLow ? 'disable' : 'enable'} shadows. Antialias changes require a page reload.`
+                );
+                if (!confirmed) return;
+                localStorage.setItem('portfolio-antialias', newAA.toString());
+                localStorage.setItem('portfolio-shadows', newShadows.toString());
+                window.location.reload();
+                return;
+            }
+            
+            // No antialias change — apply immediately
+            shadowsToggle.dataset.active = newShadows.toString();
+            setShadowsEnabled(newShadows);
+            
+            updatePresetIndicator();
+        });
+    });
+    
+    // Antialias toggle
+    antialiasToggle.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const isActive = antialiasToggle.dataset.active === 'true';
+        const newValue = !isActive;
+        
+        const confirmed = await showConfirmModal(
+            `${newValue ? 'Enable' : 'Disable'} Antialias`,
+            'Changing antialias requires a page reload to take effect. Antialias smooths jagged edges but may impact performance on some devices.'
+        );
+        
+        if (confirmed) {
+            localStorage.setItem('portfolio-antialias', newValue.toString());
+            window.location.reload();
+        }
+    });
+    
+    // Shadows toggle
+    shadowsToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isActive = shadowsToggle.dataset.active === 'true';
+        const newValue = !isActive;
+        shadowsToggle.dataset.active = newValue.toString();
+        setShadowsEnabled(newValue);
+        updatePresetIndicator();
+    });
+    
+    // ---- Misc Controls: Pixel Size Slider ----
+    const pixelSliderEl = settingsPanel.querySelector('.pixel-slider') as HTMLElement;
+    const pixelFill = pixelSliderEl.querySelector('.custom-slider-fill') as HTMLElement;
+    const pixelThumb = pixelSliderEl.querySelector('.custom-slider-thumb') as HTMLElement;
+    const pixelValueEl = settingsPanel.querySelector('.pixel-slider-value') as HTMLElement;
+    
+    let pixelSliderValue = parseInt(pixelSliderEl.dataset.value || '0');
+    const pixelSliderMin = parseInt(pixelSliderEl.dataset.min || '0');
+    const pixelSliderMax = parseInt(pixelSliderEl.dataset.max || '100');
+    
+    function setPixelSliderValue(val: number, notify = true) {
+        pixelSliderValue = Math.max(pixelSliderMin, Math.min(pixelSliderMax, Math.round(val)));
+        const pct = ((pixelSliderValue - pixelSliderMin) / (pixelSliderMax - pixelSliderMin)) * 100;
+        pixelFill.style.width = pct + '%';
+        pixelThumb.style.left = pct + '%';
+        pixelValueEl.textContent = pixelSliderValue + 'px';
+        if (notify) {
+            SetPixelSize(pixelSliderValue);
+        }
+    }
+    
+    setPixelSliderValue(pixelSliderValue, false);
+    
+    let pixelDragging = false;
+    function getPixelValFromPointer(clientX: number) {
+        const rect = pixelSliderEl.querySelector('.custom-slider-track')!.getBoundingClientRect();
+        const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        return pixelSliderMin + pct * (pixelSliderMax - pixelSliderMin);
+    }
+    pixelSliderEl.addEventListener('pointerdown', (e: Event) => {
+        const pe = e as PointerEvent;
+        pe.preventDefault();
+        pe.stopPropagation();
+        pixelDragging = true;
+        pixelSliderEl.classList.add('active');
+        (pixelSliderEl as HTMLElement).setPointerCapture(pe.pointerId);
+        setPixelSliderValue(getPixelValFromPointer(pe.clientX));
+    });
+    pixelSliderEl.addEventListener('pointermove', (e: Event) => {
+        if (!pixelDragging) return;
+        const pe = e as PointerEvent;
+        setPixelSliderValue(getPixelValFromPointer(pe.clientX));
+    });
+    pixelSliderEl.addEventListener('pointerup', (e: Event) => {
+        const pe = e as PointerEvent;
+        pixelDragging = false;
+        pixelSliderEl.classList.remove('active');
+        (pixelSliderEl as HTMLElement).releasePointerCapture(pe.pointerId);
     });
     
     // Dive/Surface button
@@ -390,7 +636,6 @@ export function Start(): void {
         if (isUnderwater) {
             // Surface: go up
             surfaceAboveWater();
-            playSurfaceSound();
         } else {
             // Dive: go down
             diveUnderwater();

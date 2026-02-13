@@ -27,6 +27,7 @@ const quadScene = new ThreeScene();
 let material: ShaderMaterial | null = null;
 let framebufferTexture: FramebufferTexture | null = null;
 let underwaterAmount = 0;
+let pixelSize = 0;
 let initialized = false;
 let width = 1;
 let height = 1;
@@ -46,17 +47,26 @@ const fragmentShader = /* glsl */`
     uniform float uSpeed;
     uniform float uScale;
     uniform float uAmount;
+    uniform float uPixelSize;
+    uniform vec2 uResolution;
     
     varying vec2 vUv;
     
     void main() {
         vec2 uv = vUv;
         
+        // Underwater distortion
         float t = uTime * uSpeed;
         float dx = sin(uv.y * uScale + t) * uDistortion * uAmount;
         float dy = cos(uv.x * uScale * 0.8 + t * 0.9) * uDistortion * 0.7 * uAmount;
         uv.x += dx;
         uv.y += dy;
+        
+        // Pixelation effect
+        if (uPixelSize > 0.5) {
+            vec2 pixelCount = uResolution / uPixelSize;
+            uv = floor(uv * pixelCount) / pixelCount;
+        }
         
         gl_FragColor = texture2D(tDiffuse, uv);
     }
@@ -82,7 +92,9 @@ export function Start(renderer: WebGLRenderer): void {
             uDistortion: { value: DISTORTION_STRENGTH },
             uSpeed: { value: DISTORTION_SPEED },
             uScale: { value: DISTORTION_SCALE },
-            uAmount: { value: 0 }
+            uAmount: { value: 0 },
+            uPixelSize: { value: pixelSize },
+            uResolution: { value: new Vector2(width, height) }
         },
         depthTest: false,
         depthWrite: false
@@ -103,6 +115,7 @@ export function onResize(w: number, h: number): void {
         framebufferTexture.magFilter = NearestFilter;
         if (material) {
             material.uniforms.tDiffuse.value = framebufferTexture;
+            material.uniforms.uResolution.value.set(width, height);
         }
     }
 }
@@ -119,15 +132,16 @@ export function renderScene(renderer: WebGLRenderer, scene: ThreeScene, camera: 
     // Always render scene first
     renderer.render(scene, camera);
     
-    // If above water or not initialized, we're done
-    if (underwaterAmount <= 0 || !initialized || !framebufferTexture || !material) {
+    // Run post-process pass if underwater OR pixelation is active
+    const needsPostProcess = (underwaterAmount > 0 || pixelSize > 0);
+    if (!needsPostProcess || !initialized || !framebufferTexture || !material) {
         return;
     }
     
     // Copy the framebuffer (already has correct colors) to texture
     renderer.copyFramebufferToTexture(framebufferTexture, new Vector2(0, 0));
     
-    // Render distorted version on top
+    // Render post-processed version on top
     renderer.render(quadScene, orthoCamera);
 }
 
@@ -141,4 +155,9 @@ export function setSpeed(v: number): void {
 
 export function setScale(v: number): void {
     if (material) material.uniforms.uScale.value = v;
+}
+
+export function setPixelSize(v: number): void {
+    pixelSize = v;
+    if (material) material.uniforms.uPixelSize.value = v;
 }

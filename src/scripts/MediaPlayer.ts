@@ -5,7 +5,7 @@
 import { camera } from "./Scene";
 import { radio } from "../scene/Island";
 import { Vector3, PerspectiveCamera } from "three";
-import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse } from "./Audio";
+import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse, getAudioMode, getAudioContext } from "./Audio";
 import { zoomToRadio, zoomOutFromRadio, getSavedCameraPosition, DEFAULT_CAMERA_X, DEFAULT_CAMERA_Z } from "./Control";
 import WaveSurfer from 'wavesurfer.js';
 
@@ -78,6 +78,7 @@ function updateMediaSessionPosition(): void {
 }
 
 function setupMediaSessionHandlers(): void {
+    if (getAudioMode() === 'api') return;
     if (!('mediaSession' in navigator)) return;
     
     navigator.mediaSession.setActionHandler('play', () => {
@@ -251,6 +252,13 @@ let playerContainer: HTMLDivElement | null = null;
 // Wavesurfer instance
 let wavesurfer: WaveSurfer | null = null;
 
+// Web Audio analyser for frequency visualization (API mode)
+let analyserNode: AnalyserNode | null = null;
+let analyserCanvas: HTMLCanvasElement | null = null;
+let analyserCtx: CanvasRenderingContext2D | null = null;
+let analyserAnimId: number = 0;
+let mediaSourceConnected = false;
+
 // Preloading system for faster song transitions
 let preloadedAudios: Map<number, HTMLAudioElement> = new Map();
 
@@ -264,8 +272,13 @@ export function Start(): void {
     // Listen for mute changes from settings
     window.addEventListener('musicMuteChanged', (e: Event) => {
         const customEvent = e as CustomEvent;
+        const muted = customEvent.detail.muted;
         if (audioElement) {
-            audioElement.muted = customEvent.detail.muted;
+            audioElement.muted = muted;
+        }
+        // In API mode, mute via WaveSurfer volume (no shared audioElement)
+        if (getAudioMode() === 'api' && wavesurfer) {
+            wavesurfer.setVolume(muted ? 0 : 0.5);
         }
     });
 }
@@ -658,6 +671,9 @@ function stopResizing(): void {
 */
 
 function createAudioElement(): void {
+    // In API mode, don't create shared audio element - WaveSurfer uses internal Web Audio
+    if (getAudioMode() === 'api') return;
+    
     audioElement = new Audio();
     audioElement.volume = 0.5;
     audioElement.addEventListener('ended', () => handleSongEnded());
@@ -717,8 +733,8 @@ function initWavesurfer(): void {
     const waveformContainer = playerContainer.querySelector('#waveform') as HTMLDivElement;
     if (!waveformContainer) return;
     
-    // Create wavesurfer instance
-    wavesurfer = WaveSurfer.create({
+    // Create wavesurfer instance with mode-specific options
+    const baseOptions = {
         container: waveformContainer,
         waveColor: 'rgba(255, 255, 255, 0.8)',
         progressColor: '#e53935',
@@ -731,10 +747,55 @@ function initWavesurfer(): void {
         normalize: true,
         hideScrollbar: true,
         fillParent: true,
-        media: audioElement!,
-        interact: true,        // Enable all interactions
-        dragToSeek: true,      // Enable smooth drag to seek
-    });
+        interact: true,
+        dragToSeek: true,
+    };
+    // In tag mode, share the HTMLAudioElement for Media Session support
+    // In API mode, WaveSurfer uses its own internal audio (no background playback)
+    if (getAudioMode() === 'tag' && audioElement) {
+        wavesurfer = WaveSurfer.create({ ...baseOptions, media: audioElement });
+    } else {
+        // API mode: hide the static waveform — the analyser canvas replaces it
+        wavesurfer = WaveSurfer.create({
+            ...baseOptions,
+            waveColor: 'transparent',
+            progressColor: 'transparent',
+            cursorColor: 'transparent',
+            cursorWidth: 0,
+            interact: false,  // We handle seeking via analyser canvas
+        });
+    }
+    
+    // In API mode, add frequency analyser canvas as the SOLE waveform visual
+    if (getAudioMode() === 'api') {
+        waveformContainer.style.position = 'relative';
+        analyserCanvas = document.createElement('canvas');
+        analyserCanvas.className = 'waveform-analyser waveform-analyser-interactive';
+        waveformContainer.appendChild(analyserCanvas);
+        analyserCtx = analyserCanvas.getContext('2d');
+        
+        // Click / drag to seek on the analyser canvas
+        let seekDragging = false;
+        const seekFromPointer = (clientX: number) => {
+            if (!wavesurfer) return;
+            const rect = analyserCanvas!.getBoundingClientRect();
+            const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+            wavesurfer.seekTo(pct);
+        };
+        analyserCanvas.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            seekDragging = true;
+            analyserCanvas!.setPointerCapture(e.pointerId);
+            seekFromPointer(e.clientX);
+        });
+        analyserCanvas.addEventListener('pointermove', (e) => {
+            if (seekDragging) seekFromPointer(e.clientX);
+        });
+        analyserCanvas.addEventListener('pointerup', (e) => {
+            seekDragging = false;
+            analyserCanvas!.releasePointerCapture(e.pointerId);
+        });
+    }
     
     // Update time display
     wavesurfer.on('audioprocess', () => {
@@ -760,6 +821,28 @@ function initWavesurfer(): void {
         }
     });
     
+    // In API mode, track play state via wavesurfer events (no shared audioElement)
+    if (getAudioMode() === 'api') {
+        // Start analyser animation immediately so idle bars + progress are visible
+        startAnalyserAnimation();
+        
+        wavesurfer.on('play', () => {
+            isPlaying = true;
+            updatePlayButton();
+            updateBubblePlayingState();
+            connectMusicAnalyser();
+            startAnalyserAnimation();
+        });
+        wavesurfer.on('pause', () => {
+            isPlaying = false;
+            updatePlayButton();
+            updateBubblePlayingState();
+            // Keep animation running so progress/idle bars stay visible
+            startAnalyserAnimation();
+        });
+        wavesurfer.on('finish', () => handleSongEnded());
+    }
+    
     // Handle resize with requestAnimationFrame for smooth, lag-free updates
     // Skip during animations to prevent lag on expand/collapse
     const resizeObserver = new ResizeObserver(() => {
@@ -777,6 +860,118 @@ function initWavesurfer(): void {
     if (playlist.length > 0) {
         wavesurfer.load(playlist[0].file);
     }
+}
+
+// ============================================
+// REAL-TIME FREQUENCY ANALYSER (API mode)
+// ============================================
+function connectMusicAnalyser(): void {
+    if (mediaSourceConnected || !wavesurfer) return;
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    try {
+        const mediaEl = wavesurfer.getMediaElement();
+        const source = ctx.createMediaElementSource(mediaEl);
+        analyserNode = ctx.createAnalyser();
+        analyserNode.fftSize = 128;
+        analyserNode.smoothingTimeConstant = 0.8;
+        source.connect(analyserNode);
+        analyserNode.connect(ctx.destination);
+        mediaSourceConnected = true;
+    } catch (e) {
+        console.warn('Could not connect music analyser:', e);
+    }
+}
+
+function startAnalyserAnimation(): void {
+    if (!analyserCanvas || !analyserCtx || analyserAnimId) return;
+    const parent = analyserCanvas.parentElement;
+    if (parent) {
+        analyserCanvas.width = parent.clientWidth;
+        analyserCanvas.height = parent.clientHeight;
+    }
+    drawAnalyser();
+}
+
+function drawAnalyser(): void {
+    if (!analyserCtx || !analyserCanvas) { analyserAnimId = 0; return; }
+    
+    // Keep canvas sized to container
+    const parent = analyserCanvas.parentElement;
+    if (parent) {
+        const w = parent.clientWidth;
+        const h = parent.clientHeight;
+        if (w > 0 && h > 0 && (analyserCanvas.width !== w || analyserCanvas.height !== h)) {
+            analyserCanvas.width = w;
+            analyserCanvas.height = h;
+        }
+    }
+    const { width, height } = analyserCanvas;
+    if (width === 0 || height === 0) { analyserAnimId = requestAnimationFrame(drawAnalyser); return; }
+
+    analyserCtx.clearRect(0, 0, width, height);
+    
+    // Get playback progress (0-1)
+    let progress = 0;
+    if (wavesurfer) {
+        const dur = wavesurfer.getDuration();
+        if (dur > 0) progress = wavesurfer.getCurrentTime() / dur;
+    }
+    const cursorX = progress * width;
+    
+    // If not playing or no analyser, draw idle bars with progress
+    const bufferLength = analyserNode ? analyserNode.frequencyBinCount : 64;
+    const dataArray = new Uint8Array(bufferLength);
+    
+    if (isPlaying && analyserNode) {
+        analyserNode.getByteFrequencyData(dataArray);
+    } else {
+        // Idle state: small ambient bars
+        for (let i = 0; i < bufferLength; i++) {
+            dataArray[i] = 8 + Math.sin(i * 0.3 + Date.now() * 0.001) * 6;
+        }
+    }
+
+    const gap = 1;
+    const barWidth = (width - gap * (bufferLength - 1)) / bufferLength;
+
+    for (let i = 0; i < bufferLength; i++) {
+        const value = dataArray[i] / 255;
+        const minBarH = 2;
+        const barHeight = minBarH + value * (height - minBarH) * 0.85;
+        const x = i * (barWidth + gap);
+        const barCenter = x + barWidth / 2;
+        
+        // Played portion is bright red, unplayed is dim white
+        if (barCenter <= cursorX) {
+            const alpha = isPlaying ? (0.4 + value * 0.6) : 0.35;
+            analyserCtx.fillStyle = `rgba(229, 57, 53, ${alpha.toFixed(2)})`;
+        } else {
+            const alpha = isPlaying ? (0.1 + value * 0.25) : 0.12;
+            analyserCtx.fillStyle = `rgba(255, 255, 255, ${alpha.toFixed(2)})`;
+        }
+        
+        // Draw bars from bottom, rounded
+        const y = height - barHeight;
+        const radius = Math.min(barWidth / 2, 2);
+        analyserCtx.beginPath();
+        analyserCtx.moveTo(x + radius, y);
+        analyserCtx.lineTo(x + barWidth - radius, y);
+        analyserCtx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
+        analyserCtx.lineTo(x + barWidth, height);
+        analyserCtx.lineTo(x, height);
+        analyserCtx.lineTo(x, y + radius);
+        analyserCtx.quadraticCurveTo(x, y, x + radius, y);
+        analyserCtx.fill();
+    }
+    
+    // Draw cursor line
+    if (progress > 0 && progress < 1) {
+        analyserCtx.fillStyle = '#e53935';
+        analyserCtx.fillRect(cursorX - 1, 0, 2, height);
+    }
+
+    analyserAnimId = requestAnimationFrame(drawAnalyser);
 }
 
 function updateTimeDisplay(): void {
@@ -802,8 +997,18 @@ function formatTime(seconds: number): string {
 function updateWaveformColors(): void {
     if (!wavesurfer) return;
     
-    // Always use white waveform with red progress (radio frequency style)
-    // Day/night mode only affects the container, not the waveform colors
+    if (getAudioMode() === 'api') {
+        // API mode: WaveSurfer is invisible; analyser canvas handles visuals
+        wavesurfer.setOptions({
+            waveColor: 'transparent',
+            progressColor: 'transparent',
+            cursorColor: 'transparent',
+            cursorWidth: 0,
+        });
+        return;
+    }
+    
+    // Tag mode: normal waveform colors
     wavesurfer.setOptions({
         waveColor: 'rgba(255, 255, 255, 0.8)',
         progressColor: '#e53935',
@@ -1027,7 +1232,7 @@ function loadSong(index: number, forcePlay: boolean = false): void {
     if (playlist.length === 0) return;
     
     // Decide if we should auto-play: either forced or was already playing
-    const shouldPlay = forcePlay || !audioElement?.paused;
+    const shouldPlay = forcePlay || (audioElement ? !audioElement.paused : isPlaying);
     const songFile = playlist[index].file;
     
     // Store intent so the wavesurfer 'ready' handler can auto-play

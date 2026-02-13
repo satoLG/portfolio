@@ -15,11 +15,28 @@ import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial"
 
 export const body = document.createElement("div");
 
+// Detect device type for default graphics settings
+export const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+const defaultHigh = !isMobile;
+
+// Read graphics settings from localStorage (or use device-based defaults)
+export let antialias = localStorage.getItem('portfolio-antialias') !== null
+    ? localStorage.getItem('portfolio-antialias') === 'true'
+    : defaultHigh;
+export let shadowsEnabled = localStorage.getItem('portfolio-shadows') !== null
+    ? localStorage.getItem('portfolio-shadows') === 'true'
+    : defaultHigh;
+
+// Pixel size for post-processing pixelation effect (0 = off)
+export let pixelSizeValue = localStorage.getItem('portfolio-pixel-size') !== null
+    ? parseInt(localStorage.getItem('portfolio-pixel-size')!)
+    : 0;
+
 // Scene lights - synced with skybox
 let ambientLight: AmbientLight;
 let directionalLight: DirectionalLight;
 
-export const renderer = new WebGLRenderer();
+export let renderer = new WebGLRenderer({ antialias });
 export const scene = new Scene();
 export const camera = new PerspectiveCamera();
 export const staticCamera = new PerspectiveCamera();
@@ -35,19 +52,6 @@ export function UpdateCameraRotation(): void
     cameraForward.copy(new Vector3(0, 0, -1).applyQuaternion(camera.quaternion));
 }
 
-export let resMult = 1;
-export function SetResolution(value: number): void
-{
-    resMult = value;
-    const width = window.innerWidth * value * window.devicePixelRatio;
-    const height = window.innerHeight * value * window.devicePixelRatio;
-    body.style.transform = "";
-    body.style.width = window.innerWidth + "px";
-    body.style.height = window.innerHeight + "px";
-
-    renderer.setSize(width, height, false);
-}
-
 export let fov = 70;
 export function SetFOV(value: number): void
 {
@@ -56,27 +60,66 @@ export function SetFOV(value: number): void
     camera.updateProjectionMatrix();
 }
 
-export let antialias = true;
 export function SetAntialias(value: boolean): void
 {
     antialias = value;
-    (renderer as unknown as { antialias: boolean }).antialias = antialias;
+    // Note: antialias is a WebGL context attribute set at renderer creation.
+    // Changing it requires a page reload to take effect.
+    localStorage.setItem('portfolio-antialias', value.toString());
+}
+
+export function SetPixelSize(value: number): void
+{
+    pixelSizeValue = value;
+    Underwater.setPixelSize(value);
+    localStorage.setItem('portfolio-pixel-size', value.toString());
+}
+
+export function setShadowsEnabled(value: boolean): void
+{
+    shadowsEnabled = value;
+    renderer.shadowMap.enabled = value;
+    renderer.shadowMap.needsUpdate = true;
+    
+    // Dispose shadow map textures so Three.js recreates them fresh
+    scene.traverse((obj) => {
+        const light = obj as any;
+        if (light.shadow?.map) {
+            light.shadow.map.dispose();
+            light.shadow.map = null;
+        }
+    });
+    // Also check the directional light directly (may not be in scene yet during init)
+    if (directionalLight?.shadow?.map) {
+        directionalLight.shadow.map.dispose();
+        (directionalLight.shadow as any).map = null;
+    }
+    
+    // Force all materials to recompile with updated shadow defines
+    scene.traverse((obj) => {
+        const mesh = obj as any;
+        if (mesh.material) {
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            for (const m of mats) m.needsUpdate = true;
+        }
+    });
+    
+    localStorage.setItem('portfolio-shadows', value.toString());
 }
 
 export function Start(): void
 {
     document.body.appendChild(body);
 
-    let width = window.innerWidth * resMult * window.devicePixelRatio;
-    let height = window.innerHeight * resMult * window.devicePixelRatio;
+    let width = window.innerWidth * window.devicePixelRatio;
+    let height = window.innerHeight * window.devicePixelRatio;
     body.style.transform = "";
     body.style.width = window.innerWidth + "px";
     body.style.height = window.innerHeight + "px";
     
     renderer.setSize(width, height, false);
-    (renderer as unknown as { antialias: boolean }).antialias = antialias;
     renderer.autoClearColor = false;
-    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.enabled = shadowsEnabled;
     renderer.shadowMap.type = PCFSoftShadowMap;  // Stable soft shadows
     body.appendChild(renderer.domElement);
     
@@ -99,8 +142,8 @@ export function Start(): void
 
     window.onresize = function()
     {
-        width = window.innerWidth * resMult * window.devicePixelRatio;
-        height = window.innerHeight * resMult * window.devicePixelRatio;
+        width = window.innerWidth * window.devicePixelRatio;
+        height = window.innerHeight * window.devicePixelRatio;
         body.style.transform = "";
         body.style.width = window.innerWidth + "px";
         body.style.height = window.innerHeight + "px";
@@ -179,6 +222,11 @@ export function Start(): void
 
     // Initialize underwater distortion
     Underwater.Start(renderer);
+    
+    // Apply saved pixel size
+    if (pixelSizeValue > 0) {
+        Underwater.setPixelSize(pixelSizeValue);
+    }
 
     // Initialize bubble effect
     Bubbles.Start();
