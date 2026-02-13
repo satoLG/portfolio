@@ -1,6 +1,14 @@
 import { isDayTime } from "../scene/Skybox";
 
 // ============================================
+// AUDIO MODE
+// ============================================
+export const audioMode: 'api' | 'tag' = (localStorage.getItem('portfolio-audio-mode') || 'api') as 'api' | 'tag';
+let _audioContext: AudioContext | null = null;
+export function getAudioContext(): AudioContext | null { return _audioContext; }
+export function getAudioMode(): 'api' | 'tag' { return audioMode; }
+
+// ============================================
 // AUDIO SETTINGS (easily tweakable)
 // ============================================
 const WATER_VOLUME = 0.7;              // Constant water ambience volume (lowered for iOS)
@@ -13,6 +21,22 @@ const UNDERWATER_AMB_VOLUME = 0.25;    // Underwater ambient loop volume
 const TRANSITION_SFX_VOLUME = 0.1;     // Volume for dive/surface SFX
 const TRANSITION_SFX_DURATION = 400;  // How long to play transition SFX (ms)
 const UI_SOUND_THROTTLE = 100;         // Minimum ms between UI sounds (mobile fix)
+
+// Audio file paths (shared between modes)
+const AUDIO_PATHS = {
+    water: 'audio/ocean.wav',
+    breeze: 'audio/breeze.wav',
+    fireplace: 'audio/fireplace.wav',
+    underwaterAmb: 'audio/366159__dcsfx__underwater-loop-amb.wav',
+    underwaterBubbles: 'audio/96742__robinhood76__01650-underwater-bubbles.wav',
+    surfaceSplash: 'audio/327667__juan_merie_venter__getting-out-of-the-pool.wav',
+    waterSplash: 'audio/274060__junggle__water-splash-11.wav',
+    uiSwitchDay: '/audio/ui/dragon-studio-light-switch-on-382714.mp3',
+    uiSwitchNight: '/audio/ui/dragon-studio-light-switch-382712.mp3',
+    uiButton: '/audio/ui/soundreality-button-202966.mp3',
+    uiBubbleExpand: '/audio/ui/universfield-bubble-pop-293342.mp3',
+    uiBubbleCollapse: '/audio/ui/universfield-bubble-pop-06-351337.mp3',
+};
 // ============================================
 
 // ============================================
@@ -74,6 +98,157 @@ async function safePause(audio: HTMLAudioElement | null, _name: string = 'audio'
     audio.pause();
 }
 
+// ============================================
+
+// ============================================
+// WEB AUDIO API ENGINE (audioMode === 'api')
+// ============================================
+const apiBuffers = new Map<string, AudioBuffer>();
+let apiNatureGain: GainNode | null = null;
+let apiInterfaceGain: GainNode | null = null;
+
+// Active loop handles
+let apiWaterLoop: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
+let apiFireplaceLoop: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
+let apiFireplaceActive = false;
+let apiUnderwaterAmbLoop: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
+let apiBreezeTimeout: ReturnType<typeof setTimeout> | null = null;
+let apiBreezeActive = false;
+
+async function apiLoadBuffer(url: string): Promise<AudioBuffer | null> {
+    if (!_audioContext) return null;
+    if (apiBuffers.has(url)) return apiBuffers.get(url)!;
+    try {
+        const response = await fetch(url);
+        const arrayBuffer = await response.arrayBuffer();
+        const audioBuffer = await _audioContext.decodeAudioData(arrayBuffer);
+        apiBuffers.set(url, audioBuffer);
+        return audioBuffer;
+    } catch (e) {
+        console.error(`Failed to load buffer: ${url}`, e);
+        return null;
+    }
+}
+
+function apiPlayOneShot(url: string, destination: GainNode | null, volume: number = 1): AudioBufferSourceNode | null {
+    if (!_audioContext || !destination) return null;
+    const buffer = apiBuffers.get(url);
+    if (!buffer) return null;
+    const source = _audioContext.createBufferSource();
+    source.buffer = buffer;
+    const gain = _audioContext.createGain();
+    gain.gain.value = volume;
+    source.connect(gain);
+    gain.connect(destination);
+    source.start();
+    return source;
+}
+
+function apiStartLoop(url: string, destination: GainNode | null, volume: number = 1): { source: AudioBufferSourceNode; gain: GainNode } | null {
+    if (!_audioContext || !destination) return null;
+    const buffer = apiBuffers.get(url);
+    if (!buffer) return null;
+    const source = _audioContext.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    const gain = _audioContext.createGain();
+    gain.gain.value = volume;
+    source.connect(gain);
+    gain.connect(destination);
+    source.start();
+    return { source, gain };
+}
+
+function apiStopLoop(loop: { source: AudioBufferSourceNode; gain: GainNode } | null): null {
+    if (loop) {
+        try { loop.source.stop(); } catch { /* already stopped */ }
+        loop.source.disconnect();
+        loop.gain.disconnect();
+    }
+    return null;
+}
+
+function apiStartAmbientSounds(): void {
+    if (!apiNatureGain) return;
+    apiWaterLoop = apiStartLoop(AUDIO_PATHS.water, apiNatureGain, WATER_VOLUME);
+    apiScheduleBreeze();
+    if (!isDayTime()) apiStartFireplace();
+    console.log('Web Audio ambient sounds started');
+}
+
+function apiScheduleBreeze(): void {
+    if (apiBreezeTimeout) clearTimeout(apiBreezeTimeout);
+    const delay = BREEZE_MIN_DELAY + Math.random() * (BREEZE_MAX_DELAY - BREEZE_MIN_DELAY);
+    apiBreezeTimeout = setTimeout(() => {
+        if (_audioContext && apiNatureGain && !isCurrentlyUnderwater && !natureMuted) {
+            const source = apiPlayOneShot(AUDIO_PATHS.breeze, apiNatureGain, BREEZE_VOLUME);
+            if (source && source.buffer) {
+                apiBreezeActive = true;
+                setTimeout(() => { apiBreezeActive = false; }, source.buffer.duration * 1000);
+            }
+        }
+        apiScheduleBreeze();
+    }, delay * 1000);
+}
+
+function apiStartFireplace(): void {
+    if (apiFireplaceActive || !apiNatureGain) return;
+    const startVol = isIOS ? FIREPLACE_VOLUME_MAX : 0;
+    apiFireplaceLoop = apiStartLoop(AUDIO_PATHS.fireplace, apiNatureGain, startVol);
+    apiFireplaceActive = true;
+    // Fade in on non-iOS
+    if (!isIOS && apiFireplaceLoop && _audioContext) {
+        apiFireplaceLoop.gain.gain.linearRampToValueAtTime(
+            FIREPLACE_VOLUME_MAX, _audioContext.currentTime + FIREPLACE_FADE_DURATION
+        );
+    }
+}
+
+function apiStopFireplace(): void {
+    if (!apiFireplaceActive) return;
+    if (apiFireplaceLoop && !isIOS && _audioContext) {
+        const { source, gain } = apiFireplaceLoop;
+        gain.gain.linearRampToValueAtTime(0, _audioContext.currentTime + 0.5);
+        setTimeout(() => {
+            try { source.stop(); } catch { /* already stopped */ }
+            source.disconnect();
+            gain.disconnect();
+        }, 600);
+    } else {
+        apiFireplaceLoop = apiStopLoop(apiFireplaceLoop);
+    }
+    apiFireplaceActive = false;
+    apiFireplaceLoop = null;
+}
+
+function apiTransitionToUnderwater(): void {
+    // Stop above-water sounds
+    apiWaterLoop = apiStopLoop(apiWaterLoop);
+    if (apiBreezeTimeout) { clearTimeout(apiBreezeTimeout); apiBreezeTimeout = null; }
+    if (apiFireplaceActive) apiStopFireplace();
+    // Start underwater sounds
+    if (apiNatureGain) {
+        apiUnderwaterAmbLoop = apiStartLoop(AUDIO_PATHS.underwaterAmb, apiNatureGain, UNDERWATER_AMB_VOLUME);
+        apiPlayOneShot(AUDIO_PATHS.underwaterBubbles, apiNatureGain, TRANSITION_SFX_VOLUME);
+    }
+}
+
+function apiTransitionToAboveWater(): void {
+    // Stop underwater sounds
+    apiUnderwaterAmbLoop = apiStopLoop(apiUnderwaterAmbLoop);
+    // Resume above-water sounds
+    if (apiNatureGain) {
+        apiWaterLoop = apiStartLoop(AUDIO_PATHS.water, apiNatureGain, WATER_VOLUME);
+        apiScheduleBreeze();
+        if (!isDayTime()) apiStartFireplace();
+    }
+}
+
+function apiCheckHealth(): void {
+    if (_audioContext && _audioContext.state === 'suspended') {
+        _audioContext.resume();
+    }
+}
 // ============================================
 
 // Pure HTML5 Audio elements - NO AudioContext connection
@@ -342,8 +517,27 @@ function setupWaterCrossfade(currentAudio: HTMLAudioElement, nextAudio: HTMLAudi
 
 function initAudio(): void {
     if (audioInitialized) return;
+    audioInitialized = true;
     
-    console.log('Initializing audio system...');
+    if (audioMode === 'api') {
+        console.log('Initializing Web Audio API engine...');
+        // Create AudioContext synchronously (must be in user gesture for iOS)
+        _audioContext = new AudioContext();
+        apiNatureGain = _audioContext.createGain();
+        apiNatureGain.connect(_audioContext.destination);
+        apiInterfaceGain = _audioContext.createGain();
+        apiInterfaceGain.connect(_audioContext.destination);
+        
+        // Load buffers async, then start ambient sounds
+        Promise.all(Object.values(AUDIO_PATHS).map(url => apiLoadBuffer(url)))
+            .then(() => apiStartAmbientSounds());
+        
+        setupVisibilityHandler();
+        console.log('Web Audio API engine initialized');
+        return;
+    }
+    
+    console.log('Initializing audio system (Audio Tag)...');
     
     if (!waterAudio1) {
         createAudioElements();
@@ -358,7 +552,6 @@ function initAudio(): void {
     
     setupVisibilityHandler();
     
-    audioInitialized = true;
     console.log('Audio system fully initialized');
 }
 
@@ -546,7 +739,12 @@ async function stopUnderwaterAmbient(): Promise<void> {
 
 // Play dive transition SFX (bubbles going down)
 export async function playDiveSound(): Promise<void> {
-    if (!underwaterBubblesAudio || !audioInitialized) return;
+    if (!audioInitialized) return;
+    if (audioMode === 'api') {
+        apiPlayOneShot(AUDIO_PATHS.underwaterBubbles, apiNatureGain, TRANSITION_SFX_VOLUME);
+        return;
+    }
+    if (!underwaterBubblesAudio) return;
     
     underwaterBubblesAudio.currentTime = 0;
     const success = await safePlay(underwaterBubblesAudio, 'dive sound');
@@ -565,7 +763,12 @@ export async function playDiveSound(): Promise<void> {
 
 // Play surface transition SFX (coming out of water)
 export function playSurfaceSound(): void {
-    if (!surfaceSplashAudio || !audioInitialized) return;
+    if (!audioInitialized) return;
+    if (audioMode === 'api') {
+        apiPlayOneShot(AUDIO_PATHS.surfaceSplash, apiNatureGain, TRANSITION_SFX_VOLUME);
+        return;
+    }
+    if (!surfaceSplashAudio) return;
     
     surfaceSplashAudio.currentTime = 0;
     // surfaceSplashAudio.play().catch(e => console.error('Failed to play surface sound:', e));
@@ -583,7 +786,12 @@ export function playSurfaceSound(): void {
 
 // Play water splash interaction sound (clicking ocean surface)
 export function playWaterSplash(): void {
-    if (!audioInitialized || !waterSplashAudio || isNatureMuted() || isCurrentlyUnderwater) return;
+    if (!audioInitialized || isNatureMuted() || isCurrentlyUnderwater) return;
+    if (audioMode === 'api') {
+        apiPlayOneShot(AUDIO_PATHS.waterSplash, apiNatureGain, WATER_SPLASH_VOLUME);
+        return;
+    }
+    if (!waterSplashAudio) return;
     
     // Restart if already playing
     waterSplashAudio.currentTime = 0;
@@ -594,6 +802,8 @@ export function playWaterSplash(): void {
 export function transitionToUnderwater(): void {
     if (!audioInitialized || isCurrentlyUnderwater) return;
     isCurrentlyUnderwater = true;
+    
+    if (audioMode === 'api') { apiTransitionToUnderwater(); return; }
     
     // Batch audio operations to minimize individual reflows
     // Use single async batch instead of sequential awaits
@@ -620,6 +830,8 @@ export function transitionToUnderwater(): void {
 export function transitionToAboveWater(): void {
     if (!audioInitialized || !isCurrentlyUnderwater) return;
     isCurrentlyUnderwater = false;
+    
+    if (audioMode === 'api') { apiTransitionToAboveWater(); return; }
     
     // Batch audio operations
     setTimeout(() => {
@@ -654,6 +866,7 @@ let musicMuted = false;
 let interfaceMuted = false;
 
 export function isBreezeActive(): boolean {
+    if (audioMode === 'api') return apiBreezeActive;
     return breezeAudio !== null && !breezeAudio.paused;
 }
 
@@ -671,6 +884,11 @@ export function isInterfaceMuted(): boolean {
 
 export function setNatureMuted(muted: boolean): void {
     natureMuted = muted;
+    
+    if (audioMode === 'api') {
+        if (apiNatureGain) apiNatureGain.gain.value = muted ? 0 : 1;
+        return;
+    }
     
     // Apply to all nature audio elements
     if (waterAudio1) waterAudio1.muted = muted;
@@ -705,6 +923,9 @@ let uiSoundBubbleExpand: HTMLAudioElement | null = null;
 let uiSoundBubbleCollapse: HTMLAudioElement | null = null;
 
 export function preloadUISounds(): void {
+    // In API mode, UI sounds are already loaded as buffers
+    if (audioMode === 'api') return;
+    
     // Day/night toggle sounds
     uiSoundSwitchDay = new Audio('/audio/ui/dragon-studio-light-switch-on-382714.mp3');
     uiSoundSwitchDay.volume = UI_SOUND_VOLUME;
@@ -732,9 +953,10 @@ export function preloadUISounds(): void {
 export function playUISwitchDay(): void {
     const now = performance.now();
     if (now - lastUISoundTime < UI_SOUND_THROTTLE) return;
-    if (interfaceMuted || !uiSoundSwitchDay) return;
-    
+    if (interfaceMuted) return;
     lastUISoundTime = now;
+    if (audioMode === 'api') { apiPlayOneShot(AUDIO_PATHS.uiSwitchDay, apiInterfaceGain, UI_SOUND_VOLUME); return; }
+    if (!uiSoundSwitchDay) return;
     if (!uiSoundSwitchDay.paused) uiSoundSwitchDay.pause();
     uiSoundSwitchDay.currentTime = 0;
     uiSoundSwitchDay.play().catch(() => {});
@@ -743,9 +965,10 @@ export function playUISwitchDay(): void {
 export function playUISwitchNight(): void {
     const now = performance.now();
     if (now - lastUISoundTime < UI_SOUND_THROTTLE) return;
-    if (interfaceMuted || !uiSoundSwitchNight) return;
-    
+    if (interfaceMuted) return;
     lastUISoundTime = now;
+    if (audioMode === 'api') { apiPlayOneShot(AUDIO_PATHS.uiSwitchNight, apiInterfaceGain, UI_SOUND_VOLUME); return; }
+    if (!uiSoundSwitchNight) return;
     if (!uiSoundSwitchNight.paused) uiSoundSwitchNight.pause();
     uiSoundSwitchNight.currentTime = 0;
     uiSoundSwitchNight.play().catch(() => {});
@@ -754,9 +977,10 @@ export function playUISwitchNight(): void {
 export function playUIButton(): void {
     const now = performance.now();
     if (now - lastUISoundTime < UI_SOUND_THROTTLE) return;
-    if (interfaceMuted || !uiSoundButton) return;
-    
+    if (interfaceMuted) return;
     lastUISoundTime = now;
+    if (audioMode === 'api') { apiPlayOneShot(AUDIO_PATHS.uiButton, apiInterfaceGain, UI_SOUND_VOLUME); return; }
+    if (!uiSoundButton) return;
     if (!uiSoundButton.paused) uiSoundButton.pause();
     uiSoundButton.currentTime = 0;
     uiSoundButton.play().catch(() => {});
@@ -765,9 +989,10 @@ export function playUIButton(): void {
 export function playUIBubbleExpand(): void {
     const now = performance.now();
     if (now - lastUISoundTime < UI_SOUND_THROTTLE) return;
-    if (interfaceMuted || !uiSoundBubbleExpand) return;
-    
+    if (interfaceMuted) return;
     lastUISoundTime = now;
+    if (audioMode === 'api') { apiPlayOneShot(AUDIO_PATHS.uiBubbleExpand, apiInterfaceGain, UI_SOUND_VOLUME); return; }
+    if (!uiSoundBubbleExpand) return;
     if (!uiSoundBubbleExpand.paused) uiSoundBubbleExpand.pause();
     uiSoundBubbleExpand.currentTime = 0;
     uiSoundBubbleExpand.play().catch(() => {});
@@ -776,9 +1001,10 @@ export function playUIBubbleExpand(): void {
 export function playUIBubbleCollapse(): void {
     const now = performance.now();
     if (now - lastUISoundTime < UI_SOUND_THROTTLE) return;
-    if (interfaceMuted || !uiSoundBubbleCollapse) return;
-    
+    if (interfaceMuted) return;
     lastUISoundTime = now;
+    if (audioMode === 'api') { apiPlayOneShot(AUDIO_PATHS.uiBubbleCollapse, apiInterfaceGain, UI_SOUND_VOLUME); return; }
+    if (!uiSoundBubbleCollapse) return;
     if (!uiSoundBubbleCollapse.paused) uiSoundBubbleCollapse.pause();
     uiSoundBubbleCollapse.currentTime = 0;
     uiSoundBubbleCollapse.play().catch(() => {});
@@ -791,6 +1017,23 @@ export function Start(): void {
 export function Update(): void {
     if (!audioInitialized) return;
     
+    const isDay = isDayTime();
+    
+    if (audioMode === 'api') {
+        // Web Audio API mode: health check + day/night transitions
+        const now = performance.now();
+        if (now - lastAudioCheck > AUDIO_CHECK_INTERVAL) {
+            lastAudioCheck = now;
+            apiCheckHealth();
+        }
+        if (!isCurrentlyUnderwater) {
+            if (wasDay && !isDay) apiStartFireplace();
+            if (!wasDay && isDay) apiStopFireplace();
+        }
+        wasDay = isDay;
+        return;
+    }
+    
     const now = performance.now();
     
     // Periodic audio health check
@@ -798,8 +1041,6 @@ export function Update(): void {
         lastAudioCheck = now;
         checkAudioHealth();
     }
-    
-    const isDay = isDayTime();
     
     // Only handle day/night transitions if we're above water
     if (!isCurrentlyUnderwater) {
