@@ -8,6 +8,7 @@ import { Vector3, PerspectiveCamera } from "three";
 import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse, getAudioMode, getAudioContext } from "./Audio";
 import { zoomToRadio, zoomOutFromRadio, getSavedCameraPosition, DEFAULT_CAMERA_X, DEFAULT_CAMERA_Z } from "./Control";
 import WaveSurfer from 'wavesurfer.js';
+import { t, onLanguageChange } from "./i18n";
 
 // ============================================
 // MEDIA SESSION API INTEGRATION
@@ -281,6 +282,11 @@ export function Start(): void {
             wavesurfer.setVolume(muted ? 0 : 0.5);
         }
     });
+
+    // Refresh dynamic text when language changes
+    onLanguageChange(() => {
+        updatePlaylistCount();
+    });
 }
 
 function createPlayerUI(): void {
@@ -293,7 +299,7 @@ function createPlayerUI(): void {
         <img class="bubble-cover" src="" alt="" />
         <div class="player-expanded-content">
             <div class="player-header-bar">
-                <button class="player-playlist-toggle" title="Show playlist">
+                <button class="player-playlist-toggle" title="${t('player.showPlaylist')}" data-i18n-title="player.showPlaylist">
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15V6"/>
                         <path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/>
@@ -302,7 +308,7 @@ function createPlayerUI(): void {
                         <path d="M12 18H3"/>
                     </svg>
                 </button>
-                <button class="player-close" title="Minimize">
+                <button class="player-close" title="${t('player.minimize')}" data-i18n-title="player.minimize">
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="4 14 10 14 10 20"/>
                         <polyline points="20 10 14 10 14 4"/>
@@ -329,12 +335,12 @@ function createPlayerUI(): void {
                 </div>
             </div>
             <div class="player-controls">
-                <button class="player-btn player-prev" title="Previous">
+                <button class="player-btn player-prev" title="${t('player.previous')}" data-i18n-title="player.previous">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
                     </svg>
                 </button>
-                <button class="player-btn player-play" title="Play">
+                <button class="player-btn player-play" title="${t('player.play')}" data-i18n-title="player.play">
                     <svg class="icon-play" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M8 5v14l11-7z"/>
                     </svg>
@@ -342,12 +348,12 @@ function createPlayerUI(): void {
                         <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
                     </svg>
                 </button>
-                <button class="player-btn player-next" title="Next">
+                <button class="player-btn player-next" title="${t('player.next')}" data-i18n-title="player.next">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
                     </svg>
                 </button>
-                <button class="player-btn player-loop" title="Loop">
+                <button class="player-btn player-loop" title="${t('player.loop')}" data-i18n-title="player.loop">
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/>
                     </svg>
@@ -355,7 +361,7 @@ function createPlayerUI(): void {
             </div>
             <div class="player-playlist">
                 <div class="playlist-header">
-                    <span class="playlist-title">Playlist</span>
+                    <span class="playlist-title" data-i18n="player.playlist">${t('player.playlist')}</span>
                     <span class="playlist-count"></span>
                 </div>
                 <div class="playlist-items"></div>
@@ -1432,7 +1438,7 @@ function updatePlaylistCount(): void {
     
     const countEl = playerContainer.querySelector('.playlist-count') as HTMLSpanElement;
     if (countEl) {
-        countEl.textContent = `${playlist.length} songs`;
+        countEl.textContent = `${playlist.length} ${t('player.songs')}`;
     }
 }
 

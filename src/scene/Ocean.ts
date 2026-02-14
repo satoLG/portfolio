@@ -102,6 +102,7 @@ function setupRippleInteraction(): void {
     
     // Touch events
     canvas.addEventListener('touchend', (event: TouchEvent) => {
+        event.preventDefault(); // Prevent synthetic click from firing
         if (event.changedTouches.length > 0) {
             const touch = event.changedTouches[0];
             onInteraction(touch.clientX, touch.clientY);
