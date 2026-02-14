@@ -13,7 +13,7 @@ import { playDiveSound } from "../scripts/Audio";
 // ============================================
 // BUBBLE SETTINGS (tweak these!)
 // ============================================
-export const BUBBLE_COUNT = 50;           // Max bubbles at once
+export const BUBBLE_COUNT = 200;           // Max bubbles at once
 export const BUBBLE_SIZE_MIN = 0.005;     // Minimum bubble radius
 export const BUBBLE_SIZE_MAX = 0.015;     // Maximum bubble radius
 export const BUBBLE_RISE_SPEED = 0.3;     // How fast bubbles rise
@@ -21,13 +21,13 @@ export const BUBBLE_WOBBLE = 0.08;        // Horizontal wobble amount
 export const BUBBLE_LIFETIME = 2.5;       // Seconds before fade
 export const BUBBLE_SPAWN_RATE = 0.02;    // Seconds between spawns
 export const BUBBLE_SPAWN_DISTANCE = 0.8; // Distance from camera to spawn
-export const BUBBLE_SPREAD = 0.05;        // Random spread at spawn
+export const BUBBLE_SPREAD = 0.25;        // Random spread at spawn
 
 // Ambient underwater bubble settings
-export const AMBIENT_BUBBLE_INTERVAL = 2.0;   // Seconds between ambient bubble groups
-export const AMBIENT_BUBBLE_GROUP_SIZE = 12;   // Bubbles per ambient group (2-3)
+export const AMBIENT_BUBBLE_INTERVAL = 1.4;   // Seconds between ambient bubble groups
+export const AMBIENT_BUBBLE_GROUP_SIZE = 6;    // Bubbles per ambient group
 export const AMBIENT_SOUND_INTERVAL = 10.0;   // Seconds between bubble sounds
-export const ENTRY_BUBBLE_COUNT = 35;          // Bubbles to spawn when entering water
+export const ENTRY_BUBBLE_COUNT = 60;          // Bubbles to spawn when entering water
 // ============================================
 
 interface Bubble {
@@ -178,11 +178,10 @@ function spawnAmbientBubbleGroup(): void {
     const ndcX = (Math.random() - 0.5) * 1.4;
     const ndcY = (Math.random() - 0.5) * 1.4;
     
-    // Spawn 2-3 bubbles close together
-    const groupSize = 2 + Math.floor(Math.random() * 2); // 2 or 3
-    for (let i = 0; i < groupSize; i++) {
-        const offsetX = ndcX + (Math.random() - 0.5) * 0.15;
-        const offsetY = ndcY + (Math.random() - 0.5) * 0.15;
+    // Spawn bubbles close together using the constant
+    for (let i = 0; i < AMBIENT_BUBBLE_GROUP_SIZE; i++) {
+        const offsetX = ndcX + (Math.random() - 0.5) * 0.2;
+        const offsetY = ndcY + (Math.random() - 0.5) * 0.2;
         const pos = getSpawnPositionAtNDC(offsetX, offsetY);
         
         if (pos.y < UNDERWATER_Y_THRESHOLD) {

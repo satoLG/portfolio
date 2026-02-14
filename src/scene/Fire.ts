@@ -5,6 +5,7 @@ import {
     ShaderMaterial, 
     DoubleSide, 
     AdditiveBlending,
+    NormalBlending,
     PointLight,
     BufferGeometry,
     Float32BufferAttribute,
@@ -37,6 +38,19 @@ const EMBER_COUNT = 15;
 const EMBER_SPEED = 0.4;
 const EMBER_SIZE = 0.02;
 const EMBER_LIFETIME = 2.5;
+
+// ============================================
+// SMOKE SETTINGS
+// ============================================
+const SMOKE_PARTICLE_COUNT = 10;
+const SMOKE_RISE_SPEED = 0.12;
+const SMOKE_PARTICLE_SIZE = 0.035;
+const SMOKE_PARTICLE_LIFETIME = 3.0;
+const SMOKE_PARTICLE_SPREAD = 0.04;
+const SMOKE_DURATION = 3.5;          // Seconds of smoke before auto-fade starts
+const SMOKE_AUTO_FADE_SPEED = 0.6;   // How fast smoke fades after duration
+const SMOKE_APPEAR_SPEED = 3.0;      // How fast smoke appears when fire dies
+const SMOKE_DISMISS_SPEED = 2.5;     // How fast smoke disappears when fire relights
 
 let fireIntensity = 1.0;
 let targetIntensity = 1.0;
@@ -199,6 +213,178 @@ const emberUniforms = {
     uEmberSize: { value: EMBER_SIZE }
 };
 
+// ============================================
+// SMOKE COLUMN SHADER (billboard planes like fire)
+// ============================================
+const smokeColumnVertexShader = /*glsl*/`
+    varying vec2 vUv;
+    
+    void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+
+const smokeColumnFragmentShader = /*glsl*/`
+    uniform float uTime;
+    uniform float uIntensity;
+    uniform float uGrowth;
+    
+    varying vec2 vUv;
+    
+    vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+    vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+    vec3 permute(vec3 x) { return mod289(((x * 34.0) + 1.0) * x); }
+    
+    float snoise(vec2 v) {
+        const vec4 C = vec4(0.211324865405187, 0.366025403784439,
+                           -0.577350269189626, 0.024390243902439);
+        vec2 i  = floor(v + dot(v, C.yy));
+        vec2 x0 = v - i + dot(i, C.xx);
+        vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+        vec4 x12 = x0.xyxy + C.xxzz;
+        x12.xy -= i1;
+        i = mod289(i);
+        vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+        vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy), dot(x12.zw, x12.zw)), 0.0);
+        m = m * m * m * m;
+        vec3 x2 = 2.0 * fract(p * C.www) - 1.0;
+        vec3 h = abs(x2) - 0.5;
+        vec3 ox = floor(x2 + 0.5);
+        vec3 a0 = x2 - ox;
+        m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);
+        vec3 g;
+        g.x = a0.x * x0.x + h.x * x0.y;
+        g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+        return 130.0 * dot(m, g);
+    }
+    
+    float fbm(vec2 p) {
+        float value = 0.0;
+        float amp = 0.5;
+        float freq = 1.0;
+        for (int i = 0; i < 3; i++) {
+            value += amp * snoise(p * freq);
+            amp *= 0.5;
+            freq *= 2.0;
+        }
+        return value;
+    }
+    
+    void main() {
+        vec2 uv = vUv;
+        float cx = uv.x * 2.0 - 1.0; // center X: -1 to 1
+        
+        // Growth mask: column grows from bottom up
+        // uGrowth 0..1 maps to how much of the column is visible
+        float growCutoff = uGrowth;  // top edge of visible region
+        float growFade = smoothstep(growCutoff, growCutoff - 0.15, uv.y);
+        if (growFade <= 0.0) discard;
+        
+        // Thin column shape: narrower than fire, widens slightly towards top
+        float width = 0.3 + uv.y * 0.25;
+        float shape = 1.0 - abs(cx) / width;
+        shape = max(shape, 0.0);
+        shape = smoothstep(0.0, 0.6, shape);
+        
+        // Fade at bottom and at the growing top edge
+        shape *= smoothstep(0.0, 0.12, uv.y);
+        shape *= growFade;
+        
+        // Wispy noise that scrolls upward
+        float n1 = fbm(vec2(cx * 4.0, uv.y * 3.0 - uTime * 1.2));
+        float n2 = fbm(vec2(cx * 6.0 + 5.0, uv.y * 4.0 - uTime * 1.8));
+        float noise = n1 * 0.6 + n2 * 0.4;
+        
+        // Break up the column with noise for wispy look
+        float smoke = shape * (0.5 + noise * 0.5);
+        smoke = smoothstep(0.05, 0.5, smoke);
+        
+        // Dark gray color
+        vec3 color = vec3(0.12, 0.11, 0.10);
+        
+        float alpha = smoke * uIntensity * 0.35;
+        
+        gl_FragColor = vec4(color, alpha);
+    }
+`;
+
+const smokeColumnUniforms = {
+    uTime: { value: 0.0 },
+    uIntensity: { value: 0.0 },
+    uGrowth: { value: 0.0 }    // 0 = nothing visible, 1 = full column
+};
+
+// Smoke accent particles (small wisps)
+const smokeParticleVertexShader = /*glsl*/`
+    attribute float aLife;
+    attribute float aRandom;
+    
+    uniform float uSmokeSize;
+    uniform float uSmokeIntensity;
+    
+    varying float vLife;
+    varying float vRandom;
+    
+    void main() {
+        vLife = aLife;
+        vRandom = aRandom;
+        
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        
+        float age = 1.0 - aLife;
+        float size = uSmokeSize * (0.5 + age * 1.2) * uSmokeIntensity;
+        
+        gl_PointSize = size * (300.0 / -mvPosition.z);
+        gl_Position = projectionMatrix * mvPosition;
+    }
+`;
+
+const smokeParticleFragmentShader = /*glsl*/`
+    uniform float uSmokeIntensity;
+    
+    varying float vLife;
+    varying float vRandom;
+    
+    void main() {
+        vec2 center = gl_PointCoord - 0.5;
+        float dist = length(center);
+        if (dist > 0.5) discard;
+        
+        float alpha = smoothstep(0.5, 0.1, dist);
+        float ageFade = smoothstep(0.0, 0.2, 1.0 - vLife) * smoothstep(0.0, 0.35, vLife);
+        alpha *= ageFade * uSmokeIntensity;
+        
+        float shade = 0.13 + vRandom * 0.08;
+        vec3 color = vec3(shade, shade, shade);
+        
+        alpha = min(alpha, 0.2);
+        
+        gl_FragColor = vec4(color, alpha);
+    }
+`;
+
+const smokeParticleUniforms = {
+    uSmokeSize: { value: SMOKE_PARTICLE_SIZE },
+    uSmokeIntensity: { value: 0.0 }
+};
+
+let smokePositions: Float32Array;
+let smokeLifes: Float32Array;
+let smokeRandoms: Float32Array;
+let smokeVelocities: Array<{ x: number; y: number; z: number }>;
+let smokeGeometry: BufferGeometry;
+let smokeParticlePoints: Points;
+
+let smokeColumnPlanes: Mesh[] = [];
+let smokeIntensity = 0.0;
+let smokeGrowth = 0.0;         // 0 = column hidden, 1 = fully grown
+let smokeActive = false;       // Whether smoke effect is currently running
+let smokeTimer = 0.0;          // How long smoke has been active
+let fireWasActive = false;
+const SMOKE_GROW_SPEED = 0.7;  // How fast the column grows upward
+const SMOKE_SHRINK_SPEED = 0.5; // How fast the column shrinks when disappearing
+
 let emberPositions: Float32Array;
 let emberLifes: Float32Array;
 let emberRandoms: Float32Array;
@@ -292,6 +478,134 @@ function updateEmbers(): void {
     lifeAttr.needsUpdate = true;
 }
 
+// ============================================
+// SMOKE COLUMN + PARTICLE SYSTEM
+// ============================================
+function createSmokeColumnPlane(): Mesh {
+    // Taller and narrower than fire planes
+    const geometry = new PlaneGeometry(0.6, 2.0, 1, 1);
+    const material = new ShaderMaterial({
+        uniforms: smokeColumnUniforms,
+        vertexShader: smokeColumnVertexShader,
+        fragmentShader: smokeColumnFragmentShader,
+        transparent: true,
+        blending: NormalBlending,
+        side: DoubleSide,
+        depthWrite: false
+    });
+    return new Mesh(geometry, material);
+}
+
+// @ts-ignore: smoke disabled temporarily
+function _initSmokeColumn(): Mesh[] {
+    const p1 = createSmokeColumnPlane();
+    const p2 = createSmokeColumnPlane();
+    const p3 = createSmokeColumnPlane();
+    
+    p1.rotation.y = 0;
+    p2.rotation.y = Math.PI / 3;
+    p3.rotation.y = -Math.PI / 3;
+    
+    // Offset up so smoke starts above fire base
+    p1.position.y = 0.4;
+    p2.position.y = 0.4;
+    p3.position.y = 0.4;
+    
+    smokeColumnPlanes = [p1, p2, p3];
+    return smokeColumnPlanes;
+}
+
+// @ts-ignore: smoke disabled temporarily
+function _initSmokeParticles(): Points {
+    smokePositions = new Float32Array(SMOKE_PARTICLE_COUNT * 3);
+    smokeLifes = new Float32Array(SMOKE_PARTICLE_COUNT);
+    smokeRandoms = new Float32Array(SMOKE_PARTICLE_COUNT);
+    smokeVelocities = [];
+    
+    for (let i = 0; i < SMOKE_PARTICLE_COUNT; i++) {
+        smokeVelocities[i] = { x: 0, y: 0, z: 0 };
+        resetSmokeParticle(i);
+        smokeLifes[i] = Math.random();
+    }
+    
+    smokeGeometry = new BufferGeometry();
+    smokeGeometry.setAttribute('position', new Float32BufferAttribute(smokePositions, 3));
+    smokeGeometry.setAttribute('aLife', new Float32BufferAttribute(smokeLifes, 1));
+    smokeGeometry.setAttribute('aRandom', new Float32BufferAttribute(smokeRandoms, 1));
+    
+    const material = new ShaderMaterial({
+        uniforms: smokeParticleUniforms,
+        vertexShader: smokeParticleVertexShader,
+        fragmentShader: smokeParticleFragmentShader,
+        transparent: true,
+        blending: NormalBlending,
+        depthWrite: false
+    });
+    
+    smokeParticlePoints = new Points(smokeGeometry, material);
+    return smokeParticlePoints;
+}
+
+function resetSmokeParticle(index: number): void {
+    const i3 = index * 3;
+    
+    smokePositions[i3] = (Math.random() - 0.5) * SMOKE_PARTICLE_SPREAD;
+    smokePositions[i3 + 1] = 0.1 + Math.random() * 0.15;
+    smokePositions[i3 + 2] = (Math.random() - 0.5) * SMOKE_PARTICLE_SPREAD;
+    
+    smokeLifes[index] = 1.0;
+    smokeRandoms[index] = Math.random();
+    
+    const speedVar = 0.7 + Math.random() * 0.6;
+    smokeVelocities[index] = {
+        x: (Math.random() - 0.5) * 0.025,
+        y: SMOKE_RISE_SPEED * speedVar,
+        z: (Math.random() - 0.5) * 0.025
+    };
+}
+
+// @ts-ignore: smoke disabled temporarily
+function _updateSmokeParticles(): void {
+    const posAttr = smokeGeometry.attributes.position;
+    const lifeAttr = smokeGeometry.attributes.aLife;
+    
+    for (let i = 0; i < SMOKE_PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const vel = smokeVelocities[i];
+        
+        smokePositions[i3] += vel.x * deltaTime;
+        smokePositions[i3 + 1] += vel.y * deltaTime;
+        smokePositions[i3 + 2] += vel.z * deltaTime;
+        
+        smokePositions[i3] += Math.sin(time * 1.5 + i * 3.1) * 0.0015 * deltaTime * 60;
+        smokePositions[i3 + 2] += Math.cos(time * 1.2 + i * 2.3) * 0.0015 * deltaTime * 60;
+        
+        vel.x *= 1.0 + 0.2 * deltaTime;
+        vel.z *= 1.0 + 0.2 * deltaTime;
+        vel.y *= 1.0 - 0.15 * deltaTime;
+        
+        smokeLifes[i] -= deltaTime / SMOKE_PARTICLE_LIFETIME;
+        
+        (posAttr.array as Float32Array)[i3] = smokePositions[i3];
+        (posAttr.array as Float32Array)[i3 + 1] = smokePositions[i3 + 1];
+        (posAttr.array as Float32Array)[i3 + 2] = smokePositions[i3 + 2];
+        (lifeAttr.array as Float32Array)[i] = smokeLifes[i];
+        
+        if (smokeLifes[i] <= 0) {
+            if (smokeActive && smokeTimer < SMOKE_DURATION) {
+                resetSmokeParticle(i);
+                (posAttr.array as Float32Array)[i3] = smokePositions[i3];
+                (posAttr.array as Float32Array)[i3 + 1] = smokePositions[i3 + 1];
+                (posAttr.array as Float32Array)[i3 + 2] = smokePositions[i3 + 2];
+                (lifeAttr.array as Float32Array)[i] = smokeLifes[i];
+            }
+        }
+    }
+    
+    posAttr.needsUpdate = true;
+    lifeAttr.needsUpdate = true;
+}
+
 function createFirePlane(): Mesh {
     const geometry = new PlaneGeometry(1, 1.5, 1, 1);
     const material = new ShaderMaterial({
@@ -324,17 +638,43 @@ export function Start(): void {
     const embers = initEmbers();
     fire.add(embers);
     
+    // // Smoke column (billboard planes) — disabled for now
+    // const smokePlanes = initSmokeColumn();
+    // for (const p of smokePlanes) fire.add(p);
+    // 
+    // // Smoke accent particles
+    // const smokeParticles = initSmokeParticles();
+    // fire.add(smokeParticles);
+    
     fireLight.position.copy(fire.position);
     fireLight.position.y += 0.05;  // TWEAK: Height offset above firecamp
     fire.add(fireLight);
     
     fireIntensity = 0.0;
     targetIntensity = isDayTime() ? 0.0 : 1.0;
+    fireWasActive = !isDayTime();
 }
 
 export function Update(): void {
-    targetIntensity = isDayTime() ? 0.0 : 1.0;
+    const isDay = isDayTime();
+    targetIntensity = isDay ? 0.0 : 1.0;
     
+    // Detect fire going out: was active (night) and now switching to day
+    if (isDay && fireWasActive) {
+        smokeActive = true;
+        smokeTimer = 0.0;
+        fireWasActive = false;
+    }
+    // Detect fire coming back: switching to night → dismiss smoke quickly
+    if (!isDay) {
+        if (smokeActive) {
+            // Force timer past duration so it fades out fast
+            smokeTimer = Math.max(smokeTimer, SMOKE_DURATION);
+        }
+        fireWasActive = true;
+    }
+    
+    // Fade fire intensity
     if (fireIntensity !== targetIntensity) {
         const diff = targetIntensity - fireIntensity;
         const step = FADE_SPEED * deltaTime;
@@ -343,6 +683,28 @@ export function Update(): void {
             fireIntensity = targetIntensity;
         } else {
             fireIntensity += Math.sign(diff) * step;
+        }
+    }
+    
+    // Smoke lifecycle with auto-fade
+    if (smokeActive) {
+        smokeTimer += deltaTime;
+        
+        if (smokeTimer < SMOKE_DURATION) {
+            // Phase 1: Smoke rising — grow from bottom up + fade in
+            smokeIntensity = Math.min(smokeIntensity + SMOKE_APPEAR_SPEED * deltaTime, 1.0);
+            smokeGrowth = Math.min(smokeGrowth + SMOKE_GROW_SPEED * deltaTime, 1.0);
+        } else {
+            // Phase 2: Auto-fade out — shrink from top down + fade opacity
+            const fadeSpeed = !isDay ? SMOKE_DISMISS_SPEED : SMOKE_AUTO_FADE_SPEED;
+            smokeIntensity = Math.max(smokeIntensity - fadeSpeed * deltaTime, 0.0);
+            smokeGrowth = Math.max(smokeGrowth - SMOKE_SHRINK_SPEED * deltaTime, 0.0);
+            
+            if (smokeIntensity <= 0 && smokeGrowth <= 0) {
+                smokeActive = false;
+                smokeIntensity = 0.0;
+                smokeGrowth = 0.0;
+            }
         }
     }
     
@@ -355,13 +717,27 @@ export function Update(): void {
         updateEmbers();
     }
     
+    // // Update smoke column + particles — disabled for now
+    // smokeColumnUniforms.uTime.value = time;
+    // smokeColumnUniforms.uIntensity.value = smokeIntensity;
+    // smokeColumnUniforms.uGrowth.value = smokeGrowth;
+    // smokeParticleUniforms.uSmokeIntensity.value = smokeIntensity;
+    // 
+    // const smokeVisible = smokeIntensity > 0.001;
+    // for (const p of smokeColumnPlanes) p.visible = smokeVisible;
+    // smokeParticlePoints.visible = smokeVisible;
+    // 
+    // if (smokeIntensity > 0.01) {
+    //     updateSmokeParticles();
+    // }
+    
     const flicker = 1.0 + (Math.sin(time * 15.0) * 0.3 + Math.sin(time * 23.0) * 0.2) * FIRE_LIGHT_FLICKER;
     fireLight.intensity = fireIntensity * FIRE_LIGHT_INTENSITY * flicker;
     
     const colorFlicker = 0.9 + Math.sin(time * 10.0) * 0.1;
     fireLight.color.setRGB(1.0, 0.4 * colorFlicker, 0.1 * colorFlicker);
     
-    fire.visible = fireIntensity > 0.001;
+    fire.visible = fireIntensity > 0.001; // || smokeVisible;
 }
 
 export function getFireLightData(): { position: Vector3; color: typeof fireLight.color; intensity: number } {

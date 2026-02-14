@@ -907,7 +907,7 @@ body.underwater .media-player.bubble.underwater-position {
 /* Water fill container */
 #start-button .water-fill {
     position: absolute;
-    bottom: 0;
+    bottom: -4px;
     left: 0;
     width: 100%;
     height: var(--fill-level);
@@ -1033,6 +1033,18 @@ body.night-mode #start-button {
     color: var(--text-color-night);
 }
 
+body.night-mode #start-button .water-fill {
+    background: rgba(30, 100, 180, 1);
+}
+
+body.night-mode #start-button .wave1 {
+    fill: rgba(30, 100, 180, 1);
+}
+
+body.night-mode #start-button .wave2 {
+    fill: rgba(30, 100, 180, 1);
+}
+
 /* ============================================
    DAY/NIGHT COLOR SCHEME
    ============================================ */
@@ -1123,7 +1135,7 @@ body.night-mode #start-button {
     top: 0;
     left: 0;
     right: 0;
-    z-index: 10;
+    z-index: 30;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1634,6 +1646,118 @@ body.day-mode .settings-slider-value {
 }
 
 /* ============================================
+   LANGUAGE OPTIONS
+   ============================================ */
+.language-options {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    padding: 4px 0;
+}
+
+.language-option {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 8px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+body.day-mode .language-option {
+    background: rgba(10, 37, 64, 0.04);
+    border-color: rgba(10, 37, 64, 0.1);
+}
+
+.language-option:hover {
+    background: rgba(0, 0, 0, 0.3);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+body.day-mode .language-option:hover {
+    background: rgba(10, 37, 64, 0.08);
+    border-color: rgba(10, 37, 64, 0.15);
+}
+
+.language-option span {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.7);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+body.day-mode .language-option span {
+    color: rgba(10, 37, 64, 0.6);
+}
+
+/* Flag wrapper and columns */
+.flag-wrapper {
+    display: flex;
+    width: 48px;
+    height: 30px;
+    border-radius: 2px;
+}
+
+.flag-column {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    transform-origin: center;
+}
+
+/* Inactive state - make columns transparent and desaturated */
+.language-option .flag-column {
+    opacity: 0.4;
+    filter: grayscale(0.6) brightness(0.8);
+    transition: opacity 0.3s ease, filter 0.3s ease;
+}
+
+/* Active state */
+.language-option.active {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+body.day-mode .language-option.active {
+    background: rgba(10, 37, 64, 0.12);
+    border-color: rgba(10, 37, 64, 0.25);
+}
+
+.language-option.active span {
+    color: rgba(255, 255, 255, 0.95);
+}
+
+body.day-mode .language-option.active span {
+    color: rgba(10, 37, 64, 0.9);
+}
+
+/* Flag animation when active */
+.language-option.active .flag-column {
+    opacity: 1;
+    filter: grayscale(0) brightness(1);
+    animation: flag-billow 600ms ease-in-out infinite;
+    animation-delay: calc(-1 * var(--delay));
+}
+
+/* Waving flag animation - billowing effect */
+@keyframes flag-billow {
+    0%, 100% {
+        transform: scaleY(1);
+    }
+    50% {
+        transform: scaleY(0.94);
+    }
+}
+
+/* ============================================
    WAVEFORM ANALYSER (API mode)
    ============================================ */
 .waveform-analyser {
@@ -2115,117 +2239,4 @@ a:visited
 {
     color: #03c;
     text-decoration: none;
-}
-
-/* ============================================
-   DIVE/SURFACE BUTTON
-   ============================================ */
-.dive-button {
-    position: fixed;
-    right: 20px;
-    bottom: 24px;
-    transform: scale(0);
-    z-index: 15;
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.15);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: none;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-    color: var(--text-color-night);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: 
-        background 0.4s ease,
-        box-shadow 0.3s ease,
-        color var(--transition-duration) ease,
-        opacity 0.3s ease;
-    opacity: 0;
-    pointer-events: none;
-    will-change: transform, opacity;
-}
-
-/* Show button with bouncy pop-in after dive-visible class added */
-body.dive-visible .dive-button {
-    animation: bouncy-pop-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-    pointer-events: auto;
-}
-
-/* Day mode button */
-body.day-mode .dive-button {
-    color: var(--text-color-day);
-    background: rgba(10, 37, 64, 0.1);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-}
-
-/* Night mode button */
-body.night-mode .dive-button {
-    color: var(--text-color-night);
-    background: rgba(255, 255, 255, 0.15);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-}
-
-.dive-button:hover {
-    transform: scale(1.1) !important;
-    background: rgba(255, 255, 255, 0.25);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
-}
-
-body.day-mode .dive-button:hover {
-    background: rgba(10, 37, 64, 0.2);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
-}
-
-.dive-button:active {
-    transform: scale(0.95) !important;
-}
-
-/* Icon sizing */
-.dive-button svg {
-    width: 28px;
-    height: 28px;
-}
-
-/* Show dive icon, hide surface icon by default */
-.dive-button .dive-icon {
-    display: block;
-}
-
-.dive-button .surface-icon {
-    display: none;
-}
-
-/* When underwater: switch icons only, keep position */
-.dive-button.is-underwater .dive-icon {
-    display: none;
-}
-
-.dive-button.is-underwater .surface-icon {
-    display: block;
-}
-
-/* Underwater mode - day: use dark blue colors */
-body.underwater.day-mode .dive-button {
-    border-color: var(--text-color-day);
-    color: var(--text-color-day);
-    background: rgba(10, 37, 64, 0.2);
-}
-
-body.underwater.day-mode .dive-button:hover {
-    background: rgba(10, 37, 64, 0.35);
-}
-
-/* Underwater mode - night: use white colors */
-body.underwater.night-mode .dive-button {
-    border-color: rgba(255, 255, 255, 0.8);
-    color: rgba(255, 255, 255, 0.9);
-    background: rgba(30, 80, 120, 0.3);
-}
-
-body.underwater.night-mode .dive-button:hover {
-    background: rgba(30, 80, 120, 0.5);
 }

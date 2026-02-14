@@ -589,7 +589,11 @@ function startWaterSound(): void {
 function scheduleBreezeSound(): void {
     if (breezeTimeout) {
         clearTimeout(breezeTimeout);
+        breezeTimeout = null;
     }
+    
+    // Don't schedule breeze while underwater
+    if (isCurrentlyUnderwater) return;
     
     const delay = BREEZE_MIN_DELAY + Math.random() * (BREEZE_MAX_DELAY - BREEZE_MIN_DELAY);
     
@@ -599,13 +603,13 @@ function scheduleBreezeSound(): void {
 }
 
 function playBreezeSound(): void {
-    if (!breezeAudio) return;
+    if (!breezeAudio || isCurrentlyUnderwater) return;
     
     breezeAudio.currentTime = 0;
     safePlay(breezeAudio, 'breeze sound').then((success) => {
         if (success) console.log('Breeze sound playing');
-        // Schedule next breeze regardless of success
-        scheduleBreezeSound();
+        // Schedule next breeze regardless of success (only if still above water)
+        if (!isCurrentlyUnderwater) scheduleBreezeSound();
     });
 }
 
@@ -739,7 +743,7 @@ async function stopUnderwaterAmbient(): Promise<void> {
 
 // Play dive transition SFX (bubbles going down)
 export async function playDiveSound(): Promise<void> {
-    if (!audioInitialized) return;
+    if (!audioInitialized || !isCurrentlyUnderwater) return;
     if (audioMode === 'api') {
         apiPlayOneShot(AUDIO_PATHS.underwaterBubbles, apiNatureGain, TRANSITION_SFX_VOLUME);
         return;
@@ -805,6 +809,12 @@ export function transitionToUnderwater(): void {
     
     if (audioMode === 'api') { apiTransitionToUnderwater(); return; }
     
+    // Clear breeze timeout so no scheduled breeze fires while underwater
+    if (breezeTimeout) {
+        clearTimeout(breezeTimeout);
+        breezeTimeout = null;
+    }
+    
     // Batch audio operations to minimize individual reflows
     // Use single async batch instead of sequential awaits
     setTimeout(() => {
@@ -846,14 +856,20 @@ export function transitionToAboveWater(): void {
         }
         
         // Resume above water sounds
-        if (waterAudio1 && waterAudio1.paused && !isNatureMuted()) {
-            waterAudio1.play().catch(() => {});
+        if (activeWaterAudio && activeWaterAudio.paused && !isNatureMuted()) {
+            activeWaterAudio.currentTime = 0;
+            activeWaterAudio.volume = WATER_VOLUME;
+            activeWaterAudio.play().catch(() => {});
         }
-        if (waterAudio2 && waterAudio2.paused && !isNatureMuted()) {
-            waterAudio2.play().catch(() => {});
+        
+        // Re-schedule breeze (don't resume mid-clip)
+        if (!isNatureMuted()) {
+            scheduleBreezeSound();
         }
-        if (breezeAudio && breezeAudio.paused && !isNatureMuted()) {
-            breezeAudio.play().catch(() => {});
+        
+        // Resume fireplace at night
+        if (!isDayTime() && fireplaceAudio && !fireplaceActive) {
+            startFireplaceSound();
         }
     }, 0);
 }

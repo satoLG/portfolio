@@ -1,13 +1,11 @@
 import { body, antialias, shadowsEnabled, pixelSizeValue, SetPixelSize, setShadowsEnabled } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
-import { startAudio, playDiveSound, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, preloadUISounds, playUISwitchDay, playUISwitchNight } from "./Audio";
-import { getIsUnderwater, diveUnderwater, surfaceAboveWater, getCameraY, setIntroProgress, enableScroll, isRadioZoomActive } from "./Control";
+import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, preloadUISounds, playUISwitchDay, playUISwitchNight } from "./Audio";
+import { getCameraY, setIntroProgress, enableScroll } from "./Control";
 import { setLoadingCallback } from "../scene/Island";
+import { t, setLanguage, type Language } from "./i18n";
 
 const THEME_STORAGE_KEY = 'portfolio-theme-mode';
-
-// Dive/Surface button reference
-let diveButton: HTMLButtonElement | null = null;
 
 // Track previous camera Y for detecting surface crossing
 let previousCameraY = 1;
@@ -209,7 +207,8 @@ export function Start(): void {
     // Theme toggle (sun/moon)
     const themeToggle = document.createElement("label");
     themeToggle.className = "theme-toggle";
-    themeToggle.title = "Toggle theme";
+    themeToggle.title = t('tooltip.toggleTheme');
+    themeToggle.setAttribute('data-i18n-title', 'tooltip.toggleTheme');
     themeToggle.innerHTML = `
         <input type="checkbox" />
         <span class="theme-toggle-sr">Toggle theme</span>
@@ -264,7 +263,8 @@ export function Start(): void {
     
     const settingsButton = document.createElement("button");
     settingsButton.className = "settings-button";
-    settingsButton.title = "Settings";
+    settingsButton.title = t('tooltip.settings');
+    settingsButton.setAttribute('data-i18n-title', 'tooltip.settings');
     settingsButton.innerHTML = `
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
@@ -289,80 +289,121 @@ export function Start(): void {
     const curShadows = shadowsEnabled;
     const curPixel = pixelSizeValue;
     const curPreset = (curAA && curShadows) ? 'high' : (!curAA && !curShadows) ? 'low' : 'custom';
+    const currentLanguage = localStorage.getItem('portfolio-language') || 'en-us';
+    
+    // Restore tab states from localStorage
+    const savedTabStates = localStorage.getItem('portfolio-settings-tabs');
+    const tabStates = savedTabStates ? JSON.parse(savedTabStates) : { audio: false, graphics: false, misc: false, language: false };
     
     settingsPanel.innerHTML = `
-        <div class="settings-tab open">
+        <div class="settings-tab${tabStates.audio ? ' open' : ''}" data-tab="audio">
             <button class="settings-tab-header">
-                <span>Audio</span>
+                <span data-i18n="tab.audio">${t('tab.audio')}</span>
                 ${tabArrowSvg}
             </button>
             <div class="settings-tab-content">
                 <div class="settings-row" style="padding-bottom:2px">
-                    <span class="settings-label">Audio Mode</span>
+                    <span class="settings-label" data-i18n="settings.audioMode">${t('settings.audioMode')}</span>
                 </div>
                 <div class="settings-row" style="padding-top:2px">
                     <div class="settings-mode-switch audio-mode-switch">
-                        <button class="mode-option${currentAudioMode === 'api' ? ' active' : ''}" data-value="api">Web Audio API</button>
-                        <button class="mode-option${currentAudioMode === 'tag' ? ' active' : ''}" data-value="tag">Audio Tag</button>
+                        <button class="mode-option${currentAudioMode === 'api' ? ' active' : ''}" data-value="api" data-i18n="settings.webAudioApi">${t('settings.webAudioApi')}</button>
+                        <button class="mode-option${currentAudioMode === 'tag' ? ' active' : ''}" data-value="tag" data-i18n="settings.audioTag">${t('settings.audioTag')}</button>
                     </div>
                 </div>
                 <div class="settings-row">
-                    <span class="settings-label">Nature</span>
+                    <span class="settings-label" data-i18n="settings.nature">${t('settings.nature')}</span>
                     <button class="settings-toggle nature-toggle" data-active="true">${volumeOnSvg}${volumeOffSvg}</button>
                 </div>
                 <div class="settings-row">
-                    <span class="settings-label">Music</span>
+                    <span class="settings-label" data-i18n="settings.music">${t('settings.music')}</span>
                     <button class="settings-toggle music-toggle" data-active="true">${volumeOnSvg}${volumeOffSvg}</button>
                 </div>
                 <div class="settings-row">
-                    <span class="settings-label">Interface</span>
+                    <span class="settings-label" data-i18n="settings.interface">${t('settings.interface')}</span>
                     <button class="settings-toggle interface-toggle" data-active="true">${volumeOnSvg}${volumeOffSvg}</button>
                 </div>
             </div>
         </div>
-        <div class="settings-tab">
+        <div class="settings-tab${tabStates.graphics ? ' open' : ''}" data-tab="graphics">
             <button class="settings-tab-header">
-                <span>Graphics</span>
+                <span data-i18n="tab.graphics">${t('tab.graphics')}</span>
                 ${tabArrowSvg}
             </button>
             <div class="settings-tab-content">
                 <div class="settings-row" style="padding-bottom:2px">
-                    <span class="settings-label">Preset</span>
+                    <span class="settings-label" data-i18n="settings.preset">${t('settings.preset')}</span>
                 </div>
                 <div class="settings-row" style="padding-top:2px">
                     <div class="settings-mode-switch preset-switch">
-                        <button class="mode-option${curPreset === 'low' ? ' active' : ''}" data-value="low">Low</button>
-                        <button class="mode-option${curPreset === 'custom' ? ' active' : ''}" data-value="custom">Custom</button>
-                        <button class="mode-option${curPreset === 'high' ? ' active' : ''}" data-value="high">High</button>
+                        <button class="mode-option${curPreset === 'low' ? ' active' : ''}" data-value="low" data-i18n="settings.low">${t('settings.low')}</button>
+                        <button class="mode-option${curPreset === 'custom' ? ' active' : ''}" data-value="custom" data-i18n="settings.custom">${t('settings.custom')}</button>
+                        <button class="mode-option${curPreset === 'high' ? ' active' : ''}" data-value="high" data-i18n="settings.high">${t('settings.high')}</button>
                     </div>
                 </div>
                 <div class="settings-row">
-                    <span class="settings-label">Antialias</span>
+                    <span class="settings-label" data-i18n="settings.antialias">${t('settings.antialias')}</span>
                     <button class="settings-toggle antialias-toggle" data-active="${curAA}">${toggleOnSvg}${toggleOffSvg}</button>
                 </div>
                 <div class="settings-row">
-                    <span class="settings-label">Shadows</span>
+                    <span class="settings-label" data-i18n="settings.shadows">${t('settings.shadows')}</span>
                     <button class="settings-toggle shadows-toggle" data-active="${curShadows}">${toggleOnSvg}${toggleOffSvg}</button>
                 </div>
             </div>
         </div>
-        <div class="settings-tab">
+        <div class="settings-tab${tabStates.misc ? ' open' : ''}" data-tab="misc">
             <button class="settings-tab-header">
-                <span>Misc</span>
+                <span data-i18n="tab.misc">${t('tab.misc')}</span>
                 ${tabArrowSvg}
             </button>
             <div class="settings-tab-content">
-                <div class="settings-row settings-slider-row">
-                    <span class="settings-label">Pixel Size</span>
-                    <div class="settings-slider-container">
-                        <div class="custom-slider pixel-slider" data-min="0" data-max="100" data-value="${curPixel}">
-                            <div class="custom-slider-track">
-                                <div class="custom-slider-fill"></div>
-                            </div>
-                            <div class="custom-slider-thumb"></div>
-                        </div>
-                        <span class="settings-slider-value pixel-slider-value">${curPixel}px</span>
+                <div class="settings-row" style="padding-bottom:2px">
+                    <span class="settings-label" data-i18n="settings.pixelation">${t('settings.pixelation')}</span>
+                </div>
+                <div class="settings-row" style="padding-top:2px">
+                    <div class="settings-mode-switch pixelation-switch">
+                        <button class="mode-option${curPixel === 0 ? ' active' : ''}" data-value="0" data-i18n="settings.none">${t('settings.none')}</button>
+                        <button class="mode-option${curPixel === 5 ? ' active' : ''}" data-value="5" data-i18n="settings.medium">${t('settings.medium')}</button>
+                        <button class="mode-option${curPixel === 10 ? ' active' : ''}" data-value="10" data-i18n="settings.high">${t('settings.high')}</button>
                     </div>
+                </div>
+            </div>
+        </div>
+        <div class="settings-tab${tabStates.language ? ' open' : ''}" data-tab="language">
+            <button class="settings-tab-header">
+                <span data-i18n="tab.language">${t('tab.language')}</span>
+                ${tabArrowSvg}
+            </button>
+            <div class="settings-tab-content">
+                <div class="language-options">
+                    <button class="language-option${currentLanguage === 'pt-br' ? ' active' : ''}" data-value="pt-br">
+                        <div class="flag-wrapper">
+                            <div class="flag-column" style="--delay: 0ms; background: #009b3a"></div>
+                            <div class="flag-column" style="--delay: 60ms; background: linear-gradient(#009b3a 0%, #009b3a 40%, #fedd00 40%, #fedd00 60%, #009b3a 60%, #009b3a 100%)"></div>
+                            <div class="flag-column" style="--delay: 120ms; background: linear-gradient(#009b3a 0%, #009b3a 28%, #fedd00 28%, #fedd00 72%, #009b3a 72%, #009b3a 100%)"></div>
+                            <div class="flag-column" style="--delay: 180ms; background: linear-gradient(#009b3a 0%, #009b3a 18%, #fedd00 18%, #fedd00 36%, #002776 36%, #002776 64%, #fedd00 64%, #fedd00 82%, #009b3a 82%, #009b3a 100%)"></div>
+                            <div class="flag-column" style="--delay: 240ms; background: linear-gradient(#009b3a 0%, #009b3a 10%, #fedd00 10%, #fedd00 35%, #002776 35%, #002776 65%, #fedd00 65%, #fedd00 90%, #009b3a 90%, #009b3a 100%)"></div>
+                            <div class="flag-column" style="--delay: 300ms; background: linear-gradient(#009b3a 0%, #009b3a 18%, #fedd00 18%, #fedd00 36%, #002776 36%, #002776 64%, #fedd00 64%, #fedd00 82%, #009b3a 82%, #009b3a 100%)"></div>
+                            <div class="flag-column" style="--delay: 360ms; background: linear-gradient(#009b3a 0%, #009b3a 28%, #fedd00 28%, #fedd00 72%, #009b3a 72%, #009b3a 100%)"></div>
+                            <div class="flag-column" style="--delay: 420ms; background: linear-gradient(#009b3a 0%, #009b3a 40%, #fedd00 40%, #fedd00 60%, #009b3a 60%, #009b3a 100%)"></div>
+                            <div class="flag-column" style="--delay: 480ms; background: #009b3a"></div>
+                        </div>
+                        <span>PT-BR</span>
+                    </button>
+                    <button class="language-option${currentLanguage === 'en-us' ? ' active' : ''}" data-value="en-us">
+                        <div class="flag-wrapper">
+                            <div class="flag-column" style="--delay: 0ms; background: linear-gradient(#3c3b6e 0%, #3c3b6e 54%, #fff 54%, #fff 62%, #b22234 62%, #b22234 69%, #fff 69%, #fff 77%, #b22234 77%, #b22234 85%, #fff 85%, #fff 92%, #b22234 92%, #b22234 100%)"></div>
+                            <div class="flag-column" style="--delay: 60ms; background: linear-gradient(#3c3b6e 0%, #3c3b6e 54%, #fff 54%, #fff 62%, #b22234 62%, #b22234 69%, #fff 69%, #fff 77%, #b22234 77%, #b22234 85%, #fff 85%, #fff 92%, #b22234 92%, #b22234 100%)"></div>
+                            <div class="flag-column" style="--delay: 120ms; background: linear-gradient(#3c3b6e 0%, #3c3b6e 54%, #fff 54%, #fff 62%, #b22234 62%, #b22234 69%, #fff 69%, #fff 77%, #b22234 77%, #b22234 85%, #fff 85%, #fff 92%, #b22234 92%, #b22234 100%)"></div>
+                            <div class="flag-column" style="--delay: 180ms; background: linear-gradient(#3c3b6e 0%, #3c3b6e 54%, #fff 54%, #fff 62%, #b22234 62%, #b22234 69%, #fff 69%, #fff 77%, #b22234 77%, #b22234 85%, #fff 85%, #fff 92%, #b22234 92%, #b22234 100%)"></div>
+                            <div class="flag-column" style="--delay: 240ms; background: linear-gradient(#b22234 0%, #b22234 8%, #fff 8%, #fff 15%, #b22234 15%, #b22234 23%, #fff 23%, #fff 31%, #b22234 31%, #b22234 38%, #fff 38%, #fff 46%, #b22234 46%, #b22234 54%, #fff 54%, #fff 62%, #b22234 62%, #b22234 69%, #fff 69%, #fff 77%, #b22234 77%, #b22234 85%, #fff 85%, #fff 92%, #b22234 92%, #b22234 100%)"></div>
+                            <div class="flag-column" style="--delay: 300ms; background: linear-gradient(#b22234 0%, #b22234 8%, #fff 8%, #fff 15%, #b22234 15%, #b22234 23%, #fff 23%, #fff 31%, #b22234 31%, #b22234 38%, #fff 38%, #fff 46%, #b22234 46%, #b22234 54%, #fff 54%, #fff 62%, #b22234 62%, #b22234 69%, #fff 69%, #fff 77%, #b22234 77%, #b22234 85%, #fff 85%, #fff 92%, #b22234 92%, #b22234 100%)"></div>
+                            <div class="flag-column" style="--delay: 360ms; background: linear-gradient(#b22234 0%, #b22234 8%, #fff 8%, #fff 15%, #b22234 15%, #b22234 23%, #fff 23%, #fff 31%, #b22234 31%, #b22234 38%, #fff 38%, #fff 46%, #b22234 46%, #b22234 54%, #fff 54%, #fff 62%, #b22234 62%, #b22234 69%, #fff 69%, #fff 77%, #b22234 77%, #b22234 85%, #fff 85%, #fff 92%, #b22234 92%, #b22234 100%)"></div>
+                            <div class="flag-column" style="--delay: 420ms; background: linear-gradient(#b22234 0%, #b22234 8%, #fff 8%, #fff 15%, #b22234 15%, #b22234 23%, #fff 23%, #fff 31%, #b22234 31%, #b22234 38%, #fff 38%, #fff 46%, #b22234 46%, #b22234 54%, #fff 54%, #fff 62%, #b22234 62%, #b22234 69%, #fff 69%, #fff 77%, #b22234 77%, #b22234 85%, #fff 85%, #fff 92%, #b22234 92%, #b22234 100%)"></div>
+                            <div class="flag-column" style="--delay: 480ms; background: linear-gradient(#b22234 0%, #b22234 8%, #fff 8%, #fff 15%, #b22234 15%, #b22234 23%, #fff 23%, #fff 31%, #b22234 31%, #b22234 38%, #fff 38%, #fff 46%, #b22234 46%, #b22234 54%, #fff 54%, #fff 62%, #b22234 62%, #b22234 69%, #fff 69%, #fff 77%, #b22234 77%, #b22234 85%, #fff 85%, #fff 92%, #b22234 92%, #b22234 100%)"></div>
+                        </div>
+                        <span>EN-US</span>
+                    </button>
                 </div>
             </div>
         </div>
@@ -371,12 +412,20 @@ export function Start(): void {
     headerControls.appendChild(settingsContainer);
     header.appendChild(headerControls);
     
-    // Collapsible tab headers
+    // Collapsible tab headers with state persistence
     settingsPanel.querySelectorAll('.settings-tab-header').forEach(tabHeader => {
         tabHeader.addEventListener('click', (e) => {
             e.stopPropagation();
             const tab = (tabHeader as HTMLElement).parentElement!;
             tab.classList.toggle('open');
+            
+            // Save tab states to localStorage
+            const tabName = tab.getAttribute('data-tab');
+            if (tabName) {
+                const states = JSON.parse(localStorage.getItem('portfolio-settings-tabs') || '{}');
+                states[tabName] = tab.classList.contains('open');
+                localStorage.setItem('portfolio-settings-tabs', JSON.stringify(states));
+            }
         });
     });
     
@@ -405,8 +454,8 @@ export function Start(): void {
             <div class="confirm-modal-title"></div>
             <div class="confirm-modal-text"></div>
             <div class="confirm-modal-buttons">
-                <button class="confirm-modal-btn cancel">Cancel</button>
-                <button class="confirm-modal-btn confirm">Confirm</button>
+                <button class="confirm-modal-btn cancel" data-i18n="modal.cancel">${t('modal.cancel')}</button>
+                <button class="confirm-modal-btn confirm" data-i18n="modal.confirm">${t('modal.confirm')}</button>
             </div>
         </div>
     `;
@@ -452,10 +501,10 @@ export function Start(): void {
             if (newMode === oldMode) return;
             
             const confirmed = await showConfirmModal(
-                'Change Audio Mode',
+                t('modal.changeAudioMode'),
                 newMode === 'api'
-                    ? 'Web Audio API mode provides superior sound quality and reliability, especially on mobile devices. Audio plays exclusively within the site — no background playback or media controls. The page will reload to apply this change.'
-                    : 'Audio Tag mode uses standard HTML5 audio elements with background playback support and OS media controls integration. Audio quality may vary on some devices. The page will reload to apply this change.'
+                    ? t('modal.webAudioApiDesc')
+                    : t('modal.audioTagDesc')
             );
             
             if (confirmed) {
@@ -521,8 +570,8 @@ export function Start(): void {
             
             if (newAA !== currentAA) {
                 const confirmed = await showConfirmModal(
-                    `Switch to ${isLow ? 'Low' : 'High'} Preset`,
-                    `This will ${isLow ? 'disable' : 'enable'} antialias and ${isLow ? 'disable' : 'enable'} shadows. Antialias changes require a page reload.`
+                    isLow ? t('modal.switchToLow') : t('modal.switchToHigh'),
+                    isLow ? t('modal.presetLowDesc') : t('modal.presetHighDesc')
                 );
                 if (!confirmed) return;
                 localStorage.setItem('portfolio-antialias', newAA.toString());
@@ -546,8 +595,8 @@ export function Start(): void {
         const newValue = !isActive;
         
         const confirmed = await showConfirmModal(
-            `${newValue ? 'Enable' : 'Disable'} Antialias`,
-            'Changing antialias requires a page reload to take effect. Antialias smooths jagged edges but may impact performance on some devices.'
+            newValue ? t('modal.enableAntialias') : t('modal.disableAntialias'),
+            t('modal.antialiasDesc')
         );
         
         if (confirmed) {
@@ -566,111 +615,29 @@ export function Start(): void {
         updatePresetIndicator();
     });
     
-    // ---- Misc Controls: Pixel Size Slider ----
-    const pixelSliderEl = settingsPanel.querySelector('.pixel-slider') as HTMLElement;
-    const pixelFill = pixelSliderEl.querySelector('.custom-slider-fill') as HTMLElement;
-    const pixelThumb = pixelSliderEl.querySelector('.custom-slider-thumb') as HTMLElement;
-    const pixelValueEl = settingsPanel.querySelector('.pixel-slider-value') as HTMLElement;
-    
-    let pixelSliderValue = parseInt(pixelSliderEl.dataset.value || '0');
-    const pixelSliderMin = parseInt(pixelSliderEl.dataset.min || '0');
-    const pixelSliderMax = parseInt(pixelSliderEl.dataset.max || '100');
-    
-    function setPixelSliderValue(val: number, notify = true) {
-        pixelSliderValue = Math.max(pixelSliderMin, Math.min(pixelSliderMax, Math.round(val)));
-        const pct = ((pixelSliderValue - pixelSliderMin) / (pixelSliderMax - pixelSliderMin)) * 100;
-        pixelFill.style.width = pct + '%';
-        pixelThumb.style.left = pct + '%';
-        pixelValueEl.textContent = pixelSliderValue + 'px';
-        if (notify) {
-            SetPixelSize(pixelSliderValue);
-        }
-    }
-    
-    setPixelSliderValue(pixelSliderValue, false);
-    
-    let pixelDragging = false;
-    function getPixelValFromPointer(clientX: number) {
-        const rect = pixelSliderEl.querySelector('.custom-slider-track')!.getBoundingClientRect();
-        const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-        return pixelSliderMin + pct * (pixelSliderMax - pixelSliderMin);
-    }
-    pixelSliderEl.addEventListener('pointerdown', (e: Event) => {
-        const pe = e as PointerEvent;
-        pe.preventDefault();
-        pe.stopPropagation();
-        pixelDragging = true;
-        pixelSliderEl.classList.add('active');
-        (pixelSliderEl as HTMLElement).setPointerCapture(pe.pointerId);
-        setPixelSliderValue(getPixelValFromPointer(pe.clientX));
-    });
-    pixelSliderEl.addEventListener('pointermove', (e: Event) => {
-        if (!pixelDragging) return;
-        const pe = e as PointerEvent;
-        setPixelSliderValue(getPixelValFromPointer(pe.clientX));
-    });
-    pixelSliderEl.addEventListener('pointerup', (e: Event) => {
-        const pe = e as PointerEvent;
-        pixelDragging = false;
-        pixelSliderEl.classList.remove('active');
-        (pixelSliderEl as HTMLElement).releasePointerCapture(pe.pointerId);
+    // ---- Misc Controls: Pixelation Mode Switch ----
+    const pixelationSwitch = settingsPanel.querySelector('.pixelation-switch') as HTMLElement;
+    pixelationSwitch.querySelectorAll('.mode-option').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const value = parseInt((btn as HTMLElement).dataset.value || '0');
+            pixelationSwitch.querySelectorAll('.mode-option').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            SetPixelSize(value);
+        });
     });
     
-    // Dive/Surface button
-    diveButton = document.createElement("button");
-    diveButton.id = "dive-button";
-    diveButton.className = "dive-button";
-    diveButton.title = "Dive underwater";
-    diveButton.innerHTML = `
-        <!-- Bubbles icon (dive down) -->
-        <svg class="dive-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bubbles-icon lucide-bubbles"><path d="M7.001 15.085A1.5 1.5 0 0 1 9 16.5"/><circle cx="18.5" cy="8.5" r="3.5"/><circle cx="7.5" cy="16.5" r="5.5"/><circle cx="7.5" cy="4.5" r="2.5"/>
-        </svg>
-        <!-- Island icon (surface up) -->
-        <svg  class="surface-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-tree-palm-icon lucide-tree-palm"><path d="M13 8c0-2.76-2.46-5-5.5-5S2 5.24 2 8h2l1-1 1 1h4"/><path d="M13 7.14A5.82 5.82 0 0 1 16.5 6c3.04 0 5.5 2.24 5.5 5h-3l-1-1-1 1h-3"/><path d="M5.89 9.71c-2.15 2.15-2.3 5.47-.35 7.43l4.24-4.25.7-.7.71-.71 2.12-2.12c-1.95-1.96-5.27-1.8-7.42.35"/><path d="M11 15.5c.5 2.5-.17 4.5-1 6.5h4c2-5.5-.5-12-1-14"/>
-        </svg>
-    `;
-    diveButton.onclick = function() {
-        if (!document.body.classList.contains('started')) return;
-        
-        const isUnderwater = getIsUnderwater();
-        if (isUnderwater) {
-            // Surface: go up
-            surfaceAboveWater();
-        } else {
-            // Dive: go down
-            diveUnderwater();
-            playDiveSound();
-        }
-    };
-    document.body.appendChild(diveButton);
-    
-    // Show dive button after scrolling down OR after a delay if already started
-    let diveButtonShown = false;
-    
-    const showDiveButton = () => {
-        if (!diveButtonShown && document.body.classList.contains('started')) {
-            diveButtonShown = true;
-            document.body.classList.add('dive-visible');
-        }
-    };
-    
-    // Show on scroll
-    window.addEventListener('scroll', () => {
-        if (!diveButtonShown && window.scrollY > 50) {
-            showDiveButton();
-        }
+    // ---- Language Controls ----
+    const languageOptions = settingsPanel.querySelectorAll('.language-option');
+    languageOptions.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const value = (btn as HTMLElement).dataset.value as Language;
+            languageOptions.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            setLanguage(value || 'en-us');
+        });
     });
-    
-    // Also show after a delay when started (fallback if user doesn't scroll)
-    const checkStarted = setInterval(() => {
-        if (document.body.classList.contains('started')) {
-            clearInterval(checkStarted);
-            // Wait a bit after start animation, then show
-            setTimeout(() => {
-                showDiveButton();
-            }, 2000);
-        }
-    }, 100);
 }
 
 export function Update(): void {
@@ -688,7 +655,6 @@ export function Update(): void {
     }
     
     // Update underwater state and audio transitions
-    const isUnderwater = getIsUnderwater();
     const cameraY = getCameraY();
     
     // Detect when camera actually crosses the surface (Y = 0)
@@ -713,30 +679,6 @@ export function Update(): void {
     }
     
     previousCameraY = cameraY;
-    
-    // Update button icon based on underwater state
-    if (diveButton) {
-        if (isUnderwater) {
-            diveButton.classList.add('is-underwater');
-            diveButton.title = "Surface";
-        } else {
-            diveButton.classList.remove('is-underwater');
-            diveButton.title = "Dive underwater";
-        }
-        
-        // Hide dive button when radio zoom is active
-        const radioZoomed = isRadioZoomActive();
-        const isDiveVisible = document.body.classList.contains('dive-visible');
-        
-        if (radioZoomed) {
-            diveButton.style.setProperty('opacity', '0', 'important');
-            diveButton.style.setProperty('pointer-events', 'none', 'important');
-        } else if (isDiveVisible) {
-            // Only show if dive-visible class has been added
-            diveButton.style.setProperty('opacity', '1', 'important');
-            diveButton.style.setProperty('pointer-events', 'auto', 'important');
-        }
-    }
 }
 
 // Typewriter effect for name (optimized for mobile)

@@ -1,4 +1,4 @@
-import { Group, TextureLoader, RepeatWrapping, SRGBColorSpace, MeshStandardMaterial, Material, Texture, Object3D, LoadingManager, RingGeometry, MeshBasicMaterial, Mesh, DoubleSide, Uniform, Vector2, Vector3, Raycaster, BoxGeometry, ShadowMaterial } from "three";
+import { Group, TextureLoader, RepeatWrapping, SRGBColorSpace, MeshStandardMaterial, Texture, Object3D, LoadingManager, RingGeometry, MeshBasicMaterial, Mesh, DoubleSide, Uniform, Vector2, Vector3, Raycaster, BoxGeometry, ShadowMaterial } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { oceanAbsorptionUniform } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
@@ -61,22 +61,16 @@ export function getLoadingProgress(): number {
 const loader = new GLTFLoader(loadingManager);
 const textureLoader = new TextureLoader();
 
-const SAND_TEXTURE_PATH = 'textures/sand_04_2k/';
-const CONCRETE_TEXTURE_PATH = 'textures/concrete_wall_01_2k/';
+const SAND_TEXTURE_PATH = 'textures/concrete_wall_01_2k/';
 const ROCKS_TEXTURE_PATH = 'textures/ground_with_rocks_01_1k/';
 const GRASS_TEXTURE_PATH = 'textures/rocky_terrain_02_2k/';
 
-const sandColorMap = textureLoader.load(SAND_TEXTURE_PATH + 'sand_04_color_2k.png');
-const sandNormalMap = textureLoader.load(SAND_TEXTURE_PATH + 'sand_04_normal_gl_2k.png');
-const sandRoughnessMap = textureLoader.load(SAND_TEXTURE_PATH + 'sand_04_roughness_2k.png');
-const sandAOMap = textureLoader.load(SAND_TEXTURE_PATH + 'sand_04_ambient_occlusion_2k.png');
-const sandDisplacementMap = textureLoader.load(SAND_TEXTURE_PATH + 'sand_04_height_2k.png');
 
-const concreteColorMap = textureLoader.load(CONCRETE_TEXTURE_PATH + 'concrete_wall_01_color_2k.png');
-const concreteNormalMap = textureLoader.load(CONCRETE_TEXTURE_PATH + 'concrete_wall_01_normal_gl_2k.png');
-const concreteRoughnessMap = textureLoader.load(CONCRETE_TEXTURE_PATH + 'concrete_wall_01_roughness_2k.png');
-const concreteAOMap = textureLoader.load(CONCRETE_TEXTURE_PATH + 'concrete_wall_01_ambient_occlusion_2k.png');
-const concreteDisplacementMap = textureLoader.load(CONCRETE_TEXTURE_PATH + 'concrete_wall_01_height_2k.png');
+const sandColorMap = textureLoader.load(SAND_TEXTURE_PATH + 'concrete_wall_01_color_2k.png');
+const sandNormalMap = textureLoader.load(SAND_TEXTURE_PATH + 'concrete_wall_01_normal_gl_2k.png');
+const sandRoughnessMap = textureLoader.load(SAND_TEXTURE_PATH + 'concrete_wall_01_roughness_2k.png');
+const sandAOMap = textureLoader.load(SAND_TEXTURE_PATH + 'concrete_wall_01_ambient_occlusion_2k.png');
+const sandDisplacementMap = textureLoader.load(SAND_TEXTURE_PATH + 'concrete_wall_01_height_2k.png');
 
 const rocksColorMap = textureLoader.load(ROCKS_TEXTURE_PATH + 'ground_with_rocks_01_color_1k.png');
 
@@ -84,7 +78,6 @@ const grassColorMap = textureLoader.load(GRASS_TEXTURE_PATH + 'rocky_terrain_02_
 
 const allTextures: Texture[] = [
     sandColorMap, sandNormalMap, sandRoughnessMap, sandAOMap, sandDisplacementMap,
-    concreteColorMap, concreteNormalMap, concreteRoughnessMap, concreteAOMap, concreteDisplacementMap,
     rocksColorMap,
     grassColorMap
 ];
@@ -96,7 +89,6 @@ allTextures.forEach(texture => {
 });
 
 sandColorMap.colorSpace = SRGBColorSpace;
-concreteColorMap.colorSpace = SRGBColorSpace;
 rocksColorMap.colorSpace = SRGBColorSpace;
 grassColorMap.colorSpace = SRGBColorSpace;
 
@@ -114,33 +106,6 @@ export let GRASS_BLEND_END = 0.10;     // Fully grass at peak
 // Grass color adjustments
 export let GRASS_SATURATION = 2.5;  // >1 = more saturated, <1 = less
 export let GRASS_BRIGHTNESS = 1.2;  // >1 = brighter, <1 = darker
-
-let currentTexture = 'sand';
-let textureBlend = 0.0;
-let targetBlend = 0.0;
-const blendSpeed = 2.0;
-
-interface BlendableMaterial {
-    material: Material;
-    blendUniform: { value: number };
-}
-
-const blendableMaterials: BlendableMaterial[] = [];
-
-export function toggleIslandTexture(): string {
-    if (currentTexture === 'sand') {
-        currentTexture = 'concrete';
-        targetBlend = 1.0;
-    } else {
-        currentTexture = 'sand';
-        targetBlend = 0.0;
-    }
-    return currentTexture;
-}
-
-export function getCurrentTexture(): string {
-    return currentTexture;
-}
 
 const islandPosition = { x: 0, y: -0.115, z: -3.3 };
 const firecampOffset = { x: 0, y: 0.25, z: 0.4 };
@@ -248,7 +213,7 @@ const oceanLightingFragment = /*glsl*/`
     }
 `;
 
-function applyIslandMaterial(material: MeshStandardMaterial, blendUniform: { value: number }): void {
+function applyIslandMaterial(material: MeshStandardMaterial): void {
     if (!material.isMeshStandardMaterial && !(material as any).isMeshPhysicalMaterial && !(material as any).isMeshBasicMaterial) {
         console.log('Skipping material:', material.type);
         return;
@@ -257,7 +222,7 @@ function applyIslandMaterial(material: MeshStandardMaterial, blendUniform: { val
     console.log('Applying island material to:', material.type, material.name);
     
     material.customProgramCacheKey = () => {
-        return 'island_blend_ocean_' + material.uuid;
+        return 'island_ocean_' + material.uuid;
     };
     
     material.onBeforeCompile = (shader) => {
@@ -267,9 +232,7 @@ function applyIslandMaterial(material: MeshStandardMaterial, blendUniform: { val
         shader.uniforms.uAbsorption = oceanAbsorptionUniform;
         shader.uniforms.uSunVisibility = sunVisibilityUniform;
         
-        shader.uniforms.uTextureBlend = blendUniform;
         shader.uniforms.uSandMap = { value: sandColorMap };
-        shader.uniforms.uConcreteMap = { value: concreteColorMap };
         shader.uniforms.uRocksMap = { value: rocksColorMap };
         shader.uniforms.uGrassMap = { value: grassColorMap };
         shader.uniforms.uTextureScale = { value: 0.5 };
@@ -302,9 +265,7 @@ function applyIslandMaterial(material: MeshStandardMaterial, blendUniform: { val
             varying vec3 vWorldPosition;
             varying vec3 vWorldNormal;
             
-            uniform float uTextureBlend;
             uniform sampler2D uSandMap;
-            uniform sampler2D uConcreteMap;
             uniform sampler2D uRocksMap;
             uniform sampler2D uGrassMap;
             uniform float uTextureScale;
@@ -339,21 +300,17 @@ function applyIslandMaterial(material: MeshStandardMaterial, blendUniform: { val
         shader.fragmentShader = shader.fragmentShader.replace(
             '#include <map_fragment>',
             `vec4 sandColor = triplanarSample(uSandMap, vWorldPosition, vWorldNormal, uTextureScale);
-            vec4 concreteColor = triplanarSample(uConcreteMap, vWorldPosition, vWorldNormal, uTextureScale);
             vec4 rocksColor = triplanarSample(uRocksMap, vWorldPosition, vWorldNormal, uTextureScale);
             vec4 grassColor = triplanarSample(uGrassMap, vWorldPosition, vWorldNormal, uTextureScale);
             
             // Boost grass color saturation and brightness
             grassColor.rgb = adjustSaturation(grassColor.rgb, uGrassSaturation) * uGrassBrightness;
             
-            // Middle layer: blend between sand and concrete based on button toggle
-            vec4 middleTexture = mix(sandColor, concreteColor, uTextureBlend);
-            
-            // Bottom blend: rocks -> middle texture
+            // Bottom blend: rocks -> sand
             float rocksBlend = smoothstep(uRocksBlendStart, uRocksBlendEnd, vWorldPosition.y);
-            vec4 bottomToMiddle = mix(rocksColor, middleTexture, rocksBlend);
+            vec4 bottomToMiddle = mix(rocksColor, sandColor, rocksBlend);
             
-            // Top blend: middle texture -> grass
+            // Top blend: sand -> grass
             float grassBlend = smoothstep(uGrassBlendStart, uGrassBlendEnd, vWorldPosition.y);
             vec4 blendedTexture = mix(bottomToMiddle, grassColor, grassBlend);
             
@@ -366,7 +323,7 @@ function applyIslandMaterial(material: MeshStandardMaterial, blendUniform: { val
             #include <dithering_fragment>`
         );
         
-        console.log('Island shader modified with triplanar blending and ocean lighting');
+        console.log('Island shader modified with triplanar blending (rocks->sand->grass) and ocean lighting');
     };
     
     material.needsUpdate = true;
@@ -588,10 +545,7 @@ function applyIslandTextures(model: Group): void {
                     material.roughness = 0.9;
                     material.metalness = 0.0;
                     
-                    const blendUniform = { value: 0.0 };
-                    blendableMaterials.push({ material, blendUniform });
-                    
-                    applyIslandMaterial(material, blendUniform);
+                    applyIslandMaterial(material);
                 }
             });
         }
@@ -927,22 +881,6 @@ function updateMouseWorldPosition(): void {
 export function Update(): void {
     // Update palm tree wind shader time
     palmWindTimeUniform.value = time * PALM_WIND_SPEED;
-    
-    // Texture blend animation
-    if (textureBlend !== targetBlend) {
-        const diff = targetBlend - textureBlend;
-        const step = blendSpeed * deltaTime;
-        
-        if (Math.abs(diff) < step) {
-            textureBlend = targetBlend;
-        } else {
-            textureBlend += Math.sign(diff) * step;
-        }
-        
-        blendableMaterials.forEach(({ blendUniform }) => {
-            blendUniform.value = textureBlend;
-        });
-    }
     
     // Breeze-driven wind animation for grass and palm tree
     windTime += deltaTime;
