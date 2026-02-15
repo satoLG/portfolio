@@ -138,22 +138,6 @@ body.day-mode #blur-overlay {
     50% { margin-top: -6px; }
 }
 
-/* Underwater position - fixed to bottom left */
-.media-player.bubble.underwater-position {
-    width: 56px;
-    height: 56px;
-    transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.media-player.bubble.underwater-position .music-note {
-    font-size: 24px;
-}
-
-.media-player.bubble.underwater-position .bubble-cover {
-    width: 56px;
-    height: 56px;
-}
-
 /* Expanded player should NEVER have underwater-position styles */
 .media-player.expanded {
     bottom: auto !important;
@@ -811,17 +795,10 @@ body.music-visible .media-player.bubble {
     will-change: transform, opacity;
 }
 
-/* Hide bubble when underwater UNLESS it has underwater-position class */
-body.underwater .media-player.bubble:not(.underwater-position) {
+/* Hide bubble when underwater */
+body.underwater .media-player.bubble {
     opacity: 0 !important;
     pointer-events: none !important;
-}
-
-/* Force visibility when underwater-position is set */
-body.underwater .media-player.bubble.underwater-position {
-    opacity: 1 !important;
-    pointer-events: auto !important;
-    z-index: 100 !important;
 }
 
 /* Start overlay */

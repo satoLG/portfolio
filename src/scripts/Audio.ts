@@ -13,8 +13,8 @@ export function getAudioMode(): 'api' | 'tag' { return audioMode; }
 // ============================================
 const WATER_VOLUME = 0.7;              // Constant water ambience volume (lowered for iOS)
 const BREEZE_VOLUME = 0.3;             // Soft breeze volume
-const BREEZE_MIN_DELAY = 5;           // Min seconds between breeze sounds
-const BREEZE_MAX_DELAY = 10;           // Max seconds between breeze sounds
+const BREEZE_MIN_DELAY = 3;           // Min seconds between breeze sounds
+const BREEZE_MAX_DELAY = 6;           // Max seconds between breeze sounds
 const FIREPLACE_VOLUME_MAX = 0.35;     // Fireplace target volume
 const FIREPLACE_FADE_DURATION = 1.5;   // Seconds to fade in fireplace (desktop only)
 const UNDERWATER_AMB_VOLUME = 0.25;    // Underwater ambient loop volume
@@ -46,7 +46,10 @@ const AUDIO_PATHS = {
 let lastUISoundTime = 0;
 const pendingPlayPromises = new WeakMap<HTMLAudioElement, Promise<void>>();
 
-// Safe play function that tracks pending promises
+// Map audio elements to their allowed scene state ('above' | 'underwater' | 'any')
+const audioStateMap = new WeakMap<HTMLAudioElement, 'above' | 'underwater' | 'any'>();
+
+// Safe play function that tracks pending promises and validates scene state
 async function safePlay(audio: HTMLAudioElement | null, name: string = 'audio'): Promise<boolean> {
     if (!audio) return false;
     
@@ -58,6 +61,13 @@ async function safePlay(audio: HTMLAudioElement | null, name: string = 'audio'):
         } catch {
             // Previous play was interrupted, that's fine
         }
+    }
+    
+    // State gate: re-check if this audio is still valid for current scene state
+    const requiredState = audioStateMap.get(audio);
+    if (requiredState) {
+        if (requiredState === 'above' && isCurrentlyUnderwater) return false;
+        if (requiredState === 'underwater' && !isCurrentlyUnderwater) return false;
     }
     
     // Create and track the new play promise
@@ -115,6 +125,10 @@ let apiUnderwaterAmbLoop: { source: AudioBufferSourceNode; gain: GainNode } | nu
 let apiBreezeTimeout: ReturnType<typeof setTimeout> | null = null;
 let apiBreezeActive = false;
 
+// Track active one-shot sources so they can be stopped on transition
+let apiBreezeSource: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
+let apiBubblesSource: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
+
 async function apiLoadBuffer(url: string): Promise<AudioBuffer | null> {
     if (!_audioContext) return null;
     if (apiBuffers.has(url)) return apiBuffers.get(url)!;
@@ -130,7 +144,7 @@ async function apiLoadBuffer(url: string): Promise<AudioBuffer | null> {
     }
 }
 
-function apiPlayOneShot(url: string, destination: GainNode | null, volume: number = 1): AudioBufferSourceNode | null {
+function apiPlayOneShot(url: string, destination: GainNode | null, volume: number = 1): { source: AudioBufferSourceNode; gain: GainNode } | null {
     if (!_audioContext || !destination) return null;
     const buffer = apiBuffers.get(url);
     if (!buffer) return null;
@@ -141,7 +155,7 @@ function apiPlayOneShot(url: string, destination: GainNode | null, volume: numbe
     source.connect(gain);
     gain.connect(destination);
     source.start();
-    return source;
+    return { source, gain };
 }
 
 function apiStartLoop(url: string, destination: GainNode | null, volume: number = 1): { source: AudioBufferSourceNode; gain: GainNode } | null {
@@ -178,16 +192,26 @@ function apiStartAmbientSounds(): void {
 
 function apiScheduleBreeze(): void {
     if (apiBreezeTimeout) clearTimeout(apiBreezeTimeout);
+    // Don't schedule if underwater
+    if (isCurrentlyUnderwater) return;
     const delay = BREEZE_MIN_DELAY + Math.random() * (BREEZE_MAX_DELAY - BREEZE_MIN_DELAY);
     apiBreezeTimeout = setTimeout(() => {
+        // Double-check state right before playing
         if (_audioContext && apiNatureGain && !isCurrentlyUnderwater && !natureMuted) {
-            const source = apiPlayOneShot(AUDIO_PATHS.breeze, apiNatureGain, BREEZE_VOLUME);
-            if (source && source.buffer) {
+            const handle = apiPlayOneShot(AUDIO_PATHS.breeze, apiNatureGain, BREEZE_VOLUME);
+            if (handle && handle.source.buffer) {
+                apiBreezeSource = handle;
                 apiBreezeActive = true;
-                setTimeout(() => { apiBreezeActive = false; }, source.buffer.duration * 1000);
+                const duration = handle.source.buffer.duration * 1000;
+                handle.source.onended = () => {
+                    apiBreezeActive = false;
+                    apiBreezeSource = null;
+                };
+                setTimeout(() => { apiBreezeActive = false; }, duration);
             }
         }
-        apiScheduleBreeze();
+        // Only re-schedule if still above water
+        if (!isCurrentlyUnderwater) apiScheduleBreeze();
     }, delay * 1000);
 }
 
@@ -221,21 +245,40 @@ function apiStopFireplace(): void {
     apiFireplaceLoop = null;
 }
 
+/** Stop a one-shot source immediately */
+function apiStopOneShot(handle: { source: AudioBufferSourceNode; gain: GainNode } | null): null {
+    if (handle) {
+        try { handle.source.stop(); } catch { /* already stopped */ }
+        handle.source.disconnect();
+        handle.gain.disconnect();
+    }
+    return null;
+}
+
 function apiTransitionToUnderwater(): void {
     // Stop above-water sounds
     apiWaterLoop = apiStopLoop(apiWaterLoop);
     if (apiBreezeTimeout) { clearTimeout(apiBreezeTimeout); apiBreezeTimeout = null; }
+    // Stop actively playing breeze one-shot
+    apiBreezeSource = apiStopOneShot(apiBreezeSource);
+    apiBreezeActive = false;
     if (apiFireplaceActive) apiStopFireplace();
     // Start underwater sounds
     if (apiNatureGain) {
         apiUnderwaterAmbLoop = apiStartLoop(AUDIO_PATHS.underwaterAmb, apiNatureGain, UNDERWATER_AMB_VOLUME);
-        apiPlayOneShot(AUDIO_PATHS.underwaterBubbles, apiNatureGain, TRANSITION_SFX_VOLUME);
+        const bubbleHandle = apiPlayOneShot(AUDIO_PATHS.underwaterBubbles, apiNatureGain, TRANSITION_SFX_VOLUME);
+        if (bubbleHandle) {
+            apiBubblesSource = bubbleHandle;
+            bubbleHandle.source.onended = () => { apiBubblesSource = null; };
+        }
     }
 }
 
 function apiTransitionToAboveWater(): void {
     // Stop underwater sounds
     apiUnderwaterAmbLoop = apiStopLoop(apiUnderwaterAmbLoop);
+    // Stop actively playing bubble one-shot
+    apiBubblesSource = apiStopOneShot(apiBubblesSource);
     // Resume above-water sounds
     if (apiNatureGain) {
         apiWaterLoop = apiStartLoop(AUDIO_PATHS.water, apiNatureGain, WATER_VOLUME);
@@ -247,6 +290,17 @@ function apiTransitionToAboveWater(): void {
 function apiCheckHealth(): void {
     if (_audioContext && _audioContext.state === 'suspended') {
         _audioContext.resume();
+    }
+    // Force-stop leaked sounds in the wrong scene state
+    if (isCurrentlyUnderwater) {
+        // Kill breeze if somehow still playing
+        if (apiBreezeSource) { apiBreezeSource = apiStopOneShot(apiBreezeSource); apiBreezeActive = false; }
+        // Kill water loop if somehow still playing
+        if (apiWaterLoop) apiWaterLoop = apiStopLoop(apiWaterLoop);
+    } else {
+        // Kill underwater sounds if somehow still playing above water
+        if (apiBubblesSource) apiBubblesSource = apiStopOneShot(apiBubblesSource);
+        if (apiUnderwaterAmbLoop) apiUnderwaterAmbLoop = apiStopLoop(apiUnderwaterAmbLoop);
     }
 }
 // ============================================
@@ -285,8 +339,10 @@ let isRecoveringAudio = false;
 function handleAudioPause(audio: HTMLAudioElement | null, name: string): void {
     if (!audio || isRecoveringAudio || !audioInitialized) return;
     
-    // Don't restart above-water sounds if we're underwater
-    if (isCurrentlyUnderwater && (name.includes('Water') || name.includes('Fireplace') || name.includes('Breeze'))) return;
+    // Strict state check — never restart sounds for the wrong scene
+    const requiredState = audioStateMap.get(audio);
+    if (requiredState === 'above' && isCurrentlyUnderwater) return;
+    if (requiredState === 'underwater' && !isCurrentlyUnderwater) return;
     
     // Don't restart if we're intentionally fading or stopping
     if (name.includes('Fireplace') && (!fireplaceActive || fireplaceFading)) return;
@@ -320,19 +376,28 @@ function restartWaterAudio(): void {
 
 // Check and recover audio if it stopped unexpectedly
 function checkAudioHealth(): void {
-    if (!audioInitialized) return;
+    if (!audioInitialized || natureMuted) return;
     
-    // Don't restart above-water sounds if we're underwater
     if (isCurrentlyUnderwater) {
-        // Check underwater ambient instead
+        // Force-stop any above-water sounds that are still playing
+        if (waterAudio1 && !waterAudio1.paused) { waterAudio1.pause(); console.log('Health: killed leaked water1'); }
+        if (waterAudio2 && !waterAudio2.paused) { waterAudio2.pause(); console.log('Health: killed leaked water2'); }
+        if (breezeAudio && !breezeAudio.paused) { breezeAudio.pause(); console.log('Health: killed leaked breeze'); }
+        if (fireplaceAudio && !fireplaceAudio.paused) { fireplaceAudio.pause(); console.log('Health: killed leaked fireplace'); }
+        // Check underwater ambient
         if (underwaterAmbAudio && underwaterAmbAudio.paused) {
             console.log('Health check: Underwater ambient stopped - restarting');
-            safePlay(underwaterAmbAudio, 'underwater ambient');
+            underwaterAmbAudio.volume = UNDERWATER_AMB_VOLUME;
+            underwaterAmbAudio.play().catch(() => {});
         }
         return;
     }
     
-    // Check water audio (only when above water)
+    // Above water — force-stop any underwater sounds that are still playing
+    if (underwaterAmbAudio && !underwaterAmbAudio.paused) { underwaterAmbAudio.pause(); underwaterAmbAudio.currentTime = 0; console.log('Health: killed leaked underwater amb'); }
+    if (underwaterBubblesAudio && !underwaterBubblesAudio.paused) { underwaterBubblesAudio.pause(); underwaterBubblesAudio.currentTime = 0; console.log('Health: killed leaked bubbles'); }
+    
+    // Check water audio
     if (activeWaterAudio && activeWaterAudio.paused && !waterCrossfading) {
         console.log('Health check: Water audio stopped - restarting');
         restartWaterAudio();
@@ -399,6 +464,14 @@ function createAudioElements(): void {
     underwaterBubblesAudio.loop = false;
     underwaterBubblesAudio.volume = TRANSITION_SFX_VOLUME;
     underwaterBubblesAudio.preload = 'auto';
+    
+    // Register scene-state requirements for each audio element
+    audioStateMap.set(waterAudio1, 'above');
+    audioStateMap.set(waterAudio2, 'above');
+    audioStateMap.set(breezeAudio!, 'above');
+    audioStateMap.set(fireplaceAudio!, 'above');
+    audioStateMap.set(underwaterAmbAudio, 'underwater');
+    audioStateMap.set(underwaterBubblesAudio, 'underwater');
     
     surfaceSplashAudio = new Audio('audio/327667__juan_merie_venter__getting-out-of-the-pool.wav');
     surfaceSplashAudio.loop = false;
@@ -603,12 +676,18 @@ function scheduleBreezeSound(): void {
 }
 
 function playBreezeSound(): void {
-    if (!breezeAudio || isCurrentlyUnderwater) return;
+    if (!breezeAudio || isCurrentlyUnderwater || natureMuted) return;
     
     breezeAudio.currentTime = 0;
     safePlay(breezeAudio, 'breeze sound').then((success) => {
+        // Re-check state after async play resolved
+        if (isCurrentlyUnderwater) {
+            // State changed while we were waiting — force stop
+            if (breezeAudio && !breezeAudio.paused) breezeAudio.pause();
+            return;
+        }
         if (success) console.log('Breeze sound playing');
-        // Schedule next breeze regardless of success (only if still above water)
+        // Schedule next breeze only if still above water
         if (!isCurrentlyUnderwater) scheduleBreezeSound();
     });
 }
@@ -745,7 +824,11 @@ async function stopUnderwaterAmbient(): Promise<void> {
 export async function playDiveSound(): Promise<void> {
     if (!audioInitialized || !isCurrentlyUnderwater) return;
     if (audioMode === 'api') {
-        apiPlayOneShot(AUDIO_PATHS.underwaterBubbles, apiNatureGain, TRANSITION_SFX_VOLUME);
+        const handle = apiPlayOneShot(AUDIO_PATHS.underwaterBubbles, apiNatureGain, TRANSITION_SFX_VOLUME);
+        if (handle) {
+            apiBubblesSource = handle;
+            handle.source.onended = () => { apiBubblesSource = null; };
+        }
         return;
     }
     if (!underwaterBubblesAudio) return;
@@ -815,25 +898,40 @@ export function transitionToUnderwater(): void {
         breezeTimeout = null;
     }
     
-    // Batch audio operations to minimize individual reflows
-    // Use single async batch instead of sequential awaits
-    setTimeout(() => {
-        // Pause above water sounds
-        if (waterAudio1 && !waterAudio1.paused) waterAudio1.pause();
-        if (waterAudio2 && !waterAudio2.paused) waterAudio2.pause();
-        if (breezeAudio && !breezeAudio.paused) breezeAudio.pause();
-        if (fireplaceAudio && !fireplaceAudio.paused) fireplaceAudio.pause();
-        
-        // Start underwater sounds immediately after
-        if (underwaterAmbAudio && underwaterAmbAudio.paused && !isNatureMuted()) {
-            underwaterAmbAudio.currentTime = 0;
-            underwaterAmbAudio.play().catch(() => {});
-        }
-        if (underwaterBubblesAudio && underwaterBubblesAudio.paused && !isNatureMuted()) {
-            underwaterBubblesAudio.currentTime = 0;
-            underwaterBubblesAudio.play().catch(() => {});
-        }
-    }, 0);
+    // Kill any running water crossfade interval
+    if (crossfadeInterval) {
+        clearInterval(crossfadeInterval);
+        crossfadeInterval = null;
+        waterCrossfading = false;
+    }
+    
+    // Stop above-water sounds synchronously (no setTimeout — avoids race conditions)
+    if (waterAudio1 && !waterAudio1.paused) waterAudio1.pause();
+    if (waterAudio2 && !waterAudio2.paused) waterAudio2.pause();
+    if (breezeAudio && !breezeAudio.paused) breezeAudio.pause();
+    if (fireplaceAudio && !fireplaceAudio.paused) {
+        fireplaceAudio.pause();
+        fireplaceActive = false;
+        fireplaceFading = false;
+    }
+    
+    // Start underwater sounds
+    if (underwaterAmbAudio && !isNatureMuted()) {
+        underwaterAmbAudio.currentTime = 0;
+        underwaterAmbAudio.volume = UNDERWATER_AMB_VOLUME;
+        underwaterAmbAudio.play().catch(() => {});
+    }
+    // Play bubble SFX once (stop after transition duration)
+    if (underwaterBubblesAudio && !isNatureMuted()) {
+        underwaterBubblesAudio.currentTime = 0;
+        underwaterBubblesAudio.play().catch(() => {});
+        setTimeout(() => {
+            if (underwaterBubblesAudio && !underwaterBubblesAudio.paused) {
+                underwaterBubblesAudio.pause();
+                underwaterBubblesAudio.currentTime = 0;
+            }
+        }, TRANSITION_SFX_DURATION);
+    }
 }
 
 // Called when transitioning to above water
@@ -843,35 +941,32 @@ export function transitionToAboveWater(): void {
     
     if (audioMode === 'api') { apiTransitionToAboveWater(); return; }
     
-    // Batch audio operations
-    setTimeout(() => {
-        // Stop underwater sounds
-        if (underwaterAmbAudio && !underwaterAmbAudio.paused) {
-            underwaterAmbAudio.pause();
-            underwaterAmbAudio.currentTime = 0;
-        }
-        if (underwaterBubblesAudio && !underwaterBubblesAudio.paused) {
-            underwaterBubblesAudio.pause();
-            underwaterBubblesAudio.currentTime = 0;
-        }
-        
-        // Resume above water sounds
-        if (activeWaterAudio && activeWaterAudio.paused && !isNatureMuted()) {
-            activeWaterAudio.currentTime = 0;
-            activeWaterAudio.volume = WATER_VOLUME;
-            activeWaterAudio.play().catch(() => {});
-        }
-        
-        // Re-schedule breeze (don't resume mid-clip)
-        if (!isNatureMuted()) {
-            scheduleBreezeSound();
-        }
-        
-        // Resume fireplace at night
-        if (!isDayTime() && fireplaceAudio && !fireplaceActive) {
-            startFireplaceSound();
-        }
-    }, 0);
+    // Stop underwater sounds synchronously
+    if (underwaterAmbAudio && !underwaterAmbAudio.paused) {
+        underwaterAmbAudio.pause();
+        underwaterAmbAudio.currentTime = 0;
+    }
+    if (underwaterBubblesAudio && !underwaterBubblesAudio.paused) {
+        underwaterBubblesAudio.pause();
+        underwaterBubblesAudio.currentTime = 0;
+    }
+    
+    // Resume above-water sounds
+    if (activeWaterAudio && !isNatureMuted()) {
+        activeWaterAudio.currentTime = 0;
+        activeWaterAudio.volume = WATER_VOLUME;
+        activeWaterAudio.play().catch(() => {});
+    }
+    
+    // Re-schedule breeze (don't resume mid-clip)
+    if (!isNatureMuted()) {
+        scheduleBreezeSound();
+    }
+    
+    // Resume fireplace at night
+    if (!isDayTime() && fireplaceAudio && !fireplaceActive) {
+        startFireplaceSound();
+    }
 }
 
 // ============================================

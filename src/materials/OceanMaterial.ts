@@ -185,7 +185,10 @@ export function Start(): void
         _Scale: new Uniform(triplanarScale),
         _SpotLightSharpness: new Uniform(spotLightSharpness),
         _SpotLightDistance: spotLightDistanceUniform,
-        _Absorption: oceanAbsorptionUniform
+        _Absorption: oceanAbsorptionUniform,
+        _Time: timeUniform,
+        _WaveVelocity1: waveVelocity1Uniform,
+        _WaveVelocity2: waveVelocity2Uniform
     };
     SetSkyboxUniforms(triplanar);
 }

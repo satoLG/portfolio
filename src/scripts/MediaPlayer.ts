@@ -260,6 +260,19 @@ let analyserCtx: CanvasRenderingContext2D | null = null;
 let analyserAnimId: number = 0;
 let mediaSourceConnected = false;
 
+// Underwater muffled music effect (API mode)
+let musicLowpassFilter: BiquadFilterNode | null = null;
+let musicGainNode: GainNode | null = null;
+const MUFFLE_FILTER_CLEAN = 22000;   // Hz — reset value when above water
+const MUFFLE_FILTER_ENTER = 200;     // Hz — immediate muffling when first entering water
+const MUFFLE_FILTER_DEEP = 150;      // Hz — fully muffled at max depth
+const MUFFLE_GAIN_MIN = 0.0;         // completely silent at max depth
+const MUFFLE_GAIN_MAX = 1.0;         // full volume above water
+const MUFFLE_DEPTH_MAX = 8.0;        // camera Y range: 0 to -8
+
+// Tag-mode underwater tracking
+let wasPlayingBeforeDive = false;
+
 // Preloading system for faster song transitions
 let preloadedAudios: Map<number, HTMLAudioElement> = new Map();
 
@@ -881,7 +894,21 @@ function connectMusicAnalyser(): void {
         analyserNode = ctx.createAnalyser();
         analyserNode.fftSize = 128;
         analyserNode.smoothingTimeConstant = 0.8;
-        source.connect(analyserNode);
+
+        // Create underwater muffled effect chain:
+        // source → lowpass → gain → analyser → destination
+        musicLowpassFilter = ctx.createBiquadFilter();
+        musicLowpassFilter.type = 'lowpass';
+        musicLowpassFilter.frequency.value = MUFFLE_FILTER_CLEAN;
+        musicLowpassFilter.Q.value = 0.7;
+
+        musicGainNode = ctx.createGain();
+        musicGainNode.gain.value = MUFFLE_GAIN_MAX;
+
+        // Chain: source → muffle lowpass → muffle gain → analyser → destination
+        source.connect(musicLowpassFilter);
+        musicLowpassFilter.connect(musicGainNode);
+        musicGainNode.connect(analyserNode);
         analyserNode.connect(ctx.destination);
         mediaSourceConnected = true;
     } catch (e) {
@@ -1066,7 +1093,6 @@ function expandPlayer(): void {
     // Restore full transitions for expand/collapse animation
     playerContainer.style.transition = '';
     playerContainer.classList.remove('bubble');
-    playerContainer.classList.remove('underwater-position');
     playerContainer.classList.add('expanded');
     
     // Allow resize after animation completes (400ms transition)
@@ -1607,11 +1633,42 @@ export function Update(): void {
     // Track surfacing animation timer
     if (surfacingAnimationTimer > 0) {
         surfacingAnimationTimer -= 0.016;  // ~60fps frame time
-        
-        // When surfacing animation completes, remove underwater class
-        if (surfacingAnimationTimer <= 0) {
-            playerContainer.classList.remove('underwater-position');
+    }
+    
+    // --- Underwater music effect ---
+    if (!wasUnderwater && isUnderwater) {
+        // Just went underwater
+        if (getAudioMode() === 'tag') {
+            // Tag mode: pause music
+            wasPlayingBeforeDive = isPlaying;
+            if (wavesurfer && isPlaying) wavesurfer.pause();
+            else if (audioElement && isPlaying) audioElement.pause();
         }
+    } else if (wasUnderwater && !isUnderwater) {
+        // Just surfaced
+        if (getAudioMode() === 'api') {
+            // Reset filter + gain to clean state
+            if (musicLowpassFilter) musicLowpassFilter.frequency.value = MUFFLE_FILTER_CLEAN;
+            if (musicGainNode) musicGainNode.gain.value = MUFFLE_GAIN_MAX;
+        } else {
+            // Tag mode: resume if was playing
+            if (wasPlayingBeforeDive) {
+                if (wavesurfer) wavesurfer.play();
+                else if (audioElement) audioElement.play().catch(() => {});
+                wasPlayingBeforeDive = false;
+            }
+        }
+    }
+    
+    // Progressive muffled effect (API mode) — every frame while underwater
+    if (isUnderwater && getAudioMode() === 'api') {
+        const depth = Math.max(0, -camera.position.y);  // 0 at surface, 8 at sea floor
+        const t = Math.min(depth / MUFFLE_DEPTH_MAX, 1.0);  // 0..1
+        // Exponential sweep from 800Hz (surface) down to 150Hz (deep)
+        const filterFreq = MUFFLE_FILTER_ENTER * Math.pow(MUFFLE_FILTER_DEEP / MUFFLE_FILTER_ENTER, t);
+        const gain = MUFFLE_GAIN_MAX * (1.0 - t * (MUFFLE_GAIN_MAX - MUFFLE_GAIN_MIN));
+        if (musicLowpassFilter) musicLowpassFilter.frequency.value = filterFreq;
+        if (musicGainNode) musicGainNode.gain.value = Math.max(0, gain);
     }
     
     // If just surfaced and was closed underwater, show bubble again
@@ -1651,14 +1708,7 @@ export function Update(): void {
     }
     
     // Handle underwater class for CSS sizing
-    // KEEP the class during surfacing animation so size doesn't jump
     const isSurfacingAnimation = surfacingAnimationTimer > 0;
-    if (isUnderwater && !isExpanded) {
-        playerContainer.classList.add('underwater-position');
-    } else if (!isSurfacingAnimation) {
-        // Only remove after surfacing animation completes (handled in timer above)
-        playerContainer.classList.remove('underwater-position');
-    }
     
     // Check if radio is in front of camera (z < 1)
     const isInFront = screenPos.z < 1 && screenPos.z > 0;
@@ -1701,26 +1751,5 @@ export function Update(): void {
             playerContainer.style.opacity = '1';
             playerContainer.style.pointerEvents = 'auto';
         }
-    }
-    
-    // UNDERWATER: Animate to bottom-left corner
-    if (isUnderwater && !isExpanded) {
-        // Calculate target position as CENTER point (since we use translate(-50%, -50%))
-        const underwaterBubbleSize = 56;
-        // We want the bubble at left:16, so center is at 16 + 28 = 44
-        // We want bottom:16, so center is at windowHeight - 16 - 28
-        const targetX = 16 + underwaterBubbleSize / 2;
-        const targetY = window.innerHeight - 16 - underwaterBubbleSize / 2;
-        
-        // Enable smooth transition when first going underwater
-        if (!wasUnderwater) {
-            playerContainer.style.transition = 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)';
-        }
-        
-        playerContainer.style.left = `${targetX}px`;
-        playerContainer.style.top = `${targetY}px`;
-        playerContainer.style.transform = 'translate(-50%, -50%)';  // Same as above water!
-        playerContainer.style.opacity = '1';
-        playerContainer.style.pointerEvents = 'auto';
     }
 }

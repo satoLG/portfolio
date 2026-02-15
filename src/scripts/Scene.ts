@@ -235,6 +235,7 @@ export function Start(): void
     Fish.Start();
     scene.add(Fish.clownFish);
     scene.add(Fish.doriFish);
+    scene.add(Fish.genericFishContainer);
 
     // Initialize media player (for radio)
     MediaPlayer.Start();
