@@ -165,9 +165,9 @@ const mouseInfluenceStrength = new Uniform(0.025);  // TWEAK: Very subtle bend
 // let isMouseOverGrass = false;
 
 // BREEZE-DRIVEN WIND SETTINGS
-const BREEZE_RAMP_UP = 3.0;           // Seconds to ramp up wind when breeze starts
+const BREEZE_RAMP_UP = 1.0;           // Seconds to ramp up wind when breeze starts
 const BREEZE_RAMP_DOWN = 4.0;         // Seconds to fade out wind after breeze ends
-const BREEZE_GRASS_STRENGTH = 0.06;   // How far grass patches sway (rotation radians)
+const BREEZE_GRASS_STRENGTH = 0.08;   // How far grass patches sway (rotation radians)
 let windTime = 0;
 let breezeIntensity = 0;              // 0-1 smoothed breeze envelope
 

@@ -326,6 +326,32 @@ export const triplanarFragment =
     varying vec3 _worldPos;
     varying vec3 _normal;
 
+    const float CAUSTIC_DISTANCE = 30.0;
+
+    // Procedural caustic line — cheap bright intersection pattern
+    float causticLine(vec2 p) {
+        return pow(1.0 - abs(sin(p.x + sin(p.y))), 4.0);
+    }
+
+    float caustics(vec2 worldXZ) {
+        float scale = 2.5;
+        float speed = 8.0;
+        
+        // Layer 1: follows ocean wave velocity 1
+        vec2 uv1 = worldXZ * scale + _WaveVelocity1 * _Time * speed;
+        // Layer 2: follows ocean wave velocity 2, rotated for crossing pattern
+        vec2 uv2 = worldXZ * scale + _WaveVelocity2 * _Time * speed;
+        float angle = 0.45;
+        float ca = cos(angle);
+        float sa = sin(angle);
+        uv2 = vec2(uv2.x * ca - uv2.y * sa, uv2.x * sa + uv2.y * ca);
+        
+        float c1 = causticLine(uv1 * 2.0);
+        float c2 = causticLine(uv2 * 2.0);
+        
+        return (c1 + c2) * 0.3;
+    }
+
     void main()
     {
         float dirLighting = max(0.4, dot(_normal, _DirToLight));
@@ -369,6 +395,22 @@ export const triplanarFragment =
 
         float sampleY = originY + viewDir.y * viewLen;
         vec3 light = exp((sampleY - viewLen * DENSITY) * _Absorption) * _Light;
+
+        // Caustic light on underwater surfaces
+        float caustic = caustics(_worldPos.xz);
+        // Depth attenuation: caustics fade on very deep surfaces
+        float depthFade = clamp(1.0 + _worldPos.y * 0.08, 0.0, 1.0);
+        // Distance fade: caustics only visible near the camera
+        float distFade = 1.0 - clamp(viewLen / CAUSTIC_DISTANCE, 0.0, 1.0);
+        distFade *= distFade; // quadratic falloff for smooth fade
+        // Day: warm bright caustics | Night: cool moonlight caustics
+        float dayIntensity = _SunVisibility * 0.5;
+        float nightIntensity = (1.0 - _SunVisibility) * 0.35;
+        vec3 causticColor = caustic * depthFade * distFade * (
+            vec3(1.0, 0.95, 0.85) * dayIntensity +
+            vec3(0.5, 0.65, 1.0) * nightIntensity
+        );
+        light += causticColor;
 
         float spotLight = 0.0;
         float spotLightDistance = 1.0;
