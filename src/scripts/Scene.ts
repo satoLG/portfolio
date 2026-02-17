@@ -111,8 +111,9 @@ export function Start(): void
 {
     document.body.appendChild(body);
 
-    let width = window.innerWidth * window.devicePixelRatio;
-    let height = window.innerHeight * window.devicePixelRatio;
+    const dpr = Math.min(window.devicePixelRatio, 2);  // cap DPR to limit GPU memory
+    let width = window.innerWidth * dpr;
+    let height = window.innerHeight * dpr;
     body.style.transform = "";
     body.style.width = window.innerWidth + "px";
     body.style.height = window.innerHeight + "px";
@@ -142,8 +143,8 @@ export function Start(): void
 
     window.onresize = function()
     {
-        width = window.innerWidth * window.devicePixelRatio;
-        height = window.innerHeight * window.devicePixelRatio;
+        width = window.innerWidth * dpr;
+        height = window.innerHeight * dpr;
         body.style.transform = "";
         body.style.width = window.innerWidth + "px";
         body.style.height = window.innerHeight + "px";
@@ -169,8 +170,8 @@ export function Start(): void
     // Position light behind island so shadows go forward towards camera
     directionalLight.position.set(1, 4, -6);  // Behind island at z=-3.3
     directionalLight.castShadow = true;
-    directionalLight.shadow.mapSize.width = 4096;
-    directionalLight.shadow.mapSize.height = 4096;
+    directionalLight.shadow.mapSize.width = 2048;
+    directionalLight.shadow.mapSize.height = 2048;
     directionalLight.shadow.camera.near = 0.1;
     directionalLight.shadow.camera.far = 20;
     directionalLight.shadow.camera.left = -4;
@@ -207,13 +208,18 @@ export function Start(): void
     scene.add(Island.sword);
     // Grass and clover patches are added dynamically as they load
     const addedPatches = new Set<any>();
-    setInterval(() => {
+    const EXPECTED_PATCHES = 42;  // 32 grass + 10 clover
+    const grassInterval = setInterval(() => {
         Island.grassPatches.forEach(patch => {
             if (!addedPatches.has(patch)) {
                 scene.add(patch);
                 addedPatches.add(patch);
             }
         });
+        // Stop polling once all patches are loaded
+        if (addedPatches.size >= EXPECTED_PATCHES) {
+            clearInterval(grassInterval);
+        }
     }, 100);
 
     // Add fire effect to firecamp

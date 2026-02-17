@@ -2,7 +2,7 @@
 // MEDIA PLAYER - Mini music player for radio
 // ============================================
 
-import { camera } from "./Scene";
+import { camera, pixelSizeValue } from "./Scene";
 import { radio } from "../scene/Island";
 import { Vector3, PerspectiveCamera } from "three";
 import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse, getAudioMode, getAudioContext } from "./Audio";
@@ -260,6 +260,9 @@ let analyserCtx: CanvasRenderingContext2D | null = null;
 let analyserAnimId: number = 0;
 let mediaSourceConnected = false;
 
+// Reusable typed array for analyser (avoids allocation per frame)
+let analyserDataArray: Uint8Array<ArrayBuffer> | null = null;
+
 // Underwater muffled music effect (API mode)
 let musicLowpassFilter: BiquadFilterNode | null = null;
 let musicGainNode: GainNode | null = null;
@@ -269,6 +272,75 @@ const MUFFLE_FILTER_DEEP = 150;      // Hz — fully muffled at max depth
 const MUFFLE_GAIN_MIN = 0.0;         // completely silent at max depth
 const MUFFLE_GAIN_MAX = 1.0;         // full volume above water
 const MUFFLE_DEPTH_MAX = 8.0;        // camera Y range: 0 to -8
+
+// Retro sample-rate reduction for pixelation mode (API mode)
+// 8-bit depth (retro quantization) + 8x sample-rate reduction (crunchy stepping)
+// + gentle post-crusher lowpass to smooth aliasing harshness
+let retroWorkletNode: AudioWorkletNode | null = null;
+let retroSmoothFilter: BiquadFilterNode | null = null;  // post-crusher muffle
+let retroBypass: GainNode | null = null;
+let retroWet: GainNode | null = null;
+let retroMerge: GainNode | null = null;
+let retroActive = false;
+let retroWorkletReady = false;
+let retroWorkletLoading: Promise<void> | null = null;
+
+const RETRO_PROCESSOR_CODE = `
+class RetroProcessor extends AudioWorkletProcessor {
+    static get parameterDescriptors() {
+        return [
+            { name: 'bitDepth', defaultValue: 16, minValue: 1, maxValue: 16 },
+            { name: 'reduction', defaultValue: 1, minValue: 1, maxValue: 80 }
+        ];
+    }
+    constructor() {
+        super();
+        this._held = [0, 0];
+        this._count = [0, 0];
+    }
+    process(inputs, outputs, parameters) {
+        const input = inputs[0];
+        const output = outputs[0];
+        if (!input || !input.length) return true;
+        for (let ch = 0; ch < input.length; ch++) {
+            const inp = input[ch];
+            const out = output[ch];
+            const b = parameters.bitDepth[0];
+            const r = parameters.reduction[0];
+            const steps = Math.pow(2, b);
+            for (let i = 0; i < inp.length; i++) {
+                this._count[ch] = (this._count[ch] || 0) + 1;
+                if (this._count[ch] >= r) {
+                    this._count[ch] = 0;
+                    this._held[ch] = Math.round(inp[i] * steps) / steps;
+                }
+                out[i] = this._held[ch] || 0;
+            }
+        }
+        return true;
+    }
+}
+registerProcessor('retro-8bit-processor', RetroProcessor);
+`;
+
+function loadRetroWorklet(): Promise<void> {
+    if (retroWorkletReady) return Promise.resolve();
+    if (retroWorkletLoading) return retroWorkletLoading;
+    retroWorkletLoading = (async () => {
+        try {
+            const ctx = getAudioContext();
+            if (!ctx) return;
+            const blob = new Blob([RETRO_PROCESSOR_CODE], { type: 'application/javascript' });
+            const url = URL.createObjectURL(blob);
+            await ctx.audioWorklet.addModule(url);
+            URL.revokeObjectURL(url);
+            retroWorkletReady = true;
+        } catch (e) {
+            console.warn('Could not load retro audio worklet:', e);
+        }
+    })();
+    return retroWorkletLoading;
+}
 
 // Tag-mode underwater tracking
 let wasPlayingBeforeDive = false;
@@ -884,19 +956,21 @@ function initWavesurfer(): void {
 // ============================================
 // REAL-TIME FREQUENCY ANALYSER (API mode)
 // ============================================
-function connectMusicAnalyser(): void {
+async function connectMusicAnalyser(): Promise<void> {
     if (mediaSourceConnected || !wavesurfer) return;
+    mediaSourceConnected = true;
     const ctx = getAudioContext();
-    if (!ctx) return;
+    if (!ctx) { mediaSourceConnected = false; return; }
     try {
+        await loadRetroWorklet();
+
         const mediaEl = wavesurfer.getMediaElement();
         const source = ctx.createMediaElementSource(mediaEl);
         analyserNode = ctx.createAnalyser();
         analyserNode.fftSize = 128;
         analyserNode.smoothingTimeConstant = 0.8;
 
-        // Create underwater muffled effect chain:
-        // source → lowpass → gain → analyser → destination
+        // Underwater muffled effect
         musicLowpassFilter = ctx.createBiquadFilter();
         musicLowpassFilter.type = 'lowpass';
         musicLowpassFilter.frequency.value = MUFFLE_FILTER_CLEAN;
@@ -905,14 +979,40 @@ function connectMusicAnalyser(): void {
         musicGainNode = ctx.createGain();
         musicGainNode.gain.value = MUFFLE_GAIN_MAX;
 
-        // Chain: source → muffle lowpass → muffle gain → analyser → destination
+        // Retro effect: worklet crusher with dry/wet split + post-crusher smoothing
+        if (retroWorkletReady) {
+            retroWorkletNode = new AudioWorkletNode(ctx, 'retro-8bit-processor');
+        }
+        retroSmoothFilter = ctx.createBiquadFilter();  // gentle muffle after crusher
+        retroSmoothFilter.type = 'lowpass';
+        retroSmoothFilter.frequency.value = 22050;  // open by default
+        retroSmoothFilter.Q.value = 0.7;
+        retroBypass = ctx.createGain();  // clean path
+        retroBypass.gain.value = 1.0;
+        retroWet = ctx.createGain();     // retro path
+        retroWet.gain.value = 0.0;
+        retroMerge = ctx.createGain();
+        retroMerge.gain.value = 1.0;
+
+        // Chain: source → muffle lowpass → muffle gain → split
         source.connect(musicLowpassFilter);
         musicLowpassFilter.connect(musicGainNode);
-        musicGainNode.connect(analyserNode);
+        //   clean path: gain → bypass → merge
+        musicGainNode.connect(retroBypass);
+        retroBypass.connect(retroMerge);
+        //   retro path: gain → worklet → smooth filter → wet → merge
+        if (retroWorkletNode) {
+            musicGainNode.connect(retroWorkletNode);
+            retroWorkletNode.connect(retroSmoothFilter);
+        }
+        retroSmoothFilter.connect(retroWet);
+        retroWet.connect(retroMerge);
+        //   merge → analyser → destination
+        retroMerge.connect(analyserNode);
         analyserNode.connect(ctx.destination);
-        mediaSourceConnected = true;
     } catch (e) {
         console.warn('Could not connect music analyser:', e);
+        mediaSourceConnected = false;
     }
 }
 
@@ -954,14 +1054,17 @@ function drawAnalyser(): void {
     
     // If not playing or no analyser, draw idle bars with progress
     const bufferLength = analyserNode ? analyserNode.frequencyBinCount : 64;
-    const dataArray = new Uint8Array(bufferLength);
+    // Reuse typed array across frames — only reallocate if size changed
+    if (!analyserDataArray || analyserDataArray.length !== bufferLength) {
+        analyserDataArray = new Uint8Array(bufferLength);
+    }
     
     if (isPlaying && analyserNode) {
-        analyserNode.getByteFrequencyData(dataArray);
+        analyserNode.getByteFrequencyData(analyserDataArray);
     } else {
         // Idle state: small ambient bars
         for (let i = 0; i < bufferLength; i++) {
-            dataArray[i] = 8 + Math.sin(i * 0.3 + Date.now() * 0.001) * 6;
+            analyserDataArray[i] = 8 + Math.sin(i * 0.3 + Date.now() * 0.001) * 6;
         }
     }
 
@@ -969,7 +1072,7 @@ function drawAnalyser(): void {
     const barWidth = (width - gap * (bufferLength - 1)) / bufferLength;
 
     for (let i = 0; i < bufferLength; i++) {
-        const value = dataArray[i] / 255;
+        const value = analyserDataArray[i] / 255;
         const minBarH = 2;
         const barHeight = minBarH + value * (height - minBarH) * 0.85;
         const x = i * (barWidth + gap);
@@ -1674,6 +1777,38 @@ export function Update(): void {
     // If just surfaced and was closed underwater, show bubble again
     if (wasUnderwater && !isUnderwater && closedWhileUnderwater) {
         closedWhileUnderwater = false;
+    }
+    
+    // Retro sample-rate reduction synced with pixelation (API mode only)
+    if (getAudioMode() === 'api' && retroWorkletNode && retroBypass && retroWet) {
+        const shouldRetro = pixelSizeValue > 0;
+        if (shouldRetro && !retroActive) {
+            // Set worklet params: 8-bit depth, 8x sample-rate reduction
+            const bitParam = retroWorkletNode.parameters.get('bitDepth');
+            const redParam = retroWorkletNode.parameters.get('reduction');
+            if (bitParam) bitParam.value = 8;
+            if (redParam) redParam.value = 8;
+            retroBypass.gain.value = 0.0;  // mute clean
+            retroWet.gain.value = 1.0;     // unmute retro
+            retroActive = true;
+        }
+        // Update post-crusher muffle based on pixelation level (every frame while active)
+        if (shouldRetro && retroSmoothFilter) {
+            // medium (5) → 6kHz, high (10) → 8kHz
+            retroSmoothFilter.frequency.value = pixelSizeValue >= 10 ? 8000 : 6000;
+        }
+        if (!shouldRetro && retroActive) {
+            // Reset worklet to passthrough
+            const bitParam = retroWorkletNode.parameters.get('bitDepth');
+            const redParam = retroWorkletNode.parameters.get('reduction');
+            if (bitParam) bitParam.value = 16;
+            if (redParam) redParam.value = 1;
+            // Open filter back up
+            if (retroSmoothFilter) retroSmoothFilter.frequency.value = 22050;
+            retroBypass.gain.value = 1.0;  // unmute clean
+            retroWet.gain.value = 0.0;     // mute retro
+            retroActive = false;
+        }
     }
     
     // Get radio world position FIRST (need it for surfacing target)

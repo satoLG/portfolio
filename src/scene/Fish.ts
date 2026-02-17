@@ -43,6 +43,9 @@ const VELOCITY_DAMPING = 0.8;            // drag on vertical velocity
 const MAX_TILT_ANGLE = 0.8;              // max rotation.z tilt in radians (~34°)
 const TILT_SMOOTHING = 8.0;              // how fast the tilt follows velocity
 
+// Object pool settings
+const POOL_SIZE = 25;                    // max simultaneous fish — prevents unbounded memory growth
+
 // Fish color tint variants (multiplied on top of base texture)
 const FISH_COLOR_TINTS: Color[] = [
     new Color(1.0, 1.0, 1.0),   // no filter (original)
@@ -67,15 +70,26 @@ export const genericFishContainer = new Group();
 let genericFishTemplate: Group | null = null;
 let genericFishAnimations: AnimationClip[] = [];
 
-interface SwimmingFish {
+interface PooledFish {
     group: Group;
+    scene: Group;             // the cloned skeleton scene inside the group
+    materials: MeshStandardMaterial[];  // pre-cloned materials for tint reuse
+    baseTintColors: Color[];  // original colors before tinting (for reset)
     mixer: AnimationMixer;
+    clip: AnimationClip | null;
+}
+
+interface SwimmingFish {
+    pool: PooledFish;         // reference back to pool entry for recycling
     speed: number;
     baseY: number;
     velocityY: number;
     currentTilt: number;
 }
-const activeFish: SwimmingFish[] = [];
+
+const fishPool: PooledFish[] = [];       // available (inactive) fish
+const activeFish: SwimmingFish[] = [];   // in-scene swimming fish
+let poolInitialized = false;
 let spawnTimer = 0;
 
 // Pointer tracking — screen NDC coords updated each frame
@@ -98,12 +112,93 @@ function onPointerLeave(): void {
 
 /** Unproject pointer NDC to world position at a given Z plane */
 const _pointerWorld = new Vector3();
+const _refPoint = new Vector3();  // reusable — avoids allocation per call
 function getPointerWorldAtZ(z: number): Vector3 {
-    // Get a point at z in NDC to find the depth
-    const refPoint = new Vector3(0, 0, z);
-    refPoint.project(camera);
-    _pointerWorld.set(pointerNDC.x, pointerNDC.y, refPoint.z).unproject(camera);
+    _refPoint.set(0, 0, z);
+    _refPoint.project(camera);
+    _pointerWorld.set(pointerNDC.x, pointerNDC.y, _refPoint.z).unproject(camera);
     return _pointerWorld;
+}
+
+/** Pre-create a single pool entry from the template */
+function createPoolEntry(template: Group, animations: AnimationClip[]): PooledFish {
+    const scene = skeletonClone(template) as Group;
+    const materials: MeshStandardMaterial[] = [];
+    const baseTintColors: Color[] = [];
+    scene.traverse((child) => {
+        if (child instanceof Mesh && child.material) {
+            const srcMat = child.material as MeshStandardMaterial;
+            const mat = srcMat.clone();
+            child.material = mat;
+            materials.push(mat);
+            baseTintColors.push(mat.color.clone());
+        }
+    });
+    const group = new Group();
+    group.add(scene);
+    group.rotation.order = 'YXZ';
+    group.rotation.y = -Math.PI / 2;
+    group.visible = false;  // hidden until activated
+
+    const mixer = new AnimationMixer(scene);
+    const clip = animations.length > 0 ? animations[0] : null;
+
+    return { group, scene, materials, baseTintColors, mixer, clip };
+}
+
+/** Populate the object pool once the template is loaded */
+function initPool(): void {
+    if (poolInitialized || !genericFishTemplate) return;
+    poolInitialized = true;
+    for (let i = 0; i < POOL_SIZE; i++) {
+        const entry = createPoolEntry(genericFishTemplate, genericFishAnimations);
+        genericFishContainer.add(entry.group);  // add once, toggle visibility
+        fishPool.push(entry);
+    }
+}
+
+/** Take a fish from the pool, apply tint/position/scale, activate it */
+function activatePooledFish(
+    tint: Color, x: number, y: number, z: number,
+    speed: number, scale: number
+): void {
+    if (fishPool.length === 0) return;  // pool exhausted — skip silently
+    const entry = fishPool.pop()!;
+
+    // Apply tint to pre-cloned materials (reset base color first)
+    for (let i = 0; i < entry.materials.length; i++) {
+        entry.materials[i].color.copy(entry.baseTintColors[i]).multiply(tint);
+    }
+
+    entry.group.position.set(x, y, z);
+    entry.group.scale.setScalar(scale);
+    entry.group.rotation.x = 0;  // reset tilt
+    entry.group.visible = true;
+
+    // Restart animation
+    entry.mixer.stopAllAction();
+    if (entry.clip) {
+        const action = entry.mixer.clipAction(entry.clip);
+        action.setLoop(LoopRepeat, Infinity);
+        action.play();
+    }
+
+    activeFish.push({
+        pool: entry,
+        speed,
+        baseY: y,
+        velocityY: 0,
+        currentTilt: 0,
+    });
+}
+
+/** Return a fish to the pool */
+function deactivateFish(index: number): void {
+    const fish = activeFish[index];
+    fish.pool.mixer.stopAllAction();
+    fish.pool.group.visible = false;
+    fishPool.push(fish.pool);
+    activeFish.splice(index, 1);
 }
 
 export function Start(): void {
@@ -143,22 +238,24 @@ export function Start(): void {
         (gltf) => {
             genericFishTemplate = gltf.scene;
             genericFishAnimations = gltf.animations;
+            // Build the object pool now that the template is ready
+            initPool();
         }
     );
 
 }
 
-// Temp vectors for frustum edge calculation
+// Reusable temp vectors for frustum edge calculation (zero per-frame allocation)
 const _vecRight = new Vector3();
 const _vecLeft = new Vector3();
+const _fishWorldPos = new Vector3();
+const _projected = new Vector3();
 
 /** Get world-space X extents of the camera frustum at the fish depth plane */
 function getFrustumEdgesX(z: number): { spawnX: number; despawnX: number } {
-    // Fish world position in camera's view
-    const fishWorldPos = new Vector3(0, (GENERIC_FISH_Y_MIN + GENERIC_FISH_Y_MAX) * 0.5, z);
-    // Project to NDC to get the depth (z) at the fish plane
-    const projected = fishWorldPos.clone().project(camera);
-    const depthNDC = projected.z;
+    _fishWorldPos.set(0, (GENERIC_FISH_Y_MIN + GENERIC_FISH_Y_MAX) * 0.5, z);
+    _projected.copy(_fishWorldPos).project(camera);
+    const depthNDC = _projected.z;
 
     // Right edge of screen in NDC = +1, unproject to world
     _vecRight.set(1, 0, depthNDC).unproject(camera);
@@ -172,7 +269,7 @@ function getFrustumEdgesX(z: number): { spawnX: number; despawnX: number } {
 }
 
 function spawnGenericFish(): void {
-    if (!genericFishTemplate) return;
+    if (!poolInitialized || fishPool.length === 0) return;
 
     const count = SPAWN_COUNT_MIN + Math.floor(Math.random() * (SPAWN_COUNT_MAX - SPAWN_COUNT_MIN + 1));
 
@@ -183,6 +280,8 @@ function spawnGenericFish(): void {
     const maxJitter = Math.max(0, (slotSize - FISH_MIN_Y_GAP) * 0.5);
 
     for (let n = 0; n < count; n++) {
+        if (fishPool.length === 0) return;  // pool exhausted mid-wave
+
         const slotCenter = GENERIC_FISH_Y_MIN + slotSize * (n + 0.5);
         const baseY = slotCenter + (Math.random() * 2 - 1) * maxJitter;
         const baseZ = GENERIC_FISH_Z_MIN + Math.random() * (GENERIC_FISH_Z_MAX - GENERIC_FISH_Z_MIN);
@@ -193,55 +292,18 @@ function spawnGenericFish(): void {
         const groupSize = GROUP_SIZE_MIN + Math.floor(Math.random() * (GROUP_SIZE_MAX - GROUP_SIZE_MIN + 1));
 
         for (let g = 0; g < groupSize; g++) {
-            spawnSingleCreature(genericFishTemplate, genericFishAnimations, tint,
-                baseY, baseZ, baseSpeed,
-                GENERIC_FISH_SCALE, FISH_SCALE_MIN, FISH_SCALE_MAX,
-                GROUP_Y_SPREAD, GROUP_Z_SPREAD, GROUP_X_SPREAD, GROUP_SPEED_SPREAD);
+            if (fishPool.length === 0) return;
+
+            const y = baseY + (Math.random() * 2 - 1) * GROUP_Y_SPREAD;
+            const z = baseZ + (Math.random() * 2 - 1) * GROUP_Z_SPREAD;
+            const speed = baseSpeed + (Math.random() * 2 - 1) * GROUP_SPEED_SPREAD;
+            const scaleMult = FISH_SCALE_MIN + Math.random() * (FISH_SCALE_MAX - FISH_SCALE_MIN);
+            const { spawnX } = getFrustumEdgesX(z);
+            const x = spawnX + Math.random() * GROUP_X_SPREAD;
+
+            activatePooledFish(tint, x, y, z, speed, GENERIC_FISH_SCALE * scaleMult);
         }
     }
-}
-
-function spawnSingleCreature(
-    template: Group, animations: AnimationClip[], tint: Color,
-    baseY: number, baseZ: number, baseSpeed: number,
-    baseScale: number, scaleMin: number, scaleMax: number,
-    ySpread: number, zSpread: number, xSpread: number, speedSpread: number
-): void {
-    const y = baseY + (Math.random() * 2 - 1) * ySpread;
-    const z = baseZ + (Math.random() * 2 - 1) * zSpread;
-    const speed = baseSpeed + (Math.random() * 2 - 1) * speedSpread;
-    const scaleMult = scaleMin + Math.random() * (scaleMax - scaleMin);
-
-    const { spawnX } = getFrustumEdgesX(z);
-    const x = spawnX + Math.random() * xSpread;
-
-    const scene = skeletonClone(template);
-    scene.traverse((child) => {
-        if (child instanceof Mesh && child.material) {
-            // Clone material to avoid shared state
-            const srcMat = child.material as MeshStandardMaterial;
-            const mat = srcMat.clone();
-            mat.color.multiply(tint);
-            child.material = mat;
-        }
-    });
-
-    const group = new Group();
-    group.add(scene);
-    group.scale.setScalar(baseScale * scaleMult);
-    group.position.set(x, y, z);
-    group.rotation.order = 'YXZ';
-    group.rotation.y = -Math.PI / 2;
-
-    const mixer = new AnimationMixer(scene);
-    if (animations.length > 0) {
-        const action = mixer.clipAction(animations[0]);
-        action.setLoop(LoopRepeat, Infinity);
-        action.play();
-    }
-
-    genericFishContainer.add(group);
-    activeFish.push({ group, mixer, speed, baseY: y, velocityY: 0, currentTilt: 0 });
 }
 
 export function Update(): void {
@@ -268,6 +330,9 @@ export function Update(): void {
     );
     doriFish.rotation.y = -doriAngle + CIRCLE_FISH_ROTATION_OFFSET;
 
+    // Lazy-init pool if template loaded after Start()
+    if (!poolInitialized && genericFishTemplate) initPool();
+
     // Only spawn fish during daytime
     if (isDayTime()) {
         spawnTimer += deltaTime;
@@ -280,14 +345,15 @@ export function Update(): void {
     // Move and cull active generic fish
     for (let i = activeFish.length - 1; i >= 0; i--) {
         const fish = activeFish[i];
-        fish.mixer.update(deltaTime);
-        fish.group.position.x -= fish.speed * deltaTime;
+        const group = fish.pool.group;
+        fish.pool.mixer.update(deltaTime);
+        group.position.x -= fish.speed * deltaTime;
 
         // Pointer avoidance
         if (pointerActive) {
-            const pw = getPointerWorldAtZ(fish.group.position.z);
-            const dx = fish.group.position.x - pw.x;
-            const dy = fish.group.position.y - pw.y;
+            const pw = getPointerWorldAtZ(group.position.z);
+            const dx = group.position.x - pw.x;
+            const dy = group.position.y - pw.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
 
             if (dist < AVOIDANCE_RADIUS && dist > 0.01) {
@@ -299,26 +365,24 @@ export function Update(): void {
         }
 
         // Spring return to base Y
-        const yDiff = fish.baseY - fish.group.position.y;
+        const yDiff = fish.baseY - group.position.y;
         fish.velocityY += yDiff * RETURN_SPEED * deltaTime;
 
         // Damping
         fish.velocityY *= Math.max(0, 1 - VELOCITY_DAMPING * deltaTime);
 
         // Apply vertical movement
-        fish.group.position.y += fish.velocityY * deltaTime;
+        group.position.y += fish.velocityY * deltaTime;
 
         // Tilt based on vertical velocity (fish pitches nose up/down)
         // With rotation.y = -PI/2 the fish faces -X, so rotation.x is pitch
         const targetTilt = Math.max(-MAX_TILT_ANGLE, Math.min(MAX_TILT_ANGLE, -fish.velocityY * 0.8));
         fish.currentTilt += (targetTilt - fish.currentTilt) * Math.min(1, TILT_SMOOTHING * deltaTime);
-        fish.group.rotation.x = fish.currentTilt;
+        group.rotation.x = fish.currentTilt;
 
-        const { despawnX } = getFrustumEdgesX(fish.group.position.z);
-        if (fish.group.position.x < despawnX) {
-            genericFishContainer.remove(fish.group);
-            fish.mixer.stopAllAction();
-            activeFish.splice(i, 1);
+        const { despawnX } = getFrustumEdgesX(group.position.z);
+        if (group.position.x < despawnX) {
+            deactivateFish(i);  // return to pool instead of leaking
         }
     }
 }
