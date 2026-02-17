@@ -66,18 +66,13 @@ const ROCKS_TEXTURE_PATH = 'textures/ground_with_rocks_01_1k/';
 const GRASS_TEXTURE_PATH = 'textures/rocky_terrain_02_2k/';
 
 
+// Only load color maps — normal/roughness/AO/height were never used by shaders (~64MB saved)
 const sandColorMap = textureLoader.load(SAND_TEXTURE_PATH + 'concrete_wall_01_color_2k.png');
-const sandNormalMap = textureLoader.load(SAND_TEXTURE_PATH + 'concrete_wall_01_normal_gl_2k.png');
-const sandRoughnessMap = textureLoader.load(SAND_TEXTURE_PATH + 'concrete_wall_01_roughness_2k.png');
-const sandAOMap = textureLoader.load(SAND_TEXTURE_PATH + 'concrete_wall_01_ambient_occlusion_2k.png');
-const sandDisplacementMap = textureLoader.load(SAND_TEXTURE_PATH + 'concrete_wall_01_height_2k.png');
-
 const rocksColorMap = textureLoader.load(ROCKS_TEXTURE_PATH + 'ground_with_rocks_01_color_1k.png');
-
 const grassColorMap = textureLoader.load(GRASS_TEXTURE_PATH + 'rocky_terrain_02_diff_2k.jpg');
 
 const allTextures: Texture[] = [
-    sandColorMap, sandNormalMap, sandRoughnessMap, sandAOMap, sandDisplacementMap,
+    sandColorMap,
     rocksColorMap,
     grassColorMap
 ];
@@ -336,7 +331,7 @@ function applyOceanLightingToModel(model: Group): void {
             const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
             materials.forEach((mat: any) => {
                 if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial || mat.isMeshBasicMaterial) {
-                    mat.customProgramCacheKey = () => 'ocean_' + mat.uuid;
+                    mat.customProgramCacheKey = () => 'ocean_lighting';
                     mat.onBeforeCompile = (shader: any) => {
                         shader.uniforms.uLight = lightUniform;
                         shader.uniforms.uAbsorption = oceanAbsorptionUniform;
@@ -379,7 +374,7 @@ function applyPalmWindShader(model: Group): void {
             const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
             materials.forEach((mat: any) => {
                 if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial || mat.isMeshBasicMaterial) {
-                    mat.customProgramCacheKey = () => 'palm_wind_' + mat.uuid;
+                    mat.customProgramCacheKey = () => 'palm_wind';
                     mat.onBeforeCompile = (shader: any) => {
                         console.log('🌴 Palm wind shader compiling!');
                         // Add ocean lighting uniforms
@@ -457,7 +452,7 @@ function applyFoliageWindShader(model: Group): void {
                     mat.transparent = false;  // Disable transparency to fix flickering
                     mesh.renderOrder = 1;  // Render after ground
                     
-                    mat.customProgramCacheKey = () => 'foliage_wind_' + mat.uuid;
+                    mat.customProgramCacheKey = () => 'foliage_wind';
                     mat.onBeforeCompile = (shader: any) => {
                         // Add ocean lighting uniforms
                         shader.uniforms.uLight = lightUniform;

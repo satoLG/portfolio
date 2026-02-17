@@ -19,7 +19,7 @@ const FIREPLACE_VOLUME_MAX = 0.35;     // Fireplace target volume
 const FIREPLACE_FADE_DURATION = 1.5;   // Seconds to fade in fireplace (desktop only)
 const UNDERWATER_AMB_VOLUME = 0.25;    // Underwater ambient loop volume
 const TRANSITION_SFX_VOLUME = 0.1;     // Volume for dive/surface SFX
-const TRANSITION_SFX_DURATION = 400;  // How long to play transition SFX (ms)
+const BUBBLE_SFX_DURATION = 2000;     // How long to play bubble SFX (ms) — clip is 10s, we only want 2s
 const UI_SOUND_THROTTLE = 100;         // Minimum ms between UI sounds (mobile fix)
 
 // Audio file paths (shared between modes)
@@ -29,7 +29,6 @@ const AUDIO_PATHS = {
     fireplace: 'audio/fireplace.wav',
     underwaterAmb: 'audio/366159__dcsfx__underwater-loop-amb.wav',
     underwaterBubbles: 'audio/96742__robinhood76__01650-underwater-bubbles.wav',
-    surfaceSplash: 'audio/327667__juan_merie_venter__getting-out-of-the-pool.wav',
     waterSplash: 'audio/274060__junggle__water-splash-11.wav',
     uiSwitchDay: '/audio/ui/dragon-studio-light-switch-on-382714.mp3',
     uiSwitchNight: '/audio/ui/dragon-studio-light-switch-382712.mp3',
@@ -128,6 +127,8 @@ let apiBreezeActive = false;
 // Track active one-shot sources so they can be stopped on transition
 let apiBreezeSource: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
 let apiBubblesSource: { source: AudioBufferSourceNode; gain: GainNode } | null = null;
+let apiBubblesStopTimer: ReturnType<typeof setTimeout> | null = null;
+let htmlBubblesStopTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function apiLoadBuffer(url: string): Promise<AudioBuffer | null> {
     if (!_audioContext) return null;
@@ -266,18 +267,32 @@ function apiTransitionToUnderwater(): void {
     // Start underwater sounds
     if (apiNatureGain) {
         apiUnderwaterAmbLoop = apiStartLoop(AUDIO_PATHS.underwaterAmb, apiNatureGain, UNDERWATER_AMB_VOLUME);
-        const bubbleHandle = apiPlayOneShot(AUDIO_PATHS.underwaterBubbles, apiNatureGain, TRANSITION_SFX_VOLUME);
-        if (bubbleHandle) {
-            apiBubblesSource = bubbleHandle;
-            bubbleHandle.source.onended = () => { apiBubblesSource = null; };
-        }
+        apiPlayBubbleClip();
+    }
+}
+
+/** Play bubble sound for exactly BUBBLE_SFX_DURATION ms, preventing overlap */
+function apiPlayBubbleClip(): void {
+    if (!apiNatureGain) return;
+    // Stop any existing bubble playback first
+    if (apiBubblesStopTimer) { clearTimeout(apiBubblesStopTimer); apiBubblesStopTimer = null; }
+    apiBubblesSource = apiStopOneShot(apiBubblesSource);
+    const handle = apiPlayOneShot(AUDIO_PATHS.underwaterBubbles, apiNatureGain, TRANSITION_SFX_VOLUME);
+    if (handle) {
+        apiBubblesSource = handle;
+        apiBubblesStopTimer = setTimeout(() => {
+            apiBubblesSource = apiStopOneShot(apiBubblesSource);
+            apiBubblesStopTimer = null;
+        }, BUBBLE_SFX_DURATION);
+        handle.source.onended = () => { apiBubblesSource = null; };
     }
 }
 
 function apiTransitionToAboveWater(): void {
     // Stop underwater sounds
     apiUnderwaterAmbLoop = apiStopLoop(apiUnderwaterAmbLoop);
-    // Stop actively playing bubble one-shot
+    // Stop actively playing bubble one-shot + clear timer
+    if (apiBubblesStopTimer) { clearTimeout(apiBubblesStopTimer); apiBubblesStopTimer = null; }
     apiBubblesSource = apiStopOneShot(apiBubblesSource);
     // Resume above-water sounds
     if (apiNatureGain) {
@@ -315,7 +330,6 @@ let fireplaceAudio: HTMLAudioElement | null = null;
 // Underwater audio elements
 let underwaterAmbAudio: HTMLAudioElement | null = null;
 let underwaterBubblesAudio: HTMLAudioElement | null = null;
-let surfaceSplashAudio: HTMLAudioElement | null = null;
 
 // Water splash interaction audio
 let waterSplashAudio: HTMLAudioElement | null = null;
@@ -473,11 +487,6 @@ function createAudioElements(): void {
     audioStateMap.set(underwaterAmbAudio, 'underwater');
     audioStateMap.set(underwaterBubblesAudio, 'underwater');
     
-    surfaceSplashAudio = new Audio('audio/327667__juan_merie_venter__getting-out-of-the-pool.wav');
-    surfaceSplashAudio.loop = false;
-    surfaceSplashAudio.volume = TRANSITION_SFX_VOLUME;
-    surfaceSplashAudio.preload = 'auto';
-    
     // Water splash interaction audio
     waterSplashAudio = new Audio('audio/274060__junggle__water-splash-11.wav');
     waterSplashAudio.loop = false;
@@ -536,7 +545,6 @@ function createAudioElements(): void {
     fireplaceAudio.load();
     underwaterAmbAudio.load();
     underwaterBubblesAudio.load();
-    surfaceSplashAudio.load();
     
     console.log('HTML5 Audio elements created');
 }
@@ -820,55 +828,34 @@ async function stopUnderwaterAmbient(): Promise<void> {
     console.log('Underwater ambient stopped');
 }
 
-// Play dive transition SFX (bubbles going down)
+// Play dive/ambient bubble SFX (only first 2s of the 10s clip)
 export async function playDiveSound(): Promise<void> {
     if (!audioInitialized || !isCurrentlyUnderwater) return;
     if (audioMode === 'api') {
-        const handle = apiPlayOneShot(AUDIO_PATHS.underwaterBubbles, apiNatureGain, TRANSITION_SFX_VOLUME);
-        if (handle) {
-            apiBubblesSource = handle;
-            handle.source.onended = () => { apiBubblesSource = null; };
-        }
+        apiPlayBubbleClip();
         return;
     }
     if (!underwaterBubblesAudio) return;
+    
+    // Prevent overlap — if already playing, skip
+    if (!underwaterBubblesAudio.paused) return;
+    
+    // Clear any lingering stop timer
+    if (htmlBubblesStopTimer) { clearTimeout(htmlBubblesStopTimer); htmlBubblesStopTimer = null; }
     
     underwaterBubblesAudio.currentTime = 0;
     const success = await safePlay(underwaterBubblesAudio, 'dive sound');
     
     if (success) {
-        console.log('Dive sound playing');
-        // Stop after transition duration
-        setTimeout(async () => {
-            if (underwaterBubblesAudio) {
+        // Stop after exactly 2 seconds (clip is 10s)
+        htmlBubblesStopTimer = setTimeout(async () => {
+            if (underwaterBubblesAudio && !underwaterBubblesAudio.paused) {
                 await safePause(underwaterBubblesAudio, 'dive sound');
                 underwaterBubblesAudio.currentTime = 0;
             }
-        }, TRANSITION_SFX_DURATION);
+            htmlBubblesStopTimer = null;
+        }, BUBBLE_SFX_DURATION);
     }
-}
-
-// Play surface transition SFX (coming out of water)
-export function playSurfaceSound(): void {
-    if (!audioInitialized) return;
-    if (audioMode === 'api') {
-        apiPlayOneShot(AUDIO_PATHS.surfaceSplash, apiNatureGain, TRANSITION_SFX_VOLUME);
-        return;
-    }
-    if (!surfaceSplashAudio) return;
-    
-    surfaceSplashAudio.currentTime = 0;
-    // surfaceSplashAudio.play().catch(e => console.error('Failed to play surface sound:', e));
-    
-    // Stop after 2 seconds
-    // setTimeout(() => {
-    //     if (surfaceSplashAudio) {
-    //         surfaceSplashAudio.pause();
-    //         surfaceSplashAudio.currentTime = 0;
-    //     }
-    // }, TRANSITION_SFX_DURATION);
-    
-    console.log('Surface sound playing');
 }
 
 // Play water splash interaction sound (clicking ocean surface)
@@ -921,16 +908,18 @@ export function transitionToUnderwater(): void {
         underwaterAmbAudio.volume = UNDERWATER_AMB_VOLUME;
         underwaterAmbAudio.play().catch(() => {});
     }
-    // Play bubble SFX once (stop after transition duration)
+    // Play bubble SFX once (stop after 2 seconds)
     if (underwaterBubblesAudio && !isNatureMuted()) {
+        if (htmlBubblesStopTimer) { clearTimeout(htmlBubblesStopTimer); htmlBubblesStopTimer = null; }
         underwaterBubblesAudio.currentTime = 0;
         underwaterBubblesAudio.play().catch(() => {});
-        setTimeout(() => {
+        htmlBubblesStopTimer = setTimeout(() => {
             if (underwaterBubblesAudio && !underwaterBubblesAudio.paused) {
                 underwaterBubblesAudio.pause();
                 underwaterBubblesAudio.currentTime = 0;
             }
-        }, TRANSITION_SFX_DURATION);
+            htmlBubblesStopTimer = null;
+        }, BUBBLE_SFX_DURATION);
     }
 }
 
@@ -941,7 +930,8 @@ export function transitionToAboveWater(): void {
     
     if (audioMode === 'api') { apiTransitionToAboveWater(); return; }
     
-    // Stop underwater sounds synchronously
+    // Stop underwater sounds synchronously + clear bubble timer
+    if (htmlBubblesStopTimer) { clearTimeout(htmlBubblesStopTimer); htmlBubblesStopTimer = null; }
     if (underwaterAmbAudio && !underwaterAmbAudio.paused) {
         underwaterAmbAudio.pause();
         underwaterAmbAudio.currentTime = 0;
@@ -1008,7 +998,7 @@ export function setNatureMuted(muted: boolean): void {
     if (fireplaceAudio) fireplaceAudio.muted = muted;
     if (underwaterAmbAudio) underwaterAmbAudio.muted = muted;
     if (underwaterBubblesAudio) underwaterBubblesAudio.muted = muted;
-    if (surfaceSplashAudio) surfaceSplashAudio.muted = muted;
+
 }
 
 export function setMusicMuted(muted: boolean): void {
