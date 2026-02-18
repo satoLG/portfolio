@@ -1,4 +1,4 @@
-import { body, antialias, shadowsEnabled, pixelSizeValue, SetPixelSize, setShadowsEnabled } from "./Scene";
+import { body, shadowsEnabled, pixelSizeValue, SetPixelSize, setShadowsEnabled } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
 import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, preloadUISounds, playUISwitchDay, playUISwitchNight } from "./Audio";
 import { getCameraY, setIntroProgress, enableScroll } from "./Control";
@@ -285,10 +285,8 @@ export function Start(): void {
     
     // Current settings for initial UI state
     const currentAudioMode = localStorage.getItem('portfolio-audio-mode') || 'api';
-    const curAA = antialias;
     const curShadows = shadowsEnabled;
     const curPixel = pixelSizeValue;
-    const curPreset = (curAA && curShadows) ? 'high' : (!curAA && !curShadows) ? 'low' : 'custom';
     const currentLanguage = localStorage.getItem('portfolio-language') || 'en-us';
     
     // Restore tab states from localStorage
@@ -331,20 +329,6 @@ export function Start(): void {
                 ${tabArrowSvg}
             </button>
             <div class="settings-tab-content">
-                <div class="settings-row" style="padding-bottom:2px">
-                    <span class="settings-label" data-i18n="settings.preset">${t('settings.preset')}</span>
-                </div>
-                <div class="settings-row" style="padding-top:2px">
-                    <div class="settings-mode-switch preset-switch">
-                        <button class="mode-option${curPreset === 'low' ? ' active' : ''}" data-value="low" data-i18n="settings.low">${t('settings.low')}</button>
-                        <button class="mode-option${curPreset === 'custom' ? ' active' : ''}" data-value="custom" data-i18n="settings.custom">${t('settings.custom')}</button>
-                        <button class="mode-option${curPreset === 'high' ? ' active' : ''}" data-value="high" data-i18n="settings.high">${t('settings.high')}</button>
-                    </div>
-                </div>
-                <div class="settings-row">
-                    <span class="settings-label" data-i18n="settings.antialias">${t('settings.antialias')}</span>
-                    <button class="settings-toggle antialias-toggle" data-active="${curAA}">${toggleOnSvg}${toggleOffSvg}</button>
-                </div>
                 <div class="settings-row">
                     <span class="settings-label" data-i18n="settings.shadows">${t('settings.shadows')}</span>
                     <button class="settings-toggle shadows-toggle" data-active="${curShadows}">${toggleOnSvg}${toggleOffSvg}</button>
@@ -435,6 +419,18 @@ export function Start(): void {
         settingsOpen = !settingsOpen;
         settingsPanel.classList.toggle('open', settingsOpen);
         settingsButton.classList.toggle('active', settingsOpen);
+        if (settingsOpen) {
+            document.dispatchEvent(new CustomEvent('settings-opened'));
+        }
+    });
+    
+    // Close settings when media player opens
+    document.addEventListener('player-opened', () => {
+        if (settingsOpen) {
+            settingsOpen = false;
+            settingsPanel.classList.remove('open');
+            settingsButton.classList.remove('active');
+        }
     });
     
     // Close settings when clicking outside
@@ -540,70 +536,7 @@ export function Start(): void {
     });
     
     // ---- Graphics Controls ----
-    const presetSwitch = settingsPanel.querySelector('.preset-switch') as HTMLElement;
-    const antialiasToggle = settingsPanel.querySelector('.antialias-toggle') as HTMLButtonElement;
     const shadowsToggle = settingsPanel.querySelector('.shadows-toggle') as HTMLButtonElement;
-    
-    function updatePresetIndicator() {
-        const aa = antialiasToggle.dataset.active === 'true';
-        const shd = shadowsToggle.dataset.active === 'true';
-        presetSwitch.querySelectorAll('.mode-option').forEach(b => b.classList.remove('active'));
-        if (aa && shd) {
-            presetSwitch.querySelector('[data-value="high"]')?.classList.add('active');
-        } else if (!aa && !shd) {
-            presetSwitch.querySelector('[data-value="low"]')?.classList.add('active');
-        } else {
-            presetSwitch.querySelector('[data-value="custom"]')?.classList.add('active');
-        }
-    }
-    
-    // Preset switch
-    presetSwitch.querySelectorAll('.mode-option').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            const preset = (btn as HTMLElement).dataset.value!;
-            if (preset === 'custom') return; // Custom is just an indicator
-            const isLow = preset === 'low';
-            const newAA = !isLow;
-            const newShadows = !isLow;
-            const currentAA = antialiasToggle.dataset.active === 'true';
-            
-            if (newAA !== currentAA) {
-                const confirmed = await showConfirmModal(
-                    isLow ? t('modal.switchToLow') : t('modal.switchToHigh'),
-                    isLow ? t('modal.presetLowDesc') : t('modal.presetHighDesc')
-                );
-                if (!confirmed) return;
-                localStorage.setItem('portfolio-antialias', newAA.toString());
-                localStorage.setItem('portfolio-shadows', newShadows.toString());
-                window.location.reload();
-                return;
-            }
-            
-            // No antialias change — apply immediately
-            shadowsToggle.dataset.active = newShadows.toString();
-            setShadowsEnabled(newShadows);
-            
-            updatePresetIndicator();
-        });
-    });
-    
-    // Antialias toggle
-    antialiasToggle.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const isActive = antialiasToggle.dataset.active === 'true';
-        const newValue = !isActive;
-        
-        const confirmed = await showConfirmModal(
-            newValue ? t('modal.enableAntialias') : t('modal.disableAntialias'),
-            t('modal.antialiasDesc')
-        );
-        
-        if (confirmed) {
-            localStorage.setItem('portfolio-antialias', newValue.toString());
-            window.location.reload();
-        }
-    });
     
     // Shadows toggle
     shadowsToggle.addEventListener('click', (e) => {
@@ -612,7 +545,6 @@ export function Start(): void {
         const newValue = !isActive;
         shadowsToggle.dataset.active = newValue.toString();
         setShadowsEnabled(newValue);
-        updatePresetIndicator();
     });
     
     // ---- Misc Controls: Pixelation Mode Switch ----

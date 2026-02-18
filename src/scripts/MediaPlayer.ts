@@ -4,7 +4,7 @@
 
 import { camera, pixelSizeValue } from "./Scene";
 import { radio } from "../scene/Island";
-import { Vector3, PerspectiveCamera } from "three";
+import { Vector3 } from "three";
 import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse, getAudioMode, getAudioContext } from "./Audio";
 import { zoomToRadio, zoomOutFromRadio, getSavedCameraPosition, DEFAULT_CAMERA_X, DEFAULT_CAMERA_Z } from "./Control";
 import WaveSurfer from 'wavesurfer.js';
@@ -49,8 +49,22 @@ function setDefaultMediaSession(): void {
     }
 }
 
+/** Completely nuke the media session so the OS shows no media controls at all */
+function clearMediaSession(): void {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.metadata = null;
+    navigator.mediaSession.playbackState = 'none';
+    // Remove all action handlers
+    const actions: MediaSessionAction[] = ['play', 'pause', 'previoustrack', 'nexttrack', 'seekto', 'seekbackward', 'seekforward', 'stop'];
+    for (const action of actions) {
+        try { navigator.mediaSession.setActionHandler(action, null); } catch { /* unsupported action */ }
+    }
+}
+
 function updateMediaSessionForSong(song: SongData): void {
     if (!('mediaSession' in navigator)) return;
+    // In API mode, never populate media session — prevents OS media controls
+    if (getAudioMode() === 'api') return;
     
     const artwork: MediaImage[] = song.cover 
         ? [{ src: song.cover, sizes: '512x512', type: 'image/jpeg' }]
@@ -61,11 +75,15 @@ function updateMediaSessionForSong(song: SongData): void {
 
 function updateMediaSessionPlaybackState(playing: boolean): void {
     if (!('mediaSession' in navigator)) return;
+    // In API mode, never set playback state — prevents OS media controls
+    if (getAudioMode() === 'api') return;
     navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
 }
 
 function updateMediaSessionPosition(): void {
     if (!('mediaSession' in navigator) || !audioElement) return;
+    // In API mode, never set position — prevents OS media controls
+    if (getAudioMode() === 'api') return;
     
     try {
         navigator.mediaSession.setPositionState({
@@ -79,8 +97,13 @@ function updateMediaSessionPosition(): void {
 }
 
 function setupMediaSessionHandlers(): void {
-    if (getAudioMode() === 'api') return;
     if (!('mediaSession' in navigator)) return;
+    
+    // In API mode, actively CLEAR the media session so the OS shows nothing
+    if (getAudioMode() === 'api') {
+        clearMediaSession();
+        return;
+    }
     
     navigator.mediaSession.setActionHandler('play', () => {
         if (wavesurfer) {
@@ -125,7 +148,7 @@ function setupMediaSessionHandlers(): void {
 }
 
 // Above water camera Y position (must match Control.ts)
-const ABOVE_WATER_CAMERA_Y = 0.5;  // aboveWaterBottomY from Control.ts
+// (surfacing animation removed — bubble now tracks radio position directly)
 
 // Song metadata map - add your songs here!
 interface SongData {
@@ -354,6 +377,13 @@ export function Start(): void {
     initWavesurfer();
     updatePlayerDisplay();
     setupMediaSessionHandlers();
+    
+    // Close media player when settings panel opens
+    document.addEventListener('settings-opened', () => {
+        if (isExpanded) {
+            collapsePlayer();
+        }
+    });
     
     // Listen for mute changes from settings
     window.addEventListener('musicMuteChanged', (e: Event) => {
@@ -923,6 +953,8 @@ function initWavesurfer(): void {
             updateBubblePlayingState();
             connectMusicAnalyser();
             startAnalyserAnimation();
+            // Suppress OS media controls in API mode
+            clearMediaSession();
         });
         wavesurfer.on('pause', () => {
             isPlaying = false;
@@ -930,6 +962,8 @@ function initWavesurfer(): void {
             updateBubblePlayingState();
             // Keep animation running so progress/idle bars stay visible
             startAnalyserAnimation();
+            // Suppress OS media controls in API mode
+            clearMediaSession();
         });
         wavesurfer.on('finish', () => handleSongEnded());
     }
@@ -1162,6 +1196,9 @@ function expandPlayer(): void {
     isExpanded = true;
     isAnimating = true;  // Block resize during animation
     hasBeenDragged = true;  // Mark as dragged so it doesn't snap back to radio
+    
+    // Close settings panel if open
+    document.dispatchEvent(new CustomEvent('player-opened'));
     
     // Play collapse sound (inverted)
     playUIBubbleCollapse();
@@ -1714,9 +1751,12 @@ function updateBubbleCover(): void {
 
 // Track day mode for waveform color updates
 let wasDayMode = false;
-let surfacingAnimationTimer = 0;  // Timer to keep transition during surfacing animation
-let surfacingTargetX = 0;  // Fixed target X when surfacing
-let surfacingTargetY = 0;  // Fixed target Y when surfacing
+// Smooth fade timer for surfacing transition (opacity only, not position)
+let surfaceFadeTimer = 0;
+const SURFACE_FADE_DELAY = 0.25;   // seconds to wait before fading in after surfacing
+
+// Reusable Vector3 for radio projection (avoids per-frame allocation)
+const _radioPos = new Vector3();
 
 // Update position to follow radio in 3D space
 export function Update(): void {
@@ -1733,14 +1773,17 @@ export function Update(): void {
     const wasUnderwater = isUnderwater;
     isUnderwater = document.body.classList.contains('underwater');
     
-    // Track surfacing animation timer
-    if (surfacingAnimationTimer > 0) {
-        surfacingAnimationTimer -= 0.016;  // ~60fps frame time
+    // Tick surface fade timer
+    if (surfaceFadeTimer > 0) {
+        surfaceFadeTimer -= 0.016;  // ~60fps frame time
     }
     
     // --- Underwater music effect ---
     if (!wasUnderwater && isUnderwater) {
-        // Just went underwater
+        // Just went underwater — immediately hide bubble (no fade)
+        playerContainer.style.opacity = '0';
+        playerContainer.style.pointerEvents = 'none';
+        
         if (getAudioMode() === 'tag') {
             // Tag mode: pause music
             wasPlayingBeforeDive = isPlaying;
@@ -1748,7 +1791,9 @@ export function Update(): void {
             else if (audioElement && isPlaying) audioElement.pause();
         }
     } else if (wasUnderwater && !isUnderwater) {
-        // Just surfaced
+        // Just surfaced — start fade delay (bubble stays hidden while camera settles)
+        surfaceFadeTimer = SURFACE_FADE_DELAY;
+        
         if (getAudioMode() === 'api') {
             // Reset filter + gain to clean state
             if (musicLowpassFilter) musicLowpassFilter.frequency.value = MUFFLE_FILTER_CLEAN;
@@ -1811,74 +1856,37 @@ export function Update(): void {
         }
     }
     
-    // Get radio world position FIRST (need it for surfacing target)
-    const radioPos = new Vector3();
-    radio.getWorldPosition(radioPos);
-    radioPos.y += 0.35;
-    const screenPos = radioPos.clone().project(camera);
+    // Project radio world position to screen coordinates every frame
+    radio.getWorldPosition(_radioPos);
+    _radioPos.y += 0.35;
+    const screenPos = _radioPos.project(camera);
     radioScreenX = (screenPos.x * 0.5 + 0.5) * window.innerWidth;
     radioScreenY = (-screenPos.y * 0.5 + 0.5) * window.innerHeight;
     
-    // Detect just surfaced moment - start animation timer
-    const justSurfaced = wasUnderwater && !isUnderwater;
-    if (justSurfaced) {
-        surfacingAnimationTimer = 0.6;  // 600ms animation time
-        
-        // Calculate where radio WILL BE when camera reaches final position
-        const currentCameraY = camera.position.y;
-        const cameraYDiff = ABOVE_WATER_CAMERA_Y - currentCameraY;
-        
-        // For perspective projection, objects below camera move up on screen when camera moves up
-        // Approximate screen Y offset based on camera Y movement
-        // The radio is below camera, so camera moving UP means radio appears LOWER on screen
-        const fov = (camera as PerspectiveCamera).fov * Math.PI / 180;
-        const distance = radioPos.distanceTo(camera.position);
-        const screenOffsetY = (cameraYDiff / distance) * (window.innerHeight / (2 * Math.tan(fov / 2)));
-        
-        surfacingTargetX = radioScreenX;
-        surfacingTargetY = radioScreenY + screenOffsetY;
-        
-        // Set transition for surfacing animation immediately
-        playerContainer.style.transition = 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)';
-    }
-    
-    // Handle underwater class for CSS sizing
-    const isSurfacingAnimation = surfacingAnimationTimer > 0;
-    
-    // Check if radio is in front of camera (z < 1)
+    // Check if radio is in front of camera
     const isInFront = screenPos.z < 1 && screenPos.z > 0;
     
-    // When underwater, always show bubble at fixed position
-    // When above water, follow radio position or stay hidden appropriately
-    // BUT: don't hide during surfacing animation!
-    const shouldHideBubble = !isUnderwater && !isSurfacingAnimation && ((!isInFront || closedWhileUnderwater) || isExpanded);
+    // Determine bubble visibility
+    const isSurfacing = surfaceFadeTimer > 0;
+    const shouldHideBubble = isUnderwater || isSurfacing || (!isInFront || closedWhileUnderwater) || isExpanded;
     
-    // ABOVE WATER: Follow radio position (or animate back from underwater)
+    // ABOVE WATER: Follow radio position directly (no CSS transition on position)
     if (!isUnderwater && !isExpanded) {
         if (!hasBeenDragged && !isDragging) {
-            if (isSurfacingAnimation) {
-                // During surfacing animation - use FIXED target captured when surfacing started
-                // Don't update position every frame or it won't animate!
-                playerContainer.style.left = `${surfacingTargetX}px`;
-                playerContainer.style.top = `${surfacingTargetY}px`;
-                playerContainer.style.transform = 'translate(-50%, -50%)';
-            } else {
-                // Normal following - no position transition (would be janky)
-                playerContainer.style.transition = 'opacity 0.3s ease, background 0.4s ease, box-shadow 0.3s ease';
-                playerContainer.style.left = `${radioScreenX}px`;
-                playerContainer.style.top = `${radioScreenY}px`;
-                playerContainer.style.transform = 'translate(-50%, -50%)';
-                
-                // First time position is set - show bubble with pop-in animation
-                if (!hasInitialPosition) {
-                    hasInitialPosition = true;
-                    playerContainer.style.opacity = '1';
-                    playerContainer.classList.add('pop-in-animate');
-                }
+            // Set position every frame — instant tracking, no lag
+            playerContainer.style.left = `${radioScreenX}px`;
+            playerContainer.style.top = `${radioScreenY}px`;
+            playerContainer.style.transform = 'translate(-50%, -50%)';
+            
+            // First time position is set — show bubble with pop-in animation
+            if (!hasInitialPosition) {
+                hasInitialPosition = true;
+                playerContainer.style.opacity = '1';
+                playerContainer.classList.add('pop-in-animate');
             }
         }
         
-        // Handle visibility - but NOT during surfacing animation
+        // Handle visibility
         if (shouldHideBubble) {
             playerContainer.style.opacity = '0';
             playerContainer.style.pointerEvents = 'none';

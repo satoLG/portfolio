@@ -80,14 +80,12 @@ body.day-mode #blur-overlay {
     justify-content: center;
     cursor: pointer;
     padding: 0;
-    animation: bubble-float 2s ease-in-out infinite;
     will-change: opacity;
     transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1),
                height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
                border-radius 0.4s cubic-bezier(0.4, 0, 0.2, 1),
                background 0.4s ease,
-               box-shadow 0.3s ease,
-               opacity 0.3s ease;
+               box-shadow 0.3s ease;
 }
 
 .media-player.bubble:hover {
@@ -131,11 +129,6 @@ body.day-mode #blur-overlay {
     width: 0;
     height: 0;
     overflow: hidden;
-}
-
-@keyframes bubble-float {
-    0%, 100% { margin-top: 0; }
-    50% { margin-top: -6px; }
 }
 
 /* Expanded player should NEVER have underwater-position styles */
@@ -795,10 +788,11 @@ body.music-visible .media-player.bubble {
     will-change: transform, opacity;
 }
 
-/* Hide bubble when underwater */
+/* Hide bubble when underwater — use visibility to avoid transition flicker on day/night toggle */
 body.underwater .media-player.bubble {
     opacity: 0 !important;
     pointer-events: none !important;
+    transition: none !important;
 }
 
 /* Start overlay */

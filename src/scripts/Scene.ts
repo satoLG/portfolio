@@ -182,7 +182,7 @@ export function Start(): void
     // Shadow bias configuration for models with subdivision surfaces
     // Negative bias works better with PCF, positive with VSM
     directionalLight.shadow.bias = -0.0001;  // Very small to prevent shadow acne
-    directionalLight.shadow.normalBias = 0.02;  // Lower value to keep shadows attached to surface
+    directionalLight.shadow.normalBias = 0.08;  // Push along normal to kill self-shadow striping
     directionalLight.shadow.radius = 1.5;  // Soft edge blur (only works with VSM/PCFSoft)
     
     // Point at island center (firecamp is at z=-2.9)

@@ -1,4 +1,4 @@
-import { Group, TextureLoader, RepeatWrapping, SRGBColorSpace, MeshStandardMaterial, Texture, Object3D, LoadingManager, RingGeometry, MeshBasicMaterial, Mesh, DoubleSide, Uniform, Vector2, Vector3, Raycaster, BoxGeometry, ShadowMaterial } from "three";
+import { Group, TextureLoader, RepeatWrapping, SRGBColorSpace, MeshStandardMaterial, Texture, Object3D, LoadingManager, RingGeometry, MeshBasicMaterial, Mesh, DoubleSide, Uniform, Vector2, Vector3, Raycaster } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { oceanAbsorptionUniform } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
@@ -732,43 +732,6 @@ export function Start(): void {
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
             
-            // Count meshes and decide shadow strategy
-            const meshes: any[] = [];
-            gltf.scene.traverse((child) => {
-                if ((child as any).isMesh) {
-                    meshes.push(child);
-                }
-            });
-            
-            console.log(`Radio has ${meshes.length} mesh(es)`);
-            
-            // If only 1-2 meshes, keep their shadows (simple model)
-            // If many meshes (>2), use simplified shadow
-            if (meshes.length <= 2) {
-                // Simple model - enable shadows on all meshes
-                meshes.forEach(mesh => {
-                    mesh.castShadow = true;
-                });
-                console.log('Radio: using mesh shadows (simple model)');
-            } else {
-                // Complex model - use simplified box shadow
-                meshes.forEach(mesh => {
-                    mesh.castShadow = false;
-                });
-                
-                // Create a simple shadow caster
-                const shadowBox = new BoxGeometry(0.8, 0.5, 0.6);
-                const shadowMat = new ShadowMaterial({ opacity: 0.5 });
-                shadowMat.transparent = true;
-                const shadowMesh = new Mesh(shadowBox, shadowMat);
-                shadowMesh.castShadow = true;
-                shadowMesh.receiveShadow = false;
-                shadowMesh.position.y = 0.25;
-                shadowMesh.visible = false;
-                radio.add(shadowMesh);
-                console.log('Radio: using simplified box shadow (complex model)');
-            }
-            
             radio.add(gltf.scene);
             radio.position.set(
                 islandPosition.x + radioOffset.x,
@@ -961,6 +924,8 @@ function spawnSoundWave(side: 'left' | 'right', isTrailing: boolean = false): vo
         depthWrite: false
     });
     const arc = new Mesh(geometry, material);
+    arc.castShadow = false;
+    arc.receiveShadow = false;
     
     // Position further from radio (spawn point)
     const sideOffset = side === 'left' ? -0.1 : 0.1;
