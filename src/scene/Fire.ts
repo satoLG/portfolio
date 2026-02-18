@@ -19,8 +19,14 @@ export const fire = new Group();
 
 export const fireLight = new PointLight(0xff6622, 0, 8, 2);
 
-// Fire light shadow disabled — cubemap (6 faces) costs ~24MB GPU for minimal visual gain
-fireLight.castShadow = false;
+// Fire light shadow — small shadow map to keep GPU cost low (~1.5MB for 6-face cubemap at 256)
+fireLight.castShadow = true;
+fireLight.shadow.mapSize.width = 256;
+fireLight.shadow.mapSize.height = 256;
+fireLight.shadow.camera.near = 0.1;
+fireLight.shadow.camera.far = 8;
+fireLight.shadow.bias = -0.002;
+fireLight.shadow.normalBias = 0.05;
 
 const FIRE_SCALE = 0.25;
 const FIRE_HEIGHT_OFFSET = 0.13;

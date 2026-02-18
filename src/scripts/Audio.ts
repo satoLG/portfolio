@@ -199,20 +199,26 @@ function apiScheduleBreeze(): void {
     apiBreezeTimeout = setTimeout(() => {
         // Double-check state right before playing
         if (_audioContext && apiNatureGain && !isCurrentlyUnderwater && !natureMuted) {
+            // Stop any still-playing breeze to prevent overlapping sources
+            if (apiBreezeSource) {
+                apiBreezeSource = apiStopOneShot(apiBreezeSource);
+                apiBreezeActive = false;
+            }
             const handle = apiPlayOneShot(AUDIO_PATHS.breeze, apiNatureGain, BREEZE_VOLUME);
             if (handle && handle.source.buffer) {
                 apiBreezeSource = handle;
                 apiBreezeActive = true;
-                const duration = handle.source.buffer.duration * 1000;
                 handle.source.onended = () => {
                     apiBreezeActive = false;
                     apiBreezeSource = null;
+                    // Schedule next breeze only after current one ends
+                    if (!isCurrentlyUnderwater) apiScheduleBreeze();
                 };
-                setTimeout(() => { apiBreezeActive = false; }, duration);
             }
+        } else {
+            // Couldn't play — reschedule for later
+            if (!isCurrentlyUnderwater) apiScheduleBreeze();
         }
-        // Only re-schedule if still above water
-        if (!isCurrentlyUnderwater) apiScheduleBreeze();
     }, delay * 1000);
 }
 
@@ -220,9 +226,11 @@ function apiStartFireplace(): void {
     if (apiFireplaceActive || !apiNatureGain) return;
     const startVol = isIOS ? FIREPLACE_VOLUME_MAX : 0;
     apiFireplaceLoop = apiStartLoop(AUDIO_PATHS.fireplace, apiNatureGain, startVol);
+    if (!apiFireplaceLoop) return;  // Buffer not loaded yet — don't mark active
     apiFireplaceActive = true;
     // Fade in on non-iOS
-    if (!isIOS && apiFireplaceLoop && _audioContext) {
+    if (!isIOS && _audioContext) {
+        apiFireplaceLoop.gain.gain.setValueAtTime(startVol, _audioContext.currentTime);
         apiFireplaceLoop.gain.gain.linearRampToValueAtTime(
             FIREPLACE_VOLUME_MAX, _audioContext.currentTime + FIREPLACE_FADE_DURATION
         );
@@ -609,6 +617,9 @@ function initAudio(): void {
         apiInterfaceGain = _audioContext.createGain();
         apiInterfaceGain.connect(_audioContext.destination);
         
+        // Sync wasDay so the first Update() doesn't fire a phantom transition
+        wasDay = isDayTime();
+        
         // Load buffers async, then start ambient sounds
         Promise.all(Object.values(AUDIO_PATHS).map(url => apiLoadBuffer(url)))
             .then(() => apiStartAmbientSounds());
@@ -623,6 +634,9 @@ function initAudio(): void {
     if (!waterAudio1) {
         createAudioElements();
     }
+    
+    // Sync wasDay so the first Update() doesn't fire a phantom transition
+    wasDay = isDayTime();
     
     startWaterSound();
     scheduleBreezeSound();
