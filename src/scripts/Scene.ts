@@ -32,6 +32,10 @@ export let pixelSizeValue = localStorage.getItem('portfolio-pixel-size') !== nul
     ? parseInt(localStorage.getItem('portfolio-pixel-size')!)
     : 0;
 
+// Color filter for the 3D scene (none, bw, sepia)
+export type ColorFilter = 'none' | 'bw' | 'sepia';
+export let colorFilterValue: ColorFilter = (localStorage.getItem('portfolio-color-filter') as ColorFilter) || 'none';
+
 // Scene lights - synced with skybox
 let ambientLight: AmbientLight;
 let directionalLight: DirectionalLight;
@@ -73,6 +77,34 @@ export function SetPixelSize(value: number): void
     pixelSizeValue = value;
     Underwater.setPixelSize(value);
     localStorage.setItem('portfolio-pixel-size', value.toString());
+    applyPixelBodyClass(value);
+}
+
+function applyPixelBodyClass(value: number): void {
+    document.body.classList.remove('pixel-medium', 'pixel-max');
+    if (value === 5) document.body.classList.add('pixel-medium');
+    else if (value >= 10) document.body.classList.add('pixel-max');
+}
+
+export function SetColorFilter(value: ColorFilter): void {
+    colorFilterValue = value;
+    localStorage.setItem('portfolio-color-filter', value);
+    applyColorFilter(value);
+}
+
+function applyColorFilter(value: ColorFilter): void {
+    const canvas = renderer.domElement;
+    switch (value) {
+        case 'bw':
+            canvas.style.filter = 'grayscale(1)';
+            break;
+        case 'sepia':
+            canvas.style.filter = 'sepia(1)';
+            break;
+        default:
+            canvas.style.filter = '';
+            break;
+    }
 }
 
 export function setShadowsEnabled(value: boolean): void
@@ -232,6 +264,12 @@ export function Start(): void
     // Apply saved pixel size
     if (pixelSizeValue > 0) {
         Underwater.setPixelSize(pixelSizeValue);
+        applyPixelBodyClass(pixelSizeValue);
+    }
+
+    // Apply saved color filter
+    if (colorFilterValue !== 'none') {
+        applyColorFilter(colorFilterValue);
     }
 
     // Initialize bubble effect

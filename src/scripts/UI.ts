@@ -1,6 +1,7 @@
-import { body, shadowsEnabled, pixelSizeValue, SetPixelSize, setShadowsEnabled } from "./Scene";
+import { body, shadowsEnabled, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter } from "./Scene";
+import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
-import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, preloadUISounds, playUISwitchDay, playUISwitchNight } from "./Audio";
+import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, preloadUISounds, playUISwitchDay, playUISwitchNight } from "./Audio";
 import { getCameraY, setIntroProgress, enableScroll } from "./Control";
 import { setLoadingCallback } from "../scene/Island";
 import { t, setLanguage, type Language } from "./i18n";
@@ -284,10 +285,12 @@ export function Start(): void {
     const tabArrowSvg = `<svg class="tab-arrow" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`;
     
     // Current settings for initial UI state
-    const currentAudioMode = localStorage.getItem('portfolio-audio-mode') || 'api';
     const curShadows = shadowsEnabled;
     const curPixel = pixelSizeValue;
     const currentLanguage = localStorage.getItem('portfolio-language') || 'en-us';
+    const natureVol = Math.round(getNatureVolume() * 100);
+    const musicVol = Math.round(getMusicVolume() * 100);
+    const interfaceVol = Math.round(getInterfaceVolume() * 100);
     
     // Restore tab states from localStorage
     const savedTabStates = localStorage.getItem('portfolio-settings-tabs');
@@ -300,25 +303,19 @@ export function Start(): void {
                 ${tabArrowSvg}
             </button>
             <div class="settings-tab-content">
-                <div class="settings-row" style="padding-bottom:2px">
-                    <span class="settings-label" data-i18n="settings.audioMode">${t('settings.audioMode')}</span>
-                </div>
-                <div class="settings-row" style="padding-top:2px">
-                    <div class="settings-mode-switch audio-mode-switch">
-                        <button class="mode-option${currentAudioMode === 'api' ? ' active' : ''}" data-value="api" data-i18n="settings.webAudioApi">${t('settings.webAudioApi')}</button>
-                        <button class="mode-option${currentAudioMode === 'tag' ? ' active' : ''}" data-value="tag" data-i18n="settings.audioTag">${t('settings.audioTag')}</button>
-                    </div>
-                </div>
                 <div class="settings-row">
                     <span class="settings-label" data-i18n="settings.nature">${t('settings.nature')}</span>
+                    <input type="range" class="volume-slider nature-volume" min="0" max="100" value="${natureVol}">
                     <button class="settings-toggle nature-toggle" data-active="true">${volumeOnSvg}${volumeOffSvg}</button>
                 </div>
                 <div class="settings-row">
                     <span class="settings-label" data-i18n="settings.music">${t('settings.music')}</span>
+                    <input type="range" class="volume-slider music-volume" min="0" max="100" value="${musicVol}">
                     <button class="settings-toggle music-toggle" data-active="true">${volumeOnSvg}${volumeOffSvg}</button>
                 </div>
                 <div class="settings-row">
                     <span class="settings-label" data-i18n="settings.interface">${t('settings.interface')}</span>
+                    <input type="range" class="volume-slider interface-volume" min="0" max="100" value="${interfaceVol}">
                     <button class="settings-toggle interface-toggle" data-active="true">${volumeOnSvg}${volumeOffSvg}</button>
                 </div>
             </div>
@@ -349,6 +346,16 @@ export function Start(): void {
                         <button class="mode-option${curPixel === 0 ? ' active' : ''}" data-value="0" data-i18n="settings.none">${t('settings.none')}</button>
                         <button class="mode-option${curPixel === 5 ? ' active' : ''}" data-value="5" data-i18n="settings.medium">${t('settings.medium')}</button>
                         <button class="mode-option${curPixel === 10 ? ' active' : ''}" data-value="10" data-i18n="settings.high">${t('settings.high')}</button>
+                    </div>
+                </div>
+                <div class="settings-row" style="padding-bottom:2px">
+                    <span class="settings-label" data-i18n="settings.colorFilter">${t('settings.colorFilter')}</span>
+                </div>
+                <div class="settings-row" style="padding-top:2px">
+                    <div class="settings-mode-switch color-filter-switch">
+                        <button class="mode-option${colorFilterValue === 'none' ? ' active' : ''}" data-value="none" data-i18n="settings.none">${t('settings.none')}</button>
+                        <button class="mode-option${colorFilterValue === 'bw' ? ' active' : ''}" data-value="bw" data-i18n="settings.bw">${t('settings.bw')}</button>
+                        <button class="mode-option${colorFilterValue === 'sepia' ? ' active' : ''}" data-value="sepia" data-i18n="settings.sepia">${t('settings.sepia')}</button>
                     </div>
                 </div>
             </div>
@@ -464,6 +471,7 @@ export function Start(): void {
     
     let modalResolve: ((confirmed: boolean) => void) | null = null;
     
+    // @ts-ignore: Kept for future use (preset confirmations, etc.)
     function showConfirmModal(title: string, text: string): Promise<boolean> {
         modalTitle.textContent = title;
         modalText.textContent = text;
@@ -487,52 +495,71 @@ export function Start(): void {
         if (e.target === modalOverlay) closeModal(false);
     });
     
-    // ---- Audio Mode Switch ----
-    const audioModeSwitch = settingsPanel.querySelector('.audio-mode-switch') as HTMLElement;
-    audioModeSwitch.querySelectorAll('.mode-option').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            const newMode = (btn as HTMLElement).dataset.value!;
-            const oldMode = localStorage.getItem('portfolio-audio-mode') || 'api';
-            if (newMode === oldMode) return;
-            
-            const confirmed = await showConfirmModal(
-                t('modal.changeAudioMode'),
-                newMode === 'api'
-                    ? t('modal.webAudioApiDesc')
-                    : t('modal.audioTagDesc')
-            );
-            
-            if (confirmed) {
-                localStorage.setItem('portfolio-audio-mode', newMode);
-                window.location.reload();
-            }
-        });
-    });
-    
+    // ---- Helper: sync slider fill to value via CSS custom property ----
+    function updateSliderFill(slider: HTMLInputElement): void {
+        const pct = ((parseInt(slider.value) - parseInt(slider.min)) / (parseInt(slider.max) - parseInt(slider.min))) * 100;
+        slider.style.setProperty('--progress', `${pct}%`);
+    }
+
     // ---- Audio Toggles ----
     const natureToggle = settingsPanel.querySelector('.nature-toggle') as HTMLButtonElement;
+    const natureSlider = settingsPanel.querySelector('.nature-volume') as HTMLInputElement;
+    updateSliderFill(natureSlider);
     natureToggle.addEventListener('click', (e) => {
         e.stopPropagation();
         const isActive = natureToggle.dataset.active === 'true';
         natureToggle.dataset.active = (!isActive).toString();
         setNatureMuted(isActive);
     });
+    natureSlider.addEventListener('input', (e) => {
+        e.stopPropagation();
+        updateSliderFill(natureSlider);
+        const value = parseInt(natureSlider.value) / 100;
+        setNatureVolume(value);
+        if (value > 0 && natureToggle.dataset.active === 'false') {
+            natureToggle.dataset.active = 'true';
+            setNatureMuted(false);
+        }
+    });
     
     const musicToggle = settingsPanel.querySelector('.music-toggle') as HTMLButtonElement;
+    const musicSlider = settingsPanel.querySelector('.music-volume') as HTMLInputElement;
+    updateSliderFill(musicSlider);
     musicToggle.addEventListener('click', (e) => {
         e.stopPropagation();
         const isActive = musicToggle.dataset.active === 'true';
         musicToggle.dataset.active = (!isActive).toString();
         setMusicMuted(isActive);
     });
+    musicSlider.addEventListener('input', (e) => {
+        e.stopPropagation();
+        updateSliderFill(musicSlider);
+        const value = parseInt(musicSlider.value) / 100;
+        setMusicVolume(value);
+        if (value > 0 && musicToggle.dataset.active === 'false') {
+            musicToggle.dataset.active = 'true';
+            setMusicMuted(false);
+        }
+    });
     
     const interfaceToggle = settingsPanel.querySelector('.interface-toggle') as HTMLButtonElement;
+    const interfaceSlider = settingsPanel.querySelector('.interface-volume') as HTMLInputElement;
+    updateSliderFill(interfaceSlider);
     interfaceToggle.addEventListener('click', (e) => {
         e.stopPropagation();
         const isActive = interfaceToggle.dataset.active === 'true';
         interfaceToggle.dataset.active = (!isActive).toString();
         setInterfaceMuted(isActive);
+    });
+    interfaceSlider.addEventListener('input', (e) => {
+        e.stopPropagation();
+        updateSliderFill(interfaceSlider);
+        const value = parseInt(interfaceSlider.value) / 100;
+        setInterfaceVolume(value);
+        if (value > 0 && interfaceToggle.dataset.active === 'false') {
+            interfaceToggle.dataset.active = 'true';
+            setInterfaceMuted(false);
+        }
     });
     
     // ---- Graphics Controls ----
@@ -559,6 +586,18 @@ export function Start(): void {
         });
     });
     
+    // ---- Misc Controls: Color Filter Switch ----
+    const colorFilterSwitch = settingsPanel.querySelector('.color-filter-switch') as HTMLElement;
+    colorFilterSwitch.querySelectorAll('.mode-option').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const value = (btn as HTMLElement).dataset.value as ColorFilter;
+            colorFilterSwitch.querySelectorAll('.mode-option').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            SetColorFilter(value || 'none');
+        });
+    });
+    
     // ---- Language Controls ----
     const languageOptions = settingsPanel.querySelectorAll('.language-option');
     languageOptions.forEach(btn => {
@@ -570,6 +609,7 @@ export function Start(): void {
             setLanguage(value || 'en-us');
         });
     });
+
 }
 
 export function Update(): void {

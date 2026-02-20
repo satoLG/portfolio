@@ -8,6 +8,33 @@
     font-family: 'Wotfard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif !important;
 }
 
+/* ============================================
+   PIXELATION LEVEL OVERRIDES
+   Medium (value 5): Jersey 15 font, reduced border-radius
+   Max (value 10): Jersey 10 font, no border-radius
+   ============================================ */
+body.pixel-medium *,
+body.pixel-medium *::before,
+body.pixel-medium *::after {
+    font-family: 'Jersey 10', cursive !important;
+    transition: none !important;
+    font-size-adjust: 0.6;
+}
+body.pixel-medium * {
+    border-radius: 2px !important;
+}
+
+body.pixel-max *,
+body.pixel-max *::before,
+body.pixel-max *::after {
+    font-family: 'Jersey 10', cursive !important;
+    transition: none !important;
+    font-size-adjust: 0.6;
+}
+body.pixel-max * {
+    border-radius: 0px !important;
+}
+
 body
 {
     margin: 0px;
@@ -590,11 +617,6 @@ body.day-mode .player-playlist-toggle.active {
     max-height: 350px;
     opacity: 1;
     margin-top: 14px;
-}
-
-/* Playlist view: no changes to player position or size, just let content grow */
-.media-player.playlist-view {
-    /* Player handles its own max-height via .expanded */
 }
 
 .playlist-header {
@@ -1326,7 +1348,7 @@ body.day-mode .settings-panel {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
+    gap: 8px;
     padding: 6px 0;
 }
 
@@ -1342,6 +1364,9 @@ body.day-mode .settings-row:not(:last-child) {
     font-size: 14px;
     font-weight: 500;
     color: rgba(255, 255, 255, 0.9);
+    width: 68px;
+    min-width: 68px;
+    flex-shrink: 0;
 }
 
 body.day-mode .settings-label {
@@ -1390,6 +1415,107 @@ body.day-mode .settings-toggle:hover {
 
 body.day-mode .settings-toggle[data-active="false"] .icon-off {
     color: rgba(10, 37, 64, 0.4);
+}
+
+/* ============================================
+   SETTINGS - VOLUME SLIDERS
+   ============================================ */
+.volume-slider {
+    --progress: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    outline: none;
+    cursor: pointer;
+    margin: 0;
+    padding: 0;
+    border: none;
+}
+
+/* Track — Webkit */
+.volume-slider::-webkit-slider-runnable-track {
+    height: 2px;
+    border-radius: 1px;
+    background: linear-gradient(
+        to right,
+        rgba(255, 255, 255, 0.55) var(--progress),
+        rgba(255, 255, 255, 0.12) var(--progress)
+    );
+}
+
+/* Thumb — Webkit */
+.volume-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.9);
+    border: none;
+    cursor: pointer;
+    margin-top: -4px;
+    transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.volume-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+    background: #fff;
+}
+
+/* Track — Firefox */
+.volume-slider::-moz-range-track {
+    height: 2px;
+    border-radius: 1px;
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/* Progress fill — Firefox */
+.volume-slider::-moz-range-progress {
+    height: 2px;
+    border-radius: 1px;
+    background: rgba(255, 255, 255, 0.55);
+}
+
+/* Thumb — Firefox */
+.volume-slider::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.9);
+    border: none;
+    box-sizing: border-box;
+    cursor: pointer;
+}
+
+/* Day mode overrides */
+body.day-mode .volume-slider::-webkit-slider-runnable-track {
+    background: linear-gradient(
+        to right,
+        rgba(10, 37, 64, 0.45) var(--progress),
+        rgba(10, 37, 64, 0.1) var(--progress)
+    );
+}
+
+body.day-mode .volume-slider::-webkit-slider-thumb {
+    background: rgba(10, 37, 64, 0.75);
+}
+
+body.day-mode .volume-slider::-webkit-slider-thumb:hover {
+    background: rgba(10, 37, 64, 0.95);
+}
+
+body.day-mode .volume-slider::-moz-range-track {
+    background: rgba(10, 37, 64, 0.1);
+}
+
+body.day-mode .volume-slider::-moz-range-progress {
+    background: rgba(10, 37, 64, 0.45);
+}
+
+body.day-mode .volume-slider::-moz-range-thumb {
+    background: rgba(10, 37, 64, 0.75);
 }
 
 /* ============================================
@@ -2149,7 +2275,7 @@ togglethumb.enabled
     transform: translate(calc(48px - 100%), calc(-100% + 4px));
 }
 
-input[type="range"]
+input[type="range"]:not(.volume-slider)
 {
     appearance: none;
     display: block;
@@ -2159,7 +2285,7 @@ input[type="range"]
     margin: 6px 0px 0px 0px;
 }
 
-input[type="range"]::-webkit-slider-thumb, togglethumb
+input[type="range"]:not(.volume-slider)::-webkit-slider-thumb, togglethumb
 {
     appearance: none;
     display: block;

@@ -17,9 +17,6 @@ const translations: Record<Language, TranslationDict> = {
         'tab.language': 'Language',
 
         // Audio settings
-        'settings.audioMode': 'Audio Mode',
-        'settings.webAudioApi': 'Web Audio API',
-        'settings.audioTag': 'Audio Tag',
         'settings.nature': 'Nature',
         'settings.music': 'Music',
         'settings.interface': 'Interface',
@@ -36,6 +33,9 @@ const translations: Record<Language, TranslationDict> = {
         'settings.pixelation': 'Pixelation',
         'settings.none': 'None',
         'settings.medium': 'Medium',
+        'settings.colorFilter': 'Color Filter',
+        'settings.bw': 'B&W',
+        'settings.sepia': 'Sepia',
 
         // Button titles / tooltips
         'tooltip.toggleTheme': 'Toggle theme',
@@ -46,11 +46,6 @@ const translations: Record<Language, TranslationDict> = {
         // Confirm modal
         'modal.cancel': 'Cancel',
         'modal.confirm': 'Confirm',
-
-        // Audio mode modal
-        'modal.changeAudioMode': 'Change Audio Mode',
-        'modal.webAudioApiDesc': 'Web Audio API mode provides superior sound quality and reliability, especially on mobile devices. Audio plays exclusively within the site — no background playback or media controls. The page will reload to apply this change.',
-        'modal.audioTagDesc': 'Audio Tag mode uses standard HTML5 audio elements with background playback support and OS media controls integration. Audio quality may vary on some devices. The page will reload to apply this change.',
 
         // Preset modal
         'modal.switchToLow': 'Switch to Low Preset',
@@ -82,9 +77,6 @@ const translations: Record<Language, TranslationDict> = {
         'tab.language': 'Idioma',
 
         // Audio settings
-        'settings.audioMode': 'Modo de Áudio',
-        'settings.webAudioApi': 'Web Audio API',
-        'settings.audioTag': 'Audio Tag',
         'settings.nature': 'Natureza',
         'settings.music': 'Música',
         'settings.interface': 'Interface',
@@ -101,6 +93,9 @@ const translations: Record<Language, TranslationDict> = {
         'settings.pixelation': 'Pixelização',
         'settings.none': 'Nenhum',
         'settings.medium': 'Médio',
+        'settings.colorFilter': 'Filtro de Cor',
+        'settings.bw': 'P&B',
+        'settings.sepia': 'Sépia',
 
         // Button titles / tooltips
         'tooltip.toggleTheme': 'Alternar tema',
@@ -111,11 +106,6 @@ const translations: Record<Language, TranslationDict> = {
         // Confirm modal
         'modal.cancel': 'Cancelar',
         'modal.confirm': 'Confirmar',
-
-        // Audio mode modal
-        'modal.changeAudioMode': 'Alterar Modo de Áudio',
-        'modal.webAudioApiDesc': 'O modo Web Audio API oferece qualidade de som superior e maior confiabilidade, especialmente em dispositivos móveis. O áudio é reproduzido exclusivamente no site — sem reprodução em segundo plano ou controles de mídia. A página será recarregada para aplicar esta alteração.',
-        'modal.audioTagDesc': 'O modo Audio Tag utiliza elementos de áudio HTML5 padrão com suporte a reprodução em segundo plano e integração com controles de mídia do sistema. A qualidade do áudio pode variar em alguns dispositivos. A página será recarregada para aplicar esta alteração.',
 
         // Preset modal
         'modal.switchToLow': 'Mudar para Predefinição Baixa',
