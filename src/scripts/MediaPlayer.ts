@@ -5,7 +5,7 @@
 import { camera, pixelSizeValue } from "./Scene";
 import { radio } from "../scene/Island";
 import { Vector3 } from "three";
-import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse, getAudioMode, getAudioContext } from "./Audio";
+import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse, getAudioContext, getMusicVolume } from "./Audio";
 import { zoomToRadio, zoomOutFromRadio, getSavedCameraPosition, DEFAULT_CAMERA_X, DEFAULT_CAMERA_Z } from "./Control";
 import WaveSurfer from 'wavesurfer.js';
 import { t, onLanguageChange } from "./i18n";
@@ -49,22 +49,8 @@ function setDefaultMediaSession(): void {
     }
 }
 
-/** Completely nuke the media session so the OS shows no media controls at all */
-function clearMediaSession(): void {
-    if (!('mediaSession' in navigator)) return;
-    navigator.mediaSession.metadata = null;
-    navigator.mediaSession.playbackState = 'none';
-    // Remove all action handlers
-    const actions: MediaSessionAction[] = ['play', 'pause', 'previoustrack', 'nexttrack', 'seekto', 'seekbackward', 'seekforward', 'stop'];
-    for (const action of actions) {
-        try { navigator.mediaSession.setActionHandler(action, null); } catch { /* unsupported action */ }
-    }
-}
-
 function updateMediaSessionForSong(song: SongData): void {
     if (!('mediaSession' in navigator)) return;
-    // In API mode, never populate media session — prevents OS media controls
-    if (getAudioMode() === 'api') return;
     
     const artwork: MediaImage[] = song.cover 
         ? [{ src: song.cover, sizes: '512x512', type: 'image/jpeg' }]
@@ -75,15 +61,11 @@ function updateMediaSessionForSong(song: SongData): void {
 
 function updateMediaSessionPlaybackState(playing: boolean): void {
     if (!('mediaSession' in navigator)) return;
-    // In API mode, never set playback state — prevents OS media controls
-    if (getAudioMode() === 'api') return;
     navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
 }
 
 function updateMediaSessionPosition(): void {
     if (!('mediaSession' in navigator) || !audioElement) return;
-    // In API mode, never set position — prevents OS media controls
-    if (getAudioMode() === 'api') return;
     
     try {
         navigator.mediaSession.setPositionState({
@@ -98,12 +80,6 @@ function updateMediaSessionPosition(): void {
 
 function setupMediaSessionHandlers(): void {
     if (!('mediaSession' in navigator)) return;
-    
-    // In API mode, actively CLEAR the media session so the OS shows nothing
-    if (getAudioMode() === 'api') {
-        clearMediaSession();
-        return;
-    }
     
     navigator.mediaSession.setActionHandler('play', () => {
         if (wavesurfer) {
@@ -365,9 +341,6 @@ function loadRetroWorklet(): Promise<void> {
     return retroWorkletLoading;
 }
 
-// Tag-mode underwater tracking
-let wasPlayingBeforeDive = false;
-
 // Preloading system for faster song transitions
 let preloadedAudios: Map<number, HTMLAudioElement> = new Map();
 
@@ -392,9 +365,14 @@ export function Start(): void {
         if (audioElement) {
             audioElement.muted = muted;
         }
-        // In API mode, mute via WaveSurfer volume (no shared audioElement)
-        if (getAudioMode() === 'api' && wavesurfer) {
-            wavesurfer.setVolume(muted ? 0 : 0.5);
+    });
+
+    // Listen for volume changes from settings
+    window.addEventListener('musicVolumeChanged', (e: Event) => {
+        const customEvent = e as CustomEvent;
+        const volume = customEvent.detail.volume;
+        if (audioElement) {
+            audioElement.volume = volume;
         }
     });
 
@@ -792,11 +770,8 @@ function stopResizing(): void {
 */
 
 function createAudioElement(): void {
-    // In API mode, don't create shared audio element - WaveSurfer uses internal Web Audio
-    if (getAudioMode() === 'api') return;
-    
     audioElement = new Audio();
-    audioElement.volume = 0.5;
+    audioElement.volume = getMusicVolume();
     audioElement.addEventListener('ended', () => handleSongEnded());
     // Single source of truth: sync isPlaying from the actual audio element state
     audioElement.addEventListener('play', () => syncPlayState());
@@ -871,52 +846,37 @@ function initWavesurfer(): void {
         interact: true,
         dragToSeek: true,
     };
-    // In tag mode, share the HTMLAudioElement for Media Session support
-    // In API mode, WaveSurfer uses its own internal audio (no background playback)
-    if (getAudioMode() === 'tag' && audioElement) {
-        wavesurfer = WaveSurfer.create({ ...baseOptions, media: audioElement });
-    } else {
-        // API mode: hide the static waveform — the analyser canvas replaces it
-        wavesurfer = WaveSurfer.create({
-            ...baseOptions,
-            waveColor: 'transparent',
-            progressColor: 'transparent',
-            cursorColor: 'transparent',
-            cursorWidth: 0,
-            interact: false,  // We handle seeking via analyser canvas
-        });
-    }
+    // Share the HTMLAudioElement so Media Session + background playback works
+    wavesurfer = WaveSurfer.create({ ...baseOptions, media: audioElement! });
     
-    // In API mode, add frequency analyser canvas as the SOLE waveform visual
-    if (getAudioMode() === 'api') {
-        waveformContainer.style.position = 'relative';
-        analyserCanvas = document.createElement('canvas');
-        analyserCanvas.className = 'waveform-analyser waveform-analyser-interactive';
-        waveformContainer.appendChild(analyserCanvas);
-        analyserCtx = analyserCanvas.getContext('2d');
-        
-        // Click / drag to seek on the analyser canvas
-        let seekDragging = false;
-        const seekFromPointer = (clientX: number) => {
-            if (!wavesurfer) return;
-            const rect = analyserCanvas!.getBoundingClientRect();
-            const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-            wavesurfer.seekTo(pct);
-        };
-        analyserCanvas.addEventListener('pointerdown', (e) => {
-            e.preventDefault();
-            seekDragging = true;
-            analyserCanvas!.setPointerCapture(e.pointerId);
-            seekFromPointer(e.clientX);
-        });
-        analyserCanvas.addEventListener('pointermove', (e) => {
-            if (seekDragging) seekFromPointer(e.clientX);
-        });
-        analyserCanvas.addEventListener('pointerup', (e) => {
-            seekDragging = false;
-            analyserCanvas!.releasePointerCapture(e.pointerId);
-        });
-    }
+    // Add frequency analyser canvas as the waveform visual
+    waveformContainer.style.position = 'relative';
+    analyserCanvas = document.createElement('canvas');
+    analyserCanvas.className = 'waveform-analyser waveform-analyser-interactive';
+    waveformContainer.appendChild(analyserCanvas);
+    analyserCtx = analyserCanvas.getContext('2d');
+    
+    // Click / drag to seek on the analyser canvas
+    let seekDragging = false;
+    const seekFromPointer = (clientX: number) => {
+        if (!wavesurfer) return;
+        const rect = analyserCanvas!.getBoundingClientRect();
+        const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        wavesurfer.seekTo(pct);
+    };
+    analyserCanvas.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        seekDragging = true;
+        analyserCanvas!.setPointerCapture(e.pointerId);
+        seekFromPointer(e.clientX);
+    });
+    analyserCanvas.addEventListener('pointermove', (e) => {
+        if (seekDragging) seekFromPointer(e.clientX);
+    });
+    analyserCanvas.addEventListener('pointerup', (e) => {
+        seekDragging = false;
+        analyserCanvas!.releasePointerCapture(e.pointerId);
+    });
     
     // Update time display
     wavesurfer.on('audioprocess', () => {
@@ -942,31 +902,24 @@ function initWavesurfer(): void {
         }
     });
     
-    // In API mode, track play state via wavesurfer events (no shared audioElement)
-    if (getAudioMode() === 'api') {
-        // Start analyser animation immediately so idle bars + progress are visible
+    // Start analyser animation immediately so idle bars + progress are visible
+    startAnalyserAnimation();
+    
+    wavesurfer.on('play', () => {
+        isPlaying = true;
+        updatePlayButton();
+        updateBubblePlayingState();
+        connectMusicAnalyser();
         startAnalyserAnimation();
-        
-        wavesurfer.on('play', () => {
-            isPlaying = true;
-            updatePlayButton();
-            updateBubblePlayingState();
-            connectMusicAnalyser();
-            startAnalyserAnimation();
-            // Suppress OS media controls in API mode
-            clearMediaSession();
-        });
-        wavesurfer.on('pause', () => {
-            isPlaying = false;
-            updatePlayButton();
-            updateBubblePlayingState();
-            // Keep animation running so progress/idle bars stay visible
-            startAnalyserAnimation();
-            // Suppress OS media controls in API mode
-            clearMediaSession();
-        });
-        wavesurfer.on('finish', () => handleSongEnded());
-    }
+    });
+    wavesurfer.on('pause', () => {
+        isPlaying = false;
+        updatePlayButton();
+        updateBubblePlayingState();
+        // Keep animation running so progress/idle bars stay visible
+        startAnalyserAnimation();
+    });
+    wavesurfer.on('finish', () => handleSongEnded());
     
     // Handle resize with requestAnimationFrame for smooth, lag-free updates
     // Skip during animations to prevent lag on expand/collapse
@@ -1167,22 +1120,12 @@ function formatTime(seconds: number): string {
 function updateWaveformColors(): void {
     if (!wavesurfer) return;
     
-    if (getAudioMode() === 'api') {
-        // API mode: WaveSurfer is invisible; analyser canvas handles visuals
-        wavesurfer.setOptions({
-            waveColor: 'transparent',
-            progressColor: 'transparent',
-            cursorColor: 'transparent',
-            cursorWidth: 0,
-        });
-        return;
-    }
-    
-    // Tag mode: normal waveform colors
+    // WaveSurfer is invisible; analyser canvas handles visuals
     wavesurfer.setOptions({
-        waveColor: 'rgba(255, 255, 255, 0.8)',
-        progressColor: '#e53935',
-        cursorColor: '#e53935',
+        waveColor: 'transparent',
+        progressColor: 'transparent',
+        cursorColor: 'transparent',
+        cursorWidth: 0,
     });
 }
 
@@ -1783,33 +1726,17 @@ export function Update(): void {
         // Just went underwater — immediately hide bubble (no fade)
         playerContainer.style.opacity = '0';
         playerContainer.style.pointerEvents = 'none';
-        
-        if (getAudioMode() === 'tag') {
-            // Tag mode: pause music
-            wasPlayingBeforeDive = isPlaying;
-            if (wavesurfer && isPlaying) wavesurfer.pause();
-            else if (audioElement && isPlaying) audioElement.pause();
-        }
     } else if (wasUnderwater && !isUnderwater) {
         // Just surfaced — start fade delay (bubble stays hidden while camera settles)
         surfaceFadeTimer = SURFACE_FADE_DELAY;
         
-        if (getAudioMode() === 'api') {
-            // Reset filter + gain to clean state
-            if (musicLowpassFilter) musicLowpassFilter.frequency.value = MUFFLE_FILTER_CLEAN;
-            if (musicGainNode) musicGainNode.gain.value = MUFFLE_GAIN_MAX;
-        } else {
-            // Tag mode: resume if was playing
-            if (wasPlayingBeforeDive) {
-                if (wavesurfer) wavesurfer.play();
-                else if (audioElement) audioElement.play().catch(() => {});
-                wasPlayingBeforeDive = false;
-            }
-        }
+        // Reset filter + gain to clean state
+        if (musicLowpassFilter) musicLowpassFilter.frequency.value = MUFFLE_FILTER_CLEAN;
+        if (musicGainNode) musicGainNode.gain.value = MUFFLE_GAIN_MAX;
     }
     
-    // Progressive muffled effect (API mode) — every frame while underwater
-    if (isUnderwater && getAudioMode() === 'api') {
+    // Progressive muffled effect — every frame while underwater
+    if (isUnderwater) {
         const depth = Math.max(0, -camera.position.y);  // 0 at surface, 8 at sea floor
         const t = Math.min(depth / MUFFLE_DEPTH_MAX, 1.0);  // 0..1
         // Exponential sweep from 800Hz (surface) down to 150Hz (deep)
@@ -1824,8 +1751,8 @@ export function Update(): void {
         closedWhileUnderwater = false;
     }
     
-    // Retro sample-rate reduction synced with pixelation (API mode only)
-    if (getAudioMode() === 'api' && retroWorkletNode && retroBypass && retroWet) {
+    // Retro sample-rate reduction synced with pixelation
+    if (retroWorkletNode && retroBypass && retroWet) {
         const shouldRetro = pixelSizeValue > 0;
         if (shouldRetro && !retroActive) {
             // Set worklet params: 8-bit depth, 8x sample-rate reduction
