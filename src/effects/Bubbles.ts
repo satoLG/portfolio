@@ -27,7 +27,8 @@ export const BUBBLE_SPREAD = 0.25;        // Random spread at spawn
 export const AMBIENT_BUBBLE_INTERVAL = 1.4;   // Seconds between ambient bubble groups
 export const AMBIENT_BUBBLE_GROUP_SIZE = 6;    // Bubbles per ambient group
 export const AMBIENT_SOUND_INTERVAL = 10.0;   // Seconds between bubble sounds
-export const ENTRY_BUBBLE_COUNT = 60;          // Bubbles to spawn when entering water
+export const ENTRY_BUBBLE_COUNT = 60;          // Total bubbles to spawn when entering water
+const ENTRY_BUBBLE_PER_FRAME = 12;                // Bubbles to spawn per frame (stagger the burst)
 // ============================================
 
 interface Bubble {
@@ -49,6 +50,9 @@ let wasUnderwater = false;
 // Ambient bubble timing
 let lastAmbientBubbleTime = 0;
 let lastAmbientSoundTime = 0;
+
+// Staggered entry bubble spawning (avoids 60-bubble single-frame spike)
+let entryBubblesRemaining = 0;
 
 // Track mouse position
 const mousePosition = { x: 0, y: 0 };
@@ -131,11 +135,17 @@ function spawnBubble(position: Vector3): void {
     }
 }
 
+// Reusable scratch vectors (eliminates per-call allocations in spawn functions)
+const _forward = new Vector3();
+const _right = new Vector3();
+const _up = new Vector3();
+const _spawnPos = new Vector3();
+
 // Get a spawn position at given screen coordinates (NDC: -1 to 1)
 function getSpawnPositionAtNDC(ndcX: number, ndcY: number): Vector3 {
-    const forward = new Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-    const right = new Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    const up = new Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+    _forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    _right.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    _up.set(0, 1, 0).applyQuaternion(camera.quaternion);
     
     const fovRad = (camera.fov * Math.PI) / 180;
     const halfHeight = Math.tan(fovRad / 2) * BUBBLE_SPAWN_DISTANCE;
@@ -144,32 +154,16 @@ function getSpawnPositionAtNDC(ndcX: number, ndcY: number): Vector3 {
     const offsetX = ndcX * halfWidth;
     const offsetY = ndcY * halfHeight;
     
-    const pos = camera.position.clone()
-        .add(forward.clone().multiplyScalar(BUBBLE_SPAWN_DISTANCE))
-        .add(right.clone().multiplyScalar(offsetX))
-        .add(up.clone().multiplyScalar(offsetY));
+    _spawnPos.copy(camera.position)
+        .addScaledVector(_forward, BUBBLE_SPAWN_DISTANCE)
+        .addScaledVector(_right, offsetX)
+        .addScaledVector(_up, offsetY);
     
-    pos.add(new Vector3(
-        (Math.random() - 0.5) * BUBBLE_SPREAD,
-        (Math.random() - 0.5) * BUBBLE_SPREAD,
-        (Math.random() - 0.5) * BUBBLE_SPREAD
-    ));
+    _spawnPos.x += (Math.random() - 0.5) * BUBBLE_SPREAD;
+    _spawnPos.y += (Math.random() - 0.5) * BUBBLE_SPREAD;
+    _spawnPos.z += (Math.random() - 0.5) * BUBBLE_SPREAD;
     
-    return pos;
-}
-
-// Spawn bubbles spread across the screen (for water entry)
-function spawnEntryBubbles(): void {
-    for (let i = 0; i < ENTRY_BUBBLE_COUNT; i++) {
-        // Random position across the screen
-        const ndcX = (Math.random() - 0.5) * 1.6; // Spread across 80% of screen width
-        const ndcY = (Math.random() - 0.5) * 1.6; // Spread across 80% of screen height
-        const pos = getSpawnPositionAtNDC(ndcX, ndcY);
-        
-        if (pos.y < UNDERWATER_Y_THRESHOLD) {
-            spawnBubble(pos);
-        }
-    }
+    return _spawnPos;
 }
 
 // Spawn a small group of ambient bubbles at a random screen position
@@ -193,10 +187,10 @@ function spawnAmbientBubbleGroup(): void {
 function getSpawnPosition(): Vector3 | null {
     if (!mouseInitialized) return null;
     
-    // Get camera basis vectors
-    const forward = new Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-    const right = new Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    const up = new Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+    // Reuse scratch vectors
+    _forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    _right.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    _up.set(0, 1, 0).applyQuaternion(camera.quaternion);
     
     // Convert mouse to NDC (-1 to 1)
     const ndcX = (mousePosition.x / window.innerWidth) * 2 - 1;
@@ -212,19 +206,17 @@ function getSpawnPosition(): Vector3 | null {
     const offsetY = ndcY * halfHeight;
     
     // Spawn at distance from camera, offset by mouse position
-    const pos = camera.position.clone()
-        .add(forward.multiplyScalar(BUBBLE_SPAWN_DISTANCE))
-        .add(right.multiplyScalar(offsetX))
-        .add(up.multiplyScalar(offsetY));
+    _spawnPos.copy(camera.position)
+        .addScaledVector(_forward, BUBBLE_SPAWN_DISTANCE)
+        .addScaledVector(_right, offsetX)
+        .addScaledVector(_up, offsetY);
     
     // Add small random spread
-    pos.add(new Vector3(
-        (Math.random() - 0.5) * BUBBLE_SPREAD,
-        (Math.random() - 0.5) * BUBBLE_SPREAD,
-        (Math.random() - 0.5) * BUBBLE_SPREAD
-    ));
+    _spawnPos.x += (Math.random() - 0.5) * BUBBLE_SPREAD;
+    _spawnPos.y += (Math.random() - 0.5) * BUBBLE_SPREAD;
+    _spawnPos.z += (Math.random() - 0.5) * BUBBLE_SPREAD;
     
-    return pos;
+    return _spawnPos;
 }
 
 export function Update(cameraY: number): void {
@@ -265,13 +257,27 @@ export function Update(cameraY: number): void {
         }
     }
     
-    // Detect entering underwater - spawn burst of bubbles
+    // Detect entering underwater - stagger bubble burst across frames
     if (isUnderwater && !wasUnderwater) {
-        spawnEntryBubbles();
+        entryBubblesRemaining = ENTRY_BUBBLE_COUNT;
         lastAmbientBubbleTime = time;
         lastAmbientSoundTime = time;
     }
     wasUnderwater = isUnderwater;
+    
+    // Stagger entry bubble spawning across multiple frames
+    if (entryBubblesRemaining > 0) {
+        const toSpawn = Math.min(entryBubblesRemaining, ENTRY_BUBBLE_PER_FRAME);
+        for (let i = 0; i < toSpawn; i++) {
+            const ndcX = (Math.random() - 0.5) * 1.6;
+            const ndcY = (Math.random() - 0.5) * 1.6;
+            const pos = getSpawnPositionAtNDC(ndcX, ndcY);
+            if (pos.y < UNDERWATER_Y_THRESHOLD) {
+                spawnBubble(pos);
+            }
+        }
+        entryBubblesRemaining -= toSpawn;
+    }
     
     // Spawn new bubbles when moving underwater
     if (isUnderwater && mouseInitialized) {

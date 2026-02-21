@@ -32,6 +32,9 @@ let initialized = false;
 let width = 1;
 let height = 1;
 
+// Reuse a static Vector2 for copyFramebufferToTexture offset (avoids per-frame allocation)
+const _copyOffset = new Vector2(0, 0);
+
 const vertexShader = /* glsl */`
     varying vec2 vUv;
     void main() {
@@ -139,7 +142,8 @@ export function renderScene(renderer: WebGLRenderer, scene: ThreeScene, camera: 
     }
     
     // Copy the framebuffer (already has correct colors) to texture
-    renderer.copyFramebufferToTexture(framebufferTexture, new Vector2(0, 0));
+    // Reuse static Vector2 to avoid allocation every frame
+    renderer.copyFramebufferToTexture(framebufferTexture, _copyOffset);
     
     // Render post-processed version on top
     renderer.render(quadScene, orthoCamera);

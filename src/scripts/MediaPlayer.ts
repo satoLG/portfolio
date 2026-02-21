@@ -5,7 +5,7 @@
 import { camera, pixelSizeValue } from "./Scene";
 import { radio } from "../scene/Island";
 import { Vector3 } from "three";
-import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse, getAudioContext, getMusicVolume } from "./Audio";
+import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse, getAudioContext, getMusicVolume, isMusicMuted } from "./Audio";
 import { zoomToRadio, zoomOutFromRadio } from "./Control";
 import WaveSurfer from 'wavesurfer.js';
 import { t, onLanguageChange } from "./i18n";
@@ -146,6 +146,7 @@ let analyserDataArray: Uint8Array<ArrayBuffer> | null = null;
 // Underwater muffled music effect (API mode)
 let musicLowpassFilter: BiquadFilterNode | null = null;
 let musicGainNode: GainNode | null = null;
+let musicVolumeGain: GainNode | null = null;
 const MUFFLE_FILTER_CLEAN = 22000;   // Hz — reset value when above water
 const MUFFLE_FILTER_ENTER = 200;     // Hz — immediate muffling when first entering water
 const MUFFLE_FILTER_DEEP = 150;      // Hz — fully muffled at max depth
@@ -238,21 +239,21 @@ export function Start(): void {
         }
     });
     
-    // Listen for mute changes from settings
+    // Listen for mute changes from settings (via Web Audio GainNode)
     window.addEventListener('musicMuteChanged', (e: Event) => {
         const customEvent = e as CustomEvent;
         const muted = customEvent.detail.muted;
-        if (audioElement) {
-            audioElement.muted = muted;
+        if (musicVolumeGain) {
+            musicVolumeGain.gain.value = muted ? 0 : getMusicVolume();
         }
     });
 
-    // Listen for volume changes from settings
+    // Listen for volume changes from settings (via Web Audio GainNode)
     window.addEventListener('musicVolumeChanged', (e: Event) => {
         const customEvent = e as CustomEvent;
         const volume = customEvent.detail.volume;
-        if (audioElement) {
-            audioElement.volume = volume;
+        if (musicVolumeGain) {
+            musicVolumeGain.gain.value = isMusicMuted() ? 0 : volume;
         }
     });
 
@@ -665,7 +666,7 @@ function stopResizing(): void {
 
 function createAudioElement(): void {
     audioElement = new Audio();
-    audioElement.volume = getMusicVolume();
+    audioElement.volume = 1;  // Always max pass-through — volume controlled via Web Audio GainNode
     audioElement.addEventListener('ended', () => handleSongEnded());
     // Single source of truth: sync isPlaying from the actual audio element state
     audioElement.addEventListener('play', () => syncPlayState());
@@ -873,7 +874,12 @@ async function connectMusicAnalyser(): Promise<void> {
         retroWet.connect(retroMerge);
         //   merge → analyser → destination
         retroMerge.connect(analyserNode);
-        analyserNode.connect(ctx.destination);
+
+        // Music volume GainNode — controls volume/mute via Web Audio instead of HTMLAudioElement.volume
+        musicVolumeGain = ctx.createGain();
+        musicVolumeGain.gain.value = isMusicMuted() ? 0 : getMusicVolume();
+        analyserNode.connect(musicVolumeGain);
+        musicVolumeGain.connect(ctx.destination);
     } catch (e) {
         console.warn('Could not connect music analyser:', e);
         mediaSourceConnected = false;
