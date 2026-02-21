@@ -3,9 +3,9 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { oceanAbsorptionUniform } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../scripts/Time";
-import { getIsPlaying } from "../scripts/MediaPlayer";
+import { getIsPlaying, expandPlayer, getIsExpanded } from "../scripts/MediaPlayer";
 import { isBreezeActive } from "../scripts/Audio";
-import { camera } from "../scripts/Scene";
+import { camera, renderer } from "../scripts/Scene";
 
 export const island = new Group();
 export const firecamp = new Group();
@@ -782,6 +782,9 @@ export function Start(): void {
 
     // Setup mouse/touch event listeners for grass interaction
     setupGrassInteraction();
+
+    // Setup radio click/hover interaction
+    setupRadioInteraction();
 }
 
 // Setup mouse and touch events for grass interaction
@@ -836,6 +839,83 @@ function updateMouseWorldPosition(): void {
     }
 }
 
+// ============================================
+// RADIO CLICK/HOVER INTERACTION
+// ============================================
+const radioRaycaster = new Raycaster();
+const radioMouse = new Vector2();
+const RADIO_HOVER_SCALE = 1.15;  // Scale multiplier on hover
+const radioBaseScale = radioScale;
+let isRadioHovered = false;
+
+function setupRadioInteraction(): void {
+    const canvas = renderer.domElement;
+    if (!canvas) return;
+
+    // Click handler — open media player when clicking on radio
+    const onRadioClick = (clientX: number, clientY: number) => {
+        if (getIsExpanded()) return;  // Already open
+        if (radio.children.length === 0) return;  // Not loaded yet
+        if (!document.body.classList.contains('music-visible')) return;  // Not ready yet
+
+        radioMouse.x = (clientX / window.innerWidth) * 2 - 1;
+        radioMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+
+        radioRaycaster.setFromCamera(radioMouse, camera);
+        const intersects = radioRaycaster.intersectObjects(radio.children, true);
+        if (intersects.length > 0) {
+            expandPlayer();
+        }
+    };
+
+    canvas.addEventListener('click', (e: MouseEvent) => {
+        onRadioClick(e.clientX, e.clientY);
+    });
+
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (e.changedTouches.length > 0) {
+            const touch = e.changedTouches[0];
+            onRadioClick(touch.clientX, touch.clientY);
+        }
+    });
+
+    // Hover handler — scale radio and change cursor
+    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+        if (radio.children.length === 0 || getIsExpanded()) {
+            if (isRadioHovered) {
+                isRadioHovered = false;
+                canvas.style.cursor = '';
+            }
+            return;
+        }
+
+        radioMouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        radioMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+        radioRaycaster.setFromCamera(radioMouse, camera);
+        const intersects = radioRaycaster.intersectObjects(radio.children, true);
+
+        if (intersects.length > 0) {
+            if (!isRadioHovered) {
+                isRadioHovered = true;
+                canvas.style.cursor = 'pointer';
+            }
+        } else {
+            if (isRadioHovered) {
+                isRadioHovered = false;
+                canvas.style.cursor = '';
+            }
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (isRadioHovered) {
+            isRadioHovered = false;
+            canvas.style.cursor = '';
+        }
+    });
+}
+
 export function Update(): void {
     // Update palm tree wind shader time
     palmWindTimeUniform.value = time * PALM_WIND_SPEED;
@@ -875,6 +955,12 @@ export function Update(): void {
     
     // Radio vibration when music is playing
     if (radio.children.length > 0) {
+        // Smooth hover scale
+        const targetScale = isRadioHovered ? radioBaseScale * RADIO_HOVER_SCALE : radioBaseScale;
+        const currentScale = radio.scale.x;
+        const newScale = currentScale + (targetScale - currentScale) * Math.min(1, deltaTime * 10);
+        radio.scale.setScalar(newScale);
+
         if (getIsPlaying()) {
             radioTime += deltaTime;
             // Multi-frequency vibration for more organic feel

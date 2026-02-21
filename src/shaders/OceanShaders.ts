@@ -349,7 +349,7 @@ export const triplanarFragment =
         float c1 = causticLine(uv1 * 2.0);
         float c2 = causticLine(uv2 * 2.0);
         
-        return (c1 + c2) * 0.3;
+        return (c1 + c2) * 0.55;
     }
 
     void main()
@@ -404,8 +404,8 @@ export const triplanarFragment =
         float distFade = 1.0 - clamp(viewLen / CAUSTIC_DISTANCE, 0.0, 1.0);
         distFade *= distFade; // quadratic falloff for smooth fade
         // Day: warm bright caustics | Night: cool moonlight caustics
-        float dayIntensity = _SunVisibility * 0.5;
-        float nightIntensity = (1.0 - _SunVisibility) * 0.35;
+        float dayIntensity = _SunVisibility * 0.9;
+        float nightIntensity = (1.0 - _SunVisibility) * 0.6;
         vec3 causticColor = caustic * depthFade * distFade * (
             vec3(1.0, 0.95, 0.85) * dayIntensity +
             vec3(0.5, 0.65, 1.0) * nightIntensity

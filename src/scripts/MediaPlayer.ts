@@ -6,122 +6,9 @@ import { camera, pixelSizeValue } from "./Scene";
 import { radio } from "../scene/Island";
 import { Vector3 } from "three";
 import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse, getAudioContext, getMusicVolume } from "./Audio";
-import { zoomToRadio, zoomOutFromRadio, getSavedCameraPosition, DEFAULT_CAMERA_X, DEFAULT_CAMERA_Z } from "./Control";
+import { zoomToRadio, zoomOutFromRadio } from "./Control";
 import WaveSurfer from 'wavesurfer.js';
 import { t, onLanguageChange } from "./i18n";
-
-// ============================================
-// MEDIA SESSION API INTEGRATION
-// ============================================
-
-// Default metadata for the site
-const DEFAULT_MEDIA_METADATA = {
-    title: 'leosato.',
-    artist: 'Interactive 3D Portfolio',
-    album: '',
-    artwork: [
-        { src: '/icons/icon-96x96.png', sizes: '96x96', type: 'image/png' },
-        { src: '/icons/icon-128x128.png', sizes: '128x128', type: 'image/png' },
-        { src: '/icons/icon-192x192.png', sizes: '192x192', type: 'image/png' },
-        { src: '/icons/icon-384x384.png', sizes: '384x384', type: 'image/png' },
-        { src: '/icons/icon-512x512.png', sizes: '512x512', type: 'image/png' }
-    ]
-};
-
-function setMediaSessionMetadata(title: string, artist: string, artwork: MediaImage[]): void {
-    if (!('mediaSession' in navigator)) return;
-    
-    navigator.mediaSession.metadata = new MediaMetadata({
-        title,
-        artist,
-        artwork
-    });
-}
-
-function setDefaultMediaSession(): void {
-    setMediaSessionMetadata(
-        DEFAULT_MEDIA_METADATA.title,
-        DEFAULT_MEDIA_METADATA.artist,
-        DEFAULT_MEDIA_METADATA.artwork
-    );
-    if ('mediaSession' in navigator) {
-        navigator.mediaSession.playbackState = 'none';
-    }
-}
-
-function updateMediaSessionForSong(song: SongData): void {
-    if (!('mediaSession' in navigator)) return;
-    
-    const artwork: MediaImage[] = song.cover 
-        ? [{ src: song.cover, sizes: '512x512', type: 'image/jpeg' }]
-        : DEFAULT_MEDIA_METADATA.artwork;
-    
-    setMediaSessionMetadata(song.name || 'Unknown Track', song.artist || 'Unknown Artist', artwork);
-}
-
-function updateMediaSessionPlaybackState(playing: boolean): void {
-    if (!('mediaSession' in navigator)) return;
-    navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
-}
-
-function updateMediaSessionPosition(): void {
-    if (!('mediaSession' in navigator) || !audioElement) return;
-    
-    try {
-        navigator.mediaSession.setPositionState({
-            duration: audioElement.duration || 0,
-            playbackRate: audioElement.playbackRate,
-            position: audioElement.currentTime || 0
-        });
-    } catch {
-        // Some browsers may not support setPositionState
-    }
-}
-
-function setupMediaSessionHandlers(): void {
-    if (!('mediaSession' in navigator)) return;
-    
-    navigator.mediaSession.setActionHandler('play', () => {
-        if (wavesurfer) {
-            wavesurfer.play();
-        } else if (audioElement) {
-            audioElement.play();
-        }
-    });
-    
-    navigator.mediaSession.setActionHandler('pause', () => {
-        if (wavesurfer) {
-            wavesurfer.pause();
-        } else if (audioElement) {
-            audioElement.pause();
-        }
-    });
-    
-    navigator.mediaSession.setActionHandler('previoustrack', () => {
-        previousSong(!audioElement?.paused);
-    });
-    
-    navigator.mediaSession.setActionHandler('nexttrack', () => {
-        nextSong(!audioElement?.paused);
-    });
-    
-    navigator.mediaSession.setActionHandler('seekto', (details) => {
-        if (details.seekTime !== undefined) {
-            if (wavesurfer) {
-                const duration = wavesurfer.getDuration();
-                if (duration > 0) {
-                    wavesurfer.seekTo(details.seekTime / duration);
-                }
-            } else if (audioElement) {
-                audioElement.currentTime = details.seekTime;
-            }
-            updateMediaSessionPosition();
-        }
-    });
-    
-    // Set default metadata initially
-    setDefaultMediaSession();
-}
 
 // Above water camera Y position (must match Control.ts)
 // (surfacing animation removed — bubble now tracks radio position directly)
@@ -227,6 +114,10 @@ export function getIsPlaying(): boolean {
     return isPlaying;
 }
 
+export function getIsExpanded(): boolean {
+    return isExpanded;
+}
+
 // Get current song cover
 export function getCurrentCover(): string | undefined {
     if (playlist.length === 0) return undefined;
@@ -234,17 +125,7 @@ export function getCurrentCover(): string | undefined {
 }
 let isPlaylistView = false;  // Expanded playlist view
 let isUnderwater = false;
-let closedWhileUnderwater = false;
 let isLoopEnabled = false;  // Loop current song or go to next
-
-// Drag state (drag disabled, only keeping minimal state)
-let isDragging = false;
-let hasBeenDragged = false;
-
-// Radio screen position (for returning after drag)
-let radioScreenX = 0;
-let radioScreenY = 0;
-let hasInitialPosition = false;  // Track if we've set the initial position
 
 // DOM Elements
 let playerContainer: HTMLDivElement | null = null;
@@ -349,7 +230,6 @@ export function Start(): void {
     createAudioElement();
     initWavesurfer();
     updatePlayerDisplay();
-    setupMediaSessionHandlers();
     
     // Close media player when settings panel opens
     document.addEventListener('settings-opened', () => {
@@ -384,29 +264,33 @@ export function Start(): void {
 
 function createPlayerUI(): void {
     playerContainer = document.createElement('div');
-    playerContainer.className = 'media-player bubble';
-    // Hide until initial position is set (prevents flash at wrong position)
-    playerContainer.style.opacity = '0';
+    playerContainer.className = 'media-player';
+    // Hidden until expandPlayer() is called
+    playerContainer.style.display = 'none';
     playerContainer.innerHTML = `
-        <span class="music-note"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
-        <img class="bubble-cover" src="" alt="" />
         <div class="player-expanded-content">
             <div class="player-header-bar">
                 <button class="player-playlist-toggle" title="${t('player.showPlaylist')}" data-i18n-title="player.showPlaylist">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg class="icon-normal" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15V6"/>
                         <path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/>
                         <path d="M12 12H3"/>
                         <path d="M16 6H3"/>
                         <path d="M12 18H3"/>
                     </svg>
+                    <svg class="icon-pixel" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M10 13h6V5h6v4h-4v10h-8v-6zm2 2v2h4v-2h-4zM2 17h6v2H2v-2zm6-4H2v2h6v-2zM2 9h12v2H2V9zm12-4H2v2h12V5z"/>
+                    </svg>
                 </button>
                 <button class="player-close" title="${t('player.minimize')}" data-i18n-title="player.minimize">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg class="icon-normal" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="4 14 10 14 10 20"/>
                         <polyline points="20 10 14 10 14 4"/>
                         <line x1="14" y1="10" x2="21" y2="3"/>
                         <line x1="3" y1="21" x2="10" y2="14"/>
+                    </svg>
+                    <svg class="icon-pixel" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M17 3h-2v2h-2v2h-2V5H9V3H7v2h2v2h2v2h2V7h2V5h2V3zM4 13h16v-2H4v2zm9 4h-2v-2h2v2zm2 2h-2v-2h2v2zm0 0h2v2h-2v-2zm-6 0h2v-2H9v2zm0 0H7v2h2v-2z"/>
                     </svg>
                 </button>
             </div>
@@ -429,26 +313,41 @@ function createPlayerUI(): void {
             </div>
             <div class="player-controls">
                 <button class="player-btn player-prev" title="${t('player.previous')}" data-i18n-title="player.previous">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="icon-normal" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+                    </svg>
+                    <svg class="icon-pixel" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M6 4h2v16H6V4zm12 0h-2v2h-2v3h-2v2h-2v2h2v3h2v2h2v2h2V4z"/>
                     </svg>
                 </button>
                 <button class="player-btn player-play" title="${t('player.play')}" data-i18n-title="player.play">
-                    <svg class="icon-play" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="icon-play icon-normal" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M8 5v14l11-7z"/>
                     </svg>
-                    <svg class="icon-pause" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style="display: none;">
+                    <svg class="icon-play icon-pixel" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M10 20H8V4h2v2h2v3h2v2h2v2h-2v2h-2v3h-2v2z"/>
+                    </svg>
+                    <svg class="icon-pause icon-normal" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                    </svg>
+                    <svg class="icon-pause icon-pixel" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M10 4H5v16h5V4zm9 0h-5v16h5V4z"/>
                     </svg>
                 </button>
                 <button class="player-btn player-next" title="${t('player.next')}" data-i18n-title="player.next">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="icon-normal" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+                    </svg>
+                    <svg class="icon-pixel" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M6 4h2v2h2v2h2v2h2v4h-2v2h-2v2H8v2H6V4zm12 0h-2v16h2V4z"/>
                     </svg>
                 </button>
                 <button class="player-btn player-loop" title="${t('player.loop')}" data-i18n-title="player.loop">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <svg class="icon-normal" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/>
+                    </svg>
+                    <svg class="icon-pixel" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M11 1H9v2h2v2H5v2H3v10h2v2h2v-2H5V7h6v2H9v2h2V9h2V7h2V5h-2V3h-2V1zm8 4h-2v2h2v10h-6v-2h2v-2h-2v2h-2v2H9v2h2v2h2v2h2v-2h-2v-2h6v-2h2V7h-2V5z"/>
                     </svg>
                 </button>
             </div>
@@ -471,16 +370,6 @@ function createPlayerUI(): void {
     const playBtn = playerContainer.querySelector('.player-play') as HTMLButtonElement;
     const nextBtn = playerContainer.querySelector('.player-next') as HTMLButtonElement;
     // dragHandle removed - drag functionality disabled
-    
-    // Bubble click to expand
-    playerContainer.addEventListener('click', (e) => {
-        const target = e.target as HTMLElement;
-        // Only expand if clicking on the bubble itself (music note, its SVG children, or container when in bubble mode)
-        const clickedMusicNote = target.closest('.music-note');
-        if (!isExpanded && !isDragging && (target === playerContainer || clickedMusicNote)) {
-            expandPlayer();
-        }
-    });
     
     // Close button
     closeBtn.addEventListener('click', (e) => {
@@ -521,6 +410,11 @@ function createPlayerUI(): void {
     
     // Build playlist items
     buildPlaylistItems();
+
+    // Prevent wheel/touch scroll on the entire media player from scrolling the 3D scene
+    playerContainer.addEventListener('wheel', (e) => {
+        e.stopPropagation();
+    }, { passive: true });
     
     // Drag and resize functionality DISABLED - player stays centered
     // setupDragListeners();
@@ -786,17 +680,6 @@ function syncPlayState(): void {
     isPlaying = playing;
     updatePlayButton();
     updateBubblePlayingState();
-    if (playing) {
-        if (playlist.length > 0) {
-            updateMediaSessionForSong(playlist[currentSongIndex]);
-        }
-        updateMediaSessionPlaybackState(true);
-    } else {
-        updateMediaSessionPlaybackState(false);
-        if (audioElement.currentTime === 0) {
-            setDefaultMediaSession();
-        }
-    }
 }
 
 // Preload adjacent songs into browser cache using fetch (no audio element swap)
@@ -881,19 +764,13 @@ function initWavesurfer(): void {
     // Update time display
     wavesurfer.on('audioprocess', () => {
         updateTimeDisplay();
-        // Update Media Session position every second (throttled)
-        if (audioElement && Math.floor(audioElement.currentTime) !== Math.floor(audioElement.currentTime - 0.25)) {
-            updateMediaSessionPosition();
-        }
     });
     wavesurfer.on('seeking', () => {
         updateTimeDisplay();
-        updateMediaSessionPosition();
     });
     wavesurfer.on('ready', () => {
         updateTimeDisplay();
         updateWaveformColors();
-        updateMediaSessionPosition();
         preloadAdjacentSongs();
         // Auto-play if a song switch requested it
         if (pendingPlayOnReady && wavesurfer) {
@@ -1133,64 +1010,91 @@ function updateWaveformColors(): void {
 const EXPANDED_WIDTH = 320;
 const EDGE_OFFSET = 16;  // Padding from viewport edges
 let isAnimating = false;  // Block resize during expand/collapse animation
+const ANIM_DURATION = 400;  // ms — must match CSS transition duration
 
-function expandPlayer(): void {
+// Reusable Vector3 for radio screen projection
+const _radioPos = new Vector3();
+
+/** Project the radio's 3D position to screen coordinates */
+function getRadioScreenPos(): { x: number; y: number } {
+    radio.getWorldPosition(_radioPos);
+    _radioPos.y += 0.15;  // Slight offset above radio center
+    const screenPos = _radioPos.project(camera);
+    return {
+        x: (screenPos.x * 0.5 + 0.5) * window.innerWidth,
+        y: (-screenPos.y * 0.5 + 0.5) * window.innerHeight,
+    };
+}
+
+export function expandPlayer(): void {
     if (isExpanded || !playerContainer) return;
     isExpanded = true;
-    isAnimating = true;  // Block resize during animation
-    hasBeenDragged = true;  // Mark as dragged so it doesn't snap back to radio
-    
+    isAnimating = true;
+
     // Close settings panel if open
     document.dispatchEvent(new CustomEvent('player-opened'));
-    
+
     // Play collapse sound (inverted)
     playUIBubbleCollapse();
-    
+
     // Zoom camera to radio when above water
     if (!isUnderwater) {
         zoomToRadio();
     }
-    
-    // Clear any conflicting inline styles
-    playerContainer.style.bottom = '';
-    playerContainer.style.right = '';
-    playerContainer.style.position = '';
-    playerContainer.style.transform = '';
-    
-    // SIMPLIFIED POSITIONING: Always centered horizontally, top portion of screen
-    // Works both above water and underwater
+
+    // --- Position player at its final expanded location ---
     const centerX = (window.innerWidth - EXPANDED_WIDTH) / 2;
-    const topY = Math.max(EDGE_OFFSET + 20, window.innerHeight * 0.15);  // 15% from top
-    
-    // Clamp to ensure it stays within viewport
+    const topY = Math.max(EDGE_OFFSET + 20, window.innerHeight * 0.15);
     const maxX = window.innerWidth - EXPANDED_WIDTH - EDGE_OFFSET;
-    const maxY = window.innerHeight - 240 - EDGE_OFFSET;  // Min height 240px
-    
+    const maxY = window.innerHeight - 240 - EDGE_OFFSET;
     const finalX = Math.max(EDGE_OFFSET, Math.min(maxX, centerX));
     const finalY = Math.max(EDGE_OFFSET, Math.min(maxY, topY));
-    
-    // Set position before transitioning
+
+    playerContainer.style.transition = 'none';
+    playerContainer.style.display = '';
+    playerContainer.classList.add('expanded');
     playerContainer.style.left = `${finalX}px`;
     playerContainer.style.top = `${finalY}px`;
-    
-    // Restore full transitions for expand/collapse animation
-    playerContainer.style.transition = '';
-    playerContainer.classList.remove('bubble');
-    playerContainer.classList.add('expanded');
-    
-    // Allow resize after animation completes (400ms transition)
+
+    // Force layout so we can measure the final bounding rect
+    playerContainer.offsetHeight;
+
+    // --- Set transform-origin to the radio's screen position relative to the player ---
+    const rect = playerContainer.getBoundingClientRect();
+    const radioScreen = getRadioScreenPos();
+    const originX = radioScreen.x - rect.left;
+    const originY = radioScreen.y - rect.top;
+
+    // Start state: scale(0) at the radio's exact screen position
+    playerContainer.style.transformOrigin = `${originX}px ${originY}px`;
+    playerContainer.style.transform = 'scale(0)';
+    playerContainer.style.opacity = '0';
+
+    // Force flush so browser registers the start state
+    playerContainer.offsetHeight;
+
+    // --- Animate: grow outward from the radio point ---
+    playerContainer.style.transition = `transform ${ANIM_DURATION}ms cubic-bezier(0.16, 1, 0.3, 1), opacity ${Math.round(ANIM_DURATION * 0.4)}ms ease`;
+    playerContainer.style.transform = 'scale(1)';
+    playerContainer.style.opacity = '1';
+
+    // After animation finishes, clean up inline overrides
     setTimeout(() => {
-        isAnimating = false;
-        // Trigger one resize now that animation is done
-        if (wavesurfer && isExpanded) {
-            wavesurfer.setOptions({ height: 40 });
+        if (playerContainer && isExpanded) {
+            playerContainer.style.transition = '';
+            playerContainer.style.transform = '';
+            playerContainer.style.transformOrigin = '';
+            playerContainer.style.opacity = '';
+            isAnimating = false;
+            if (wavesurfer) wavesurfer.setOptions({ height: 40 });
         }
-    }, 400);
+    }, ANIM_DURATION + 50);
 }
 
 function collapsePlayer(): void {
     if (!isExpanded || !playerContainer) return;
     isExpanded = false;
+    isAnimating = true;
     
     // Exit playlist view if active
     if (isPlaylistView) {
@@ -1198,7 +1102,6 @@ function collapsePlayer(): void {
         playerContainer.classList.remove('playlist-view');
         const toggleBtn = playerContainer.querySelector('.player-playlist-toggle') as HTMLButtonElement;
         if (toggleBtn) toggleBtn.classList.remove('active');
-        // Clear inline max-height so CSS max-height:0 takes effect on next expand
         const playlistEl = playerContainer.querySelector('.player-playlist') as HTMLDivElement;
         if (playlistEl) playlistEl.style.maxHeight = '';
     }
@@ -1211,72 +1114,31 @@ function collapsePlayer(): void {
         zoomOutFromRadio();
     }
     
-    // Remove pop-in class so it doesn't replay animation on collapse
-    playerContainer.classList.remove('pop-in-animate');
-    
-    // Reset any custom width/height from resize
-    playerContainer.style.width = '';
-    playerContainer.style.height = '';
-    
-    // Restore full transition for smooth animation back to bubble
-    playerContainer.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
-    
-    playerContainer.classList.remove('expanded');
-    playerContainer.classList.add('bubble');
-    
-    // Calculate where radio WILL BE after camera zooms out
-    let targetRadioX = radioScreenX;
-    let targetRadioY = radioScreenY;
-    
-    if (!isUnderwater) {
-        // Get saved camera position (where camera will return to)
-        const savedCam = getSavedCameraPosition();
-        
-        // Temporarily move camera to saved position to calculate correct projection
-        const currentCamX = camera.position.x;
-        const currentCamY = camera.position.y;
-        const currentCamZ = camera.position.z;
-        
-        // Set camera to saved position
-        camera.position.x = savedCam.x !== undefined ? savedCam.x : DEFAULT_CAMERA_X;
-        camera.position.y = savedCam.y;
-        camera.position.z = savedCam.z !== undefined ? savedCam.z : DEFAULT_CAMERA_Z;
-        camera.updateMatrixWorld();
-        
-        // Now project radio position with camera at saved position
-        const radioPos = new Vector3();
-        radio.getWorldPosition(radioPos);
-        radioPos.y += 0.35;  // Same offset used in Update
-        
-        const screenPos = radioPos.clone().project(camera);
-        targetRadioX = (screenPos.x * 0.5 + 0.5) * window.innerWidth;
-        targetRadioY = (-screenPos.y * 0.5 + 0.5) * window.innerHeight;
-        
-        // Restore camera to current position
-        camera.position.x = currentCamX;
-        camera.position.y = currentCamY;
-        camera.position.z = currentCamZ;
-        camera.updateMatrixWorld();
-    }
-    
-    // Animate back to calculated radio position
-    playerContainer.style.left = `${targetRadioX}px`;
-    playerContainer.style.top = `${targetRadioY}px`;
-    playerContainer.style.transform = 'translate(-50%, -50%)';
-    
-    // Wait for animation to complete before letting Update() take over
+    // --- Set transform-origin to the radio's screen position relative to the player ---
+    const rect = playerContainer.getBoundingClientRect();
+    const radioScreen = getRadioScreenPos();
+    const originX = radioScreen.x - rect.left;
+    const originY = radioScreen.y - rect.top;
+
+    playerContainer.style.transformOrigin = `${originX}px ${originY}px`;
+    playerContainer.style.transition = `transform ${ANIM_DURATION}ms cubic-bezier(0.5, 0, 0.84, 0), opacity ${Math.round(ANIM_DURATION * 0.5)}ms ease ${Math.round(ANIM_DURATION * 0.4)}ms`;
+    playerContainer.style.transform = 'scale(0)';
+    playerContainer.style.opacity = '0';
+
+    // After animation finishes, hide and clean up
     setTimeout(() => {
-        hasBeenDragged = false;
-        // Reset transition to default
-        if (playerContainer) {
+        if (playerContainer && !isExpanded) {
+            playerContainer.classList.remove('expanded');
+            playerContainer.style.display = 'none';
             playerContainer.style.transition = '';
+            playerContainer.style.transform = '';
+            playerContainer.style.transformOrigin = '';
+            playerContainer.style.opacity = '';
+            playerContainer.style.left = '';
+            playerContainer.style.top = '';
         }
-    }, 450);  // Slightly longer than 0.4s transition
-    
-    // If underwater, mark that we closed it underwater
-    if (isUnderwater) {
-        closedWhileUnderwater = true;
-    }
+        isAnimating = false;
+    }, ANIM_DURATION + 50);
 }
 
 function togglePlay(): void {
@@ -1405,9 +1267,6 @@ function updatePlayerDisplay(): void {
     titleEl.textContent = song.name || DEFAULT_NAME;
     artistEl.textContent = song.artist || DEFAULT_ARTIST;
     
-    // Update bubble cover as well
-    updateBubbleCover();
-    
     // Update playlist view if visible
     updatePlaylistHighlight();
 }
@@ -1492,13 +1351,16 @@ function buildPlaylistItems(): void {
         
         item.innerHTML = `
             <div class="playlist-item-drag">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <svg class="icon-normal" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                     <circle cx="9" cy="6" r="1.5"/>
                     <circle cx="15" cy="6" r="1.5"/>
                     <circle cx="9" cy="12" r="1.5"/>
                     <circle cx="15" cy="12" r="1.5"/>
                     <circle cx="9" cy="18" r="1.5"/>
                     <circle cx="15" cy="18" r="1.5"/>
+                </svg>
+                <svg class="icon-pixel" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M5 3H3v2h2V3zm14 4h2v6h-2V9H9v10h4v2H7V7h12zM7 3h2v2H7V3zM5 7H3v2h2V7zm-2 4h2v2H3v-2zm2 4H3v2h2v-2zm6-12h2v2h-2V3zm6 0h-2v2h2V3zm-2 14v-2h6v2h-2v2h-2v2h-2v-4zm4 2v2h2v-2h-2z"/>
                 </svg>
             </div>
             <img class="playlist-item-cover" src="${song.cover || DEFAULT_COVER}" alt="" />
@@ -1640,15 +1502,13 @@ function handleDragEnd(): void {
 function updatePlayButton(): void {
     if (!playerContainer) return;
     
-    const playIcon = playerContainer.querySelector('.icon-play') as SVGElement;
-    const pauseIcon = playerContainer.querySelector('.icon-pause') as SVGElement;
+    const playBtn = playerContainer.querySelector('.player-play') as HTMLButtonElement;
+    if (!playBtn) return;
     
     if (isPlaying) {
-        playIcon.style.display = 'none';
-        pauseIcon.style.display = 'block';
+        playBtn.classList.add('playing');
     } else {
-        playIcon.style.display = 'block';
-        pauseIcon.style.display = 'none';
+        playBtn.classList.remove('playing');
     }
 }
 
@@ -1662,46 +1522,12 @@ function updateBubblePlayingState(): void {
         playerContainer.classList.remove('is-playing');
     }
     
-    // Update bubble cover separately (not tied to playing state)
-    updateBubbleCover();
-}
-
-// Update bubble cover image - shows cover only when playing
-function updateBubbleCover(): void {
-    if (!playerContainer) return;
-    
-    const bubbleCover = playerContainer.querySelector('.bubble-cover') as HTMLImageElement;
-    const musicNote = playerContainer.querySelector('.music-note') as HTMLElement;
-    
-    const cover = playlist[currentSongIndex]?.cover;
-    
-    // Only show cover if playing AND song has a cover
-    if (isPlaying && cover && bubbleCover) {
-        // Preload new image before switching
-        const newImg = new Image();
-        newImg.onload = () => {
-            bubbleCover.src = cover;
-            bubbleCover.style.display = 'block';
-            if (musicNote) musicNote.style.display = 'none';
-        };
-        newImg.src = cover;
-    } else {
-        // Not playing or no cover - show music icon
-        if (bubbleCover) bubbleCover.style.display = 'none';
-        if (musicNote) musicNote.style.display = '';
-    }
 }
 
 // Track day mode for waveform color updates
 let wasDayMode = false;
-// Smooth fade timer for surfacing transition (opacity only, not position)
-let surfaceFadeTimer = 0;
-const SURFACE_FADE_DELAY = 0.25;   // seconds to wait before fading in after surfacing
 
-// Reusable Vector3 for radio projection (avoids per-frame allocation)
-const _radioPos = new Vector3();
-
-// Update position to follow radio in 3D space
+// Update audio effects (underwater muffle, retro, etc.)
 export function Update(): void {
     if (!playerContainer || !radio || radio.children.length === 0) return;
     
@@ -1716,21 +1542,9 @@ export function Update(): void {
     const wasUnderwater = isUnderwater;
     isUnderwater = document.body.classList.contains('underwater');
     
-    // Tick surface fade timer
-    if (surfaceFadeTimer > 0) {
-        surfaceFadeTimer -= 0.016;  // ~60fps frame time
-    }
-    
     // --- Underwater music effect ---
-    if (!wasUnderwater && isUnderwater) {
-        // Just went underwater — immediately hide bubble (no fade)
-        playerContainer.style.opacity = '0';
-        playerContainer.style.pointerEvents = 'none';
-    } else if (wasUnderwater && !isUnderwater) {
-        // Just surfaced — start fade delay (bubble stays hidden while camera settles)
-        surfaceFadeTimer = SURFACE_FADE_DELAY;
-        
-        // Reset filter + gain to clean state
+    if (wasUnderwater && !isUnderwater) {
+        // Just surfaced — reset filter + gain to clean state
         if (musicLowpassFilter) musicLowpassFilter.frequency.value = MUFFLE_FILTER_CLEAN;
         if (musicGainNode) musicGainNode.gain.value = MUFFLE_GAIN_MAX;
     }
@@ -1744,11 +1558,6 @@ export function Update(): void {
         const gain = MUFFLE_GAIN_MAX * (1.0 - t * (MUFFLE_GAIN_MAX - MUFFLE_GAIN_MIN));
         if (musicLowpassFilter) musicLowpassFilter.frequency.value = filterFreq;
         if (musicGainNode) musicGainNode.gain.value = Math.max(0, gain);
-    }
-    
-    // If just surfaced and was closed underwater, show bubble again
-    if (wasUnderwater && !isUnderwater && closedWhileUnderwater) {
-        closedWhileUnderwater = false;
     }
     
     // Retro sample-rate reduction synced with pixelation
@@ -1780,46 +1589,6 @@ export function Update(): void {
             retroBypass.gain.value = 1.0;  // unmute clean
             retroWet.gain.value = 0.0;     // mute retro
             retroActive = false;
-        }
-    }
-    
-    // Project radio world position to screen coordinates every frame
-    radio.getWorldPosition(_radioPos);
-    _radioPos.y += 0.35;
-    const screenPos = _radioPos.project(camera);
-    radioScreenX = (screenPos.x * 0.5 + 0.5) * window.innerWidth;
-    radioScreenY = (-screenPos.y * 0.5 + 0.5) * window.innerHeight;
-    
-    // Check if radio is in front of camera
-    const isInFront = screenPos.z < 1 && screenPos.z > 0;
-    
-    // Determine bubble visibility
-    const isSurfacing = surfaceFadeTimer > 0;
-    const shouldHideBubble = isUnderwater || isSurfacing || (!isInFront || closedWhileUnderwater) || isExpanded;
-    
-    // ABOVE WATER: Follow radio position directly (no CSS transition on position)
-    if (!isUnderwater && !isExpanded) {
-        if (!hasBeenDragged && !isDragging) {
-            // Set position every frame — instant tracking, no lag
-            playerContainer.style.left = `${radioScreenX}px`;
-            playerContainer.style.top = `${radioScreenY}px`;
-            playerContainer.style.transform = 'translate(-50%, -50%)';
-            
-            // First time position is set — show bubble with pop-in animation
-            if (!hasInitialPosition) {
-                hasInitialPosition = true;
-                playerContainer.style.opacity = '1';
-                playerContainer.classList.add('pop-in-animate');
-            }
-        }
-        
-        // Handle visibility
-        if (shouldHideBubble) {
-            playerContainer.style.opacity = '0';
-            playerContainer.style.pointerEvents = 'none';
-        } else {
-            playerContainer.style.opacity = '1';
-            playerContainer.style.pointerEvents = 'auto';
         }
     }
 }

@@ -35,6 +35,26 @@ const FISH_SCALE_MIN = 0.8;              // min scale multiplier
 const FISH_SCALE_MAX = 1.2;              // max scale multiplier
 const SCREEN_MARGIN = 0.5;               // extra world units past screen edge
 
+// Jellyfish spawn settings (night mode — slower, fewer, bioluminescent)
+const JELLYFISH_SCALE = 0.001;           // base scale for jellyfish
+const JELLY_SPEED_MIN = 0.05;            // very slow drift
+const JELLY_SPEED_MAX = 0.12;            // still slow
+const JELLY_SPAWN_INTERVAL = 3.5;        // seconds between spawn waves
+const JELLY_SPAWN_COUNT_MIN = 1;         // min jellyfish per wave
+const JELLY_SPAWN_COUNT_MAX = 2;         // max jellyfish per wave
+const JELLY_GROUP_SIZE_MIN = 1;          // usually solo
+const JELLY_GROUP_SIZE_MAX = 1;          // usually solo
+const JELLY_Y_MIN = -5;                  // min spawn height
+const JELLY_Y_MAX = -2.5;                // max spawn height (higher than fish)
+const JELLY_Z_MIN = -4.0;               // farthest Z
+const JELLY_Z_MAX = 0.0;                // closest Z
+const JELLY_SPEED_SPREAD = 0.02;         // speed variation
+const JELLY_POOL_SIZE = 10;              // fewer simultaneous jellyfish
+
+// Jellyfish bioluminescence settings
+const JELLY_EMISSIVE_INTENSITY = 2.0;    // how bright the glow is
+const JELLY_OPACITY = 0.45;              // semi-transparent (0 = invisible, 1 = opaque)
+
 // Fish avoidance settings
 const AVOIDANCE_RADIUS = 0.15;            // world units — how close the pointer must be to scare fish
 const AVOIDANCE_STRENGTH = 0.5;          // vertical push force away from pointer
@@ -70,6 +90,10 @@ export const genericFishContainer = new Group();
 let genericFishTemplate: Group | null = null;
 let genericFishAnimations: AnimationClip[] = [];
 
+// Jellyfish spawn system (night mode)
+let jellyfishTemplate: Group | null = null;
+let jellyfishAnimations: AnimationClip[] = [];
+
 interface PooledFish {
     group: Group;
     scene: Group;             // the cloned skeleton scene inside the group
@@ -77,6 +101,7 @@ interface PooledFish {
     baseTintColors: Color[];  // original colors before tinting (for reset)
     mixer: AnimationMixer;
     clip: AnimationClip | null;
+    isJellyfish: boolean;     // true = belongs to jellyPool, false = fishPool
 }
 
 interface SwimmingFish {
@@ -87,10 +112,22 @@ interface SwimmingFish {
     currentTilt: number;
 }
 
-const fishPool: PooledFish[] = [];       // available (inactive) fish
-const activeFish: SwimmingFish[] = [];   // in-scene swimming fish
-let poolInitialized = false;
+const fishPool: PooledFish[] = [];       // available (inactive) day fish
+const jellyPool: PooledFish[] = [];      // available (inactive) night jellyfish
+const activeFish: SwimmingFish[] = [];   // in-scene swimming creatures
+let fishPoolInitialized = false;
+let jellyPoolInitialized = false;
 let spawnTimer = 0;
+let jellySpawnTimer = 0;
+
+// Jellyfish color tints (bioluminescent night palette)
+const JELLY_COLOR_TINTS: Color[] = [
+    new Color(0.3, 0.8, 1.5),   // bioluminescent blue
+    new Color(0.8, 0.2, 1.5),   // purple glow
+    new Color(0.2, 1.5, 0.8),   // cyan-green
+    new Color(1.2, 0.3, 0.8),   // pink
+    new Color(0.5, 1.2, 1.5),   // light cyan
+];
 
 // Pointer tracking — screen NDC coords updated each frame
 const pointerNDC = new Vector2(9999, 9999); // off-screen by default
@@ -121,7 +158,7 @@ function getPointerWorldAtZ(z: number): Vector3 {
 }
 
 /** Pre-create a single pool entry from the template */
-function createPoolEntry(template: Group, animations: AnimationClip[]): PooledFish {
+function createPoolEntry(template: Group, animations: AnimationClip[], jellyfish = false): PooledFish {
     const scene = skeletonClone(template) as Group;
     const materials: MeshStandardMaterial[] = [];
     const baseTintColors: Color[] = [];
@@ -129,6 +166,13 @@ function createPoolEntry(template: Group, animations: AnimationClip[]): PooledFi
         if (child instanceof Mesh && child.material) {
             const srcMat = child.material as MeshStandardMaterial;
             const mat = srcMat.clone();
+            // Pre-configure jellyfish materials for transparency so the shader
+            // variant is compiled once at pool creation, not on first activation
+            if (jellyfish) {
+                mat.transparent = true;
+                mat.depthWrite = false;  // transparent objects shouldn't write depth
+                mat.opacity = 0;         // invisible until activated
+            }
             child.material = mat;
             materials.push(mat);
             baseTintColors.push(mat.color.clone());
@@ -143,31 +187,61 @@ function createPoolEntry(template: Group, animations: AnimationClip[]): PooledFi
     const mixer = new AnimationMixer(scene);
     const clip = animations.length > 0 ? animations[0] : null;
 
-    return { group, scene, materials, baseTintColors, mixer, clip };
+    return { group, scene, materials, baseTintColors, mixer, clip, isJellyfish: jellyfish };
 }
 
-/** Populate the object pool once the template is loaded */
-function initPool(): void {
-    if (poolInitialized || !genericFishTemplate) return;
-    poolInitialized = true;
-    for (let i = 0; i < POOL_SIZE; i++) {
-        const entry = createPoolEntry(genericFishTemplate, genericFishAnimations);
-        genericFishContainer.add(entry.group);  // add once, toggle visibility
+// Staggered pool initialization — create one entry per frame to avoid a massive spike
+let _fishPoolQueue = 0;
+let _jellyPoolQueue = 0;
+
+/** Populate the day fish object pool, one entry per frame */
+function initFishPool(): void {
+    if (fishPoolInitialized || !genericFishTemplate) return;
+    fishPoolInitialized = true;
+    _fishPoolQueue = POOL_SIZE;
+}
+
+/** Populate the night jellyfish object pool, one entry per frame */
+function initJellyPool(): void {
+    if (jellyPoolInitialized || !jellyfishTemplate) return;
+    jellyPoolInitialized = true;
+    _jellyPoolQueue = JELLY_POOL_SIZE;
+}
+
+/** Drip-feed pool creation — call once per Update() */
+function tickPoolCreation(): void {
+    if (_fishPoolQueue > 0 && genericFishTemplate) {
+        const entry = createPoolEntry(genericFishTemplate, genericFishAnimations, false);
+        genericFishContainer.add(entry.group);
         fishPool.push(entry);
+        _fishPoolQueue--;
+    }
+    if (_jellyPoolQueue > 0 && jellyfishTemplate) {
+        const entry = createPoolEntry(jellyfishTemplate, jellyfishAnimations, true);
+        genericFishContainer.add(entry.group);
+        jellyPool.push(entry);
+        _jellyPoolQueue--;
     }
 }
 
-/** Take a fish from the pool, apply tint/position/scale, activate it */
+/** Take a creature from the correct pool, apply tint/position/scale, activate it */
 function activatePooledFish(
     tint: Color, x: number, y: number, z: number,
-    speed: number, scale: number
+    speed: number, scale: number, useJellyfish: boolean
 ): void {
-    if (fishPool.length === 0) return;  // pool exhausted — skip silently
-    const entry = fishPool.pop()!;
+    const pool = useJellyfish ? jellyPool : fishPool;
+    if (pool.length === 0) return;  // pool exhausted — skip silently
+    const entry = pool.pop()!;
 
     // Apply tint to pre-cloned materials (reset base color first)
     for (let i = 0; i < entry.materials.length; i++) {
         entry.materials[i].color.copy(entry.baseTintColors[i]).multiply(tint);
+        // Jellyfish get emissive glow matching their tint + transparency
+        if (entry.isJellyfish) {
+            entry.materials[i].emissive.copy(tint);
+            entry.materials[i].emissiveIntensity = JELLY_EMISSIVE_INTENSITY;
+            entry.materials[i].opacity = JELLY_OPACITY;
+        }
     }
 
     entry.group.position.set(x, y, z);
@@ -192,12 +266,24 @@ function activatePooledFish(
     });
 }
 
-/** Return a fish to the pool */
+/** Return a creature to the correct pool */
 function deactivateFish(index: number): void {
     const fish = activeFish[index];
     fish.pool.mixer.stopAllAction();
     fish.pool.group.visible = false;
-    fishPool.push(fish.pool);
+    // Reset emissive and transparency on materials
+    if (fish.pool.isJellyfish) {
+        for (let i = 0; i < fish.pool.materials.length; i++) {
+            fish.pool.materials[i].emissive.setScalar(0);
+            fish.pool.materials[i].emissiveIntensity = 0;
+            fish.pool.materials[i].opacity = 0;
+        }
+    }
+    if (fish.pool.isJellyfish) {
+        jellyPool.push(fish.pool);
+    } else {
+        fishPool.push(fish.pool);
+    }
     activeFish.splice(index, 1);
 }
 
@@ -232,14 +318,23 @@ export function Start(): void {
         }
     );
 
-    // Load generic fish template
+    // Load generic fish template (day)
     loader.load(
         'models/genericfish.glb',
         (gltf) => {
             genericFishTemplate = gltf.scene;
             genericFishAnimations = gltf.animations;
-            // Build the object pool now that the template is ready
-            initPool();
+            initFishPool();
+        }
+    );
+
+    // Load jellyfish template (night)
+    loader.load(
+        'models/jellyfish.glb',
+        (gltf) => {
+            jellyfishTemplate = gltf.scene;
+            jellyfishAnimations = gltf.animations;
+            initJellyPool();
         }
     );
 
@@ -268,40 +363,54 @@ function getFrustumEdgesX(z: number): { spawnX: number; despawnX: number } {
     return { spawnX: rightX, despawnX: leftX };
 }
 
-function spawnGenericFish(): void {
-    if (!poolInitialized || fishPool.length === 0) return;
+function spawnCreatures(): void {
+    const night = !isDayTime();
+    const pool = night ? jellyPool : fishPool;
+    const initialized = night ? jellyPoolInitialized : fishPoolInitialized;
+    if (!initialized || pool.length === 0) return;
 
-    const count = SPAWN_COUNT_MIN + Math.floor(Math.random() * (SPAWN_COUNT_MAX - SPAWN_COUNT_MIN + 1));
+    const tints = night ? JELLY_COLOR_TINTS : FISH_COLOR_TINTS;
+    const baseScale = night ? JELLYFISH_SCALE : GENERIC_FISH_SCALE;
+    const yMin = night ? JELLY_Y_MIN : GENERIC_FISH_Y_MIN;
+    const yMax = night ? JELLY_Y_MAX : GENERIC_FISH_Y_MAX;
+    const zMin = night ? JELLY_Z_MIN : GENERIC_FISH_Z_MIN;
+    const zMax = night ? JELLY_Z_MAX : GENERIC_FISH_Z_MAX;
+    const speedMin = night ? JELLY_SPEED_MIN : GENERIC_FISH_SPEED_MIN;
+    const speedMax = night ? JELLY_SPEED_MAX : GENERIC_FISH_SPEED_MAX;
+    const speedSpread = night ? JELLY_SPEED_SPREAD : GROUP_SPEED_SPREAD;
+    const countMin = night ? JELLY_SPAWN_COUNT_MIN : SPAWN_COUNT_MIN;
+    const countMax = night ? JELLY_SPAWN_COUNT_MAX : SPAWN_COUNT_MAX;
+    const grpMin = night ? JELLY_GROUP_SIZE_MIN : GROUP_SIZE_MIN;
+    const grpMax = night ? JELLY_GROUP_SIZE_MAX : GROUP_SIZE_MAX;
 
-    // Divide the Y range into evenly spaced slots, then jitter each slot
-    // so groups never overlap vertically
-    const range = GENERIC_FISH_Y_MAX - GENERIC_FISH_Y_MIN;
+    const count = countMin + Math.floor(Math.random() * (countMax - countMin + 1));
+
+    const range = yMax - yMin;
     const slotSize = range / count;
     const maxJitter = Math.max(0, (slotSize - FISH_MIN_Y_GAP) * 0.5);
 
     for (let n = 0; n < count; n++) {
-        if (fishPool.length === 0) return;  // pool exhausted mid-wave
+        if (pool.length === 0) return;
 
-        const slotCenter = GENERIC_FISH_Y_MIN + slotSize * (n + 0.5);
+        const slotCenter = yMin + slotSize * (n + 0.5);
         const baseY = slotCenter + (Math.random() * 2 - 1) * maxJitter;
-        const baseZ = GENERIC_FISH_Z_MIN + Math.random() * (GENERIC_FISH_Z_MAX - GENERIC_FISH_Z_MIN);
-        const baseSpeed = GENERIC_FISH_SPEED_MIN + Math.random() * (GENERIC_FISH_SPEED_MAX - GENERIC_FISH_SPEED_MIN);
+        const baseZ = zMin + Math.random() * (zMax - zMin);
+        const baseSpeed = speedMin + Math.random() * (speedMax - speedMin);
 
-        // Pick one color for the whole group
-        const tint = FISH_COLOR_TINTS[Math.floor(Math.random() * FISH_COLOR_TINTS.length)];
-        const groupSize = GROUP_SIZE_MIN + Math.floor(Math.random() * (GROUP_SIZE_MAX - GROUP_SIZE_MIN + 1));
+        const tint = tints[Math.floor(Math.random() * tints.length)];
+        const groupSize = grpMin + Math.floor(Math.random() * (grpMax - grpMin + 1));
 
         for (let g = 0; g < groupSize; g++) {
-            if (fishPool.length === 0) return;
+            if (pool.length === 0) return;
 
             const y = baseY + (Math.random() * 2 - 1) * GROUP_Y_SPREAD;
             const z = baseZ + (Math.random() * 2 - 1) * GROUP_Z_SPREAD;
-            const speed = baseSpeed + (Math.random() * 2 - 1) * GROUP_SPEED_SPREAD;
+            const speed = baseSpeed + (Math.random() * 2 - 1) * speedSpread;
             const scaleMult = FISH_SCALE_MIN + Math.random() * (FISH_SCALE_MAX - FISH_SCALE_MIN);
             const { spawnX } = getFrustumEdgesX(z);
             const x = spawnX + Math.random() * GROUP_X_SPREAD;
 
-            activatePooledFish(tint, x, y, z, speed, GENERIC_FISH_SCALE * scaleMult);
+            activatePooledFish(tint, x, y, z, speed, baseScale * scaleMult, night);
         }
     }
 }
@@ -330,15 +439,26 @@ export function Update(): void {
     );
     doriFish.rotation.y = -doriAngle + CIRCLE_FISH_ROTATION_OFFSET;
 
-    // Lazy-init pool if template loaded after Start()
-    if (!poolInitialized && genericFishTemplate) initPool();
+    // Lazy-init pools if templates loaded after Start()
+    if (!fishPoolInitialized && genericFishTemplate) initFishPool();
+    if (!jellyPoolInitialized && jellyfishTemplate) initJellyPool();
 
-    // Only spawn fish during daytime
-    if (isDayTime()) {
+    // Drip-feed pool creation (one entry per frame to avoid stutter)
+    tickPoolCreation();
+
+    // Spawn fish (day) or jellyfish (night) with separate timers
+    const night = !isDayTime();
+    if (night) {
+        jellySpawnTimer += deltaTime;
+        if (jellySpawnTimer >= JELLY_SPAWN_INTERVAL) {
+            jellySpawnTimer = 0;
+            spawnCreatures();
+        }
+    } else {
         spawnTimer += deltaTime;
         if (spawnTimer >= SPAWN_INTERVAL) {
             spawnTimer = 0;
-            spawnGenericFish();
+            spawnCreatures();
         }
     }
 
