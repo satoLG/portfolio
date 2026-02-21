@@ -52,8 +52,8 @@ export const edgeFadeDistanceUniform = new Uniform(1.0);
 
 export const foamIslandCenterUniform = new Uniform({ x: 0.0, y: -3.3 });
 export const foamIslandRadiusUniform = new Uniform(1.25);
-export const foamWidthUniform = new Uniform(0.01);
-export const foamIntensityUniform = new Uniform(0.65);
+export const foamWidthUniform = new Uniform(0.015);
+export const foamIntensityUniform = new Uniform(0.8);
 
 // Ripple system - interactive circular waves
 interface Ripple {

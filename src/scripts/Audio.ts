@@ -3,7 +3,7 @@ import { isDayTime } from "../scene/Skybox";
 // ============================================
 // UNIFIED AUDIO ENGINE
 // Uses HTMLAudioElement + MediaElementAudioSourceNode
-// for simultaneous Web Audio effects & Media Session support.
+// for simultaneous Web Audio effects.
 // ============================================
 let _audioContext: AudioContext | null = null;
 export function getAudioContext(): AudioContext | null { return _audioContext; }

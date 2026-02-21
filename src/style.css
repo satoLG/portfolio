@@ -17,7 +17,7 @@ body.pixel-medium *,
 body.pixel-medium *::before,
 body.pixel-medium *::after {
     font-family: 'Jersey 10', cursive !important;
-    transition: none !important;
+    font-weight: 100 !important;
     font-size-adjust: 0.6;
 }
 body.pixel-medium * {
@@ -28,11 +28,101 @@ body.pixel-max *,
 body.pixel-max *::before,
 body.pixel-max *::after {
     font-family: 'Jersey 10', cursive !important;
-    transition: none !important;
+    font-weight: 100 !important;
     font-size-adjust: 0.6;
 }
 body.pixel-max * {
     border-radius: 0px !important;
+}
+
+/* ============================================
+   PIXEL ICON SWAP
+   Default: hide pixel variant icons
+   Pixel modes: show pixel icons, hide normal icons
+   ============================================ */
+.icon-pixel {
+    display: none !important;
+}
+
+body.pixel-medium .icon-normal,
+body.pixel-max .icon-normal {
+    display: none !important;
+}
+
+body.pixel-medium .icon-pixel,
+body.pixel-max .icon-pixel {
+    display: unset !important;
+}
+
+/* Settings toggle: re-apply on/off visibility for pixel icons */
+body.pixel-medium .settings-toggle .icon-off.icon-pixel,
+body.pixel-max .settings-toggle .icon-off.icon-pixel {
+    display: none !important;
+}
+
+body.pixel-medium .settings-toggle[data-active="false"] .icon-on.icon-pixel,
+body.pixel-max .settings-toggle[data-active="false"] .icon-on.icon-pixel {
+    display: none !important;
+}
+
+body.pixel-medium .settings-toggle[data-active="false"] .icon-off.icon-pixel,
+body.pixel-max .settings-toggle[data-active="false"] .icon-off.icon-pixel {
+    display: block !important;
+}
+
+/* Theme toggle: pixel sun/moon sizing and colors */
+.theme-toggle .pixel-sun,
+.theme-toggle .pixel-moon {
+    width: 2rem;
+    height: 2rem;
+}
+
+.theme-toggle .pixel-sun {
+    color: var(--icon-color-day);
+}
+
+.theme-toggle .pixel-moon {
+    color: var(--icon-color-night);
+}
+
+/* Theme toggle: show correct pixel icon based on day/night state */
+body.pixel-medium .theme-toggle input:not(:checked) ~ .pixel-moon,
+body.pixel-max .theme-toggle input:not(:checked) ~ .pixel-moon {
+    display: none !important;
+}
+
+body.pixel-medium .theme-toggle input:checked ~ .pixel-sun,
+body.pixel-max .theme-toggle input:checked ~ .pixel-sun {
+    display: none !important;
+}
+
+/* Media player: CSS-driven play/pause toggle */
+.player-play .icon-pause {
+    display: none;
+}
+
+.player-play.playing .icon-play {
+    display: none;
+}
+
+.player-play.playing .icon-pause {
+    display: block;
+}
+
+/* Media player: pixel play/pause overrides */
+body.pixel-medium .player-play .icon-pause.icon-pixel,
+body.pixel-max .player-play .icon-pause.icon-pixel {
+    display: none !important;
+}
+
+body.pixel-medium .player-play.playing .icon-play.icon-pixel,
+body.pixel-max .player-play.playing .icon-play.icon-pixel {
+    display: none !important;
+}
+
+body.pixel-medium .player-play.playing .icon-pause.icon-pixel,
+body.pixel-max .player-play.playing .icon-pause.icon-pixel {
+    display: block !important;
 }
 
 body
@@ -83,99 +173,13 @@ body.day-mode #blur-overlay {
 }
 
 /* ============================================
-   MEDIA PLAYER (Bubble + Expanded states)
+   MEDIA PLAYER (Expanded state only — opened via 3D radio click)
    ============================================ */
 .media-player {
     position: fixed;
     z-index: 25;
     font-family: 'Wotfard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
-}
-
-/* BUBBLE STATE */
-.media-player.bubble {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.15);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border: none;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    padding: 0;
-    will-change: opacity;
-    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1),
-               height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
-               border-radius 0.4s cubic-bezier(0.4, 0, 0.2, 1),
-               background 0.4s ease,
-               box-shadow 0.3s ease;
-}
-
-.media-player.bubble:hover {
-    background: rgba(255, 255, 255, 0.25);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-}
-
-.media-player.bubble .music-note {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    opacity: 1;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-.media-player.bubble .music-note svg {
-    width: 20px;
-    height: 20px;
-}
-
-/* Bubble cover image (hidden by default) */
-.media-player.bubble .bubble-cover {
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    object-fit: cover;
-    display: none;
-    position: absolute;
-    top: 0;
-    left: 0;
-    pointer-events: none;
-    transition: opacity 0.3s ease;
-}
-
-.media-player.bubble .player-expanded-content {
-    opacity: 0;
-    pointer-events: none;
-    position: absolute;
-    width: 0;
-    height: 0;
-    overflow: hidden;
-}
-
-/* Expanded player should NEVER have underwater-position styles */
-.media-player.expanded {
-    bottom: auto !important;
-}
-
-/* Day mode bubble */
-body.day-mode .media-player.bubble {
-    background: rgba(10, 37, 64, 0.12);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-body.day-mode .media-player.bubble:hover {
-    background: rgba(10, 37, 64, 0.2);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-body.day-mode .media-player.bubble .music-note {
-    color: var(--text-color-day);
+    /* Transitions controlled entirely by JS for expand/collapse animation */
 }
 
 /* EXPANDED STATE */
@@ -198,16 +202,6 @@ body.day-mode .media-player.bubble .music-note {
     overflow: hidden;
     display: flex;
     flex-direction: column;
-}
-
-.media-player.expanded .music-note {
-    opacity: 0;
-    position: absolute;
-    pointer-events: none;
-}
-
-.media-player.expanded .bubble-cover {
-    display: none !important;
 }
 
 .media-player.expanded .player-expanded-content {
@@ -793,30 +787,6 @@ body.day-mode .playlist-item.drag-over {
     border-top-color: rgba(198, 40, 40, 0.6);
 }
 
-/* Hide player before START and before music-visible */
-body:not(.started) .media-player,
-body:not(.music-visible) .media-player {
-    display: none;
-}
-
-/* Show bubble when music-visible */
-body.music-visible .media-player.bubble {
-    display: flex;
-}
-
-/* Initial pop-in class (applied once via JS) */
-.media-player.bubble.pop-in-animate {
-    animation: bouncy-pop-in-bubble 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-    will-change: transform, opacity;
-}
-
-/* Hide bubble when underwater — use visibility to avoid transition flicker on day/night toggle */
-body.underwater .media-player.bubble {
-    opacity: 0 !important;
-    pointer-events: none !important;
-    transition: none !important;
-}
-
 /* Start overlay */
 #start-overlay {
     position: fixed;
@@ -1098,28 +1068,6 @@ body.night-mode #start-button .wave2 {
     }
 }
 
-/* Bubble version (maintains translate(-50%, -50%) for radio centering) */
-@keyframes bouncy-pop-in-bubble {
-    0% {
-        opacity: 0;
-        transform: translate(-50%, -50%) scale(0) translateZ(0);
-    }
-    50% {
-        opacity: 1;
-        transform: translate(-50%, -50%) scale(1.15) translateZ(0);
-    }
-    70% {
-        transform: translate(-50%, -50%) scale(0.95) translateZ(0);
-    }
-    85% {
-        transform: translate(-50%, -50%) scale(1.05) translateZ(0);
-    }
-    100% {
-        opacity: 1;
-        transform: translate(-50%, -50%) scale(1) translateZ(0);
-    }
-}
-
 /* ============================================
    HEADER
    ============================================ */
@@ -1319,11 +1267,12 @@ body.day-mode .settings-button.active {
     right: 0;
     z-index: 9999;
     min-width: 230px;
-    max-height: calc(100vh - 80px);
+    max-height: calc(100dvh - 60px);
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 8px;
     border-radius: 12px;
-    background: rgba(20, 40, 60, 0.85);
+    background: rgb(20 40 60 / 66%);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
@@ -1340,7 +1289,7 @@ body.day-mode .settings-button.active {
 }
 
 body.day-mode .settings-panel {
-    background: rgba(255, 255, 255, 0.9);
+    background: rgb(212 212 212 / 70%);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
 
@@ -1364,7 +1313,7 @@ body.day-mode .settings-row:not(:last-child) {
     font-size: 14px;
     font-weight: 500;
     color: rgba(255, 255, 255, 0.9);
-    width: 68px;
+    /* width: 68px; */
     min-width: 68px;
     flex-shrink: 0;
 }
