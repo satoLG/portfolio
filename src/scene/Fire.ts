@@ -737,12 +737,16 @@ export function Update(): void {
     const colorFlicker = 0.9 + Math.sin(time * 10.0) * 0.1;
     fireLight.color.setRGB(1.0, 0.4 * colorFlicker, 0.1 * colorFlicker);
     
-    fire.visible = fireIntensity > 0.001; // || smokeVisible;
+    // Keep fire.visible = true always so shaders stay compiled (avoids first-toggle stall).
+    // When fireIntensity == 0 the shaders output alpha 0, so cost is negligible.
+    fire.visible = true;
 }
+
+const _fireLightWorldPos = new Vector3();
 
 export function getFireLightData(): { position: Vector3; color: typeof fireLight.color; intensity: number } {
     return {
-        position: fireLight.getWorldPosition(new Vector3()),
+        position: fireLight.getWorldPosition(_fireLightWorldPos),
         color: fireLight.color,
         intensity: fireLight.intensity
     };

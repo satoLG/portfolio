@@ -49,11 +49,19 @@ export const cameraRight = new Vector3();
 export const cameraUp = new Vector3();
 export const cameraForward = new Vector3();
 
+// Reusable scratch vector for light direction (avoids allocation per frame)
+const _scratchLightDir = new Vector3();
+
+// Scratch vectors for UpdateCameraRotation (eliminates 3 Vector3 allocations per frame)
+const _basisX = new Vector3();
+const _basisY = new Vector3();
+const _basisZ = new Vector3();
+
 export function UpdateCameraRotation(): void
 {
-    cameraRight.copy(new Vector3(1, 0, 0).applyQuaternion(camera.quaternion));
-    cameraUp.copy(new Vector3(0, 1, 0).applyQuaternion(camera.quaternion));
-    cameraForward.copy(new Vector3(0, 0, -1).applyQuaternion(camera.quaternion));
+    cameraRight.copy(_basisX.set(1, 0, 0).applyQuaternion(camera.quaternion));
+    cameraUp.copy(_basisY.set(0, 1, 0).applyQuaternion(camera.quaternion));
+    cameraForward.copy(_basisZ.set(0, 0, -1).applyQuaternion(camera.quaternion));
 }
 
 export let fov = 70;
@@ -304,18 +312,23 @@ export function Update(): void
 
     // Sync lights with skybox sun position and intensity
     // Keep light close enough for shadow mapping to work
-    const lightDir = Skybox.dirToLight.clone();
+    // Reuse a scratch vector instead of cloning every frame
+    _scratchLightDir.copy(Skybox.dirToLight);
     directionalLight.position.set(
-        lightDir.x * 8 - 7,
-        lightDir.y * 8 + 2,
-        lightDir.z * 8 - 4.5
+        _scratchLightDir.x * 8 - 7,
+        _scratchLightDir.y * 8 + 2,
+        _scratchLightDir.z * 8 - 4.5
     );
     const sunVisible = sunVisibilityUniform.value; // 0 when sun hidden, 1 when fully visible
     const lightIntensity = lightUniform.value.x;
     // Directional light only active when sun is visible
     directionalLight.intensity = sunVisible * lightIntensity * 1.1;  // TWEAK: Lower = lighter shadows
-    // Shadows only during day
-    directionalLight.castShadow = sunVisible > 0.1;
+    // Shadows: fade to zero intensity instead of toggling castShadow on/off
+    // Toggling castShadow causes GPU pipeline stall (shadow map alloc/dealloc)
+    // Instead, keep castShadow always on (if shadows enabled) and let intensity=0 make it invisible
+    if (shadowsEnabled && !directionalLight.castShadow) {
+        directionalLight.castShadow = true;
+    }
     // Ambient light - higher = lighter/softer shadows
     ambientLight.intensity = 0.3 + sunVisible * lightIntensity * 0.9;  // TWEAK: Higher base = brighter scene
 

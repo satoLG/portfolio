@@ -632,18 +632,34 @@ export function Start(): void {
 
 }
 
+// Track previous blend class to avoid redundant DOM mutations
+let _lastBlendClass: 'day' | 'night' = 'day';
+let _lastBlendValue = -1;
+
 export function Update(): void {
     // Update CSS custom property for smooth day/night color transitions
+    // Only update when value actually changed (avoid style recalc every frame)
     const blend = getDayNightBlend();
-    document.documentElement.style.setProperty('--day-night-blend', blend.toString());
+    const rounded = Math.round(blend * 1000) / 1000; // 3 decimal places
+    if (rounded !== _lastBlendValue) {
+        _lastBlendValue = rounded;
+        document.documentElement.style.setProperty('--day-night-blend', rounded.toString());
+    }
     
-    // Update body class for CSS targeting
-    if (blend < 0.5) {
-        document.body.classList.remove('night-mode');
-        document.body.classList.add('day-mode');
-    } else {
-        document.body.classList.remove('day-mode');
-        document.body.classList.add('night-mode');
+    // Update body class for CSS targeting — only swap once at threshold
+    const newClass = blend < 0.5 ? 'day' : 'night';
+    if (newClass !== _lastBlendClass) {
+        _lastBlendClass = newClass;
+        // Defer the class swap to avoid layout thrashing mid-render
+        requestAnimationFrame(() => {
+            if (newClass === 'day') {
+                document.body.classList.remove('night-mode');
+                document.body.classList.add('day-mode');
+            } else {
+                document.body.classList.remove('day-mode');
+                document.body.classList.add('night-mode');
+            }
+        });
     }
     
     // Update underwater state and audio transitions

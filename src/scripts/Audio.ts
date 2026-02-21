@@ -1,9 +1,9 @@
 import { isDayTime } from "../scene/Skybox";
 
 // ============================================
-// UNIFIED AUDIO ENGINE
-// Uses HTMLAudioElement + MediaElementAudioSourceNode
-// for simultaneous Web Audio effects.
+// WEB AUDIO ENGINE
+// 100% Web Audio API — AudioBuffer + AudioBufferSourceNode
+// No HTML audio tags or MediaElementAudioSourceNode
 // ============================================
 let _audioContext: AudioContext | null = null;
 export function getAudioContext(): AudioContext | null { return _audioContext; }
@@ -41,42 +41,77 @@ const AUDIO_PATHS = {
 };
 
 // ============================================
-// UNIFIED SOUND TYPE
-// Each sound = HTMLAudioElement + MediaElementAudioSourceNode + GainNode
+// WEB AUDIO BUFFER SOUND TYPE
+// Each sound = AudioBuffer + GainNode + active AudioBufferSourceNode
 // ============================================
-interface UnifiedSound {
-    element: HTMLAudioElement;
-    source: MediaElementAudioSourceNode;
+interface BufferSound {
+    buffer: AudioBuffer;
     gain: GainNode;
+    source: AudioBufferSourceNode | null;
+    loop: boolean;
+    defaultVolume: number;
+}
+
+/** Fetch and decode an audio file into an AudioBuffer */
+async function loadAudioBuffer(url: string): Promise<AudioBuffer> {
+    const response = await fetch(url);
+    const arrayBuffer = await response.arrayBuffer();
+    return _audioContext!.decodeAudioData(arrayBuffer);
 }
 
 /**
- * Create a unified sound: <audio> element wired through Web Audio graph.
- * @param url      Path to audio file
- * @param dest     Destination GainNode (natureGain or interfaceGain)
- * @param options  loop / volume / preload
+ * Create a buffer-based sound wired through the Web Audio graph.
+ * @param buffer  Decoded AudioBuffer
+ * @param dest    Destination GainNode (natureGain or interfaceGain)
+ * @param options loop / volume
  */
-function createSound(
-    url: string,
+function createBufferSound(
+    buffer: AudioBuffer,
     dest: GainNode,
-    options: { loop?: boolean; volume?: number; preload?: boolean } = {}
-): UnifiedSound {
-    const { loop = false, volume = 1, preload = true } = options;
-    const ctx = _audioContext!;
-    const element = new Audio(url);
-    element.loop = loop;
-    element.preload = preload ? 'auto' : 'none';
-    // Keep element volume at 1 — control volume via GainNode for precision
-    element.volume = 1;
-
-    const source = ctx.createMediaElementSource(element);
-    const gain = ctx.createGain();
+    options: { loop?: boolean; volume?: number } = {}
+): BufferSound {
+    const { loop = false, volume = 1 } = options;
+    const gain = _audioContext!.createGain();
     gain.gain.value = volume;
-    source.connect(gain);
     gain.connect(dest);
+    return { buffer, gain, source: null, loop, defaultVolume: volume };
+}
 
-    if (preload) element.load();
-    return { element, source, gain };
+/**
+ * Play a buffer sound (creates a new AudioBufferSourceNode each time).
+ * Stops any currently active source for this sound first.
+ */
+function playBufferSound(sound: BufferSound, options?: { onEnded?: () => void }): AudioBufferSourceNode {
+    stopBufferSound(sound);
+
+    const ctx = _audioContext!;
+    const source = ctx.createBufferSource();
+    source.buffer = sound.buffer;
+    source.loop = sound.loop;
+    source.connect(sound.gain);
+
+    source.onended = () => {
+        if (sound.source === source) sound.source = null;
+        options?.onEnded?.();
+    };
+
+    sound.source = source;
+    source.start(0);
+    return source;
+}
+
+/** Stop a buffer sound's active source */
+function stopBufferSound(sound: BufferSound): void {
+    if (sound.source) {
+        try { sound.source.stop(); } catch { /* already stopped */ }
+        try { sound.source.disconnect(); } catch { /* already disconnected */ }
+        sound.source = null;
+    }
+}
+
+/** Check if a buffer sound is currently playing */
+function isBufferPlaying(sound: BufferSound | null): boolean {
+    return sound !== null && sound.source !== null;
 }
 
 // ============================================
@@ -88,32 +123,34 @@ let interfaceGain: GainNode | null = null;
 // ============================================
 // NATURE SOUNDS
 // ============================================
-let waterSound1: UnifiedSound | null = null;
-let waterSound2: UnifiedSound | null = null;
-let activeWaterSound: UnifiedSound | null = null;
+let waterSound1: BufferSound | null = null;
+let waterSound2: BufferSound | null = null;
+let activeWaterSound: BufferSound | null = null;
 let waterCrossfading = false;
+let waterCrossfadeTimer: ReturnType<typeof setTimeout> | null = null;
+let waterSourceStartTime = 0;
 
-let breezeSound: UnifiedSound | null = null;
+let breezeSound: BufferSound | null = null;
 let breezeTimeout: ReturnType<typeof setTimeout> | null = null;
 let breezeActive = false;
 
-let fireplaceSound: UnifiedSound | null = null;
+let fireplaceSound: BufferSound | null = null;
 let fireplaceActive = false;
 
-let underwaterAmbSound: UnifiedSound | null = null;
-let underwaterBubblesSound: UnifiedSound | null = null;
+let underwaterAmbSound: BufferSound | null = null;
+let underwaterBubblesSound: BufferSound | null = null;
 let bubblesStopTimer: ReturnType<typeof setTimeout> | null = null;
 
-let waterSplashSound: UnifiedSound | null = null;
+let waterSplashSound: BufferSound | null = null;
 
 // ============================================
 // UI SOUNDS
 // ============================================
-let uiSwitchDaySound: UnifiedSound | null = null;
-let uiSwitchNightSound: UnifiedSound | null = null;
-let uiButtonSound: UnifiedSound | null = null;
-let uiBubbleExpandSound: UnifiedSound | null = null;
-let uiBubbleCollapseSound: UnifiedSound | null = null;
+let uiSwitchDaySound: BufferSound | null = null;
+let uiSwitchNightSound: BufferSound | null = null;
+let uiButtonSound: BufferSound | null = null;
+let uiBubbleExpandSound: BufferSound | null = null;
+let uiBubbleCollapseSound: BufferSound | null = null;
 
 // ============================================
 // STATE
@@ -138,50 +175,87 @@ let interfaceVolume = parseFloat(localStorage.getItem('portfolio-interface-volum
 // ============================================
 // WATER CROSSFADE
 // Uses Web Audio gain ramps for smooth, reliable crossfade.
-// Two <audio> elements alternate; timeupdate triggers the blend.
+// Two AudioBufferSourceNodes alternate; a scheduled timer triggers the blend.
 // ============================================
-function setupWaterCrossfade(current: UnifiedSound, next: UnifiedSound): void {
-    current.element.addEventListener('timeupdate', () => {
-        if (!current.element.duration || waterCrossfading) return;
-        const timeRemaining = current.element.duration - current.element.currentTime;
+function startWaterLoop(): void {
+    if (!waterSound1 || !_audioContext) return;
+    waterSound1.gain.gain.value = WATER_VOLUME;
+    playWaterAndSchedule(waterSound1);
+}
 
-        if (timeRemaining <= CROSSFADE_DURATION && timeRemaining > 0) {
-            waterCrossfading = true;
-            const ctx = _audioContext!;
-            const now = ctx.currentTime;
+/** Play a water sound source and schedule the next crossfade */
+function playWaterAndSchedule(sound: BufferSound): void {
+    const other = sound === waterSound1 ? waterSound2 : waterSound1;
+    activeWaterSound = sound;
 
-            // Prepare next
-            next.element.currentTime = 0;
-            next.gain.gain.setValueAtTime(0, now);
-            next.element.play().catch(() => {});
-
-            // Ramp current down, next up
-            current.gain.gain.setValueAtTime(current.gain.gain.value, now);
-            current.gain.gain.linearRampToValueAtTime(0, now + CROSSFADE_DURATION);
-            next.gain.gain.linearRampToValueAtTime(WATER_VOLUME, now + CROSSFADE_DURATION);
-
-            // After ramp completes, swap active
-            setTimeout(() => {
-                current.element.pause();
-                current.element.currentTime = 0;
-                current.gain.gain.value = WATER_VOLUME;
-                activeWaterSound = next;
-                waterCrossfading = false;
-            }, CROSSFADE_DURATION * 1000 + 50);
+    playBufferSound(sound, {
+        onEnded: () => {
+            // Fallback: if crossfade didn't trigger (e.g. tab was backgrounded)
+            if (!waterCrossfading && activeWaterSound === sound && !isCurrentlyUnderwater && other) {
+                other.gain.gain.value = WATER_VOLUME;
+                playWaterAndSchedule(other);
+            }
         }
     });
+    waterSourceStartTime = Date.now();
+    if (other) scheduleWaterCrossfade(sound, other);
+}
 
-    // Fallback: if crossfade fails and element ends abruptly, restart from next
-    current.element.addEventListener('ended', () => {
-        if (isCurrentlyUnderwater) return;
-        if (activeWaterSound === current) {
-            waterCrossfading = false;
-            next.element.currentTime = 0;
-            next.gain.gain.value = WATER_VOLUME;
-            next.element.play().catch(() => {});
-            activeWaterSound = next;
+function scheduleWaterCrossfade(current: BufferSound, next: BufferSound): void {
+    if (waterCrossfadeTimer) { clearTimeout(waterCrossfadeTimer); waterCrossfadeTimer = null; }
+    if (!current.buffer) return;
+
+    const endTime = waterSourceStartTime + current.buffer.duration * 1000;
+    const delay = endTime - CROSSFADE_DURATION * 1000 - Date.now();
+    if (delay <= 0) return;
+
+    waterCrossfadeTimer = setTimeout(() => {
+        if (isCurrentlyUnderwater || waterCrossfading) return;
+        startCrossfadeTo(next);
+    }, delay);
+}
+
+function startCrossfadeTo(next: BufferSound): void {
+    if (!_audioContext || waterCrossfading) return;
+    waterCrossfading = true;
+
+    const ctx = _audioContext;
+    const now = ctx.currentTime;
+    const current = activeWaterSound;
+    const other = next === waterSound1 ? waterSound2 : waterSound1;
+
+    // Ramp current down
+    if (current) {
+        current.gain.gain.cancelScheduledValues(now);
+        current.gain.gain.setValueAtTime(current.gain.gain.value, now);
+        current.gain.gain.linearRampToValueAtTime(0, now + CROSSFADE_DURATION);
+    }
+
+    // Start next and ramp up
+    next.gain.gain.cancelScheduledValues(now);
+    next.gain.gain.setValueAtTime(0, now);
+    next.gain.gain.linearRampToValueAtTime(WATER_VOLUME, now + CROSSFADE_DURATION);
+
+    playBufferSound(next, {
+        onEnded: () => {
+            if (!waterCrossfading && activeWaterSound === next && !isCurrentlyUnderwater && other) {
+                other.gain.gain.value = WATER_VOLUME;
+                playWaterAndSchedule(other);
+            }
         }
     });
+    waterSourceStartTime = Date.now();
+
+    // After ramp completes, stop old source & schedule next crossfade
+    setTimeout(() => {
+        if (current) stopBufferSound(current);
+        activeWaterSound = next;
+        waterCrossfading = false;
+
+        if (other && !isCurrentlyUnderwater) {
+            scheduleWaterCrossfade(next, other);
+        }
+    }, CROSSFADE_DURATION * 1000 + 50);
 }
 
 // ============================================
@@ -199,16 +273,12 @@ function playBreeze(): void {
         if (!isCurrentlyUnderwater) scheduleBreeze();
         return;
     }
-    breezeSound.element.currentTime = 0;
     breezeActive = true;
-    breezeSound.element.play().then(() => {
-        // Re-check scene state after async play
-        if (isCurrentlyUnderwater && breezeSound) {
-            breezeSound.element.pause();
+    playBufferSound(breezeSound, {
+        onEnded: () => {
             breezeActive = false;
+            if (!isCurrentlyUnderwater) scheduleBreeze();
         }
-    }).catch(() => {
-        breezeActive = false;
     });
 }
 
@@ -220,23 +290,21 @@ function startFireplace(): void {
     fireplaceActive = true;
     const ctx = _audioContext;
     const now = ctx.currentTime;
-    fireplaceSound.element.currentTime = 0;
+    fireplaceSound.gain.gain.cancelScheduledValues(now);
     fireplaceSound.gain.gain.setValueAtTime(0, now);
     fireplaceSound.gain.gain.linearRampToValueAtTime(FIREPLACE_VOLUME_MAX, now + FIREPLACE_FADE_DURATION);
-    fireplaceSound.element.play().catch(() => {});
+    playBufferSound(fireplaceSound);
 }
 
 function stopFireplace(): void {
     if (!fireplaceActive || !fireplaceSound || !_audioContext) return;
     const ctx = _audioContext;
     const now = ctx.currentTime;
+    fireplaceSound.gain.gain.cancelScheduledValues(now);
     fireplaceSound.gain.gain.setValueAtTime(fireplaceSound.gain.gain.value, now);
     fireplaceSound.gain.gain.linearRampToValueAtTime(0, now + 0.5);
     setTimeout(() => {
-        if (fireplaceSound) {
-            fireplaceSound.element.pause();
-            fireplaceSound.element.currentTime = 0;
-        }
+        if (fireplaceSound) stopBufferSound(fireplaceSound);
     }, 600);
     fireplaceActive = false;
 }
@@ -249,15 +317,14 @@ export function transitionToUnderwater(): void {
     isCurrentlyUnderwater = true;
 
     // Stop above-water sounds
-    if (activeWaterSound) activeWaterSound.element.pause();
-    // Also pause the other water element in case crossfade was mid-flight
-    if (waterSound1 && waterSound1 !== activeWaterSound) waterSound1.element.pause();
-    if (waterSound2 && waterSound2 !== activeWaterSound) waterSound2.element.pause();
+    if (waterCrossfadeTimer) { clearTimeout(waterCrossfadeTimer); waterCrossfadeTimer = null; }
+    if (waterSound1) stopBufferSound(waterSound1);
+    if (waterSound2) stopBufferSound(waterSound2);
     waterCrossfading = false;
 
     if (breezeTimeout) { clearTimeout(breezeTimeout); breezeTimeout = null; }
-    if (breezeSound && !breezeSound.element.paused) {
-        breezeSound.element.pause();
+    if (breezeSound && isBufferPlaying(breezeSound)) {
+        stopBufferSound(breezeSound);
         breezeActive = false;
     }
     if (fireplaceActive) stopFireplace();
@@ -265,9 +332,8 @@ export function transitionToUnderwater(): void {
     // Start underwater sounds
     if (!natureMuted) {
         if (underwaterAmbSound) {
-            underwaterAmbSound.element.currentTime = 0;
             underwaterAmbSound.gain.gain.value = UNDERWATER_AMB_VOLUME;
-            underwaterAmbSound.element.play().catch(() => {});
+            playBufferSound(underwaterAmbSound);
         }
         playBubbleClip();
     }
@@ -279,21 +345,14 @@ export function transitionToAboveWater(): void {
 
     // Stop underwater sounds
     if (bubblesStopTimer) { clearTimeout(bubblesStopTimer); bubblesStopTimer = null; }
-    if (underwaterAmbSound && !underwaterAmbSound.element.paused) {
-        underwaterAmbSound.element.pause();
-        underwaterAmbSound.element.currentTime = 0;
-    }
-    if (underwaterBubblesSound && !underwaterBubblesSound.element.paused) {
-        underwaterBubblesSound.element.pause();
-        underwaterBubblesSound.element.currentTime = 0;
-    }
+    if (underwaterAmbSound) stopBufferSound(underwaterAmbSound);
+    if (underwaterBubblesSound) stopBufferSound(underwaterBubblesSound);
 
     // Resume above-water sounds
     if (!natureMuted) {
         if (activeWaterSound) {
-            activeWaterSound.element.currentTime = 0;
             activeWaterSound.gain.gain.value = WATER_VOLUME;
-            activeWaterSound.element.play().catch(() => {});
+            playWaterAndSchedule(activeWaterSound);
         }
         scheduleBreeze();
         if (!isDayTime()) startFireplace();
@@ -304,28 +363,23 @@ export function transitionToAboveWater(): void {
 function playBubbleClip(): void {
     if (!underwaterBubblesSound) return;
     if (bubblesStopTimer) { clearTimeout(bubblesStopTimer); bubblesStopTimer = null; }
-    underwaterBubblesSound.element.currentTime = 0;
-    underwaterBubblesSound.element.play().catch(() => {});
+    playBufferSound(underwaterBubblesSound);
     bubblesStopTimer = setTimeout(() => {
-        if (underwaterBubblesSound && !underwaterBubblesSound.element.paused) {
-            underwaterBubblesSound.element.pause();
-            underwaterBubblesSound.element.currentTime = 0;
-        }
+        if (underwaterBubblesSound) stopBufferSound(underwaterBubblesSound);
         bubblesStopTimer = null;
     }, BUBBLE_SFX_DURATION);
 }
 
 export async function playDiveSound(): Promise<void> {
     if (!audioInitialized || !isCurrentlyUnderwater) return;
-    if (!underwaterBubblesSound || !underwaterBubblesSound.element.paused) return;
+    if (!underwaterBubblesSound || isBufferPlaying(underwaterBubblesSound)) return;
     playBubbleClip();
 }
 
 export function playWaterSplash(): void {
     if (!audioInitialized || isNatureMuted() || isCurrentlyUnderwater) return;
     if (!waterSplashSound) return;
-    waterSplashSound.element.currentTime = 0;
-    waterSplashSound.element.play().catch(() => {});
+    playBufferSound(waterSplashSound);
 }
 
 // ============================================
@@ -339,29 +393,29 @@ function checkHealth(): void {
 
     if (isCurrentlyUnderwater) {
         // Kill leaked above-water sounds
-        if (waterSound1 && !waterSound1.element.paused) waterSound1.element.pause();
-        if (waterSound2 && !waterSound2.element.paused) waterSound2.element.pause();
-        if (breezeSound && !breezeSound.element.paused) { breezeSound.element.pause(); breezeActive = false; }
-        if (fireplaceSound && !fireplaceSound.element.paused) { fireplaceSound.element.pause(); fireplaceActive = false; }
+        if (waterCrossfadeTimer) { clearTimeout(waterCrossfadeTimer); waterCrossfadeTimer = null; }
+        if (waterSound1 && isBufferPlaying(waterSound1)) stopBufferSound(waterSound1);
+        if (waterSound2 && isBufferPlaying(waterSound2)) stopBufferSound(waterSound2);
+        if (breezeSound && isBufferPlaying(breezeSound)) { stopBufferSound(breezeSound); breezeActive = false; }
+        if (fireplaceSound && isBufferPlaying(fireplaceSound)) { stopBufferSound(fireplaceSound); fireplaceActive = false; }
         // Ensure underwater ambient is playing
-        if (underwaterAmbSound && underwaterAmbSound.element.paused) {
+        if (underwaterAmbSound && !isBufferPlaying(underwaterAmbSound)) {
             underwaterAmbSound.gain.gain.value = UNDERWATER_AMB_VOLUME;
-            underwaterAmbSound.element.play().catch(() => {});
+            playBufferSound(underwaterAmbSound);
         }
     } else {
         // Kill leaked underwater sounds
-        if (underwaterAmbSound && !underwaterAmbSound.element.paused) { underwaterAmbSound.element.pause(); underwaterAmbSound.element.currentTime = 0; }
-        if (underwaterBubblesSound && !underwaterBubblesSound.element.paused) { underwaterBubblesSound.element.pause(); underwaterBubblesSound.element.currentTime = 0; }
+        if (underwaterAmbSound && isBufferPlaying(underwaterAmbSound)) stopBufferSound(underwaterAmbSound);
+        if (underwaterBubblesSound && isBufferPlaying(underwaterBubblesSound)) stopBufferSound(underwaterBubblesSound);
         // Ensure water loop is playing
-        if (activeWaterSound && activeWaterSound.element.paused && !waterCrossfading) {
+        if (activeWaterSound && !isBufferPlaying(activeWaterSound) && !waterCrossfading) {
             activeWaterSound.gain.gain.value = WATER_VOLUME;
-            activeWaterSound.element.currentTime = 0;
-            activeWaterSound.element.play().catch(() => {});
+            playWaterAndSchedule(activeWaterSound);
         }
         // Ensure fireplace is playing at night
-        if (fireplaceSound && fireplaceActive && fireplaceSound.element.paused) {
+        if (fireplaceSound && fireplaceActive && !isBufferPlaying(fireplaceSound)) {
             fireplaceSound.gain.gain.value = FIREPLACE_VOLUME_MAX;
-            fireplaceSound.element.play().catch(() => {});
+            playBufferSound(fireplaceSound);
         }
     }
 }
@@ -427,23 +481,33 @@ export function setInterfaceVolume(v: number): void {
 // ============================================
 // UI SOUND EFFECTS
 // ============================================
-export function preloadUISounds(): void {
+export async function preloadUISounds(): Promise<void> {
     if (!_audioContext || !interfaceGain) return;
-    uiSwitchDaySound = createSound(AUDIO_PATHS.uiSwitchDay, interfaceGain, { volume: UI_SOUND_VOLUME });
-    uiSwitchNightSound = createSound(AUDIO_PATHS.uiSwitchNight, interfaceGain, { volume: UI_SOUND_VOLUME });
-    uiButtonSound = createSound(AUDIO_PATHS.uiButton, interfaceGain, { volume: UI_SOUND_VOLUME });
-    uiBubbleExpandSound = createSound(AUDIO_PATHS.uiBubbleExpand, interfaceGain, { volume: UI_SOUND_VOLUME });
-    uiBubbleCollapseSound = createSound(AUDIO_PATHS.uiBubbleCollapse, interfaceGain, { volume: UI_SOUND_VOLUME });
+    try {
+        const [switchDayBuf, switchNightBuf, buttonBuf, bubbleExpandBuf, bubbleCollapseBuf] = await Promise.all([
+            loadAudioBuffer(AUDIO_PATHS.uiSwitchDay),
+            loadAudioBuffer(AUDIO_PATHS.uiSwitchNight),
+            loadAudioBuffer(AUDIO_PATHS.uiButton),
+            loadAudioBuffer(AUDIO_PATHS.uiBubbleExpand),
+            loadAudioBuffer(AUDIO_PATHS.uiBubbleCollapse),
+        ]);
+        uiSwitchDaySound = createBufferSound(switchDayBuf, interfaceGain, { volume: UI_SOUND_VOLUME });
+        uiSwitchNightSound = createBufferSound(switchNightBuf, interfaceGain, { volume: UI_SOUND_VOLUME });
+        uiButtonSound = createBufferSound(buttonBuf, interfaceGain, { volume: UI_SOUND_VOLUME });
+        uiBubbleExpandSound = createBufferSound(bubbleExpandBuf, interfaceGain, { volume: UI_SOUND_VOLUME });
+        uiBubbleCollapseSound = createBufferSound(bubbleCollapseBuf, interfaceGain, { volume: UI_SOUND_VOLUME });
+    } catch (e) {
+        console.warn('Failed to preload UI sounds:', e);
+    }
 }
 
-function playUISound(sound: UnifiedSound | null): void {
+function playUISound(sound: BufferSound | null): void {
     const now = performance.now();
     if (now - lastUISoundTime < UI_SOUND_THROTTLE) return;
     if (interfaceMuted) return;
     lastUISoundTime = now;
     if (!sound) return;
-    sound.element.currentTime = 0;
-    sound.element.play().catch(() => {});
+    playBufferSound(sound);
 }
 
 export function playUISwitchDay(): void { playUISound(uiSwitchDaySound); }
@@ -455,7 +519,7 @@ export function playUIBubbleCollapse(): void { playUISound(uiBubbleCollapseSound
 // ============================================
 // INITIALIZATION
 // ============================================
-function initAudio(): void {
+async function initAudio(): Promise<void> {
     if (audioInitialized) return;
     audioInitialized = true;
 
@@ -473,35 +537,46 @@ function initAudio(): void {
     interfaceGain.gain.value = interfaceMuted ? 0 : interfaceVolume;
     interfaceGain.connect(_audioContext.destination);
 
-    // Create all nature sounds
-    waterSound1 = createSound(AUDIO_PATHS.water, natureGain, { volume: WATER_VOLUME });
-    waterSound2 = createSound(AUDIO_PATHS.water, natureGain, { volume: 0 });
-    setupWaterCrossfade(waterSound1, waterSound2);
-    setupWaterCrossfade(waterSound2, waterSound1);
+    // Load and decode all nature sound buffers
+    try {
+        const [waterBuf, breezeBuf, fireplaceBuf, underwaterAmbBuf, underwaterBubblesBuf, waterSplashBuf] = await Promise.all([
+            loadAudioBuffer(AUDIO_PATHS.water),
+            loadAudioBuffer(AUDIO_PATHS.breeze),
+            loadAudioBuffer(AUDIO_PATHS.fireplace),
+            loadAudioBuffer(AUDIO_PATHS.underwaterAmb),
+            loadAudioBuffer(AUDIO_PATHS.underwaterBubbles),
+            loadAudioBuffer(AUDIO_PATHS.waterSplash),
+        ]);
 
-    breezeSound = createSound(AUDIO_PATHS.breeze, natureGain, { volume: BREEZE_VOLUME });
-    breezeSound.element.addEventListener('ended', () => {
-        breezeActive = false;
-        if (!isCurrentlyUnderwater) scheduleBreeze();
-    });
+        waterSound1 = createBufferSound(waterBuf, natureGain, { volume: WATER_VOLUME });
+        waterSound2 = createBufferSound(waterBuf, natureGain, { volume: 0 });
+        breezeSound = createBufferSound(breezeBuf, natureGain, { volume: BREEZE_VOLUME });
+        fireplaceSound = createBufferSound(fireplaceBuf, natureGain, { loop: true, volume: 0 });
+        underwaterAmbSound = createBufferSound(underwaterAmbBuf, natureGain, { loop: true, volume: UNDERWATER_AMB_VOLUME });
+        underwaterBubblesSound = createBufferSound(underwaterBubblesBuf, natureGain, { volume: TRANSITION_SFX_VOLUME });
+        waterSplashSound = createBufferSound(waterSplashBuf, natureGain, { volume: WATER_SPLASH_VOLUME });
 
-    fireplaceSound = createSound(AUDIO_PATHS.fireplace, natureGain, { loop: true, volume: 0 });
-    underwaterAmbSound = createSound(AUDIO_PATHS.underwaterAmb, natureGain, { loop: true, volume: UNDERWATER_AMB_VOLUME });
-    underwaterBubblesSound = createSound(AUDIO_PATHS.underwaterBubbles, natureGain, { volume: TRANSITION_SFX_VOLUME });
-    waterSplashSound = createSound(AUDIO_PATHS.waterSplash, natureGain, { volume: WATER_SPLASH_VOLUME });
+        // Sync day state
+        wasDay = isDayTime();
 
-    // Sync day state
-    wasDay = isDayTime();
-
-    // Start ambient sounds
-    activeWaterSound = waterSound1;
-    waterSound1.gain.gain.value = WATER_VOLUME;
-    waterSound1.element.play().catch(() => {});
-    scheduleBreeze();
-    if (!isDayTime()) startFireplace();
+        // Start appropriate ambient sounds based on current state
+        if (!isCurrentlyUnderwater) {
+            startWaterLoop();
+            scheduleBreeze();
+            if (!isDayTime()) startFireplace();
+        } else {
+            // Already underwater when buffers finished loading
+            if (!natureMuted && underwaterAmbSound) {
+                underwaterAmbSound.gain.gain.value = UNDERWATER_AMB_VOLUME;
+                playBufferSound(underwaterAmbSound);
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load audio buffers:', e);
+    }
 
     setupVisibilityHandler();
-    console.log('Unified audio engine initialized');
+    console.log('Web Audio engine initialized (pure AudioBuffer)');
 }
 
 function setupVisibilityHandler(): void {
@@ -520,7 +595,7 @@ function setupVisibilityHandler(): void {
 export function startAudio(): void {
     if (listenersRemoved) return;
     listenersRemoved = true;
-    initAudio();
+    initAudio(); // AudioContext created synchronously (required for iOS), buffers load async
 }
 
 // ============================================
