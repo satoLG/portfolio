@@ -25,6 +25,7 @@ const WATER_SPLASH_VOLUME = 0.3;
 const UI_SOUND_VOLUME = 0.4;
 const CROSSFADE_DURATION = 1.0;
 const AUDIO_CHECK_INTERVAL = 2000;
+const FADE_IN_DURATION = 2.0;  // seconds — all audio fades in over this after start
 
 const AUDIO_PATHS = {
     water: 'audio/ocean.wav',
@@ -38,7 +39,32 @@ const AUDIO_PATHS = {
     uiButton: '/audio/ui/soundreality-button-202966.mp3',
     uiBubbleExpand: '/audio/ui/universfield-bubble-pop-293342.mp3',
     uiBubbleCollapse: '/audio/ui/universfield-bubble-pop-06-351337.mp3',
+    uiSpin: '/audio/ui/712916__greyfeather__spinning-a-crank-fast.wav',
 };
+
+// ============================================
+// PRE-FETCH CACHE (raw ArrayBuffers fetched during loading screen, before AudioContext)
+// ============================================
+const _prefetchCache = new Map<string, ArrayBuffer>();
+let _prefetchPromise: Promise<void> | null = null;
+
+/** Pre-fetch all audio files as raw ArrayBuffers (no AudioContext needed).
+ *  Called early during loading screen so data is ready when user clicks Start. */
+function prefetchAudioData(): void {
+    if (_prefetchPromise) return;
+    const paths = Object.values(AUDIO_PATHS);
+    _prefetchPromise = Promise.all(
+        paths.map(async (url) => {
+            try {
+                const resp = await fetch(url);
+                const buf = await resp.arrayBuffer();
+                _prefetchCache.set(url, buf);
+            } catch (e) {
+                console.warn('Audio prefetch failed:', url, e);
+            }
+        })
+    ).then(() => {});
+}
 
 // ============================================
 // WEB AUDIO BUFFER SOUND TYPE
@@ -52,8 +78,15 @@ interface BufferSound {
     defaultVolume: number;
 }
 
-/** Fetch and decode an audio file into an AudioBuffer */
+/** Fetch and decode an audio file into an AudioBuffer.
+ *  Uses pre-fetched ArrayBuffer from cache when available (eliminates network delay). */
 async function loadAudioBuffer(url: string): Promise<AudioBuffer> {
+    const cached = _prefetchCache.get(url);
+    if (cached) {
+        _prefetchCache.delete(url); // free memory
+        return _audioContext!.decodeAudioData(cached);
+    }
+    // Fallback: fetch from network (cache miss or prefetch not done)
     const response = await fetch(url);
     const arrayBuffer = await response.arrayBuffer();
     return _audioContext!.decodeAudioData(arrayBuffer);
@@ -117,8 +150,15 @@ function isBufferPlaying(sound: BufferSound | null): boolean {
 // ============================================
 // GROUP GAIN NODES (nature / interface)
 // ============================================
+let masterGain: GainNode | null = null;
 let natureGain: GainNode | null = null;
 let interfaceGain: GainNode | null = null;
+
+/** Master output node — all audio routes through this for global fade-in.
+ *  External consumers (e.g. MediaPlayer) should connect here instead of ctx.destination. */
+export function getMasterDestination(): AudioNode | null {
+    return masterGain ?? _audioContext?.destination ?? null;
+}
 
 // ============================================
 // NATURE SOUNDS
@@ -151,6 +191,8 @@ let uiSwitchNightSound: BufferSound | null = null;
 let uiButtonSound: BufferSound | null = null;
 let uiBubbleExpandSound: BufferSound | null = null;
 let uiBubbleCollapseSound: BufferSound | null = null;
+let uiSpinOpenSound: BufferSound | null = null;
+let uiSpinCloseSound: BufferSound | null = null;
 
 // ============================================
 // STATE
@@ -481,21 +523,38 @@ export function setInterfaceVolume(v: number): void {
 // ============================================
 // UI SOUND EFFECTS
 // ============================================
+/** Create a reversed copy of an AudioBuffer (for playing sounds backwards) */
+function reverseAudioBuffer(buffer: AudioBuffer): AudioBuffer {
+    const ctx = _audioContext!;
+    const reversed = ctx.createBuffer(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
+    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+        const src = buffer.getChannelData(ch);
+        const dst = reversed.getChannelData(ch);
+        for (let i = 0; i < src.length; i++) {
+            dst[i] = src[src.length - 1 - i];
+        }
+    }
+    return reversed;
+}
+
 export async function preloadUISounds(): Promise<void> {
     if (!_audioContext || !interfaceGain) return;
     try {
-        const [switchDayBuf, switchNightBuf, buttonBuf, bubbleExpandBuf, bubbleCollapseBuf] = await Promise.all([
+        const [switchDayBuf, switchNightBuf, buttonBuf, bubbleExpandBuf, bubbleCollapseBuf, spinBuf] = await Promise.all([
             loadAudioBuffer(AUDIO_PATHS.uiSwitchDay),
             loadAudioBuffer(AUDIO_PATHS.uiSwitchNight),
             loadAudioBuffer(AUDIO_PATHS.uiButton),
             loadAudioBuffer(AUDIO_PATHS.uiBubbleExpand),
             loadAudioBuffer(AUDIO_PATHS.uiBubbleCollapse),
+            loadAudioBuffer(AUDIO_PATHS.uiSpin),
         ]);
         uiSwitchDaySound = createBufferSound(switchDayBuf, interfaceGain, { volume: UI_SOUND_VOLUME });
         uiSwitchNightSound = createBufferSound(switchNightBuf, interfaceGain, { volume: UI_SOUND_VOLUME });
         uiButtonSound = createBufferSound(buttonBuf, interfaceGain, { volume: UI_SOUND_VOLUME });
         uiBubbleExpandSound = createBufferSound(bubbleExpandBuf, interfaceGain, { volume: UI_SOUND_VOLUME });
         uiBubbleCollapseSound = createBufferSound(bubbleCollapseBuf, interfaceGain, { volume: UI_SOUND_VOLUME });
+        uiSpinOpenSound = createBufferSound(spinBuf, interfaceGain, { volume: UI_SOUND_VOLUME });
+        uiSpinCloseSound = createBufferSound(reverseAudioBuffer(spinBuf), interfaceGain, { volume: UI_SOUND_VOLUME });
     } catch (e) {
         console.warn('Failed to preload UI sounds:', e);
     }
@@ -515,6 +574,8 @@ export function playUISwitchNight(): void { playUISound(uiSwitchNightSound); }
 export function playUIButton(): void { playUISound(uiButtonSound); }
 export function playUIBubbleExpand(): void { playUISound(uiBubbleExpandSound); }
 export function playUIBubbleCollapse(): void { playUISound(uiBubbleCollapseSound); }
+export function playUISpinOpen(): void { playUISound(uiSpinOpenSound); }
+export function playUISpinClose(): void { playUISound(uiSpinCloseSound); }
 
 // ============================================
 // INITIALIZATION
@@ -529,13 +590,21 @@ async function initAudio(): Promise<void> {
     // Create AudioContext (must be in user gesture for iOS)
     _audioContext = new AudioContext();
 
-    // Group gain nodes (apply saved volume)
+    // Master gain — starts at 0 for global fade-in after start
+    masterGain = _audioContext.createGain();
+    masterGain.gain.value = 0;
+    masterGain.connect(_audioContext.destination);
+
+    // Group gain nodes routed through master (apply saved volume)
     natureGain = _audioContext.createGain();
     natureGain.gain.value = natureMuted ? 0 : natureVolume;
-    natureGain.connect(_audioContext.destination);
+    natureGain.connect(masterGain);
     interfaceGain = _audioContext.createGain();
     interfaceGain.gain.value = interfaceMuted ? 0 : interfaceVolume;
-    interfaceGain.connect(_audioContext.destination);
+    interfaceGain.connect(masterGain);
+
+    // Wait for pre-fetched audio data (eliminates network delay)
+    if (_prefetchPromise) await _prefetchPromise;
 
     // Load and decode all nature sound buffers
     try {
@@ -575,6 +644,11 @@ async function initAudio(): Promise<void> {
         console.error('Failed to load audio buffers:', e);
     }
 
+    // Gradually fade in all audio from silence
+    const now = _audioContext.currentTime;
+    masterGain.gain.setValueAtTime(0, now);
+    masterGain.gain.linearRampToValueAtTime(1, now + FADE_IN_DURATION);
+
     setupVisibilityHandler();
     console.log('Web Audio engine initialized (pure AudioBuffer)');
 }
@@ -603,6 +677,8 @@ export function startAudio(): void {
 // ============================================
 export function Start(): void {
     wasDay = isDayTime();
+    // Begin fetching audio files early (during loading screen) so they're cached by the time user clicks Start
+    prefetchAudioData();
 }
 
 export function Update(): void {

@@ -1,9 +1,11 @@
 import {
     Mesh,
     SphereGeometry,
-    MeshBasicMaterial,
+    ShaderMaterial,
     Vector3,
-    Group
+    Group,
+    AdditiveBlending,
+    FrontSide
 } from "three";
 import { camera, scene } from "../scripts/Scene";
 import { deltaTime, time } from "../scripts/Time";
@@ -40,7 +42,48 @@ interface Bubble {
 
 const bubbles: Bubble[] = [];
 const bubbleGroup = new Group();
-const sphereGeo = new SphereGeometry(1, 8, 6);
+const sphereGeo = new SphereGeometry(1, 16, 12);  // Smoother for Fresnel rim
+
+// ============================================
+// BUBBLE SHADER — Fresnel rim + transparent center
+// ============================================
+const bubbleVertexShader = /* glsl */`
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+
+    void main() {
+        vNormal = normalize(normalMatrix * normal);
+        vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+        vViewDir = normalize(-mvPos.xyz);
+        gl_Position = projectionMatrix * mvPos;
+    }
+`;
+
+const bubbleFragmentShader = /* glsl */`
+    uniform float uOpacity;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+
+    void main() {
+        float fresnel = 1.0 - abs(dot(vNormal, vViewDir));
+        float rim = pow(fresnel, 1.8);
+
+        // Slight rainbow iridescence based on view angle
+        vec3 rimColor = vec3(0.9, 0.95, 1.0);  // bright white-blue rim
+        vec3 iriColor = vec3(
+            0.7 + 0.3 * sin(fresnel * 6.0),
+            0.8 + 0.2 * sin(fresnel * 6.0 + 2.1),
+            0.9 + 0.1 * sin(fresnel * 6.0 + 4.2)
+        );
+        vec3 color = mix(iriColor, rimColor, rim);
+
+        // More visible: higher base alpha, stronger rim
+        float alpha = mix(0.12, 0.7, rim) * uOpacity;
+
+        gl_FragColor = vec4(color, alpha);
+    }
+`;
+// ============================================
 
 let initialized = false;
 let lastSpawnTime = 0;
@@ -63,10 +106,16 @@ export function Start(): void {
     // Pre-create bubble meshes (pooling)
     for (let i = 0; i < BUBBLE_COUNT; i++) {
         const size = BUBBLE_SIZE_MIN + Math.random() * (BUBBLE_SIZE_MAX - BUBBLE_SIZE_MIN);
-        const material = new MeshBasicMaterial({
-            color: 0x88ccff,
+        const material = new ShaderMaterial({
+            vertexShader: bubbleVertexShader,
+            fragmentShader: bubbleFragmentShader,
+            uniforms: {
+                uOpacity: { value: 0 }
+            },
             transparent: true,
-            opacity: 0
+            blending: AdditiveBlending,
+            depthWrite: false,
+            side: FrontSide
         });
         const mesh = new Mesh(sphereGeo, material);
         mesh.scale.setScalar(size);
@@ -127,8 +176,8 @@ function spawnBubble(position: Vector3): void {
             const size = BUBBLE_SIZE_MIN + Math.random() * (BUBBLE_SIZE_MAX - BUBBLE_SIZE_MIN);
             bubble.mesh.scale.setScalar(size);
             
-            const mat = bubble.mesh.material as MeshBasicMaterial;
-            mat.opacity = 0.6;
+            const mat = bubble.mesh.material as ShaderMaterial;
+            mat.uniforms.uOpacity.value = 0.6;
             
             return;
         }
@@ -244,8 +293,8 @@ export function Update(cameraY: number): void {
         
         // Fade out and pop at surface
         const lifeRatio = bubble.life / bubble.maxLife;
-        const mat = bubble.mesh.material as MeshBasicMaterial;
-        mat.opacity = Math.min(0.6, lifeRatio * 1.5);
+        const mat = bubble.mesh.material as ShaderMaterial;
+        mat.uniforms.uOpacity.value = Math.min(0.6, lifeRatio * 1.5);
         
         // Pop at surface
         if (bubble.mesh.position.y > UNDERWATER_Y_THRESHOLD - 0.05) {

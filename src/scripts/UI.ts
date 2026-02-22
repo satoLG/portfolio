@@ -1,7 +1,7 @@
 import { body, shadowsEnabled, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter } from "./Scene";
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
-import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, preloadUISounds, playUISwitchDay, playUISwitchNight } from "./Audio";
+import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, preloadUISounds, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
 import { getCameraY, setIntroProgress, enableScroll } from "./Control";
 import { setLoadingCallback } from "../scene/Island";
 import { t, setLanguage, type Language } from "./i18n";
@@ -242,11 +242,44 @@ export function Start(): void {
                 </g>
             </g>
         </svg>
-        <svg class="icon-pixel pixel-sun" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M13 3h-2v2h2V3zm4 2h2v2h-2V5zm-6 6h2v2h-2v-2zm-8 0h2v2H3v-2zm18 0h-2v2h2v-2zM5 5h2v2H5V5zm14 14h-2v-2h2v2zm-8 2h2v-2h-2v2zm-4-2H5v-2h2v2zM9 7h6v2H9V7zm0 8H7V9h2v6zm0 0v2h6v-2h2V9h-2v6H9z"/>
+        <svg class="icon-pixel pixel-sun" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" width="1em" height="1em" viewBox="0 0 400 400" fill="currentColor">
+            <rect x="186.7" y="0" width="26.7" height="53.3"/>
+            <rect x="53.3" y="53.3" width="26.7" height="26.7"/>
+            <rect x="320" y="53.3" width="26.7" height="26.7"/>
+            <rect x="80" y="80" width="26.7" height="26.7"/>
+            <rect x="160" y="80" width="80" height="26.7"/>
+            <rect x="293.3" y="80" width="26.7" height="26.7"/>
+            <rect x="133.3" y="106.7" width="133.4" height="26.7"/>
+            <rect x="106.7" y="133.3" width="186.6" height="26.7"/>
+            <rect x="80" y="160" width="240" height="80"/>
+            <rect x="0" y="186.7" width="53.3" height="26.7"/>
+            <rect x="346.7" y="186.7" width="53.3" height="26.7"/>
+            <rect x="106.7" y="240" width="186.6" height="26.7"/>
+            <rect x="133.3" y="266.7" width="133.4" height="26.7"/>
+            <rect x="80" y="293.3" width="26.7" height="26.7"/>
+            <rect x="160" y="293.3" width="80" height="26.7"/>
+            <rect x="293.3" y="293.3" width="26.7" height="26.7"/>
+            <rect x="53.3" y="320" width="26.7" height="26.7"/>
+            <rect x="320" y="320" width="26.7" height="26.7"/>
+            <rect x="186.7" y="346.7" width="26.7" height="53.3"/>
         </svg>
-        <svg class="icon-pixel pixel-moon" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M6 2h8v2h-2v2h-2V4H6V2ZM4 6V4h2v2H4Zm0 10H2V6h2v10Zm2 2H4v-2h2v2Zm2 2H6v-2h2v2Zm10 0v2H8v-2h10Zm2-2v2h-2v-2h2Zm-2-4v-2h2v-2h2v8h-2v-4h-2Zm-6 0h6v2h-6v-2Zm-2-2h2v2h-2v-2Zm0 0V6H8v6h2Zm8-10h2v2h2v2h-2v2h-2V6h-2V4h2V2Z"/>
+        <svg class="icon-pixel pixel-moon" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" width="1em" height="1em" viewBox="0 0 400 400" fill="currentColor">
+            <rect x="133.3" y="0" width="80" height="26.7"/>
+            <rect x="80" y="26.7" width="106.7" height="26.7"/>
+            <rect x="53.3" y="53.3" width="106.7" height="26.7"/>
+            <rect x="26.7" y="80" width="106.6" height="53.3"/>
+            <rect x="0" y="133.3" width="133.3" height="80"/>
+            <rect x="373.3" y="186.7" width="26.7" height="26.7"/>
+            <rect x="0" y="213.3" width="160" height="26.7"/>
+            <rect x="346.7" y="213.3" width="53.3" height="26.7"/>
+            <rect x="0" y="240" width="186.7" height="26.7"/>
+            <rect x="320" y="240" width="80" height="26.7"/>
+            <rect x="26.7" y="266.7" width="186.6" height="26.7"/>
+            <rect x="293.3" y="266.7" width="80" height="26.7"/>
+            <rect x="26.7" y="293.3" width="346.6" height="26.7"/>
+            <rect x="53.3" y="320" width="293.4" height="26.7"/>
+            <rect x="80" y="346.7" width="240" height="26.7"/>
+            <rect x="133.3" y="373.3" width="133.4" height="26.7"/>
         </svg>
     `;
     headerControls.appendChild(themeToggle);
@@ -280,8 +313,9 @@ export function Start(): void {
             <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
             <circle cx="12" cy="12" r="4"/>
         </svg>
-        <svg class="icon-pixel" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
-            <path d="M3 8h4m0 0V6h4v2M7 8v2h4V8m0 0h10M3 16h10m0 0v-2h4v2m-4 0v2h4v-2m0 0h4" stroke="currentColor" stroke-width="2" stroke-linecap="square"/>
+        <svg class="icon-pixel" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+            <path d="m21,10v-1h-1v-2h1v-2h-1v-1h-1v-1h-2v1h-2v-1h-1V1h-4v2h-1v1h-2v-1h-2v1h-1v1h-1v2h1v2h-1v1H1v4h2v1h1v2h-1v2h1v1h1v1h2v-1h2v1h1v2h4v-2h1v-1h2v1h2v-1h1v-1h1v-2h-1v-2h1v-1h2v-4h-2Zm0,3h-1v1h-1v1h-1v2h1v2h-2v-1h-2v1h-1v1h-1v1h-2v-1h-1v-1h-1v-1h-2v1h-2v-2h1v-2h-1v-1h-1v-1h-1v-2h1v-1h1v-1h1v-2h-1v-2h2v1h2v-1h1v-1h1v-1h2v1h1v1h1v1h2v-1h2v2h-1v2h1v1h1v1h1v2Z"/>
+            <path d="m16,10v-1h-1v-1h-1v-1h-4v1h-1v1h-1v1h-1v4h1v1h1v1h1v1h4v-1h1v-1h1v-1h1v-4h-1Zm-1,4h-1v1h-4v-1h-1v-4h1v-1h4v1h1v4Z"/>
         </svg>
     `;
     settingsContainer.appendChild(settingsButton);
@@ -446,8 +480,16 @@ export function Start(): void {
         settingsOpen = !settingsOpen;
         settingsPanel.classList.toggle('open', settingsOpen);
         settingsButton.classList.toggle('active', settingsOpen);
+        // Cog rotation animation + spin sound
         if (settingsOpen) {
+            settingsButton.classList.remove('cog-close');
+            settingsButton.classList.add('cog-open');
+            playUISpinOpen();
             document.dispatchEvent(new CustomEvent('settings-opened'));
+        } else {
+            settingsButton.classList.remove('cog-open');
+            settingsButton.classList.add('cog-close');
+            playUISpinClose();
         }
     });
     
@@ -457,6 +499,9 @@ export function Start(): void {
             settingsOpen = false;
             settingsPanel.classList.remove('open');
             settingsButton.classList.remove('active');
+            settingsButton.classList.remove('cog-open');
+            settingsButton.classList.add('cog-close');
+            playUISpinClose();
         }
     });
     
@@ -466,6 +511,9 @@ export function Start(): void {
             settingsOpen = false;
             settingsPanel.classList.remove('open');
             settingsButton.classList.remove('active');
+            settingsButton.classList.remove('cog-open');
+            settingsButton.classList.add('cog-close');
+            playUISpinClose();
         }
     });
     

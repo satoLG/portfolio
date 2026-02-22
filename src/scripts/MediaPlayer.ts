@@ -5,7 +5,7 @@
 import { camera, pixelSizeValue } from "./Scene";
 import { radio } from "../scene/Island";
 import { Vector3 } from "three";
-import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse, getAudioContext, getMusicVolume, isMusicMuted } from "./Audio";
+import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse, getAudioContext, getMasterDestination, getMusicVolume, isMusicMuted } from "./Audio";
 import { zoomToRadio, zoomOutFromRadio } from "./Control";
 import WaveSurfer from 'wavesurfer.js';
 import { t, onLanguageChange } from "./i18n";
@@ -94,7 +94,37 @@ let playlist: SongData[] = [
         name: 'Umbrella',
         artist: 'Moavii',
         cover: 'images/music/umbrella.webp'
-    }
+    },
+    {
+        file: 'audio/music/Alegend - Dawn (freetouse.com).mp3',
+        name: 'Dawn',
+        artist: 'Alegend',
+    },
+    {
+        file: 'audio/music/Hazelwood - At Ease (freetouse.com).mp3',
+        name: 'At Ease',
+        artist: 'Hazelwood',
+    },
+    {
+        file: 'audio/music/Lukrembo - Memories (freetouse.com).mp3',
+        name: 'Memories',
+        artist: 'Lukrembo',
+    },
+    {
+        file: 'audio/music/massobeats - peach prosecco (freetouse.com).mp3',
+        name: 'peach prosecco',
+        artist: 'massobeats',
+    },
+    {
+        file: 'audio/music/Project Ex - Tranquility (freetouse.com).mp3',
+        name: 'Tranquility',
+        artist: 'Project Ex',
+    },
+    {
+        file: 'audio/music/Walen - Dark Heart (freetouse.com).mp3',
+        name: 'Dark Heart',
+        artist: 'Walen',
+    },
 ];
 
 // Default values
@@ -879,7 +909,7 @@ async function connectMusicAnalyser(): Promise<void> {
         musicVolumeGain = ctx.createGain();
         musicVolumeGain.gain.value = isMusicMuted() ? 0 : getMusicVolume();
         analyserNode.connect(musicVolumeGain);
-        musicVolumeGain.connect(ctx.destination);
+        musicVolumeGain.connect(getMasterDestination() ?? ctx.destination);
     } catch (e) {
         console.warn('Could not connect music analyser:', e);
         mediaSourceConnected = false;
