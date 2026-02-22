@@ -30,6 +30,11 @@ export const surfaceFragment =
     uniform float _FoamIslandRadius;
     uniform float _FoamWidth;
     uniform float _FoamIntensity;
+
+    // Foam irregularity
+    uniform float _FoamEdgeNoiseAmt;
+    uniform float _FoamEdgeNoiseFreq;
+    uniform float _FoamAnimSpeed;
     
     uniform float _Ripples[15];  // MAX_RIPPLES * 3 (x, z, time)
     uniform int _RippleCount;
@@ -48,19 +53,62 @@ export const surfaceFragment =
         return smoothstep(0.0, _EdgeFadeDistance, distFromNearEdge);
     }
     
+    // --- Hash-based noise (no texture) for foam ---
+    float foamHash(vec2 p) {
+        vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+        p3 += dot(p3, p3.yzx + 33.33);
+        return fract((p3.x + p3.y) * p3.z);
+    }
+    float foamNoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f); // smoothstep
+        float a = foamHash(i);
+        float b = foamHash(i + vec2(1.0, 0.0));
+        float c = foamHash(i + vec2(0.0, 1.0));
+        float d = foamHash(i + vec2(1.0, 1.0));
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    }
+    // 3-octave FBM
+    float foamFbm(vec2 p) {
+        float v = 0.0;
+        v += 0.50 * foamNoise(p); p *= 2.01;
+        v += 0.30 * foamNoise(p); p *= 2.03;
+        v += 0.20 * foamNoise(p);
+        return v;
+    }
+
     float calcFoam(vec2 pos) {
-        float dist = length(pos - _FoamIslandCenter);
-        
-        float innerEdge = _FoamIslandRadius;
-        float outerEdge = _FoamIslandRadius + _FoamWidth;
-        
-        float foam = smoothstep(innerEdge - 0.1, innerEdge, dist) * 
-                     smoothstep(outerEdge + 0.1, outerEdge, dist);
-        
-        float noiseOffset = sin(pos.x * 8.0 + _Time * 2.0) * 0.1 + 
-                           cos(pos.y * 6.0 + _Time * 1.5) * 0.1;
-        foam *= (0.8 + noiseOffset);
-        
+        vec2 delta = pos - _FoamIslandCenter;
+        float dist = length(delta);
+
+        float t = _Time * _FoamAnimSpeed;
+
+        // ---- Irregular wavy edge ----
+        // Use normalised direction (continuous around the circle, no atan seam)
+        vec2 dir = delta / max(dist, 0.0001);
+        float cx = dir.x;  // cos(angle)
+        float sy = dir.y;  // sin(angle)
+
+        // Multi-frequency wobble using seamless sin/cos pairs
+        float angNoise = sin(cx * _FoamEdgeNoiseFreq + sy * _FoamEdgeNoiseFreq * 0.7 + t * 1.3) * 0.4
+                       + sin(sy * _FoamEdgeNoiseFreq * 2.3 - cx * _FoamEdgeNoiseFreq * 1.1 - t * 0.9) * 0.3
+                       + sin(cx * _FoamEdgeNoiseFreq * 4.7 + sy * _FoamEdgeNoiseFreq * 3.2 + t * 1.7) * 0.2;
+        // Add spatial noise for extra organic feel
+        angNoise += (foamFbm(pos * 5.0 + t * 0.3) - 0.5) * 1.0;
+        float edgeDisplace = angNoise * _FoamEdgeNoiseAmt;
+
+        float innerEdge = _FoamIslandRadius + edgeDisplace;
+        float outerEdge = innerEdge + _FoamWidth;
+
+        // Main ring band
+        float foam = smoothstep(innerEdge - 0.1, innerEdge, dist)
+                   * smoothstep(outerEdge + 0.1, outerEdge, dist);
+
+        // Subtle brightness variation along the ring (seamless)
+        float brightVar = 0.85 + 0.15 * sin(cx * 3.0 + sy * 2.0 + t * 0.7);
+        foam *= brightVar;
+
         return foam * _FoamIntensity;
     }
     
@@ -326,30 +374,63 @@ export const triplanarFragment =
     varying vec3 _worldPos;
     varying vec3 _normal;
 
-    const float CAUSTIC_DISTANCE = 30.0;
+    const float CAUSTIC_DISTANCE = 15.0;
 
-    // Procedural caustic line — cheap bright intersection pattern
-    float causticLine(vec2 p) {
-        return pow(1.0 - abs(sin(p.x + sin(p.y))), 4.0);
+    // Hash for Voronoi cell caustics
+    vec2 causticHash(vec2 p) {
+        p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+        return fract(sin(p) * 43758.5453);
+    }
+
+    // Voronoi-based caustic: finds distance to nearest cell edge
+    // producing organic net-like patterns similar to real underwater caustics
+    float voronoiCaustic(vec2 p) {
+        vec2 ip = floor(p);
+        vec2 fp = fract(p);
+
+        float d1 = 8.0;  // nearest
+        float d2 = 8.0;  // second nearest
+
+        for (int y = -1; y <= 1; y++) {
+            for (int x = -1; x <= 1; x++) {
+                vec2 neighbor = vec2(float(x), float(y));
+                vec2 point = causticHash(ip + neighbor);
+                // Animate the cell centers
+                point = 0.5 + 0.5 * sin(_Time * 0.8 + 6.2831 * point);
+                vec2 diff = neighbor + point - fp;
+                float dist = dot(diff, diff);
+                if (dist < d1) {
+                    d2 = d1;
+                    d1 = dist;
+                } else if (dist < d2) {
+                    d2 = dist;
+                }
+            }
+        }
+
+        // Edge detection: bright where d2 ≈ d1 (cell boundaries)
+        float edge = d2 - d1;
+        return exp(-12.0 * edge);
     }
 
     float caustics(vec2 worldXZ) {
-        float scale = 2.5;
-        float speed = 8.0;
-        
-        // Layer 1: follows ocean wave velocity 1
-        vec2 uv1 = worldXZ * scale + _WaveVelocity1 * _Time * speed;
-        // Layer 2: follows ocean wave velocity 2, rotated for crossing pattern
-        vec2 uv2 = worldXZ * scale + _WaveVelocity2 * _Time * speed;
+        // Speed multiplier = 1.0 so drift matches the ocean wave velocities exactly
+        float speed = 1.0;
+
+        // Layer 1: drifts with wave velocity 1
+        vec2 uv1 = worldXZ * 2.5 + _WaveVelocity1 * _Time * speed;
+        float c1 = voronoiCaustic(uv1 * 2.0);
+
+        // Layer 2: drifts with wave velocity 2, slightly rotated
+        vec2 uv2 = worldXZ * 2.5 + _WaveVelocity2 * _Time * speed;
         float angle = 0.45;
         float ca = cos(angle);
         float sa = sin(angle);
         uv2 = vec2(uv2.x * ca - uv2.y * sa, uv2.x * sa + uv2.y * ca);
-        
-        float c1 = causticLine(uv1 * 2.0);
-        float c2 = causticLine(uv2 * 2.0);
-        
-        return (c1 + c2) * 0.55;
+        float c2 = voronoiCaustic(uv2 * 2.0);
+
+        // Min blend: produces the classic intersecting caustic network
+        return min(c1, c2) * 3.5;
     }
 
     void main()

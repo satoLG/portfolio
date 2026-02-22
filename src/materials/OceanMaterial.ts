@@ -51,9 +51,14 @@ export const oceanHalfSizeUniform = new Uniform({ x: 200.0, y: 200.0 });
 export const edgeFadeDistanceUniform = new Uniform(1.0);
 
 export const foamIslandCenterUniform = new Uniform({ x: 0.0, y: -3.3 });
-export const foamIslandRadiusUniform = new Uniform(1.25);
+export const foamIslandRadiusUniform = new Uniform(1.27);
 export const foamWidthUniform = new Uniform(0.015);
-export const foamIntensityUniform = new Uniform(0.8);
+export const foamIntensityUniform = new Uniform(0.7);
+
+// Foam irregularity / organic look
+export const foamEdgeNoiseAmtUniform = new Uniform(0.05);      // How much the edge wobbles (0 = perfect circle)
+export const foamEdgeNoiseFreqUniform = new Uniform(0.05);      // Angular frequency of edge wobble
+export const foamAnimSpeedUniform = new Uniform(0.5);          // Speed of the foam animation
 
 // Ripple system - interactive circular waves
 interface Ripple {
@@ -146,6 +151,9 @@ export function Start(): void
         _FoamIslandRadius: foamIslandRadiusUniform,
         _FoamWidth: foamWidthUniform,
         _FoamIntensity: foamIntensityUniform,
+        _FoamEdgeNoiseAmt: foamEdgeNoiseAmtUniform,
+        _FoamEdgeNoiseFreq: foamEdgeNoiseFreqUniform,
+        _FoamAnimSpeed: foamAnimSpeedUniform,
         _Ripples: ripplesUniform,
         _RippleCount: rippleCountUniform,
         _RippleSpeed: rippleSpeedUniform,

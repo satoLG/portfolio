@@ -10,6 +10,7 @@ import * as UI from "./UI.ts";
 import * as MediaPlayer from "./MediaPlayer.ts";
 import * as Underwater from "../effects/Underwater.ts";
 import * as Bubbles from "../effects/Bubbles.ts";
+import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
 import { axes } from "./Debug.ts";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 
@@ -283,6 +284,9 @@ export function Start(): void
     // Initialize bubble effect
     Bubbles.Start();
 
+    // Initialize underwater floating particles
+    UnderwaterParticles.Start();
+
     // Initialize fish
     Fish.Start();
     scene.add(Fish.clownFish);
@@ -309,6 +313,7 @@ export function Update(): void
     MediaPlayer.Update();
     Underwater.Update(camera.position.y);
     Bubbles.Update(camera.position.y);
+    UnderwaterParticles.Update(camera.position.y);
 
     // Sync lights with skybox sun position and intensity
     // Keep light close enough for shadow mapping to work

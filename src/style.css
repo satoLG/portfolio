@@ -73,8 +73,10 @@ body.pixel-max .settings-toggle[data-active="false"] .icon-off.icon-pixel {
 /* Theme toggle: pixel sun/moon sizing and colors */
 .theme-toggle .pixel-sun,
 .theme-toggle .pixel-moon {
-    width: 2rem;
-    height: 2rem;
+    width: 1.7rem;
+    height: 1.7rem;
+    position: absolute;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .theme-toggle .pixel-sun {
@@ -85,15 +87,29 @@ body.pixel-max .settings-toggle[data-active="false"] .icon-off.icon-pixel {
     color: var(--icon-color-night);
 }
 
-/* Theme toggle: show correct pixel icon based on day/night state */
+/* Pixel mode: scale-based animation for sun/moon switching */
+/* Day (unchecked) => show sun (expand after delay), hide moon (shrink immediately) */
+body.pixel-medium .theme-toggle input:not(:checked) ~ .pixel-sun,
+body.pixel-max .theme-toggle input:not(:checked) ~ .pixel-sun {
+    transform: scale(1);
+    transition-delay: 0.2s;
+}
 body.pixel-medium .theme-toggle input:not(:checked) ~ .pixel-moon,
 body.pixel-max .theme-toggle input:not(:checked) ~ .pixel-moon {
-    display: none !important;
+    transform: scale(0);
+    transition-delay: 0s;
 }
 
+/* Night (checked) => show moon (expand after delay), hide sun (shrink immediately) */
 body.pixel-medium .theme-toggle input:checked ~ .pixel-sun,
 body.pixel-max .theme-toggle input:checked ~ .pixel-sun {
-    display: none !important;
+    transform: scale(0);
+    transition-delay: 0s;
+}
+body.pixel-medium .theme-toggle input:checked ~ .pixel-moon,
+body.pixel-max .theme-toggle input:checked ~ .pixel-moon {
+    transform: scale(1);
+    transition-delay: 0.2s;
 }
 
 /* Media player: CSS-driven play/pause toggle */
@@ -1195,6 +1211,9 @@ canvas
     display: flex;
     align-items: center;
     justify-content: center;
+    position: relative;
+    width: 2rem;
+    height: 2rem;
 }
 
 /* ============================================
@@ -1216,49 +1235,65 @@ body.header-visible .site-header .settings-container {
 }
 
 .settings-button {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    border-radius: 0;
     border: none;
-    background: rgba(255, 255, 255, 0.15);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    background: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
+    padding: 0;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--text-color-night);
-    transition: background 0.3s ease, color var(--transition-duration) ease, transform 0.3s ease;
-    margin-left: 12px;
+    transition: color var(--transition-duration) ease;
+    margin-left: 8px;
 }
 
 .settings-button:hover {
-    background: rgba(255, 255, 255, 0.25);
-    transform: scale(1.05);
+    background: none;
 }
 
 .settings-button.active {
-    background: rgba(255, 255, 255, 0.3);
+    background: none;
 }
 
 .settings-button svg {
-    width: 20px;
-    height: 20px;
+    width: 28px;
+    height: 28px;
+}
+
+/* Cog rotation animation */
+@keyframes cog-rotate-open {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(180deg); }
+}
+@keyframes cog-rotate-close {
+    from { transform: rotate(180deg); }
+    to   { transform: rotate(0deg); }
+}
+.settings-button.cog-open {
+    animation: cog-rotate-open 0.4s ease-out forwards;
+}
+.settings-button.cog-close {
+    animation: cog-rotate-close 0.4s ease-out forwards;
 }
 
 body.day-mode .settings-button {
-    background: rgba(10, 37, 64, 0.12);
+    background: none;
     color: var(--text-color-day);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: none;
 }
 
 body.day-mode .settings-button:hover {
-    background: rgba(10, 37, 64, 0.2);
+    background: none;
 }
 
 body.day-mode .settings-button.active {
-    background: rgba(10, 37, 64, 0.25);
+    background: none;
 }
 
 .settings-panel {
@@ -1385,7 +1420,7 @@ body.day-mode .settings-toggle[data-active="false"] .icon-off {
 
 /* Track — Webkit */
 .volume-slider::-webkit-slider-runnable-track {
-    height: 2px;
+    height: 5px;
     border-radius: 1px;
     background: linear-gradient(
         to right,
@@ -1398,13 +1433,13 @@ body.day-mode .settings-toggle[data-active="false"] .icon-off {
 .volume-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 10px;
-    height: 10px;
+    width: 15px;
+    height: 15px;
     border-radius: 3px;
     background: rgba(255, 255, 255, 0.9);
     border: none;
     cursor: pointer;
-    margin-top: -4px;
+    margin-top: -5px;
     transition: transform 0.15s ease, background 0.15s ease;
 }
 
@@ -1429,8 +1464,8 @@ body.day-mode .settings-toggle[data-active="false"] .icon-off {
 
 /* Thumb — Firefox */
 .volume-slider::-moz-range-thumb {
-    width: 10px;
-    height: 10px;
+    width: 15px;
+    height: 15px;
     border-radius: 3px;
     background: rgba(255, 255, 255, 0.9);
     border: none;
