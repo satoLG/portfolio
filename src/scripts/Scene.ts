@@ -162,7 +162,7 @@ export function Start(): void
     renderer.setSize(width, height, false);
     renderer.autoClearColor = false;
     renderer.shadowMap.enabled = shadowsEnabled;
-    renderer.shadowMap.type = PCFSoftShadowMap;  // Stable soft shadows
+    renderer.shadowMap.type = VSMShadowMap;  // Variance shadows — real Gaussian blur
     body.appendChild(renderer.domElement);
     
     camera.fov = fov;
@@ -211,20 +211,20 @@ export function Start(): void
     // Position light behind island so shadows go forward towards camera
     directionalLight.position.set(1, 4, -6);  // Behind island at z=-3.3
     directionalLight.castShadow = true;
-    directionalLight.shadow.mapSize.width = 2048;
-    directionalLight.shadow.mapSize.height = 2048;
-    directionalLight.shadow.camera.near = 0.1;
-    directionalLight.shadow.camera.far = 20;
-    directionalLight.shadow.camera.left = -4;
-    directionalLight.shadow.camera.right = 4;
-    directionalLight.shadow.camera.top = 4;
-    directionalLight.shadow.camera.bottom = -8;
+    directionalLight.shadow.mapSize.width = 1024;
+    directionalLight.shadow.mapSize.height = 1024;
+    directionalLight.shadow.camera.near = 0.5;
+    directionalLight.shadow.camera.far = 12;
+    directionalLight.shadow.camera.left = -2;
+    directionalLight.shadow.camera.right = 2;
+    directionalLight.shadow.camera.top = 2;
+    directionalLight.shadow.camera.bottom = -4;
     
-    // Shadow bias configuration for models with subdivision surfaces
-    // Negative bias works better with PCF, positive with VSM
-    directionalLight.shadow.bias = -0.0001;  // Very small to prevent shadow acne
-    directionalLight.shadow.normalBias = 0.08;  // Push along normal to kill self-shadow striping
-    directionalLight.shadow.radius = 1.5;  // Soft edge blur (only works with VSM/PCFSoft)
+    // Shadow bias configuration — VSM uses positive bias
+    directionalLight.shadow.bias = 0.0005;
+    directionalLight.shadow.normalBias = 0.05;
+    directionalLight.shadow.radius = 4;  // VSM blur radius
+    directionalLight.shadow.blurSamples = 10;
     
     // Point at island center (firecamp is at z=-2.9)
     directionalLight.target.position.set(0, 0, -3.0);
@@ -266,6 +266,9 @@ export function Start(): void
     // Add fire effect to firecamp
     Fire.Start();
     Island.firecamp.add(Fire.fire);
+    // Shadow spotlight lives in the scene (not inside fire group which is scaled 0.25x)
+    scene.add(Fire.fireShadowLight);
+    scene.add(Fire.fireShadowLight.target);
 
     // Initialize underwater distortion
     Underwater.Start(renderer);

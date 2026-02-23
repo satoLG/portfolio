@@ -24,34 +24,16 @@ interface SongData {
 // Playlist that can be reordered
 let playlist: SongData[] = [
     {
-        file: 'audio/music/320526__benpm__ambient-piano-music-3.wav',
-        name: 'Ambient Piano Music 3',
-        artist: 'benpm',
-        cover: 'images/music/ben.jpg'
-    },
-    {
-        file: 'audio/music/595751__yellowtree__late-nights-in-osaka.wav',
-        name: 'Late Nights in Osaka',
-        artist: 'yellowtree',
-        cover: 'images/music/yellowtree.jpg'
-    },
-    {
         file: 'audio/music/Aventure - Afternoon Coffee (freetouse.com).mp3',
         name: 'Afternoon Coffee',
         artist: 'Aventure',
         cover: 'images/music/afternooncoffee.webp'
     },
     {
-        file: 'audio/music/Aventure - Chill Walk (freetouse.com).mp3',
-        name: 'Chill Walk',
-        artist: 'Aventure',
-        cover: 'images/music/chillwalk.webp'
-    },
-    {
-        file: 'audio/music/Hazelwood - Reflection (freetouse.com).mp3',
-        name: 'Reflection',
+        file: 'audio/music/Hazelwood - At Ease (freetouse.com).mp3',
+        name: 'At Ease',
         artist: 'Hazelwood',
-        cover: 'images/music/reflection.webp'
+        cover: 'images/music/at_ease.webp'
     },
     {
         file: 'audio/music/massobeats - breeze (freetouse.com).mp3',
@@ -60,16 +42,10 @@ let playlist: SongData[] = [
         cover: 'images/music/breeze.webp'
     },
     {
-        file: 'audio/music/massobeats - honey jam (freetouse.com).mp3',
-        name: 'honey jam',
-        artist: 'massobeats',
-        cover: 'images/music/massobeats.webp'
-    },
-    {
-        file: 'audio/music/massobeats - ocean (freetouse.com).mp3',
-        name: 'ocean',
-        artist: 'massobeats',
-        cover: 'images/music/ocean.webp'
+        file: 'audio/music/Aventure - Chill Walk (freetouse.com).mp3',
+        name: 'Chill Walk',
+        artist: 'Aventure',
+        cover: 'images/music/chillwalk.webp'
     },
     {
         file: 'audio/music/Moavii - City Lights (freetouse.com).mp3',
@@ -78,10 +54,58 @@ let playlist: SongData[] = [
         cover: 'images/music/blur.webp'
     },
     {
+        file: 'audio/music/Walen - Dark Heart (freetouse.com).mp3',
+        name: 'Dark Heart',
+        artist: 'Walen',
+        cover: 'images/music/darkheart.webp'
+    },
+    {
+        file: 'audio/music/Alegend - Dawn (freetouse.com).mp3',
+        name: 'Dawn',
+        artist: 'Alegend',
+        cover: 'images/music/dawn.webp'
+    },
+    {
         file: 'audio/music/Moavii - Fly With Me (freetouse.com).mp3',
         name: 'Fly With Me',
         artist: 'Moavii',
         cover: 'images/music/flywithme.webp'
+    },
+    {
+        file: 'audio/music/massobeats - honey jam (freetouse.com).mp3',
+        name: 'honey jam',
+        artist: 'massobeats',
+        cover: 'images/music/massobeats.webp'
+    },
+    {
+        file: 'audio/music/595751__yellowtree__late-nights-in-osaka.wav',
+        name: 'Late Nights in Osaka',
+        artist: 'yellowtree',
+        cover: 'images/music/yellowtree.jpg'
+    },
+    {
+        file: 'audio/music/Lukrembo - Memories (freetouse.com).mp3',
+        name: 'Memories',
+        artist: 'Lukrembo',
+        cover: 'images/music/memories.webp'
+    },
+    {
+        file: 'audio/music/massobeats - ocean (freetouse.com).mp3',
+        name: 'ocean',
+        artist: 'massobeats',
+        cover: 'images/music/ocean.webp'
+    },
+    {
+        file: 'audio/music/massobeats - peach prosecco (freetouse.com).mp3',
+        name: 'peach prosecco',
+        artist: 'massobeats',
+        cover: 'images/music/prosecco.webp'
+    },
+    {
+        file: 'audio/music/Hazelwood - Reflection (freetouse.com).mp3',
+        name: 'Reflection',
+        artist: 'Hazelwood',
+        cover: 'images/music/reflection.webp'
     },
     {
         file: 'audio/music/Moavii - Stranded (freetouse.com).mp3',
@@ -90,40 +114,16 @@ let playlist: SongData[] = [
         cover: 'images/music/stranded.webp'
     },
     {
+        file: 'audio/music/Project Ex - Tranquility (freetouse.com).mp3',
+        name: 'Tranquility',
+        artist: 'Project Ex',
+        cover: 'images/music/tranquility.webp'
+    },
+    {
         file: 'audio/music/Moavii - Umbrella (freetouse.com).mp3',
         name: 'Umbrella',
         artist: 'Moavii',
         cover: 'images/music/umbrella.webp'
-    },
-    {
-        file: 'audio/music/Alegend - Dawn (freetouse.com).mp3',
-        name: 'Dawn',
-        artist: 'Alegend',
-    },
-    {
-        file: 'audio/music/Hazelwood - At Ease (freetouse.com).mp3',
-        name: 'At Ease',
-        artist: 'Hazelwood',
-    },
-    {
-        file: 'audio/music/Lukrembo - Memories (freetouse.com).mp3',
-        name: 'Memories',
-        artist: 'Lukrembo',
-    },
-    {
-        file: 'audio/music/massobeats - peach prosecco (freetouse.com).mp3',
-        name: 'peach prosecco',
-        artist: 'massobeats',
-    },
-    {
-        file: 'audio/music/Project Ex - Tranquility (freetouse.com).mp3',
-        name: 'Tranquility',
-        artist: 'Project Ex',
-    },
-    {
-        file: 'audio/music/Walen - Dark Heart (freetouse.com).mp3',
-        name: 'Dark Heart',
-        artist: 'Walen',
     },
 ];
 

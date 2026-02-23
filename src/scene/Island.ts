@@ -1,11 +1,12 @@
-import { Group, TextureLoader, RepeatWrapping, SRGBColorSpace, MeshStandardMaterial, Texture, Object3D, LoadingManager, RingGeometry, MeshBasicMaterial, Mesh, DoubleSide, Uniform, Vector2, Vector3, Raycaster } from "three";
+import { Group, Object3D, LoadingManager, RingGeometry, MeshBasicMaterial, Mesh, DoubleSide, Uniform, Vector2, Vector3, Raycaster } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { oceanAbsorptionUniform } from "../materials/OceanMaterial";
+import { oceanAbsorptionUniform, setFoamMask } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../scripts/Time";
 import { getIsPlaying, expandPlayer, getIsExpanded } from "../scripts/MediaPlayer";
 import { isBreezeActive } from "../scripts/Audio";
 import { camera, renderer } from "../scripts/Scene";
+import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
 
 export const island = new Group();
 export const firecamp = new Group();
@@ -59,58 +60,18 @@ export function getLoadingProgress(): number {
 }
 
 const loader = new GLTFLoader(loadingManager);
-const textureLoader = new TextureLoader();
 
-const SAND_TEXTURE_PATH = 'textures/concrete_wall_01_2k/';
-const ROCKS_TEXTURE_PATH = 'textures/ground_with_rocks_01_1k/';
-const GRASS_TEXTURE_PATH = 'textures/rocky_terrain_02_2k/';
+// FLOATING ISLAND SETTINGS — tweak position/scale here
+const islandPosition = { x: 0, y: -0.8, z: -3.3 };
+const firecampOffset = { x: 0, y: 1.0, z: 0.4 };
+const palmtreeOffset = { x: -0.35, y: 1.0, z: -0.3 };
+const radioOffset = { x: -0.65, y: 1.0, z: 0.20 };  // In front of firecamp, left of center
+const swordOffset = { x: 0.08, y: 1.3, z: 0.4 };  // Stuck in the middle of the bonfire
 
-
-// Only load color maps — normal/roughness/AO/height were never used by shaders (~64MB saved)
-const sandColorMap = textureLoader.load(SAND_TEXTURE_PATH + 'concrete_wall_01_color_2k.png');
-const rocksColorMap = textureLoader.load(ROCKS_TEXTURE_PATH + 'ground_with_rocks_01_color_1k.png');
-const grassColorMap = textureLoader.load(GRASS_TEXTURE_PATH + 'rocky_terrain_02_diff_2k.jpg');
-
-const allTextures: Texture[] = [
-    sandColorMap,
-    rocksColorMap,
-    grassColorMap
-];
-
-allTextures.forEach(texture => {
-    texture.wrapS = RepeatWrapping;
-    texture.wrapT = RepeatWrapping;
-    texture.repeat.set(4, 4);
-});
-
-sandColorMap.colorSpace = SRGBColorSpace;
-rocksColorMap.colorSpace = SRGBColorSpace;
-grassColorMap.colorSpace = SRGBColorSpace;
-
-// Height blend settings - tweak these to control texture layers
-// These are WORLD Y coordinates (not local model coordinates)
-// Island is at Y=-0.115, scaled 1.8x
-//
-// ROCKS: solid below START, blends to sand until END
-// GRASS: starts blending in at START, fully grass above END
-export let ROCKS_BLEND_START = -0.1;   // Start fading out rocks just below ocean
-export let ROCKS_BLEND_END = 0.05;     // Fully sand just above ocean level
-export let GRASS_BLEND_START = 0.07;   // Grass starts just above sand transition
-export let GRASS_BLEND_END = 0.10;     // Fully grass at peak
-
-// Grass color adjustments
-export let GRASS_SATURATION = 2.5;  // >1 = more saturated, <1 = less
-export let GRASS_BRIGHTNESS = 1.2;  // >1 = brighter, <1 = darker
-
-const islandPosition = { x: 0, y: -0.115, z: -3.3 };
-const firecampOffset = { x: 0, y: 0.25, z: 0.4 };
-const palmtreeOffset = { x: -0.35, y: 0.1, z: -0.3 };
-const radioOffset = { x: -0.65, y: 0.23, z: 0.20 };  // In front of firecamp, left of center
-const swordOffset = { x: 0.08, y: 0.58, z: 0.4 };  // Stuck in the middle of the bonfire
-
-const islandScale = 1.5;
+const islandScale = 0.25;
 const firecampScale = 1.4;
-const palmtreeScale = 0.75;
+// const palmtreeScale = 0.75;
+const palmtreeScale = 0.5;
 const radioScale = 0.22;
 const swordScale = 0.25;
 
@@ -127,18 +88,18 @@ const MAX_DISTANCE = 0.65;  // TWEAK: Maximum spread distance
 // GRASS SETTINGS - easily tweakable
 const GRASS_COUNT = 32;  // Number of grass patches
 const grassScale = 0.22;
-const grassBaseOffset = { x: 0.4, y: 0.07, z: 0.6 };  // Base position near palm tree
+const grassBaseOffset = { x: 0.4, y: 0.93, z: 0.6 };  // Base position near palm tree
 
 // CLOVER SETTINGS
 const CLOVER_COUNT = 10;  // Number of clover patches
 const cloverScale = 0.15;
-const cloverBaseOffset = { x: 0.4, y: 0.14, z: 0.6 };  // Same Y as grass for consistency
+const cloverBaseOffset = { x: 0.4, y: 0.93, z: 0.6 };  // Same Y as grass for consistency
 
 // PALM TREE WIND SETTINGS - easily tweakable
 const PALM_WIND_STRENGTH = 0.03;    // TWEAK: How much leaves sway (0.05-0.3)
 const PALM_WIND_SPEED = 0.5;       // TWEAK: Speed of wind oscillation (0.5-3.0)
-const PALM_LEAF_START_Y = 0.015;     // TWEAK: Y height where leaves start swaying (local coords)
-const PALM_LEAF_FULL_Y = 0.30;      // TWEAK: Y height where full sway happens
+const PALM_LEAF_START_Y = 3.0;     // TWEAK: Y height where leaves start swaying (local coords)
+const PALM_LEAF_FULL_Y = 3.25;      // TWEAK: Y height where full sway happens
 
 // Wind uniforms for shader
 const palmWindTimeUniform = new Uniform(0.0);
@@ -208,122 +169,6 @@ const oceanLightingFragment = /*glsl*/`
     }
 `;
 
-function applyIslandMaterial(material: MeshStandardMaterial): void {
-    if (!material.isMeshStandardMaterial && !(material as any).isMeshPhysicalMaterial && !(material as any).isMeshBasicMaterial) {
-        console.log('Skipping material:', material.type);
-        return;
-    }
-    
-    console.log('Applying island material to:', material.type, material.name);
-    
-    material.customProgramCacheKey = () => {
-        return 'island_ocean_' + material.uuid;
-    };
-    
-    material.onBeforeCompile = (shader) => {
-        console.log('onBeforeCompile triggered for:', material.type);
-        
-        shader.uniforms.uLight = lightUniform;
-        shader.uniforms.uAbsorption = oceanAbsorptionUniform;
-        shader.uniforms.uSunVisibility = sunVisibilityUniform;
-        
-        shader.uniforms.uSandMap = { value: sandColorMap };
-        shader.uniforms.uRocksMap = { value: rocksColorMap };
-        shader.uniforms.uGrassMap = { value: grassColorMap };
-        shader.uniforms.uTextureScale = { value: 0.5 };
-        shader.uniforms.uRocksBlendStart = { value: ROCKS_BLEND_START };
-        shader.uniforms.uRocksBlendEnd = { value: ROCKS_BLEND_END };
-        shader.uniforms.uGrassBlendStart = { value: GRASS_BLEND_START };
-        shader.uniforms.uGrassBlendEnd = { value: GRASS_BLEND_END };
-        shader.uniforms.uGrassSaturation = { value: GRASS_SATURATION };
-        shader.uniforms.uGrassBrightness = { value: GRASS_BRIGHTNESS };
-        
-        (material as any).userData.oceanUniforms = shader.uniforms;
-        
-        shader.vertexShader = shader.vertexShader.replace(
-            '#include <common>',
-            `#include <common>
-            varying vec3 vWorldPosition;
-            varying vec3 vWorldNormal;`
-        );
-        
-        shader.vertexShader = shader.vertexShader.replace(
-            '#include <worldpos_vertex>',
-            `#include <worldpos_vertex>
-            vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
-            vWorldNormal = normalize(mat3(modelMatrix) * normal);`
-        );
-        
-        shader.fragmentShader = shader.fragmentShader.replace(
-            '#include <common>',
-            `#include <common>
-            varying vec3 vWorldPosition;
-            varying vec3 vWorldNormal;
-            
-            uniform sampler2D uSandMap;
-            uniform sampler2D uRocksMap;
-            uniform sampler2D uGrassMap;
-            uniform float uTextureScale;
-            uniform float uRocksBlendStart;
-            uniform float uRocksBlendEnd;
-            uniform float uGrassBlendStart;
-            uniform float uGrassBlendEnd;
-            uniform float uGrassSaturation;
-            uniform float uGrassBrightness;
-            
-            vec3 adjustSaturation(vec3 color, float saturation) {
-                float grey = dot(color, vec3(0.299, 0.587, 0.114));
-                return mix(vec3(grey), color, saturation);
-            }
-            
-            vec4 triplanarSample(sampler2D tex, vec3 worldPos, vec3 worldNormal, float scale) {
-                vec3 blendWeights = abs(worldNormal);
-                blendWeights = pow(blendWeights, vec3(4.0));
-                blendWeights = blendWeights / (blendWeights.x + blendWeights.y + blendWeights.z);
-                
-                vec3 scaledPos = worldPos * scale;
-                vec4 xProj = texture2D(tex, scaledPos.yz);
-                vec4 yProj = texture2D(tex, scaledPos.xz);
-                vec4 zProj = texture2D(tex, scaledPos.xy);
-                
-                return xProj * blendWeights.x + yProj * blendWeights.y + zProj * blendWeights.z;
-            }
-            
-            ${oceanLightingPars}`
-        );
-        
-        shader.fragmentShader = shader.fragmentShader.replace(
-            '#include <map_fragment>',
-            `vec4 sandColor = triplanarSample(uSandMap, vWorldPosition, vWorldNormal, uTextureScale);
-            vec4 rocksColor = triplanarSample(uRocksMap, vWorldPosition, vWorldNormal, uTextureScale);
-            vec4 grassColor = triplanarSample(uGrassMap, vWorldPosition, vWorldNormal, uTextureScale);
-            
-            // Boost grass color saturation and brightness
-            grassColor.rgb = adjustSaturation(grassColor.rgb, uGrassSaturation) * uGrassBrightness;
-            
-            // Bottom blend: rocks -> sand
-            float rocksBlend = smoothstep(uRocksBlendStart, uRocksBlendEnd, vWorldPosition.y);
-            vec4 bottomToMiddle = mix(rocksColor, sandColor, rocksBlend);
-            
-            // Top blend: sand -> grass
-            float grassBlend = smoothstep(uGrassBlendStart, uGrassBlendEnd, vWorldPosition.y);
-            vec4 blendedTexture = mix(bottomToMiddle, grassColor, grassBlend);
-            
-            diffuseColor *= blendedTexture;`
-        );
-        
-        shader.fragmentShader = shader.fragmentShader.replace(
-            '#include <dithering_fragment>',
-            `${oceanLightingFragment}
-            #include <dithering_fragment>`
-        );
-        
-        console.log('Island shader modified with triplanar blending (rocks->sand->grass) and ocean lighting');
-    };
-    
-    material.needsUpdate = true;
-}
-
 function applyOceanLightingToModel(model: Group): void {
     model.traverse((child) => {
         if ((child as any).isMesh && (child as any).material) {
@@ -374,6 +219,14 @@ function applyPalmWindShader(model: Group): void {
             const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
             materials.forEach((mat: any) => {
                 if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial || mat.isMeshBasicMaterial) {
+                    // Force leaves into opaque pass (alpha-test) so they render
+                    // at the same depth/visibility as the trunk — not blocked
+                    // by the ocean surface when viewed from underwater
+                    if (mat.transparent || mat.alphaMap || mat.map?.image) {
+                        mat.transparent = false;
+                        mat.depthWrite = true;
+                        mat.alphaTest = 0.5;
+                    }
                     mat.customProgramCacheKey = () => 'palm_wind';
                     mat.onBeforeCompile = (shader: any) => {
                         console.log('🌴 Palm wind shader compiling!');
@@ -519,49 +372,40 @@ function applyFoliageWindShader(model: Group): void {
     });
 }
 
-function applyIslandTextures(model: Group): void {
-    model.traverse((child) => {
-        if ((child as any).isMesh && (child as any).material) {
-            const mesh = child as any;
-            // Enable shadow receiving on the mesh itself
-            mesh.receiveShadow = true;
-            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-            
-            materials.forEach((material: any) => {
-                if (material.isMeshStandardMaterial || material.isMeshPhysicalMaterial) {
-                    console.log('Setting up island material for:', mesh.name);
-                    
-                    material.map = null;
-                    material.normalMap = null;
-                    material.roughnessMap = null;
-                    material.aoMap = null;
-                    material.displacementMap = null;
-                    
-                    material.roughness = 0.9;
-                    material.metalness = 0.0;
-                    
-                    applyIslandMaterial(material);
-                }
-            });
-        }
-    });
-}
-
 export function Start(): void {
     loader.load(
-        'models/island.glb',
+        'models/floating_island.glb',
         (gltf) => {
-            applyIslandTextures(gltf.scene);
+            applyOceanLightingToModel(gltf.scene);
+            // Enable shadow receiving on island meshes
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    (child as any).receiveShadow = true;
+                    (child as any).castShadow = true;
+                }
+            });
             island.add(gltf.scene);
             island.position.set(islandPosition.x, islandPosition.y, islandPosition.z);
             island.scale.setScalar(islandScale);
-            console.log('Island loaded with texture blending and ocean lighting');
+            
+            // Generate foam mask from island silhouette (must happen after position/scale are set)
+            // Use requestAnimationFrame to ensure the world matrices are up to date
+            requestAnimationFrame(() => {
+                island.updateMatrixWorld(true);
+                generateFoamMask(renderer, island);
+                const tex = getMaskTexture();
+                if (tex) {
+                    setFoamMask(tex.texture, getMaskCenter(), getMaskSize());
+                }
+            });
+            
+            console.log('Floating island loaded with ocean lighting');
         },
         (progress) => {
             console.log('Island loading:', (progress.loaded / progress.total * 100) + '%');
         },
         (error) => {
-            console.error('Error loading island:', error);
+            console.error('Error loading floating island:', error);
         }
     );
 
@@ -569,10 +413,11 @@ export function Start(): void {
         'models/bonfire.glb',
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
-            // Enable shadow casting for firecamp
+            // Enable shadow casting and receiving for firecamp
             gltf.scene.traverse((child) => {
                 if ((child as any).isMesh) {
                     child.castShadow = true;
+                    (child as any).receiveShadow = true;
                 }
             });
             firecamp.add(gltf.scene);
@@ -593,14 +438,15 @@ export function Start(): void {
     );
 
     loader.load(
-        'models/palmtree.glb',
+        'models/tree.glb',
         (gltf) => {
             // Apply wind shader instead of just ocean lighting
             applyPalmWindShader(gltf.scene);
-            // Enable shadow casting
+            // Enable shadow casting and receiving
             gltf.scene.traverse((child) => {
                 if ((child as any).isMesh) {
                     child.castShadow = true;
+                    (child as any).receiveShadow = true;
                     const mesh = child as any;
                     // Compute bounding box to see vertex Y range
                     mesh.geometry.computeBoundingBox();
@@ -668,6 +514,13 @@ export function Start(): void {
                 const grassPatch = new Group();
                 const grassModel = gltf.scene.clone();
                 applyFoliageWindShader(grassModel);  // Wind shader synced with palm
+                // Enable shadow casting and receiving for grass
+                grassModel.traverse((child) => {
+                    if ((child as any).isMesh) {
+                        child.castShadow = true;
+                        (child as any).receiveShadow = true;
+                    }
+                });
                 grassPatch.add(grassModel);
                 
                 // Spread grass in full circle with min/max distance from center
@@ -701,6 +554,13 @@ export function Start(): void {
                 const cloverPatch = new Group();
                 const cloverModel = gltf.scene.clone();
                 applyFoliageWindShader(cloverModel);  // Wind shader synced with palm
+                // Enable shadow casting and receiving for clover
+                cloverModel.traverse((child) => {
+                    if ((child as any).isMesh) {
+                        child.castShadow = true;
+                        (child as any).receiveShadow = true;
+                    }
+                });
                 cloverPatch.add(cloverModel);
                 
                 // Spread clover in full circle with min/max distance from center
@@ -731,7 +591,13 @@ export function Start(): void {
         'models/radio.glb',
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
-            
+            // Enable shadow casting and receiving for radio
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    (child as any).receiveShadow = true;
+                }
+            });
             radio.add(gltf.scene);
             radio.position.set(
                 islandPosition.x + radioOffset.x,
@@ -753,10 +619,11 @@ export function Start(): void {
         'models/sword.glb',
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
-            // Enable shadow casting for sword
+            // Enable shadow casting and receiving for sword
             gltf.scene.traverse((child) => {
                 if ((child as any).isMesh) {
                     child.castShadow = true;
+                    (child as any).receiveShadow = true;
                 }
             });
             sword.add(gltf.scene);

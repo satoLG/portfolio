@@ -1250,7 +1250,7 @@ body.header-visible .site-header .settings-container {
     justify-content: center;
     color: var(--text-color-night);
     transition: color var(--transition-duration) ease;
-    margin-left: 8px;
+    margin-left: 12px;
 }
 
 .settings-button:hover {
