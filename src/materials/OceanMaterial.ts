@@ -1,4 +1,4 @@
-import { DoubleSide, RepeatWrapping, ShaderMaterial, TextureLoader, Uniform, Vector3 } from "three";
+import { DoubleSide, RepeatWrapping, ShaderMaterial, Texture, TextureLoader, Uniform, Vector3, Vector2 } from "three";
 import * as OceanShaders from "../shaders/OceanShaders";
 import { cameraForward } from "../scripts/Scene";
 import { timeUniform } from "../scripts/Time";
@@ -50,15 +50,26 @@ export const waveVelocity2Uniform = new Uniform({ x: 0.0, y: 0.065 });
 export const oceanHalfSizeUniform = new Uniform({ x: 200.0, y: 200.0 });
 export const edgeFadeDistanceUniform = new Uniform(1.0);
 
-export const foamIslandCenterUniform = new Uniform({ x: 0.0, y: -3.3 });
-export const foamIslandRadiusUniform = new Uniform(1.27);
-export const foamWidthUniform = new Uniform(0.015);
-export const foamIntensityUniform = new Uniform(0.7);
+// Foam mask — generated at runtime from island silhouette
+export const foamMaskUniform = new Uniform(null as Texture | null);              // Top-down silhouette texture
+export const foamMaskCenterUniform = new Uniform(new Vector2(0.0, -1));       // World XZ center of mask region
+export const foamMaskSizeUniform = new Uniform(new Vector2(4.0, 4.0));          // World XZ extent of mask region
+export const foamWidthUniform = new Uniform(0.12);             // TWEAK: Width of foam band around edge
+export const foamIntensityUniform = new Uniform(0.35);         // TWEAK: Overall foam brightness
+export const foamAnimSpeedUniform = new Uniform(0.5);          // TWEAK: Speed of foam animation
+export const foamEdgeNoiseAmtUniform = new Uniform(0.06);      // TWEAK: How much brightness shimmers near edge
+export const foamWobbleAmtUniform = new Uniform(0.07);         // TWEAK: How far (world units) the foam line wobbles
+export const foamWobbleFreqUniform = new Uniform(3.0);         // TWEAK: Spatial frequency of the wobble pattern
+export const foamWobbleSpeedUniform = new Uniform(0.5);        // TWEAK: How fast the wobble animates
+export const foamRadiusUniform = new Uniform(0.94);             // TWEAK: Foam ring scale — >1 pushes foam outward, <1 pulls inward
 
-// Foam irregularity / organic look
-export const foamEdgeNoiseAmtUniform = new Uniform(0.05);      // How much the edge wobbles (0 = perfect circle)
-export const foamEdgeNoiseFreqUniform = new Uniform(0.05);      // Angular frequency of edge wobble
-export const foamAnimSpeedUniform = new Uniform(0.5);          // Speed of the foam animation
+/** Call after generating the foam mask to wire the texture + bounds into the shader */
+export function setFoamMask(texture: Texture, center: { x: number; y: number }, size: { x: number; y: number }): void {
+    foamMaskUniform.value = texture;
+    foamMaskCenterUniform.value.set(center.x, center.y);
+    foamMaskSizeUniform.value.set(size.x, size.y);
+    console.log('Foam mask wired into ocean shader');
+}
 
 // Ripple system - interactive circular waves
 interface Ripple {
@@ -147,13 +158,17 @@ export function Start(): void
         _WaveVelocity2: waveVelocity2Uniform,
         _OceanHalfSize: oceanHalfSizeUniform,
         _EdgeFadeDistance: edgeFadeDistanceUniform,
-        _FoamIslandCenter: foamIslandCenterUniform,
-        _FoamIslandRadius: foamIslandRadiusUniform,
+        _FoamMask: foamMaskUniform,
+        _FoamMaskCenter: foamMaskCenterUniform,
+        _FoamMaskSize: foamMaskSizeUniform,
         _FoamWidth: foamWidthUniform,
         _FoamIntensity: foamIntensityUniform,
-        _FoamEdgeNoiseAmt: foamEdgeNoiseAmtUniform,
-        _FoamEdgeNoiseFreq: foamEdgeNoiseFreqUniform,
         _FoamAnimSpeed: foamAnimSpeedUniform,
+        _FoamEdgeNoiseAmt: foamEdgeNoiseAmtUniform,
+        _FoamWobbleAmt: foamWobbleAmtUniform,
+        _FoamWobbleFreq: foamWobbleFreqUniform,
+        _FoamWobbleSpeed: foamWobbleSpeedUniform,
+        _FoamRadius: foamRadiusUniform,
         _Ripples: ripplesUniform,
         _RippleCount: rippleCountUniform,
         _RippleSpeed: rippleSpeedUniform,

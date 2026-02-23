@@ -26,15 +26,18 @@ export const surfaceFragment =
     uniform vec2 _OceanHalfSize;
     uniform float _EdgeFadeDistance;
     
-    uniform vec2 _FoamIslandCenter;
-    uniform float _FoamIslandRadius;
+    // Foam mask — top-down island silhouette rendered at runtime
+    uniform sampler2D _FoamMask;
+    uniform vec2 _FoamMaskCenter;   // World XZ center of the mask region
+    uniform vec2 _FoamMaskSize;     // World XZ extent of the mask region
     uniform float _FoamWidth;
     uniform float _FoamIntensity;
-
-    // Foam irregularity
-    uniform float _FoamEdgeNoiseAmt;
-    uniform float _FoamEdgeNoiseFreq;
     uniform float _FoamAnimSpeed;
+    uniform float _FoamEdgeNoiseAmt;
+    uniform float _FoamWobbleAmt;
+    uniform float _FoamWobbleFreq;
+    uniform float _FoamWobbleSpeed;
+    uniform float _FoamRadius;
     
     uniform float _Ripples[15];  // MAX_RIPPLES * 3 (x, z, time)
     uniform int _RippleCount;
@@ -79,37 +82,60 @@ export const surfaceFragment =
     }
 
     float calcFoam(vec2 pos) {
-        vec2 delta = pos - _FoamIslandCenter;
-        float dist = length(delta);
+        // Wobble: displace the lookup position with animated noise
+        // This makes the foam line itself undulate organically
+        float wt = _Time * _FoamWobbleSpeed;
+        vec2 wobble = vec2(
+            foamFbm(pos * _FoamWobbleFreq + vec2(wt, 0.0)) - 0.5,
+            foamFbm(pos * _FoamWobbleFreq + vec2(0.0, wt + 17.3)) - 0.5
+        ) * _FoamWobbleAmt;
+        vec2 wobbledPos = pos + wobble;
 
+        // Convert world XZ to mask UV (0-1 range within the captured region)
+        vec2 maskUV = (wobbledPos - _FoamMaskCenter) / _FoamMaskSize + 0.5;
+        // The ortho camera's right axis = world -X, so flip U to match
+        maskUV.x = 1.0 - maskUV.x;
+
+        // Scale UV around center to push foam ring inward (<1) or outward (>1)
+        maskUV = (maskUV - 0.5) / _FoamRadius + 0.5;
+        
+        // Outside the mask region — no foam
+        if (maskUV.x < 0.0 || maskUV.x > 1.0 || maskUV.y < 0.0 || maskUV.y > 1.0) {
+            return 0.0;
+        }
+        
+        // Sample the mask: white (1) = island, black (0) = water
+        float mask = texture2D(_FoamMask, maskUV).r;
+        
+        // Sample neighbors to compute distance to edge (manual SDF approximation)
+        // Step size in UV = _FoamWidth converted to UV space
+        vec2 texelSize = _FoamWidth / _FoamMaskSize;
+        
+        float maskL = texture2D(_FoamMask, maskUV + vec2(-texelSize.x, 0.0)).r;
+        float maskR = texture2D(_FoamMask, maskUV + vec2( texelSize.x, 0.0)).r;
+        float maskU = texture2D(_FoamMask, maskUV + vec2(0.0,  texelSize.y)).r;
+        float maskD = texture2D(_FoamMask, maskUV + vec2(0.0, -texelSize.y)).r;
+        
+        // Edge detection: gradient magnitude (how fast the mask changes)
+        float gx = maskR - maskL;
+        float gy = maskU - maskD;
+        float edgeStrength = length(vec2(gx, gy));
+        
+        // Foam appears on the water side near the edge
+        // mask < 0.5 = water, edgeStrength > 0 = near island
+        float onWater = 1.0 - smoothstep(0.3, 0.7, mask);
+        float foam = edgeStrength * onWater;
+        
+        // Subtle animated brightness shimmer
         float t = _Time * _FoamAnimSpeed;
-
-        // ---- Irregular wavy edge ----
-        // Use normalised direction (continuous around the circle, no atan seam)
-        vec2 dir = delta / max(dist, 0.0001);
-        float cx = dir.x;  // cos(angle)
-        float sy = dir.y;  // sin(angle)
-
-        // Multi-frequency wobble using seamless sin/cos pairs
-        float angNoise = sin(cx * _FoamEdgeNoiseFreq + sy * _FoamEdgeNoiseFreq * 0.7 + t * 1.3) * 0.4
-                       + sin(sy * _FoamEdgeNoiseFreq * 2.3 - cx * _FoamEdgeNoiseFreq * 1.1 - t * 0.9) * 0.3
-                       + sin(cx * _FoamEdgeNoiseFreq * 4.7 + sy * _FoamEdgeNoiseFreq * 3.2 + t * 1.7) * 0.2;
-        // Add spatial noise for extra organic feel
-        angNoise += (foamFbm(pos * 5.0 + t * 0.3) - 0.5) * 1.0;
-        float edgeDisplace = angNoise * _FoamEdgeNoiseAmt;
-
-        float innerEdge = _FoamIslandRadius + edgeDisplace;
-        float outerEdge = innerEdge + _FoamWidth;
-
-        // Main ring band
-        float foam = smoothstep(innerEdge - 0.1, innerEdge, dist)
-                   * smoothstep(outerEdge + 0.1, outerEdge, dist);
-
-        // Subtle brightness variation along the ring (seamless)
-        float brightVar = 0.85 + 0.15 * sin(cx * 3.0 + sy * 2.0 + t * 0.7);
+        float noise = foamFbm(pos * 8.0 + t * 0.3) * 2.0 - 1.0;
+        foam += foam * noise * _FoamEdgeNoiseAmt * 10.0;
+        
+        // Soft brightness variation along the edge
+        float brightVar = 0.9 + 0.1 * sin(pos.x * 5.0 + pos.y * 3.0 + t * 0.7);
         foam *= brightVar;
-
-        return foam * _FoamIntensity;
+        
+        return clamp(foam, 0.0, 1.0) * _FoamIntensity;
     }
     
     // Calculate ripple normal perturbation and subtle foam
@@ -206,6 +232,9 @@ export const surfaceFragment =
         float reflectivity = pow2(1.0 - max(0.0, dot(viewDir, normal)));
         float t = clamp(max(reflectivity, viewLen / MAX_VIEW_DEPTH) + dither, 0.0, 1.0);
 
+        // Foam is barely visible from underwater
+        float underwaterFoam = foam * 0.3;
+
         if (dot(viewDir, normal) < CRITICAL_ANGLE)
         {
             vec3 r = reflect(viewDir, -normal);
@@ -214,16 +243,16 @@ export const surfaceFragment =
             rColor *= _Light;
             
             vec3 foamColor = vec3(1.0, 1.0, 1.0);
-            vec3 finalColor = mix(mix(rColor, light, t), foamColor, foam);
+            vec3 finalColor = mix(mix(rColor, light, t), foamColor, underwaterFoam);
 
-            gl_FragColor = vec4(finalColor, max(edgeFade, foam));
+            gl_FragColor = vec4(finalColor, max(edgeFade, underwaterFoam));
             return;
         }
         
         vec3 foamColor = vec3(1.0, 1.0, 1.0);
-        vec3 finalColor = mix(light, foamColor, foam);
+        vec3 finalColor = mix(light, foamColor, underwaterFoam);
 
-        gl_FragColor = vec4(finalColor, max(t * edgeFade, foam));
+        gl_FragColor = vec4(finalColor, max(t * edgeFade, underwaterFoam));
     }
 `;
 

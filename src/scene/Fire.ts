@@ -7,6 +7,7 @@ import {
     AdditiveBlending,
     NormalBlending,
     PointLight,
+    SpotLight,
     BufferGeometry,
     Float32BufferAttribute,
     Points,
@@ -19,14 +20,21 @@ export const fire = new Group();
 
 export const fireLight = new PointLight(0xff6622, 0, 8, 2);
 
-// Fire light shadow — small shadow map to keep GPU cost low (~1.5MB for 6-face cubemap at 256)
-fireLight.castShadow = true;
-fireLight.shadow.mapSize.width = 256;
-fireLight.shadow.mapSize.height = 256;
-fireLight.shadow.camera.near = 0.1;
-fireLight.shadow.camera.far = 8;
-fireLight.shadow.bias = -0.002;
-fireLight.shadow.normalBias = 0.05;
+// PointLight doesn't support VSM blur, so use it only for illumination
+fireLight.castShadow = false;
+
+// Separate SpotLight for shadow casting (VSM compatible — real blur)
+// Added to scene directly (not fire group) to avoid the 0.25x scale
+export const fireShadowLight = new SpotLight(0xff6622, 0, 12, Math.PI / 2.5, 0.5, 1.2);
+fireShadowLight.castShadow = true;
+fireShadowLight.shadow.mapSize.width = 512;
+fireShadowLight.shadow.mapSize.height = 512;
+fireShadowLight.shadow.camera.near = 0.05;
+fireShadowLight.shadow.camera.far = 6;
+fireShadowLight.shadow.bias = 0.0005;
+fireShadowLight.shadow.normalBias = 0.02;
+fireShadowLight.shadow.radius = 2;
+fireShadowLight.shadow.blurSamples = 8;
 
 const FIRE_SCALE = 0.25;
 const FIRE_HEIGHT_OFFSET = 0.13;
@@ -649,6 +657,9 @@ export function Start(): void {
     fireLight.position.copy(fire.position);
     fireLight.position.y += 0.05;  // TWEAK: Height offset above firecamp
     fire.add(fireLight);
+
+    // Shadow spotlight is added to the scene (not fire group) — see Scene.ts
+    // Its position is updated each frame in Update()
     
     fireIntensity = 0.0;
     targetIntensity = isDayTime() ? 0.0 : 1.0;
@@ -733,9 +744,17 @@ export function Update(): void {
     
     const flicker = 1.0 + (Math.sin(time * 15.0) * 0.3 + Math.sin(time * 23.0) * 0.2) * FIRE_LIGHT_FLICKER;
     fireLight.intensity = fireIntensity * FIRE_LIGHT_INTENSITY * flicker;
+    fireShadowLight.intensity = fireIntensity * FIRE_LIGHT_INTENSITY * flicker * 0.7;
     
     const colorFlicker = 0.9 + Math.sin(time * 10.0) * 0.1;
     fireLight.color.setRGB(1.0, 0.4 * colorFlicker, 0.1 * colorFlicker);
+    fireShadowLight.color.setRGB(1.0, 0.4 * colorFlicker, 0.1 * colorFlicker);
+
+    // Update shadow spotlight world position to follow fire
+    // Positioned just slightly above the fire so shadows spread outward with visible length
+    fireLight.getWorldPosition(_fireShadowWorldPos);
+    fireShadowLight.position.set(_fireShadowWorldPos.x, _fireShadowWorldPos.y + 0.3, _fireShadowWorldPos.z);
+    fireShadowLight.target.position.set(_fireShadowWorldPos.x, _fireShadowWorldPos.y - 1, _fireShadowWorldPos.z);
     
     // Keep fire.visible = true always so shaders stay compiled (avoids first-toggle stall).
     // When fireIntensity == 0 the shaders output alpha 0, so cost is negligible.
@@ -743,6 +762,7 @@ export function Update(): void {
 }
 
 const _fireLightWorldPos = new Vector3();
+const _fireShadowWorldPos = new Vector3();
 
 export function getFireLightData(): { position: Vector3; color: typeof fireLight.color; intensity: number } {
     return {
