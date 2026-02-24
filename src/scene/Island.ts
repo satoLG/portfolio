@@ -1,9 +1,10 @@
-import { Group, Object3D, LoadingManager, RingGeometry, MeshBasicMaterial, Mesh, DoubleSide, Uniform, Vector2, Vector3, Raycaster } from "three";
+import { Group, Object3D, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, LoopRepeat } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { oceanAbsorptionUniform, setFoamMask } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../scripts/Time";
-import { getIsPlaying, expandPlayer, getIsExpanded } from "../scripts/MediaPlayer";
+import { getIsPlaying, expandPlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../scripts/MediaPlayer";
+import { zoomToPug, zoomOutFromPug, isPugZoomActive } from "../scripts/Control";
 import { isBreezeActive } from "../scripts/Audio";
 import { camera, renderer } from "../scripts/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
@@ -13,21 +14,55 @@ export const firecamp = new Group();
 export const palmtree = new Group();
 export const radio = new Group();
 export const sword = new Group();
+export const pug = new Group();
+export const tent = new Group();
+export const dogBed = new Group();
+export const dogBowl = new Group();
 export const grassPatches: Group[] = [];
 
 // Store palm tree leaves for wind animation
 const palmLeaves: Object3D[] = [];
 
-// Sound wave arcs for radio
-interface SoundWave {
-    mesh: Mesh;
-    progress: number;  // 0 to 1
-    side: 'left' | 'right';
-    isTrailing: boolean;  // Is this the second wave in a pair
+// Pug animation mixer
+let pugMixer: AnimationMixer | null = null;
+
+// Music note particles for radio
+interface MusicNote {
+    sprite: Sprite;
+    age: number;       // seconds alive
+    lifetime: number;  // total seconds before removed
+    vx: number;        // velocity X
+    vy: number;        // velocity Y
+    vz: number;        // velocity Z
+    baseOpacity: number;
 }
-const soundWaves: SoundWave[] = [];
-const WAVE_COUNT = 8;  // Max waves at a time (pairs of 2 on each side)
-let lastBounceUp = false;  // Track bounce direction to spawn on peaks
+const musicNotes: MusicNote[] = [];
+let noteSpawnTimer = 0;
+let lastBeatKick = 0;  // Track previous beat kick to detect rising edge
+
+// Pre-built note textures (3 variants, created once)
+let noteTextures: CanvasTexture[] = [];
+
+function buildNoteTextures(): void {
+    if (noteTextures.length > 0) return;
+    const symbols = ['\u266A', '\u266B', '\u2669'];  // ♪ ♫ ♩
+    for (const sym of symbols) {
+        const size = 64;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d')!;
+        ctx.clearRect(0, 0, size, size);
+        ctx.font = `bold ${size * 0.7}px serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(sym, size / 2, size / 2);
+        const tex = new CanvasTexture(canvas);
+        tex.needsUpdate = true;
+        noteTextures.push(tex);
+    }
+}
 
 // Loading manager for progress tracking
 const loadingManager = new LoadingManager();
@@ -67,6 +102,10 @@ const firecampOffset = { x: 0, y: 1.0, z: 0.4 };
 const palmtreeOffset = { x: -0.35, y: 1.0, z: -0.3 };
 const radioOffset = { x: -0.65, y: 1.0, z: 0.20 };  // In front of firecamp, left of center
 const swordOffset = { x: 0.08, y: 1.3, z: 0.4 };  // Stuck in the middle of the bonfire
+const pugOffset = { x: 0.65, y: 1.0, z: 1 };  // Opposite side of radio relative to firecamp
+const tentOffset = { x: 0.48, y: 0.97, z: -0.35 };  // Right of palm tree (camera view)
+const dogBedOffset = { x: 0.38, y: 0.97, z: -0.35 };  // Centered inside tent, flush to ground
+const dogBowlOffset = { x: 0.52, y: 1.1, z: -0.5 };  // Slightly to the side of bed
 
 const islandScale = 0.25;
 const firecampScale = 1.4;
@@ -74,6 +113,10 @@ const firecampScale = 1.4;
 const palmtreeScale = 0.5;
 const radioScale = 0.22;
 const swordScale = 0.25;
+const pugScale = 0.45;
+const tentScale = 1.8;
+const dogBedScale = 0.3;
+const dogBowlScale = 0.5;
 
 // Radio vibration settings
 let radioTime = 0;
@@ -374,7 +417,7 @@ function applyFoliageWindShader(model: Group): void {
 
 export function Start(): void {
     loader.load(
-        'models/floating_island.glb',
+        'models/surface/floating_island.glb',
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
             // Enable shadow receiving on island meshes
@@ -410,7 +453,7 @@ export function Start(): void {
     );
 
     loader.load(
-        'models/bonfire.glb',
+        'models/surface/bonfire.glb',
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
             // Enable shadow casting and receiving for firecamp
@@ -438,7 +481,7 @@ export function Start(): void {
     );
 
     loader.load(
-        'models/tree.glb',
+        'models/surface/tree.glb',
         (gltf) => {
             // Apply wind shader instead of just ocean lighting
             applyPalmWindShader(gltf.scene);
@@ -508,7 +551,7 @@ export function Start(): void {
 
     // Load grass patches around the palm tree
     loader.load(
-        'models/grass.glb',
+        'models/surface/grass.glb',
         (gltf) => {
             for (let i = 0; i < GRASS_COUNT; i++) {
                 const grassPatch = new Group();
@@ -548,7 +591,7 @@ export function Start(): void {
 
     // Load clover patches alongside grass
     loader.load(
-        'models/clover.glb',
+        'models/surface/clover.glb',
         (gltf) => {
             for (let i = 0; i < CLOVER_COUNT; i++) {
                 const cloverPatch = new Group();
@@ -588,7 +631,7 @@ export function Start(): void {
 
     // Load radio in front of firecamp
     loader.load(
-        'models/radio.glb',
+        'models/surface/radio.glb',
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
             // Enable shadow casting and receiving for radio
@@ -616,7 +659,7 @@ export function Start(): void {
 
     // Load sword stuck in the middle of the bonfire
     loader.load(
-        'models/sword.glb',
+        'models/surface/sword.glb',
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
             // Enable shadow casting and receiving for sword
@@ -647,11 +690,130 @@ export function Start(): void {
         }
     );
 
+    // Load pug on the island (opposite side of radio)
+    loader.load(
+        'models/character/pug.glb',
+        (gltf) => {
+            applyOceanLightingToModel(gltf.scene);
+            // Enable shadow casting and receiving for pug
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    (child as any).receiveShadow = true;
+                }
+            });
+            pug.add(gltf.scene);
+            pug.position.set(
+                islandPosition.x + pugOffset.x,
+                islandPosition.y + pugOffset.y,
+                islandPosition.z + pugOffset.z
+            );
+            pug.scale.setScalar(pugScale);
+            // Face to the right of the island (positive X)
+            pug.rotation.y = Math.PI / 2;
+
+            // Setup idle animation (index 4)
+            if (gltf.animations && gltf.animations.length > 4) {
+                pugMixer = new AnimationMixer(gltf.scene);
+                const idleClip = gltf.animations[4];
+                const action = pugMixer.clipAction(idleClip);
+                action.setLoop(LoopRepeat, Infinity);
+                action.play();
+                console.log(`Pug loaded with animation: ${idleClip.name || 'index 4'} (${gltf.animations.length} total animations)`);
+            } else {
+                console.warn(`Pug model has ${gltf.animations?.length ?? 0} animations, expected at least 5`);
+            }
+        },
+        undefined,
+        (error) => {
+            console.error('Error loading pug:', error);
+        }
+    );
+
+    // Load tent to the right of the palm tree
+    loader.load(
+        'models/surface/tent.glb',
+        (gltf) => {
+            applyOceanLightingToModel(gltf.scene);
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    (child as any).receiveShadow = true;
+                }
+            });
+            tent.add(gltf.scene);
+            tent.position.set(
+                islandPosition.x + tentOffset.x,
+                islandPosition.y + tentOffset.y,
+                islandPosition.z + tentOffset.z
+            );
+            tent.scale.setScalar(tentScale);
+            // Face camera with slight left-angle offset (from camera's perspective)
+            tent.rotation.y = -0.4;
+            console.log('Tent loaded');
+        },
+        undefined,
+        (error) => { console.error('Error loading tent:', error); }
+    );
+
+    // Load dog bed inside the tent
+    loader.load(
+        'models/surface/dog_bed.glb',
+        (gltf) => {
+            applyOceanLightingToModel(gltf.scene);
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    (child as any).receiveShadow = true;
+                }
+            });
+            dogBed.add(gltf.scene);
+            dogBed.position.set(
+                islandPosition.x + dogBedOffset.x,
+                islandPosition.y + dogBedOffset.y,
+                islandPosition.z + dogBedOffset.z
+            );
+            dogBed.scale.setScalar(dogBedScale);
+            dogBed.rotation.y = -1.5;
+            console.log('Dog bed loaded');
+        },
+        undefined,
+        (error) => { console.error('Error loading dog bed:', error); }
+    );
+
+    // Load dog bowl beside the dog bed
+    loader.load(
+        'models/surface/dog_bowl.glb',
+        (gltf) => {
+            applyOceanLightingToModel(gltf.scene);
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    (child as any).receiveShadow = true;
+                }
+            });
+            dogBowl.add(gltf.scene);
+            dogBowl.position.set(
+                islandPosition.x + dogBowlOffset.x,
+                islandPosition.y + dogBowlOffset.y,
+                islandPosition.z + dogBowlOffset.z
+            );
+            dogBowl.scale.setScalar(dogBowlScale);
+            dogBowl.rotation.y = -0.4;
+            console.log('Dog bowl loaded');
+        },
+        undefined,
+        (error) => { console.error('Error loading dog bowl:', error); }
+    );
+
     // Setup mouse/touch event listeners for grass interaction
     setupGrassInteraction();
 
     // Setup radio click/hover interaction
     setupRadioInteraction();
+
+    // Setup pug click/hover interaction
+    setupPugInteraction();
 }
 
 // Setup mouse and touch events for grass interaction
@@ -704,6 +866,66 @@ function updateMouseWorldPosition(): void {
         // If not hitting anything, move mouse position far away
         mouseWorldPos.value.set(0, -100, 0);
     }
+}
+
+// ============================================
+// PUG CLICK/HOVER INTERACTION
+// ============================================
+const pugRaycaster = new Raycaster();
+const pugMouse = new Vector2();
+let isPugHovered = false;
+
+function setupPugInteraction(): void {
+    const canvas = renderer.domElement;
+    if (!canvas) return;
+
+    const onPugClick = (clientX: number, clientY: number) => {
+        // If already zoomed into pug, any click zooms out
+        if (isPugZoomActive()) {
+            zoomOutFromPug();
+            return;
+        }
+        if (pug.children.length === 0) return;
+
+        pugMouse.x = (clientX / window.innerWidth) * 2 - 1;
+        pugMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+        pugRaycaster.setFromCamera(pugMouse, camera);
+        const intersects = pugRaycaster.intersectObjects(pug.children, true);
+        if (intersects.length > 0) {
+            zoomToPug();
+        }
+    };
+
+    canvas.addEventListener('click', (e: MouseEvent) => {
+        onPugClick(e.clientX, e.clientY);
+    });
+
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (e.changedTouches.length > 0) {
+            const touch = e.changedTouches[0];
+            onPugClick(touch.clientX, touch.clientY);
+        }
+    });
+
+    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+        if (pug.children.length === 0 || isPugZoomActive()) {
+            if (isPugHovered) { isPugHovered = false; canvas.style.cursor = ''; }
+            return;
+        }
+        pugMouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        pugMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        pugRaycaster.setFromCamera(pugMouse, camera);
+        const intersects = pugRaycaster.intersectObjects(pug.children, true);
+        if (intersects.length > 0) {
+            if (!isPugHovered) { isPugHovered = true; canvas.style.cursor = 'pointer'; }
+        } else {
+            if (isPugHovered) { isPugHovered = false; canvas.style.cursor = ''; }
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (isPugHovered) { isPugHovered = false; canvas.style.cursor = ''; }
+    });
 }
 
 // ============================================
@@ -830,108 +1052,162 @@ export function Update(): void {
 
         if (getIsPlaying()) {
             radioTime += deltaTime;
-            // Multi-frequency vibration for more organic feel
-            const vibe1 = Math.sin(radioTime * radioVibeSpeed) * radioVibeStrength;
-            const vibe2 = Math.sin(radioTime * radioVibeSpeed * 1.7) * radioVibeStrength * 0.5;
-            const vibe3 = Math.abs(Math.sin(radioTime * radioVibeSpeed * 0.5)) * radioVibeStrength * 0.3;
+            
+            // Music intensity (0-1) from the Web Audio analyser
+            const intensity = getMusicIntensity();
+            
+            // Real music rarely exceeds ~0.45 raw intensity, so remap to use full range.
+            // Clamp to 0-1 after stretching so 0.45 raw → 1.0 effective.
+            const normalized = Math.min(1, intensity / 0.4);
+            // Exponential curve for wider dynamic range:
+            // Near 0 → almost no bounce, near 1 → very strong bounce
+            const curved = normalized * normalized;
+            // Map: 0.05 at silence → ~3.5 at max
+            const intensityScale = 0.05 + curved * 3.45;
+            
+            // Multi-frequency vibration scaled by music energy
+            const vibe1 = Math.sin(radioTime * radioVibeSpeed) * radioVibeStrength * intensityScale;
+            const vibe2 = Math.sin(radioTime * radioVibeSpeed * 1.7) * radioVibeStrength * 0.5 * intensityScale;
+            const vibe3 = Math.abs(Math.sin(radioTime * radioVibeSpeed * 0.5)) * radioVibeStrength * 0.3 * intensityScale;
             const totalVibe = vibe1 + vibe2 + vibe3;
             radio.position.y = radioBaseY + totalVibe;
             // Subtle rotation wobble
-            radio.rotation.z = Math.sin(radioTime * radioVibeSpeed * 0.8) * 0.015;
+            radio.rotation.z = Math.sin(radioTime * radioVibeSpeed * 0.8) * 0.015 * intensityScale;
             
-            // Spawn waves on bounce peaks (when going up and crossing threshold)
-            const bounceUp = totalVibe > radioVibeStrength * 0.5;
-            if (bounceUp && !lastBounceUp && soundWaves.length < WAVE_COUNT) {
-                spawnSoundWave('left');
-                spawnSoundWave('right');
+            // Spawn music note particles
+            buildNoteTextures();
+            const kick = getBeatKick();
+            
+            // Use same normalized intensity as bounce (real music tops ~0.4 raw)
+            const normIntensity = Math.min(1, intensity / 0.4);
+            
+            // Base spawn rate: calm, steady output (every ~1.0s quiet, ~0.3s loud)
+            const spawnInterval = 1.0 - normIntensity * 0.7;
+            // Max particles: 4 at silence, 24 at max
+            const maxNotes = Math.round(4 + normIntensity * 20);
+            
+            noteSpawnTimer += deltaTime;
+            
+            // Detect beat: rising edge of kick (crosses threshold from below)
+            const beatHit = kick > 0.3 && lastBeatKick <= 0.3;
+            lastBeatKick = kick;
+            
+            // Regular calm spawning on timer
+            if (noteSpawnTimer >= spawnInterval && musicNotes.length < maxNotes) {
+                noteSpawnTimer = 0;
+                spawnMusicNote(normIntensity);
             }
-            lastBounceUp = bounceUp;
+            
+            // Beat-triggered burst: spawn extra notes on detected beats
+            if (beatHit && musicNotes.length < maxNotes) {
+                // Number of burst notes scales with beat strength (2-5)
+                const burstCount = Math.min(5, Math.round(2 + kick * 3));
+                for (let b = 0; b < burstCount && musicNotes.length < maxNotes; b++) {
+                    spawnMusicNote(Math.min(1, normIntensity + kick * 0.2));
+                }
+                // Reset timer so we don't double-spawn right after a beat
+                noteSpawnTimer = 0;
+            }
         } else {
             // Smoothly return to base position
             radio.position.y += (radioBaseY - radio.position.y) * 0.1;
             radio.rotation.z *= 0.9;
-            lastBounceUp = false;
+            noteSpawnTimer = 0;
         }
     }
     
-    // Update sound waves
-    updateSoundWaves();
+    // Update pug animation mixer
+    if (pugMixer) {
+        pugMixer.update(deltaTime);
+    }
+
+    // Update music note particles
+    updateMusicNotes();
 }
 
-// Create a sound wave arc (symmetric half rings)
-function spawnSoundWave(side: 'left' | 'right', isTrailing: boolean = false): void {
-    // Both arcs point UPWARD at ~45 degree angles
-    const thetaLength = Math.PI * 0.55;  // ~100 degree arc
-    // Left: arc in upper-left quadrant, Right: arc in upper-right quadrant
-    const thetaStart = side === 'left' 
-        ? Math.PI * 0.45   // Starts at ~80°, spans to ~180° (upper-left)
-        : -Math.PI * 0.1;  // Starts at ~-18°, spans to ~80° (upper-right)
+// Spawn a music note particle along an invisible arch above the radio
+function spawnMusicNote(intensity: number): void {
+    if (noteTextures.length === 0) return;
     
-    // Thin ring, always white
-    const geometry = new RingGeometry(0.02, 0.024, 24, 1, thetaStart, thetaLength);
-    const material = new MeshBasicMaterial({
-        color: 0xffffff,
+    // Pick random note texture
+    const tex = noteTextures[Math.floor(Math.random() * noteTextures.length)];
+    
+    const mat = new SpriteMaterial({
+        map: tex,
         transparent: true,
-        opacity: 1.0,  // Max opacity
-        side: DoubleSide,
-        depthWrite: false
+        opacity: 0,  // starts invisible, fades in
+        depthWrite: false,
+        blending: AdditiveBlending,
     });
-    const arc = new Mesh(geometry, material);
-    arc.castShadow = false;
-    arc.receiveShadow = false;
+    const sprite = new Sprite(mat);
     
-    // Position further from radio (spawn point)
-    const sideOffset = side === 'left' ? -0.1 : 0.1;
-    arc.position.copy(radio.position);
-    arc.position.y += 0.18;
-    arc.position.x += sideOffset;
+    // Size: 0.07 - 0.12
+    const noteSize = 0.07 + Math.random() * 0.05;
+    sprite.scale.set(noteSize, noteSize, 1);
     
-    // Face camera
-    arc.rotation.x = -Math.PI * 0.1;
+    // Spawn position: along a wider arch above the radio, spread in X and Z
+    // archAngle sweeps the XY arch, zAngle adds depth variation
+    const archAngle = Math.random() * Math.PI;  // 0 to PI (left to right)
+    const zAngle = (Math.random() - 0.5) * Math.PI * 0.6;  // ±54° depth spread
+    const archRadius = 0.12 + Math.random() * 0.06;
+    const spawnX = radio.position.x + Math.cos(archAngle) * archRadius;
+    const spawnY = radio.position.y + 0.15 + Math.sin(archAngle) * archRadius * 0.6;
+    const spawnZ = radio.position.z + Math.sin(zAngle) * archRadius * 0.5;
+    sprite.position.set(spawnX, spawnY, spawnZ);
     
-    radio.parent?.add(arc);
-    soundWaves.push({ mesh: arc, progress: isTrailing ? -0.15 : 0, side: side, isTrailing: isTrailing });
+    // Velocity: fast initial launch, deceleration handled in update
+    const speed = (0.12 + intensity * 0.18) * (0.8 + Math.random() * 0.4);
+    const vx = Math.cos(archAngle) * speed * 0.8;  // outward to sides
+    const vy = (0.5 + Math.sin(archAngle) * 0.5) * speed;  // always upward
+    const vz = Math.sin(zAngle) * speed * 0.4;  // outward in depth
     
-    // Spawn trailing wave after main wave (only if this is the main wave)
-    if (!isTrailing) {
-        spawnSoundWave(side, true);
-    }
+    // Lifetime: longer so notes travel further before fading
+    const lifetime = 2.0 + (1 - intensity) * 1.0 + Math.random() * 0.5;
+    
+    // Base opacity scales with intensity: 0.4 at silence, 0.9 at max
+    const baseOpacity = 0.4 + intensity * 0.5;
+    
+    radio.parent?.add(sprite);
+    musicNotes.push({ sprite, age: 0, lifetime, vx, vy, vz, baseOpacity });
 }
 
-// Update all sound waves
-function updateSoundWaves(): void {
-    const WAVE_DURATION = 1.0;  // seconds for wave to complete
-    const MAX_SCALE = 5;  // How much the arc grows
-    const MOVE_DISTANCE = 0.04;  // Shorter travel distance
-    
-    for (let i = soundWaves.length - 1; i >= 0; i--) {
-        const wave = soundWaves[i];
-        wave.progress += deltaTime / WAVE_DURATION;
+// Update all music note particles
+function updateMusicNotes(): void {
+    for (let i = musicNotes.length - 1; i >= 0; i--) {
+        const note = musicNotes[i];
+        note.age += deltaTime;
         
-        if (wave.progress >= 1) {
-            // Remove completed wave
-            wave.mesh.parent?.remove(wave.mesh);
-            wave.mesh.geometry.dispose();
-            (wave.mesh.material as MeshBasicMaterial).dispose();
-            soundWaves.splice(i, 1);
-        } else if (wave.progress < 0) {
-            // Trailing wave waiting to start - keep hidden
-            wave.mesh.visible = false;
-        } else {
-            // Wave is active
-            wave.mesh.visible = true;
-            
-            // Scale up and fade out
-            const scale = 1 + wave.progress * MAX_SCALE;
-            wave.mesh.scale.setScalar(scale);
-            (wave.mesh.material as MeshBasicMaterial).opacity = 1.0 * (1 - wave.progress);
-            
-            // Move outward and upward (shorter distance)
-            const sideOffset = wave.side === 'left' ? -0.1 : 0.1;
-            const moveOffset = wave.progress * MOVE_DISTANCE * (wave.side === 'left' ? -1 : 1);
-            wave.mesh.position.copy(radio.position);
-            wave.mesh.position.y += 0.18 + wave.progress * 0.03;
-            wave.mesh.position.x += sideOffset + moveOffset;
+        if (note.age >= note.lifetime) {
+            note.sprite.parent?.remove(note.sprite);
+            (note.sprite.material as SpriteMaterial).dispose();
+            musicNotes.splice(i, 1);
+            continue;
         }
+        
+        const t = note.age / note.lifetime;  // 0 to 1
+        
+        // Move
+        note.sprite.position.x += note.vx * deltaTime;
+        note.sprite.position.y += note.vy * deltaTime;
+        note.sprite.position.z += note.vz * deltaTime;
+        
+        // Deceleration curve: light drag early, heavy braking in last 40%
+        // This keeps the fast launch feeling while notes slow to a float before fading
+        const drag = t < 0.6 ? 0.998 : 0.96;
+        note.vx *= drag;
+        note.vy *= drag;
+        note.vz *= drag;
+        
+        // Opacity: fade in quickly (first 10%), then fade out
+        let opacity: number;
+        if (t < 0.1) {
+            opacity = note.baseOpacity * (t / 0.1);
+        } else {
+            opacity = note.baseOpacity * (1 - (t - 0.1) / 0.9);
+        }
+        (note.sprite.material as SpriteMaterial).opacity = opacity;
+        
+        // Gentle rotation for visual variety
+        note.sprite.material.rotation += deltaTime * (i % 2 === 0 ? 0.5 : -0.5);
     }
 }

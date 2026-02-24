@@ -247,6 +247,10 @@ export function Start(): void
     scene.add(Island.palmtree);
     scene.add(Island.radio);
     scene.add(Island.sword);
+    scene.add(Island.pug);
+    scene.add(Island.tent);
+    scene.add(Island.dogBed);
+    scene.add(Island.dogBowl);
     // Grass and clover patches are added dynamically as they load
     const addedPatches = new Set<any>();
     const EXPECTED_PATCHES = 42;  // 32 grass + 10 clover

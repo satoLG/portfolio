@@ -61,9 +61,10 @@ export function enableScroll(): void {
 }
 
 // ============================================
-// RADIO ZOOM MODE (for media player)
+// ZOOM MODE (radio and pug)
 // ============================================
 let radioZoomActive = false;
+let pugZoomActive = false;
 
 // Saved camera state before zoom
 let savedCameraX = 0;
@@ -76,41 +77,63 @@ let currentZoomX = 0;
 let currentZoomY = 0;
 let currentZoomZ = 0;
 
-// Target position when zoomed to radio (camera looks at a point above the radio)
-// Radio world position: x ≈ -0.975, y ≈ 0.085, z ≈ -3.075
-const RADIO_ZOOM_TARGET_X = -0.6;   // Slightly to the left to see radio
-const RADIO_ZOOM_TARGET_Y = 0.65;   // Above the radio, looking down slightly
-const RADIO_ZOOM_TARGET_Z = -1.9;   // Closer to the radio
-const RADIO_ZOOM_SMOOTH = 5;        // Smoothing for zoom animation
+const ZOOM_SMOOTH = 5;
+
+// Radio zoom target
+const RADIO_ZOOM_SMOOTH = ZOOM_SMOOTH;
+const RADIO_ZOOM_TARGET_X = -0.6;
+const RADIO_ZOOM_TARGET_Y = 0.65;
+const RADIO_ZOOM_TARGET_Z = -1.9;
+
+// Pug zoom target — pug world position ≈ (0.65, 0.2, -2.3)
+const PUG_ZOOM_TARGET_X = 0.85;
+const PUG_ZOOM_TARGET_Y = 0.5;
+const PUG_ZOOM_TARGET_Z = -1.2;
 
 export function isRadioZoomActive(): boolean {
     return radioZoomActive;
 }
 
-// Zoom camera to focus on radio (called when expanding media player above water)
-export function zoomToRadio(): void {
-    if (radioZoomActive || isUnderwater) return;
-    
-    // Save current camera state
+export function isPugZoomActive(): boolean {
+    return pugZoomActive;
+}
+
+function saveAndStartZoom(): void {
     savedCameraX = camera.position.x;
     savedCameraY = currentY;
     savedCameraZ = camera.position.z;
     savedTargetY = targetY;
-    
-    // Initialize zoom position from current camera position
     currentZoomX = savedCameraX;
     currentZoomY = savedCameraY;
     currentZoomZ = savedCameraZ;
-    
+}
+
+// Zoom camera to focus on radio (called when expanding media player above water)
+export function zoomToRadio(): void {
+    if (radioZoomActive || pugZoomActive || isUnderwater) return;
+    saveAndStartZoom();
     radioZoomActive = true;
 }
 
 // Return camera to previous position (called when collapsing media player)
 export function zoomOutFromRadio(): void {
     if (!radioZoomActive) return;
-    
     radioZoomActive = false;
-    targetY = savedTargetY;  // Restore saved Y target for normal scrolling
+    targetY = savedTargetY;
+}
+
+// Zoom camera to focus on pug
+export function zoomToPug(): void {
+    if (pugZoomActive || radioZoomActive || isUnderwater) return;
+    saveAndStartZoom();
+    pugZoomActive = true;
+}
+
+// Zoom out from pug
+export function zoomOutFromPug(): void {
+    if (!pugZoomActive) return;
+    pugZoomActive = false;
+    targetY = savedTargetY;
 }
 
 // Get saved camera position (for calculating where radio will be after zoomout)
@@ -153,7 +176,7 @@ export function toggleCameraMode(): boolean {
 
 export function handleScroll(deltaY: number): void {
     if (!scrollEnabled) return;  // Block scroll during intro
-    if (radioZoomActive) return;  // Block scroll during radio zoom
+    if (radioZoomActive || pugZoomActive) return;  // Block scroll during zoom
     if (webPageMode) {
         // Free scroll across the full range
         targetY = MathUtils.clamp(targetY - deltaY * scrollSpeed, underwaterBottomY, aboveWaterTopY);
@@ -396,11 +419,14 @@ export function Update(): void
 
     // Web page mode: override camera position with smooth scroll/zoom
     if (webPageMode) {
-        if (radioZoomActive) {
-            // RADIO ZOOM MODE: Smoothly move camera to zoom position (all axes)
-            currentZoomX = MathUtils.damp(currentZoomX, RADIO_ZOOM_TARGET_X, RADIO_ZOOM_SMOOTH, deltaTime);
-            currentZoomY = MathUtils.damp(currentZoomY, RADIO_ZOOM_TARGET_Y, RADIO_ZOOM_SMOOTH, deltaTime);
-            currentZoomZ = MathUtils.damp(currentZoomZ, RADIO_ZOOM_TARGET_Z, RADIO_ZOOM_SMOOTH, deltaTime);
+        if (radioZoomActive || pugZoomActive) {
+            // ZOOM MODE: Smoothly move camera to target position
+            const zoomTargetX = pugZoomActive ? PUG_ZOOM_TARGET_X : RADIO_ZOOM_TARGET_X;
+            const zoomTargetY = pugZoomActive ? PUG_ZOOM_TARGET_Y : RADIO_ZOOM_TARGET_Y;
+            const zoomTargetZ = pugZoomActive ? PUG_ZOOM_TARGET_Z : RADIO_ZOOM_TARGET_Z;
+            currentZoomX = MathUtils.damp(currentZoomX, zoomTargetX, ZOOM_SMOOTH, deltaTime);
+            currentZoomY = MathUtils.damp(currentZoomY, zoomTargetY, ZOOM_SMOOTH, deltaTime);
+            currentZoomZ = MathUtils.damp(currentZoomZ, zoomTargetZ, ZOOM_SMOOTH, deltaTime);
             
             camera.position.x = currentZoomX;
             camera.position.y = currentZoomY;

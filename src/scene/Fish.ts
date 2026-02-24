@@ -294,7 +294,7 @@ export function Start(): void {
 
     // Load clown fish
     loader.load(
-        'models/clownfish.glb',
+        'models/underwater/clownfish.glb',
         (gltf) => {
             clownFish.add(gltf.scene);
             clownFish.scale.setScalar(CIRCLE_FISH_SCALE);
@@ -307,7 +307,7 @@ export function Start(): void {
     
     // Load dori fish
     loader.load(
-        'models/dorifish.glb',
+        'models/underwater/dorifish.glb',
         (gltf) => {
             doriFish.add(gltf.scene);
             doriFish.scale.setScalar(CIRCLE_FISH_SCALE);
@@ -320,7 +320,7 @@ export function Start(): void {
 
     // Load generic fish template (day)
     loader.load(
-        'models/genericfish.glb',
+        'models/underwater/genericfish.glb',
         (gltf) => {
             genericFishTemplate = gltf.scene;
             genericFishAnimations = gltf.animations;
@@ -330,7 +330,7 @@ export function Start(): void {
 
     // Load jellyfish template (night)
     loader.load(
-        'models/jellyfish.glb',
+        'models/underwater/jellyfish.glb',
         (gltf) => {
             jellyfishTemplate = gltf.scene;
             jellyfishAnimations = gltf.animations;

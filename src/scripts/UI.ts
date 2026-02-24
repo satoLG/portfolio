@@ -2,7 +2,7 @@ import { body, shadowsEnabled, pixelSizeValue, SetPixelSize, setShadowsEnabled, 
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
 import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, preloadUISounds, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
-import { getCameraY, setIntroProgress, enableScroll } from "./Control";
+import { getCameraY, setIntroProgress, enableScroll, toggleCameraMode, isWebPageMode } from "./Control";
 import { setLoadingCallback } from "../scene/Island";
 import { t, setLanguage, type Language } from "./i18n";
 
@@ -404,6 +404,10 @@ export function Start(): void {
                         <button class="mode-option${colorFilterValue === 'sepia' ? ' active' : ''}" data-value="sepia" data-i18n="settings.sepia">${t('settings.sepia')}</button>
                     </div>
                 </div>
+                <div class="settings-row">
+                    <span class="settings-label" data-i18n="settings.freeRoam">${t('settings.freeRoam')}</span>
+                    <button class="settings-toggle free-roam-toggle" data-active="${!isWebPageMode()}">${toggleOnSvg}${toggleOffSvg}</button>
+                </div>
             </div>
         </div>
         <div class="settings-tab${tabStates.language ? ' open' : ''}" data-tab="language">
@@ -664,6 +668,16 @@ export function Start(): void {
             btn.classList.add('active');
             SetColorFilter(value || 'none');
         });
+    });
+
+    // ---- Misc Controls: Free Roam Camera Toggle ----
+    const freeRoamToggle = settingsPanel.querySelector('.free-roam-toggle') as HTMLElement;
+    freeRoamToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // toggleCameraMode() returns the new webPageMode value (true = normal scroll, false = free roam)
+        const newWebPageMode = toggleCameraMode();
+        // data-active="true" lights up the toggle — we want it lit when free roam is ON
+        freeRoamToggle.dataset.active = (!newWebPageMode).toString();
     });
     
     // ---- Language Controls ----
