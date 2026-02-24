@@ -36,6 +36,7 @@ const translations: Record<Language, TranslationDict> = {
         'settings.colorFilter': 'Color Filter',
         'settings.bw': 'B&W',
         'settings.sepia': 'Sepia',
+        'settings.freeRoam': 'Free Roam Camera',
 
         // Button titles / tooltips
         'tooltip.toggleTheme': 'Toggle theme',
@@ -96,6 +97,7 @@ const translations: Record<Language, TranslationDict> = {
         'settings.colorFilter': 'Filtro de Cor',
         'settings.bw': 'P&B',
         'settings.sepia': 'Sépia',
+        'settings.freeRoam': 'Câmera Livre',
 
         // Button titles / tooltips
         'tooltip.toggleTheme': 'Alternar tema',

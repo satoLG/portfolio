@@ -148,6 +148,27 @@ export function getIsExpanded(): boolean {
     return isExpanded;
 }
 
+// Smoothed music intensity (0-1) derived from the frequency analyser.
+// Updated every frame by drawAnalyser(). Other modules (e.g. Island radio
+// animation) read this to react to the actual music energy.
+let _musicIntensity = 0;
+let _beatKick = 0;  // Impulse (0-1) that spikes on sudden beats, decays fast
+let _intensityHistory = 0;  // Slow-moving average to detect relative spikes
+const INTENSITY_ATTACK = 0.35;   // Fast attack — react quickly to rises
+const INTENSITY_RELEASE = 0.08;  // Slow release — hold energy briefly
+const BEAT_THRESHOLD = 0.06;     // Min raw jump to count as a beat
+const BEAT_DECAY = 0.88;         // How fast the kick impulse decays per frame
+const HISTORY_SMOOTH = 0.03;     // Very slow average for relative beat detection
+
+export function getMusicIntensity(): number {
+    return _musicIntensity;
+}
+
+/** Impulse value (0-1) that spikes on strong beats. Decays quickly. */
+export function getBeatKick(): number {
+    return _beatKick;
+}
+
 // Get current song cover
 export function getCurrentCover(): string | undefined {
     if (playlist.length === 0) return undefined;
@@ -697,7 +718,9 @@ function stopResizing(): void {
 function createAudioElement(): void {
     audioElement = new Audio();
     audioElement.volume = 1;  // Always max pass-through — volume controlled via Web Audio GainNode
-    audioElement.addEventListener('ended', () => handleSongEnded());
+    // NOTE: Do NOT add an 'ended' listener here — wavesurfer's 'finish' event
+    // already calls handleSongEnded(). Both fire from the same HTMLAudioElement,
+    // so adding 'ended' here would double-trigger nextSong() and skip tracks.
     // Single source of truth: sync isPlaying from the actual audio element state
     audioElement.addEventListener('play', () => syncPlayState());
     audioElement.addEventListener('pause', () => syncPlayState());
@@ -814,6 +837,7 @@ function initWavesurfer(): void {
     startAnalyserAnimation();
     
     wavesurfer.on('play', () => {
+        _songEndHandled = false;  // Reset guard — new song is playing
         isPlaying = true;
         updatePlayButton();
         updateBubblePlayingState();
@@ -961,11 +985,38 @@ function drawAnalyser(): void {
     
     if (isPlaying && analyserNode) {
         analyserNode.getByteFrequencyData(analyserDataArray);
+        // Compute average intensity from frequency data (0-1)
+        // Weight low frequencies (bass) more for better beat reactivity
+        let sum = 0;
+        let weightSum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+            const weight = i < bufferLength * 0.25 ? 2.0 : 1.0;  // Bass bins get 2x weight
+            sum += analyserDataArray[i] * weight;
+            weightSum += 255 * weight;
+        }
+        const rawIntensity = sum / weightSum;
+        
+        // Asymmetric smoothing: fast attack, slow release
+        const smooth = rawIntensity > _musicIntensity ? INTENSITY_ATTACK : INTENSITY_RELEASE;
+        _musicIntensity += (rawIntensity - _musicIntensity) * smooth;
+        
+        // Beat detection: compare raw against slow-moving history
+        const jump = rawIntensity - _intensityHistory;
+        _intensityHistory += (rawIntensity - _intensityHistory) * HISTORY_SMOOTH;
+        if (jump > BEAT_THRESHOLD) {
+            // Scale kick by how big the jump is (capped at 1)
+            _beatKick = Math.min(1, jump / 0.25);
+        } else {
+            _beatKick *= BEAT_DECAY;
+        }
     } else {
         // Idle state: small ambient bars
         for (let i = 0; i < bufferLength; i++) {
             analyserDataArray[i] = 8 + Math.sin(i * 0.3 + Date.now() * 0.001) * 6;
         }
+        // Decay everything when not playing
+        _musicIntensity *= 0.95;
+        _beatKick *= BEAT_DECAY;
     }
 
     const gap = 1;
@@ -1209,9 +1260,17 @@ function updateLoopButton(): void {
     }
 }
 
+// Guard against duplicate 'finish' events — wavesurfer can fire 'finish' a second
+// time when loading a new song (the old media element state triggers it).
+let _songEndHandled = false;
+
 function handleSongEnded(): void {
+    if (_songEndHandled) return;
+    _songEndHandled = true;
+
     if (isLoopEnabled) {
         // Loop the current song
+        _songEndHandled = false;  // allow next loop end to fire
         if (wavesurfer) {
             wavesurfer.seekTo(0);
             wavesurfer.play();
@@ -1500,19 +1559,19 @@ function handleDrop(e: DragEvent): void {
     if (!dropItem || !draggedItem || dropItem === draggedItem) return;
     
     const dropIndex = parseInt(dropItem.dataset.index || '0');
+    if (draggedIndex === dropIndex) return;
     
-    // Reorder the playlist
-    const movedSong = playlist.splice(draggedIndex, 1)[0];
-    playlist.splice(dropIndex, 0, movedSong);
+    // Remember which song is currently playing (by reference)
+    const currentSong = playlist[currentSongIndex];
     
-    // Update currentSongIndex if needed
-    if (currentSongIndex === draggedIndex) {
-        currentSongIndex = dropIndex;
-    } else if (draggedIndex < currentSongIndex && dropIndex >= currentSongIndex) {
-        currentSongIndex--;
-    } else if (draggedIndex > currentSongIndex && dropIndex <= currentSongIndex) {
-        currentSongIndex++;
-    }
+    // Reorder the playlist — adjust insertion index when moving down,
+    // because the first splice shifts all subsequent items back by one.
+    const [movedSong] = playlist.splice(draggedIndex, 1);
+    const insertAt = draggedIndex < dropIndex ? dropIndex - 1 : dropIndex;
+    playlist.splice(insertAt, 0, movedSong);
+    
+    // Update currentSongIndex to follow the currently playing song
+    currentSongIndex = playlist.indexOf(currentSong);
     
     // Rebuild the playlist UI
     buildPlaylistItems();
