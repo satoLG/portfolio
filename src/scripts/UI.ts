@@ -1,7 +1,7 @@
 import { body, shadowsEnabled, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter } from "./Scene";
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
-import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, preloadUISounds, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
+import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, preloadUISounds, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
 import { getCameraY, setIntroProgress, enableScroll, toggleCameraMode, isWebPageMode } from "./Control";
 import { setLoadingCallback } from "../scene/Island";
 import { t, setLanguage, type Language } from "./i18n";
@@ -337,6 +337,7 @@ export function Start(): void {
     const natureVol = Math.round(getNatureVolume() * 100);
     const musicVol = Math.round(getMusicVolume() * 100);
     const interfaceVol = Math.round(getInterfaceVolume() * 100);
+    const characterVol = Math.round(getCharacterVolume() * 100);
     
     // Restore tab states from localStorage
     const savedTabStates = localStorage.getItem('portfolio-settings-tabs');
@@ -363,6 +364,11 @@ export function Start(): void {
                     <span class="settings-label" data-i18n="settings.interface">${t('settings.interface')}</span>
                     <input type="range" class="volume-slider interface-volume" min="0" max="100" value="${interfaceVol}">
                     <button class="settings-toggle interface-toggle" data-active="true">${volumeOnSvg}${volumeOffSvg}</button>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-label" data-i18n="settings.character">${t('settings.character')}</span>
+                    <input type="range" class="volume-slider character-volume" min="0" max="100" value="${characterVol}">
+                    <button class="settings-toggle character-toggle" data-active="true">${volumeOnSvg}${volumeOffSvg}</button>
                 </div>
             </div>
         </div>
@@ -631,6 +637,27 @@ export function Start(): void {
         if (value > 0 && interfaceToggle.dataset.active === 'false') {
             interfaceToggle.dataset.active = 'true';
             setInterfaceMuted(false);
+        }
+    });
+
+    const characterToggle = settingsPanel.querySelector('.character-toggle') as HTMLButtonElement;
+    const characterSlider = settingsPanel.querySelector('.character-volume') as HTMLInputElement;
+    updateSliderFill(characterSlider);
+    characterToggle.dataset.active = (!isCharacterMuted()).toString();
+    characterToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isActive = characterToggle.dataset.active === 'true';
+        characterToggle.dataset.active = (!isActive).toString();
+        setCharacterMuted(isActive);
+    });
+    characterSlider.addEventListener('input', (e) => {
+        e.stopPropagation();
+        updateSliderFill(characterSlider);
+        const value = parseInt(characterSlider.value) / 100;
+        setCharacterVolume(value);
+        if (value > 0 && characterToggle.dataset.active === 'false') {
+            characterToggle.dataset.active = 'true';
+            setCharacterMuted(false);
         }
     });
     

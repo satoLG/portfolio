@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@types/three": "^0.182.0",
+    "lil-gui": "^0.21.0",
     "three": "0.182.0",
     "wavesurfer.js": "^7.12.1"
   }

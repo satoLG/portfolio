@@ -128,6 +128,7 @@ export function Start(): void {
     points = new Points(geometry, material);
     points.frustumCulled = false;
     points.renderOrder = 1000;  // Render AFTER ocean surface and all other transparent objects
+    points.raycast = () => {};   // purely visual — must not intercept raycasts
     scene.add(points);
 
     initialized = true;

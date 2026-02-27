@@ -250,10 +250,8 @@ export function Start(): void
     scene.add(Island.pug);
     scene.add(Island.tent);
     scene.add(Island.dogBed);
-    scene.add(Island.dogBowl);
     // Grass and clover patches are added dynamically as they load
     const addedPatches = new Set<any>();
-    const EXPECTED_PATCHES = 42;  // 32 grass + 10 clover
     const grassInterval = setInterval(() => {
         Island.grassPatches.forEach(patch => {
             if (!addedPatches.has(patch)) {
@@ -261,8 +259,8 @@ export function Start(): void
                 addedPatches.add(patch);
             }
         });
-        // Stop polling once all patches are loaded
-        if (addedPatches.size >= EXPECTED_PATCHES) {
+        // Stop polling once both grass and clover loaders have finished
+        if (Island.isFoliageLoaded()) {
             clearInterval(grassInterval);
         }
     }, 100);

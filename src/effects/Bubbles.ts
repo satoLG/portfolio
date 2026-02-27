@@ -120,6 +120,7 @@ export function Start(): void {
         const mesh = new Mesh(sphereGeo, material);
         mesh.scale.setScalar(size);
         mesh.visible = false;
+        mesh.raycast = () => {};  // purely visual — must not intercept raycasts (ocean ripple, etc.)
         bubbleGroup.add(mesh);
         
         bubbles.push({

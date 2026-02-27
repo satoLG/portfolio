@@ -20,6 +20,7 @@ const translations: Record<Language, TranslationDict> = {
         'settings.nature': 'Nature',
         'settings.music': 'Music',
         'settings.interface': 'Interface',
+        'settings.character': 'Pug',
 
         // Graphics settings
         'settings.preset': 'Preset',
@@ -68,6 +69,10 @@ const translations: Record<Language, TranslationDict> = {
         'player.loop': 'Loop',
         'player.playlist': 'Playlist',
         'player.songs': 'songs',
+
+        // Pug dialog
+        'pug.dialog.0': 'au au.',
+        'pug.dialog.1': 'au au...',
     },
 
     'pt-br': {
@@ -81,6 +86,7 @@ const translations: Record<Language, TranslationDict> = {
         'settings.nature': 'Natureza',
         'settings.music': 'Música',
         'settings.interface': 'Interface',
+        'settings.character': 'Pug',
 
         // Graphics settings
         'settings.preset': 'Predefinição',
@@ -129,6 +135,10 @@ const translations: Record<Language, TranslationDict> = {
         'player.loop': 'Repetir',
         'player.playlist': 'Playlist',
         'player.songs': 'músicas',
+
+        // Diálogo do pug
+        'pug.dialog.0': 'au au.',
+        'pug.dialog.1': 'au au...',
     }
 };
 
