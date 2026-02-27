@@ -92,6 +92,8 @@ const ANIM_CROSSFADE_DURATION = 0.35;
 /** sunVisibility below this value counts as night — TWEAK */
 const PUG_NIGHT_THRESHOLD = 0.35;
 let _pugIsNight = false;
+/** True while a music track is actively playing — suppresses sleep state. */
+let _pugMusicWasPlaying = false;
 
 /** Find the first clip whose name contains ANY of the given substrings (case-insensitive). */
 function _findPugNightAnim(): number {
@@ -1205,14 +1207,19 @@ function _restorePugNightState(): void {
 
 function _startPugDialog(): void {
     // During dialog always use day idle, regardless of night mode
-    pugDefaultAnimIndex = 3;
-    setPugAnimation(3);
+    pugDefaultAnimIndex = _pugMusicWasPlaying ? 4 : 3;
+    setPugAnimation(pugDefaultAnimIndex);
     _clearPugZParticles();
 
     showDialog(PUG_DIALOG_LINES, _getPugScreenPos, () => {
         zoomOutFromPug();
-        // Re-check night state now that dialog is over
-        _restorePugNightState();
+        // If music is playing, stay on the music-default anim; otherwise restore night state
+        if (_pugMusicWasPlaying) {
+            pugDefaultAnimIndex = 4;
+            setPugAnimation(4);
+        } else {
+            _restorePugNightState();
+        }
     });
 }
 
@@ -1484,8 +1491,23 @@ export function Update(): void {
         pugMixer.update(deltaTime);
     }
 
+    // ── Pug music-playing state: suppress sleep when music is on
+    const _musicNowPlaying = getIsPlaying();
+    if (_musicNowPlaying && !_pugMusicWasPlaying) {
+        // Music just started — cancel sleep mode
+        _pugMusicWasPlaying = true;
+        _clearPugZParticles();
+        stopPugSnore();
+        pugDefaultAnimIndex = 4;  // treat as default so any temp anim returns here
+        setPugAnimation(4);  // same clip used at dialog line start (onLineStart)
+    } else if (!_musicNowPlaying && _pugMusicWasPlaying) {
+        // Music just stopped — restore default idle based on day/night
+        _pugMusicWasPlaying = false;
+        _restorePugNightState();
+    }
+
     // ── Pug night-mode: crossfade on day↔night transitions
-    if (pugMixer && pugAnimClips.length > 0 && !isDialogActive()) {
+    if (pugMixer && pugAnimClips.length > 0 && !isDialogActive() && !_pugMusicWasPlaying) {
         const sunVis = sunVisibilityUniform.value as number;
         const shouldBeNight = sunVis < PUG_NIGHT_THRESHOLD;
         if (shouldBeNight !== _pugIsNight) {
@@ -1493,8 +1515,8 @@ export function Update(): void {
         }
     }
 
-    // ── Pug sleep Z particles (only during night, not during dialog)
-    if (_pugIsNight && !isDialogActive() && pug.children.length > 0) {
+    // ── Pug sleep Z particles (only during night, not during dialog, not while music plays)
+    if (_pugIsNight && !isDialogActive() && !_pugMusicWasPlaying && pug.children.length > 0) {
         _pugZTimer += deltaTime;
         if (_pugZTimer >= PUG_Z_SPAWN_INTERVAL && _pugZParticles.length < PUG_Z_MAX) {
             _pugZTimer = 0;
