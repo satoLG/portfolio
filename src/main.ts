@@ -4,6 +4,7 @@ import * as INPUT from "./scripts/Input";
 import * as CONTROL from "./scripts/Control";
 import * as UI from "./scripts/UI";
 import * as DEBUG from "./scripts/Debug";
+import * as ISLAND_DEBUG from "./scripts/IslandDebug";
 import * as SETTINGS from "./shaders/Settings"
 import "./style.css";
 
@@ -27,6 +28,7 @@ INPUT.Start();
 CONTROL.Start();
 UI.Start();
 DEBUG.Start();
+ISLAND_DEBUG.Start();
 
 requestAnimationFrame(UpdateFrame);
 

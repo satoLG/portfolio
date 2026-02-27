@@ -3,6 +3,7 @@ import { deltaTime, time } from "./Time";
 import { camera, cameraRight, cameraForward, UpdateCameraRotation, renderer, staticCamera } from "./Scene.ts"; //body,
 import { KeyCodes, PointerPhase, PointerType, keysJustPressed, keysPressed, lastPointerLockChange, mouseMovement, pointers } from "./Input";
 import { spotLightDistance, spotLightDistanceUniform } from "../materials/OceanMaterial";
+import { islandPosition as cfgIslandPos, radioOffset as cfgRadioOffset, radioRotY as cfgRadioRotY, pugOffset as cfgPugOffset, pugRotY as cfgPugRotY } from '../scene/IslandConfig';
 
 const baseMoveSpeed = 10;
 const shiftMoveSpeed = baseMoveSpeed * 5;
@@ -79,16 +80,30 @@ let currentZoomZ = 0;
 
 const ZOOM_SMOOTH = 5;
 
-// Radio zoom target
-const RADIO_ZOOM_SMOOTH = ZOOM_SMOOTH;
-const RADIO_ZOOM_TARGET_X = -0.6;
-const RADIO_ZOOM_TARGET_Y = 0.65;
-const RADIO_ZOOM_TARGET_Z = -1.9;
+// Radio zoom target — computed from IslandConfig so camera sits on the radio's front face normal
+const RADIO_ZOOM_SMOOTH  = ZOOM_SMOOTH;
+const RADIO_ZOOM_DIST    = 1.5;   // World-units in front of the radio face
+const _radioWorldX = cfgIslandPos.x + cfgRadioOffset.x;
+const _radioWorldY = cfgIslandPos.y + cfgRadioOffset.y;
+const _radioWorldZ = cfgIslandPos.z + cfgRadioOffset.z;
+// Camera position: radio_world + frontNormal * dist  (frontNormal = [sin(rotY), 0, cos(rotY)])
+const RADIO_ZOOM_TARGET_X = _radioWorldX + RADIO_ZOOM_DIST * Math.sin(cfgRadioRotY);
+const RADIO_ZOOM_TARGET_Y = _radioWorldY + 0.55;   // Well above island surface
+const RADIO_ZOOM_TARGET_Z = _radioWorldZ + RADIO_ZOOM_DIST * Math.cos(cfgRadioRotY);
+// Camera yaw: phi = 2π − rotY makes the camera look along −frontNormal (directly at radio front)
+const RADIO_ZOOM_PHI = Math.PI * 2 - cfgRadioRotY;
+let zoomPhi = Math.PI * 2;  // Smoothly interpolated camera yaw, only active in webPageMode
 
-// Pug zoom target — pug world position ≈ (0.65, 0.2, -2.3)
-const PUG_ZOOM_TARGET_X = 0.85;
-const PUG_ZOOM_TARGET_Y = 0.5;
-const PUG_ZOOM_TARGET_Z = -1.2;
+// Pug zoom target — computed from IslandConfig respecting pug rotation
+const PUG_ZOOM_DIST    = 1.2;   // World-units in front of pug face
+const _pugWorldX = cfgIslandPos.x + cfgPugOffset.x;
+const _pugWorldY = cfgIslandPos.y + cfgPugOffset.y;
+const _pugWorldZ = cfgIslandPos.z + cfgPugOffset.z;
+const PUG_ZOOM_TARGET_X = _pugWorldX + PUG_ZOOM_DIST * Math.sin(cfgPugRotY);
+const PUG_ZOOM_TARGET_Y = _pugWorldY + 0.55;
+const PUG_ZOOM_TARGET_Z = _pugWorldZ + PUG_ZOOM_DIST * Math.cos(cfgPugRotY);
+// phi = 2π − rotY makes camera look along −frontNormal (same derivation as radio)
+const PUG_ZOOM_PHI = Math.PI * 2 - cfgPugRotY;
 
 export function isRadioZoomActive(): boolean {
     return radioZoomActive;
@@ -296,10 +311,15 @@ export function Update(): void
         }
         else if (touchControls && webPageMode)
         {
-            // Touch scrolling in web page mode
-            if (pointer.phase == PointerPhase.moved)
+            // Two-finger scroll: gate on 2+ simultaneous touches.
+            // Only process for the first pointer (i === 0) to avoid double-counting.
+            if (pointer.phase == PointerPhase.moved && pointers.length >= 2 && i === 0)
             {
-                handleScroll(-pointer.deltaPosition.y * 2);
+                // Average Y delta across all active touch pointers for stable scrolling
+                let avgDeltaY = 0;
+                for (const p of pointers) avgDeltaY += p.deltaPosition.y;
+                avgDeltaY /= pointers.length;
+                handleScroll(-avgDeltaY * 2);
             }
         }
         else if (pointer.type == PointerType.mouse && !document.pointerLockElement && pointer.phase == PointerPhase.ended && time - lastPointerLockChange > 1.5 && !webPageMode)
@@ -434,6 +454,13 @@ export function Update(): void
             
             // Keep currentY in sync for when we exit zoom
             currentY = currentZoomY;
+
+            // Smoothly rotate camera to face the target during zoom
+            if (radioZoomActive) {
+                zoomPhi = MathUtils.damp(zoomPhi, RADIO_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
+            } else if (pugZoomActive) {
+                zoomPhi = MathUtils.damp(zoomPhi, PUG_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
+            }
         } else {
             // NORMAL MODE: Smooth Y scrolling, fixed X and Z
             let smoothFactor = introActive ? introSmooth : scrollSmooth;
@@ -468,7 +495,13 @@ export function Update(): void
                 camera.position.x = 0;
                 camera.position.z = 0.9;
             }
-            
+
+            // Smoothly return camera yaw to default after radio zoom
+            if (Math.abs(zoomPhi - Math.PI * 2) > 0.001) {
+                zoomPhi = MathUtils.damp(zoomPhi, Math.PI * 2, ZOOM_SMOOTH, deltaTime);
+                if (Math.abs(zoomPhi - Math.PI * 2) < 0.001) zoomPhi = Math.PI * 2;
+            }
+
             currentY = MathUtils.damp(currentY, targetY, smoothFactor, deltaTime);
             camera.position.y = currentY;
         }
@@ -481,7 +514,8 @@ export function Update(): void
     }
 
     const qx = new Quaternion();
-    qx.setFromAxisAngle(new Vector3(0, -1, 0), phi);
+    // In web-page mode, zoomPhi drives camera yaw (smoothly rotates to face radio front on zoom)
+    qx.setFromAxisAngle(new Vector3(0, -1, 0), webPageMode ? zoomPhi : phi);
     const qy = new Quaternion();
     qy.setFromAxisAngle(new Vector3(1, 0, 0), tetha);
 

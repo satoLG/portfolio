@@ -1178,7 +1178,7 @@ export function expandPlayer(): void {
     }, ANIM_DURATION + 50);
 }
 
-function collapsePlayer(): void {
+export function collapsePlayer(): void {
     if (!isExpanded || !playerContainer) return;
     isExpanded = false;
     isAnimating = true;

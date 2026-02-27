@@ -23,6 +23,7 @@ const BUBBLE_SFX_DURATION = 2000;
 const UI_SOUND_THROTTLE = 100;
 const WATER_SPLASH_VOLUME = 0.3;
 const UI_SOUND_VOLUME = 0.4;
+const CHARACTER_SNORE_VOLUME = 0.5;
 const CROSSFADE_DURATION = 1.0;
 const AUDIO_CHECK_INTERVAL = 2000;
 const FADE_IN_DURATION = 2.0;  // seconds — all audio fades in over this after start
@@ -40,6 +41,7 @@ const AUDIO_PATHS = {
     uiBubbleExpand: '/audio/ui/universfield-bubble-pop-293342.mp3',
     uiBubbleCollapse: '/audio/ui/universfield-bubble-pop-06-351337.mp3',
     uiSpin: '/audio/ui/712916__greyfeather__spinning-a-crank-fast.wav',
+    pugSnore: '/audio/character/freesound_community-pug-roncando-95042.mp3',
 };
 
 // ============================================
@@ -153,11 +155,17 @@ function isBufferPlaying(sound: BufferSound | null): boolean {
 let masterGain: GainNode | null = null;
 let natureGain: GainNode | null = null;
 let interfaceGain: GainNode | null = null;
+let characterGain: GainNode | null = null;
 
 /** Master output node — all audio routes through this for global fade-in.
  *  External consumers (e.g. MediaPlayer) should connect here instead of ctx.destination. */
 export function getMasterDestination(): AudioNode | null {
     return masterGain ?? _audioContext?.destination ?? null;
+}
+
+/** Character audio output node — dialog barks and pug snore route through this. */
+export function getCharacterDestination(): AudioNode | null {
+    return characterGain ?? getMasterDestination();
 }
 
 // ============================================
@@ -184,6 +192,26 @@ let bubblesStopTimer: ReturnType<typeof setTimeout> | null = null;
 let waterSplashSound: BufferSound | null = null;
 
 // ============================================
+// CHARACTER SOUNDS
+// ============================================
+let pugSnoreSound: BufferSound | null = null;
+let _snoreActive = false;
+let _snoreTimeout: ReturnType<typeof setTimeout> | null = null;
+const SNORE_MIN_PAUSE = 1.5;  // seconds of silence between snore clip plays
+const SNORE_MAX_PAUSE = 3.0;
+
+function _scheduleNextSnore(): void {
+    if (!_snoreActive) return;
+    const delay = SNORE_MIN_PAUSE + Math.random() * (SNORE_MAX_PAUSE - SNORE_MIN_PAUSE);
+    _snoreTimeout = setTimeout(() => {
+        if (!_snoreActive || !pugSnoreSound) return;
+        playBufferSound(pugSnoreSound, {
+            onEnded: () => { if (_snoreActive) _scheduleNextSnore(); }
+        });
+    }, delay * 1000);
+}
+
+// ============================================
 // UI SOUNDS
 // ============================================
 let uiSwitchDaySound: BufferSound | null = null;
@@ -208,11 +236,13 @@ let lastAudioCheck = 0;
 let natureMuted = false;
 let musicMuted = false;
 let interfaceMuted = false;
+let characterMuted = false;
 
 // Volume state (persisted to localStorage)
 let natureVolume = parseFloat(localStorage.getItem('portfolio-nature-volume') ?? '1');
 let musicVolume = parseFloat(localStorage.getItem('portfolio-music-volume') ?? '1');
 let interfaceVolume = parseFloat(localStorage.getItem('portfolio-interface-volume') ?? '1');
+let characterVolume = parseFloat(localStorage.getItem('portfolio-character-volume') ?? '1');
 
 // ============================================
 // WATER CROSSFADE
@@ -520,6 +550,38 @@ export function setInterfaceVolume(v: number): void {
     if (!interfaceMuted && interfaceGain) interfaceGain.gain.value = v;
 }
 
+export function getCharacterVolume(): number { return characterVolume; }
+export function isCharacterMuted(): boolean { return characterMuted; }
+
+export function setCharacterVolume(v: number): void {
+    characterVolume = v;
+    localStorage.setItem('portfolio-character-volume', v.toString());
+    if (!characterMuted && characterGain) characterGain.gain.value = v;
+}
+
+export function setCharacterMuted(muted: boolean): void {
+    characterMuted = muted;
+    if (characterGain) characterGain.gain.value = muted ? 0 : characterVolume;
+}
+
+/** Start pug snoring loop (safe to call repeatedly — no-op if already active). */
+export function playPugSnore(): void {
+    if (!audioInitialized || !pugSnoreSound) return;
+    if (_snoreActive) return;  // already playing/scheduled
+    _snoreActive = true;
+    // Play first clip immediately, then schedule repeats via onEnded
+    playBufferSound(pugSnoreSound, {
+        onEnded: () => { if (_snoreActive) _scheduleNextSnore(); }
+    });
+}
+
+/** Stop pug snore and cancel any pending replay. */
+export function stopPugSnore(): void {
+    _snoreActive = false;
+    if (_snoreTimeout) { clearTimeout(_snoreTimeout); _snoreTimeout = null; }
+    if (pugSnoreSound) stopBufferSound(pugSnoreSound);
+}
+
 // ============================================
 // UI SOUND EFFECTS
 // ============================================
@@ -602,6 +664,9 @@ async function initAudio(): Promise<void> {
     interfaceGain = _audioContext.createGain();
     interfaceGain.gain.value = interfaceMuted ? 0 : interfaceVolume;
     interfaceGain.connect(masterGain);
+    characterGain = _audioContext.createGain();
+    characterGain.gain.value = characterMuted ? 0 : characterVolume;
+    characterGain.connect(masterGain);
 
     // Wait for pre-fetched audio data (eliminates network delay)
     if (_prefetchPromise) await _prefetchPromise;
@@ -624,6 +689,14 @@ async function initAudio(): Promise<void> {
         underwaterAmbSound = createBufferSound(underwaterAmbBuf, natureGain, { loop: true, volume: UNDERWATER_AMB_VOLUME });
         underwaterBubblesSound = createBufferSound(underwaterBubblesBuf, natureGain, { volume: TRANSITION_SFX_VOLUME });
         waterSplashSound = createBufferSound(waterSplashBuf, natureGain, { volume: WATER_SPLASH_VOLUME });
+
+        // Load character sounds
+        try {
+            const pugSnoreBuf = await loadAudioBuffer(AUDIO_PATHS.pugSnore);
+            pugSnoreSound = createBufferSound(pugSnoreBuf, characterGain!, { loop: false, volume: CHARACTER_SNORE_VOLUME });
+        } catch (e) {
+            console.warn('Failed to load character sounds:', e);
+        }
 
         // Sync day state
         wasDay = isDayTime();

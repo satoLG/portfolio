@@ -753,7 +753,7 @@ export function Update(): void {
     // Update shadow spotlight world position to follow fire
     // Positioned just slightly above the fire so shadows spread outward with visible length
     fireLight.getWorldPosition(_fireShadowWorldPos);
-    fireShadowLight.position.set(_fireShadowWorldPos.x, _fireShadowWorldPos.y + 0.3, _fireShadowWorldPos.z);
+    fireShadowLight.position.set(_fireShadowWorldPos.x, _fireShadowWorldPos.y + 0.4, _fireShadowWorldPos.z);
     fireShadowLight.target.position.set(_fireShadowWorldPos.x, _fireShadowWorldPos.y - 1, _fireShadowWorldPos.z);
     
     // Keep fire.visible = true always so shaders stay compiled (avoids first-toggle stall).

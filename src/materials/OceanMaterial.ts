@@ -80,8 +80,12 @@ interface Ripple {
 
 const MAX_RIPPLES = 3;  // Reduced from 5 for better mobile performance
 const ripples: Ripple[] = [];
-export const ripplesUniform = new Uniform(new Float32Array(MAX_RIPPLES * 3)); // x, z, time for each ripple
-export const rippleCountUniform = new Uniform(3);
+// Initialise all time slots to -999 (inactive) so the GPU never sees ghost ripples
+// before the first Update() call.  rippleCountUniform starts at 0 for the same reason.
+const _rippleInitData = new Float32Array(MAX_RIPPLES * 3);
+for (let i = 0; i < MAX_RIPPLES; i++) _rippleInitData[i * 3 + 2] = -999;
+export const ripplesUniform = new Uniform(_rippleInitData);
+export const rippleCountUniform = new Uniform(0);  // was 3 — caused ghost ripples on startup
 export const rippleSpeedUniform = new Uniform(1.0);      // How fast ripples expand
 export const rippleLifetimeUniform = new Uniform(1.2);   // Reduced from 1.5 for faster cleanup
 export const rippleAmplitudeUniform = new Uniform(0.85); // Height of ripple wave

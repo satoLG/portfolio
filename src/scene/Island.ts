@@ -1,13 +1,27 @@
-import { Group, Object3D, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, LoopRepeat } from "three";
+import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, MeshDepthMaterial, RGBADepthPacking } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { oceanAbsorptionUniform, setFoamMask } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../scripts/Time";
-import { getIsPlaying, expandPlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../scripts/MediaPlayer";
-import { zoomToPug, zoomOutFromPug, isPugZoomActive } from "../scripts/Control";
-import { isBreezeActive } from "../scripts/Audio";
-import { camera, renderer } from "../scripts/Scene";
+import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../scripts/MediaPlayer";
+import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive } from "../scripts/Control";
+import { showDialog, advanceDialog, isDialogActive } from "../scripts/Dialog";
+import type { DialogLine } from "../scripts/Dialog";
+import { isBreezeActive, playPugSnore, stopPugSnore } from "../scripts/Audio";
+import { camera, renderer, scene as threeScene } from "../scripts/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
+import {
+    islandPosition, firecampOffset, palmtreeOffset, radioOffset, swordOffset,
+    pugOffset, tentOffset, dogBedOffset,
+    islandScale, firecampScale, palmtreeScale, radioScale, swordScale, pugScale, tentScale, dogBedScale,
+    palmtreeRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY,
+    CLUSTER_MAIN as CLUSTER_MAIN_CFG,
+    CLUSTER_PALM as CLUSTER_PALM_CFG,
+    GRASS_COUNT  as GRASS_COUNT_CFG,
+    GRASS_COUNT_PALM as GRASS_COUNT_PALM_CFG,
+    CLOVER_COUNT as CLOVER_COUNT_CFG,
+    SURFACE_EDGE_PADDING,
+} from './IslandConfig';
 
 export const island = new Group();
 export const firecamp = new Group();
@@ -17,14 +31,143 @@ export const sword = new Group();
 export const pug = new Group();
 export const tent = new Group();
 export const dogBed = new Group();
-export const dogBowl = new Group();
 export const grassPatches: Group[] = [];
 
 // Store palm tree leaves for wind animation
 const palmLeaves: Object3D[] = [];
 
-// Pug animation mixer
-let pugMixer: AnimationMixer | null = null;
+// Island surface meshes — populated once the island glTF loads.
+// Used by isOnIslandSurface() to confine foliage spawning to the island top.
+const islandMeshes: Mesh[] = [];
+const _spawnRaycaster = new Raycaster();
+const _spawnOrigin    = new Vector3();
+const _spawnDown      = new Vector3(0, -1, 0);
+
+// SURFACE_EDGE_PADDING is imported from IslandConfig.ts
+
+/**
+ * Calls `callback` once islandMeshes has been populated.
+ * Polls via requestAnimationFrame so it never blocks the main thread.
+ */
+function waitForIslandMeshes(callback: () => void): void {
+    if (islandMeshes.length > 0) { callback(); return; }
+    requestAnimationFrame(() => waitForIslandMeshes(callback));
+}
+
+/**
+ * Returns true if world position (wx, wz) is directly above the island mesh
+ * AND all four cardinal neighbours at SURFACE_EDGE_PADDING distance also hit
+ * the island, ensuring the patch is not too close to any edge.
+ * Falls back to true when island hasn't loaded yet so spawning isn't blocked.
+ */
+function isOnIslandSurface(wx: number, wz: number): boolean {
+    if (islandMeshes.length === 0) return true;
+    const p = SURFACE_EDGE_PADDING;
+    const checks: [number, number][] = [
+        [wx,     wz    ],  // center
+        [wx + p, wz    ],  // east
+        [wx - p, wz    ],  // west
+        [wx,     wz + p],  // south
+        [wx,     wz - p],  // north
+    ];
+    for (const [cx, cz] of checks) {
+        _spawnOrigin.set(cx, 5, cz);
+        _spawnRaycaster.set(_spawnOrigin, _spawnDown);
+        if (_spawnRaycaster.intersectObjects(islandMeshes, false).length === 0) return false;
+    }
+    return true;
+}
+
+// Pug animation mixer & exported animation state
+export let pugMixer: AnimationMixer | null = null;
+export let pugAnimClips: AnimationClip[] = [];
+export let pugCurrentAnimIndex = 3;
+/** The animation index the pug returns to when idle (changes at night). */
+export let pugDefaultAnimIndex = 3;
+
+/** Duration (seconds) for crossfade blending between pug animations. */
+const ANIM_CROSSFADE_DURATION = 0.35;
+
+// ── Night-mode state ─────────────────────────────────────────────────────────
+/** sunVisibility below this value counts as night — TWEAK */
+const PUG_NIGHT_THRESHOLD = 0.35;
+let _pugIsNight = false;
+
+/** Find the first clip whose name contains ANY of the given substrings (case-insensitive). */
+function _findPugNightAnim(): number {
+    const terms = ['idle_headlow', 'headlow', 'head_low', 'sleep', 'sleeping', 'low'];
+    for (const term of terms) {
+        const idx = pugAnimClips.findIndex(c => c.name.toLowerCase().includes(term));
+        if (idx >= 0) {
+            console.log(`[Pug] Night anim matched "${term}" → index ${idx}: "${pugAnimClips[idx].name}"`);
+            return idx;
+        }
+    }
+    console.warn('[Pug] Night animation not found. Available clips:', pugAnimClips.map((c, i) => `${i}: "${c.name}"`));
+    return -1;
+}
+
+// ── Sleep-Z particle settings ─────────────────────────────────────────────────
+/** Seconds between each spawned Z — TWEAK */
+const PUG_Z_SPAWN_INTERVAL = 3.0;  // seconds between Z particle spawns (also snore start delay)
+/** Maximum simultaneous Z sprites — TWEAK */
+const PUG_Z_MAX = 5;
+let _pugZTimer = 0;
+let _pugZTexture: CanvasTexture | null = null;
+const _pugZParticles: MusicNote[] = [];   // reuse same shape as music notes
+
+// Currently active AnimationAction — needed to crossfade from it
+let _pugCurrentAction: AnimationAction | null = null;
+// Pending loop-return listener — stored so it can be cancelled on re-entry
+let _pugReturnListener: ((e: any) => void) | null = null;
+
+/**
+ * Crossfade to the clip at `index`, looping infinitely.
+ * Cancels any pending auto-return scheduled by playPugAnimationThenReturn.
+ */
+export function setPugAnimation(index: number, crossfadeDuration = ANIM_CROSSFADE_DURATION): void {
+    if (!pugMixer || pugAnimClips.length === 0) return;
+    const clip = pugAnimClips[index];
+    if (!clip) return;
+    // Cancel any scheduled loop-return
+    if (_pugReturnListener) {
+        pugMixer.removeEventListener('loop', _pugReturnListener);
+        _pugReturnListener = null;
+    }
+    pugCurrentAnimIndex = index;
+    const next = pugMixer.clipAction(clip);
+    next.setLoop(LoopRepeat, Infinity);
+    if (_pugCurrentAction && _pugCurrentAction !== next) {
+        next.reset().play();
+        _pugCurrentAction.crossFadeTo(next, crossfadeDuration, true);
+    } else {
+        next.reset().play();
+    }
+    _pugCurrentAction = next;
+}
+
+/**
+ * Play animation `index` for at least one full loop, then crossfade back to
+ * `pugDefaultAnimIndex` (automatically correct for day / night state).
+ * A second call before the first loop finishes cancels the previous return.
+ */
+export function playPugAnimationThenReturn(index: number): void {
+    if (!pugMixer || pugAnimClips.length === 0) return;
+    // Cancel previous pending return before starting a new one
+    if (_pugReturnListener) {
+        pugMixer.removeEventListener('loop', _pugReturnListener);
+        _pugReturnListener = null;
+    }
+    setPugAnimation(index);
+    const listenAction = _pugCurrentAction;
+    _pugReturnListener = (e: { action: AnimationAction }) => {
+        if (e.action !== listenAction) return;
+        pugMixer!.removeEventListener('loop', _pugReturnListener!);
+        _pugReturnListener = null;
+        setPugAnimation(pugDefaultAnimIndex);
+    };
+    pugMixer.addEventListener('loop', _pugReturnListener as any);
+}
 
 // Music note particles for radio
 interface MusicNote {
@@ -96,47 +239,147 @@ export function getLoadingProgress(): number {
 
 const loader = new GLTFLoader(loadingManager);
 
-// FLOATING ISLAND SETTINGS — tweak position/scale here
-const islandPosition = { x: 0, y: -0.8, z: -3.3 };
-const firecampOffset = { x: 0, y: 1.0, z: 0.4 };
-const palmtreeOffset = { x: -0.35, y: 1.0, z: -0.3 };
-const radioOffset = { x: -0.65, y: 1.0, z: 0.20 };  // In front of firecamp, left of center
-const swordOffset = { x: 0.08, y: 1.3, z: 0.4 };  // Stuck in the middle of the bonfire
-const pugOffset = { x: 0.65, y: 1.0, z: 1 };  // Opposite side of radio relative to firecamp
-const tentOffset = { x: 0.48, y: 0.97, z: -0.35 };  // Right of palm tree (camera view)
-const dogBedOffset = { x: 0.38, y: 0.97, z: -0.35 };  // Centered inside tent, flush to ground
-const dogBowlOffset = { x: 0.52, y: 1.1, z: -0.5 };  // Slightly to the side of bed
-
-const islandScale = 0.25;
-const firecampScale = 1.4;
-// const palmtreeScale = 0.75;
-const palmtreeScale = 0.5;
-const radioScale = 0.22;
-const swordScale = 0.25;
-const pugScale = 0.45;
-const tentScale = 1.8;
-const dogBedScale = 0.3;
-const dogBowlScale = 0.5;
+// Placement constants are imported from IslandConfig.ts — edit that file or
+// use the debug panel's "Copy Config" button to regenerate it.
 
 // Radio vibration settings
 let radioTime = 0;
 const radioBaseY = islandPosition.y + radioOffset.y;
 const radioVibeStrength = 0.003;  // Very subtle bounce
-const radioVibeSpeed = 12;  // Quick vibration
+const radioVibeSpeed = 15;  // Quick vibration
 
 // GRASS/CLOVER SPAWN SETTINGS
-const MIN_DISTANCE_FROM_CENTER = 0.35;  // TWEAK: Minimum distance to avoid bonfire
-const MAX_DISTANCE = 0.65;  // TWEAK: Maximum spread distance
+// All positions and exclusion zones are in ABSOLUTE WORLD XZ space.
+// Object world positions (for reference):
+//   Firecamp  : X= 0.00  Z=-2.90   (islandPos + firecampOffset)  scale 1.4
+//   Tent      : X= 0.48  Z=-3.65   (islandPos + tentOffset)       scale 1.8
+//   Palm trunk: X=-0.35  Z=-3.60   (islandPos + palmtreeOffset)
+//   Pug       : X= 0.65  Z=-2.30   (islandPos + pugOffset)
+//   Radio     : X=-0.65  Z=-3.10   (islandPos + radioOffset)
 
-// GRASS SETTINGS - easily tweakable
-const GRASS_COUNT = 32;  // Number of grass patches
-const grassScale = 0.22;
-const grassBaseOffset = { x: 0.4, y: 0.93, z: 0.6 };  // Base position near palm tree
+// Spawn clusters ─ each cluster is a filled annulus (donut) in world XZ
+// Mutable cluster objects — initialised from config, then mutated live by the debug panel
+export const CLUSTER_MAIN = { ...CLUSTER_MAIN_CFG };
+export const CLUSTER_PALM = { ...CLUSTER_PALM_CFG };
 
-// CLOVER SETTINGS
-const CLOVER_COUNT = 10;  // Number of clover patches
-const cloverScale = 0.15;
-const cloverBaseOffset = { x: 0.4, y: 0.93, z: 0.6 };  // Same Y as grass for consistency
+// Per-cluster patch lists — used by IslandDebug to shift patches when the center moves
+export const clusterMainPatches: Group[] = [];
+export const clusterPalmPatches: Group[] = [];
+export const clusterCloverPatches: Group[] = [];
+
+// Cached gltf source scenes for runtime respawning
+let grassGltfScene: Group | null = null;
+let cloverGltfScene: Group | null = null;
+const GRASS_Y   = islandPosition.y + 0.90;  // World Y for grass placement
+const CLOVER_Y  = islandPosition.y + 0.98;  // World Y for clover placement
+
+// Exclusion zones — objects that should not have grass underneath them.
+// Radii are intentionally generous so footprints are fully clear.
+interface ExclusionZone { x: number; z: number; r: number; }
+const SPAWN_EXCLUSION_ZONES: ExclusionZone[] = [
+    { x:  0.00,  z: -2.90, r: 0.42 },  // Bonfire + sword + campfire footprint
+    { x:  0.48,  z: -3.70, r: 0.42 },  // Tent + dog bed + dog bowl
+    { x: -0.35,  z: -3.60, r: 0.14 },  // Palm trunk (small — palm-cluster grass grows around it)
+    { x:  0.65,  z: -2.30, r: 0.34 },  // Pug
+    { x: -0.65,  z: -3.10, r: 0.26 },  // Radio
+];
+const PATCH_MIN_SPACING  = 0.055;  // Min world-space gap between any two patches
+const SPAWN_MAX_ATTEMPTS = 40;     // Retries per patch before giving up
+
+// sx/sz are absolute world XZ coordinates
+function isValidSpawnPos(sx: number, sz: number, placed: Array<{x: number; z: number}>): boolean {
+    // Reject positions that don't land on the island surface
+    if (!isOnIslandSurface(sx, sz)) return false;
+    for (const zone of SPAWN_EXCLUSION_ZONES) {
+        const dx = sx - zone.x, dz = sz - zone.z;
+        if (dx * dx + dz * dz < zone.r * zone.r) return false;
+    }
+    for (const p of placed) {
+        const dx = sx - p.x, dz = sz - p.z;
+        if (dx * dx + dz * dz < PATCH_MIN_SPACING * PATCH_MIN_SPACING) return false;
+    }
+    return true;
+}
+
+// Shared placed-positions list so grass AND clover don't overlap each other
+const foliageSpawnPlaced: Array<{x: number; z: number}> = [];
+
+// Signals when both loader callbacks have finished so Scene.ts can stop polling
+let _grassLoaded  = false;
+let _cloverLoaded = false;
+export function isFoliageLoaded(): boolean { return _grassLoaded && _cloverLoaded; }
+
+// Mutable counts — initialised from config, then mutated live by the debug panel
+export let GRASS_COUNT      = GRASS_COUNT_CFG;
+export let GRASS_COUNT_PALM = GRASS_COUNT_PALM_CFG;
+const grassScale = 0.2;
+export let CLOVER_COUNT = CLOVER_COUNT_CFG;
+const cloverScale = 0.08;
+
+/** Setters — ES module bindings are read-only from outside, use these to mutate counts */
+export function setGrassCount(n: number)     { GRASS_COUNT      = Math.max(0, Math.round(n)); }
+export function setGrassPalmCount(n: number) { GRASS_COUNT_PALM = Math.max(0, Math.round(n)); }
+export function setCloverCount(n: number)    { CLOVER_COUNT     = Math.max(0, Math.round(n)); }
+
+// ─── Runtime respawn ─────────────────────────────────────────────────────────
+export type FoliageCluster = 'grass-main' | 'grass-palm' | 'clover';
+
+export function respawnFoliage(which: FoliageCluster): void {
+    const sourceScene = which === 'clover' ? cloverGltfScene : grassGltfScene;
+    if (!sourceScene) { console.warn('respawnFoliage: gltf not loaded yet'); return; }
+
+    const targetPatches = which === 'grass-main' ? clusterMainPatches
+                        : which === 'grass-palm'  ? clusterPalmPatches
+                        : clusterCloverPatches;
+    const cluster   = which === 'grass-palm' ? CLUSTER_PALM : CLUSTER_MAIN;
+    const count     = which === 'grass-main' ? GRASS_COUNT
+                    : which === 'grass-palm'  ? GRASS_COUNT_PALM
+                    : CLOVER_COUNT;
+    const yPos  = which === 'clover' ? CLOVER_Y : GRASS_Y;
+    const scale = which === 'clover' ? cloverScale : grassScale;
+
+    // Remove old patches from the Three.js scene and tracking arrays
+    for (const p of targetPatches) {
+        p.parent?.remove(p);
+        const idx = grassPatches.indexOf(p);
+        if (idx !== -1) grassPatches.splice(idx, 1);
+    }
+    targetPatches.length = 0;
+
+    // Build placed list from ALL surviving patches (cross-cluster collision)
+    const placed: Array<{x: number; z: number}> = grassPatches.map(p => ({ x: p.position.x, z: p.position.z }));
+
+    // Spawn new patches
+    for (let i = 0; i < count; i++) {
+        for (let attempt = 0; attempt < SPAWN_MAX_ATTEMPTS; attempt++) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist  = cluster.minR + Math.random() * (cluster.maxR - cluster.minR);
+            const wx = cluster.wx + Math.cos(angle) * dist;
+            const wz = cluster.wz + Math.sin(angle) * dist;
+            if (!isValidSpawnPos(wx, wz, placed)) continue;
+
+            placed.push({ x: wx, z: wz });
+            const patch = new Group();
+            const model = sourceScene.clone();
+            applyFoliageWindShader(model);
+            model.traverse(child => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    (child as any).receiveShadow = true;
+                }
+            });
+            patch.add(model);
+            patch.position.set(wx, yPos, wz);
+            patch.scale.setScalar(scale);
+            patch.rotation.y = Math.random() * Math.PI * 2;
+            threeScene.add(patch);
+            grassPatches.push(patch);
+            targetPatches.push(patch);
+            break;
+        }
+    }
+    console.log(`[Island] Respawned ${targetPatches.length}/${count} ${which} patches`);
+}
 
 // PALM TREE WIND SETTINGS - easily tweakable
 const PALM_WIND_STRENGTH = 0.03;    // TWEAK: How much leaves sway (0.05-0.3)
@@ -159,9 +402,8 @@ const foliageWindStrengthUniform = new Uniform(FOLIAGE_WIND_STRENGTH);
 const raycaster = new Raycaster();
 const mouse = new Vector2();
 const mouseWorldPos = new Uniform(new Vector3(0, -100, 0));  // Far away by default
-const mouseInfluenceRadius = new Uniform(0.25);  // TWEAK: Small area
-const mouseInfluenceStrength = new Uniform(0.025);  // TWEAK: Very subtle bend
-// let isMouseOverGrass = false;
+const mouseInfluenceRadius = new Uniform(0.50);   // Wide area — very gradual falloff
+const mouseInfluenceStrength = new Uniform(0.018); // Very subtle — barely noticeable
 
 // BREEZE-DRIVEN WIND SETTINGS
 const BREEZE_RAMP_UP = 1.0;           // Seconds to ramp up wind when breeze starts
@@ -347,7 +589,12 @@ function applyFoliageWindShader(model: Group): void {
                     mat.alphaTest = 0.5;
                     mat.transparent = false;  // Disable transparency to fix flickering
                     mesh.renderOrder = 1;  // Render after ground
-                    
+
+                    // Custom depth material so the shadow map renderer uses alpha-test
+                    // properly even when onBeforeCompile has modified the main shader.
+                    const depthMat = new MeshDepthMaterial({ depthPacking: RGBADepthPacking, alphaTest: 0.5 });
+                    if (mat.map) depthMat.map = mat.map;
+                    mesh.customDepthMaterial = depthMat;
                     mat.customProgramCacheKey = () => 'foliage_wind';
                     mat.onBeforeCompile = (shader: any) => {
                         // Add ocean lighting uniforms
@@ -381,13 +628,14 @@ function applyFoliageWindShader(model: Group): void {
                             float windSway = sin(uWindTime * 1.5 + position.x * 3.0) * uWindStrength * heightFactor;
                             transformed.x += windSway;
                             
-                            // Mouse interaction - very subtle push away from cursor
-                            vec4 worldPos = modelMatrix * vec4(position, 1.0);
-                            vec2 toMouse = worldPos.xz - uMouseWorldPos.xz;
-                            float mouseDist = length(toMouse);
-                            float mouseInfluence = smoothstep(uMouseRadius, 0.0, mouseDist) * heightFactor;
-                            vec2 pushDir = normalize(toMouse + vec2(0.001));
-                            transformed.x += pushDir.x * mouseInfluence * uMouseStrength;`
+                            // Mouse proximity — very soft Y-compression (blade gently bows down)
+                            // Squared smoothstep gives an extremely gradual ramp-in so there
+                            // is no visible snap when the cursor enters/leaves the radius.
+                            vec4 worldPos4 = modelMatrix * vec4(position, 1.0);
+                            float mouseDist = length(worldPos4.xz - uMouseWorldPos.xz);
+                            float t = smoothstep(uMouseRadius, 0.0, mouseDist);
+                            float mouseInfluence = t * t * heightFactor;  // squared = very gentle
+                            transformed.y -= mouseInfluence * uMouseStrength;`
                         );
                         shader.vertexShader = shader.vertexShader.replace(
                             '#include <worldpos_vertex>',
@@ -430,11 +678,16 @@ export function Start(): void {
             island.add(gltf.scene);
             island.position.set(islandPosition.x, islandPosition.y, islandPosition.z);
             island.scale.setScalar(islandScale);
-            
-            // Generate foam mask from island silhouette (must happen after position/scale are set)
-            // Use requestAnimationFrame to ensure the world matrices are up to date
+
+            // Populate islandMeshes synchronously so waitForIslandMeshes() unblocks
+            // even if grass/clover finish loading before the next animation frame.
+            island.updateMatrixWorld(true);
+            island.traverse((child) => {
+                if ((child as any).isMesh) islandMeshes.push(child as Mesh);
+            });
+
+            // Foam mask needs the renderer so it still runs in the next frame.
             requestAnimationFrame(() => {
-                island.updateMatrixWorld(true);
                 generateFoamMask(renderer, island);
                 const tex = getMaskTexture();
                 if (tex) {
@@ -539,6 +792,7 @@ export function Start(): void {
                 islandPosition.z + palmtreeOffset.z
             );
             palmtree.scale.setScalar(palmtreeScale);
+            palmtree.rotation.y = palmtreeRotY;
             console.log('Palm tree loaded with ocean lighting');
         },
         (progress) => {
@@ -549,39 +803,56 @@ export function Start(): void {
         }
     );
 
-    // Load grass patches around the palm tree
+    // Load grass patches — two clusters: main island area + palm tree ring
     loader.load(
         'models/surface/grass.glb',
         (gltf) => {
-            for (let i = 0; i < GRASS_COUNT; i++) {
-                const grassPatch = new Group();
-                const grassModel = gltf.scene.clone();
-                applyFoliageWindShader(grassModel);  // Wind shader synced with palm
-                // Enable shadow casting and receiving for grass
-                grassModel.traverse((child) => {
-                    if ((child as any).isMesh) {
-                        child.castShadow = true;
-                        (child as any).receiveShadow = true;
-                    }
-                });
-                grassPatch.add(grassModel);
-                
-                // Spread grass in full circle with min/max distance from center
-                const angle = Math.random() * Math.PI * 2;  // Random angle around full circle
-                const distance = MIN_DISTANCE_FROM_CENTER + Math.random() * (MAX_DISTANCE - MIN_DISTANCE_FROM_CENTER);
-                const spreadX = Math.cos(angle) * distance;
-                const spreadZ = Math.sin(angle) * distance;
-                
-                grassPatch.position.set(
-                    islandPosition.x + palmtreeOffset.x + grassBaseOffset.x + spreadX,
-                    islandPosition.y + grassBaseOffset.y,
-                    islandPosition.z + palmtreeOffset.z + grassBaseOffset.z + spreadZ
-                );
-                grassPatch.scale.setScalar(grassScale);
-                grassPatch.rotation.y = Math.random() * Math.PI * 2;  // Random rotation
-                grassPatches.push(grassPatch);
-            }
-            console.log(`${GRASS_COUNT} grass patches loaded`);
+            grassGltfScene = gltf.scene;  // cache for respawning
+
+            // Defer placement until the island surface raycaster is ready.
+            waitForIslandMeshes(() => {
+
+            // Helper: place one patch from a given cluster annulus
+            const spawnGrassPatch = (cluster: typeof CLUSTER_MAIN) => {
+                for (let attempt = 0; attempt < SPAWN_MAX_ATTEMPTS; attempt++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist  = cluster.minR + Math.random() * (cluster.maxR - cluster.minR);
+                    const wx = cluster.wx + Math.cos(angle) * dist;
+                    const wz = cluster.wz + Math.sin(angle) * dist;
+                    if (!isValidSpawnPos(wx, wz, foliageSpawnPlaced)) continue;
+
+                    foliageSpawnPlaced.push({ x: wx, z: wz });
+                    const grassPatch = new Group();
+                    const grassModel = gltf.scene.clone();
+                    applyFoliageWindShader(grassModel);
+                    grassModel.traverse((child) => {
+                        if ((child as any).isMesh) {
+                            child.castShadow = true;
+                            (child as any).receiveShadow = true;
+                        }
+                    });
+                    grassPatch.add(grassModel);
+                    grassPatch.position.set(wx, GRASS_Y, wz);
+                    grassPatch.scale.setScalar(grassScale);
+                    grassPatch.rotation.y = Math.random() * Math.PI * 2;
+                    grassPatches.push(grassPatch);
+                    // Track cluster membership for debug shifting
+                    if (cluster === CLUSTER_MAIN) clusterMainPatches.push(grassPatch);
+                    else clusterPalmPatches.push(grassPatch);
+                    return true;
+                }
+                return false;  // Could not place
+            };
+
+            // Main cluster — broad island surface
+            for (let i = 0; i < GRASS_COUNT; i++) spawnGrassPatch(CLUSTER_MAIN);
+            // Palm cluster — ring of grass around the palm trunk
+            for (let i = 0; i < GRASS_COUNT_PALM; i++) spawnGrassPatch(CLUSTER_PALM);
+
+            _grassLoaded = true;
+            console.log(`${grassPatches.length} grass patches placed (target ${GRASS_COUNT + GRASS_COUNT_PALM})`);
+
+            }); // end waitForIslandMeshes
         },
         undefined,
         (error) => {
@@ -589,39 +860,50 @@ export function Start(): void {
         }
     );
 
-    // Load clover patches alongside grass
+    // Load clover patches — main cluster only
     loader.load(
         'models/surface/clover.glb',
         (gltf) => {
+            cloverGltfScene = gltf.scene;  // cache for respawning
+
+            // Defer placement until the island surface raycaster is ready.
+            waitForIslandMeshes(() => {
+
+            const cloverStart = grassPatches.length;
             for (let i = 0; i < CLOVER_COUNT; i++) {
-                const cloverPatch = new Group();
-                const cloverModel = gltf.scene.clone();
-                applyFoliageWindShader(cloverModel);  // Wind shader synced with palm
-                // Enable shadow casting and receiving for clover
-                cloverModel.traverse((child) => {
-                    if ((child as any).isMesh) {
-                        child.castShadow = true;
-                        (child as any).receiveShadow = true;
-                    }
-                });
-                cloverPatch.add(cloverModel);
-                
-                // Spread clover in full circle with min/max distance from center
-                const angle = Math.random() * Math.PI * 2;  // Random angle around full circle
-                const distance = MIN_DISTANCE_FROM_CENTER + Math.random() * (MAX_DISTANCE - MIN_DISTANCE_FROM_CENTER);
-                const spreadX = Math.cos(angle) * distance;
-                const spreadZ = Math.sin(angle) * distance;
-                
-                cloverPatch.position.set(
-                    islandPosition.x + palmtreeOffset.x + cloverBaseOffset.x + spreadX,
-                    islandPosition.y + cloverBaseOffset.y,
-                    islandPosition.z + palmtreeOffset.z + cloverBaseOffset.z + spreadZ
-                );
-                cloverPatch.scale.setScalar(cloverScale);
-                cloverPatch.rotation.y = Math.random() * Math.PI * 2;  // Random rotation
-                grassPatches.push(cloverPatch);  // Add to same array for scene management
+                let placed = false;
+                for (let attempt = 0; attempt < SPAWN_MAX_ATTEMPTS; attempt++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist  = CLUSTER_MAIN.minR + Math.random() * (CLUSTER_MAIN.maxR - CLUSTER_MAIN.minR);
+                    const wx = CLUSTER_MAIN.wx + Math.cos(angle) * dist;
+                    const wz = CLUSTER_MAIN.wz + Math.sin(angle) * dist;
+                    if (!isValidSpawnPos(wx, wz, foliageSpawnPlaced)) continue;
+
+                    foliageSpawnPlaced.push({ x: wx, z: wz });
+                    const cloverPatch = new Group();
+                    const cloverModel = gltf.scene.clone();
+                    applyFoliageWindShader(cloverModel);
+                    cloverModel.traverse((child) => {
+                        if ((child as any).isMesh) {
+                            child.castShadow = true;
+                            (child as any).receiveShadow = true;
+                        }
+                    });
+                    cloverPatch.add(cloverModel);
+                    cloverPatch.position.set(wx, CLOVER_Y, wz);
+                    cloverPatch.scale.setScalar(cloverScale);
+                    cloverPatch.rotation.y = Math.random() * Math.PI * 2;
+                    grassPatches.push(cloverPatch);
+                    clusterCloverPatches.push(cloverPatch);  // own array, separate from grass main
+                    placed = true;
+                    break;
+                }
+                if (!placed) console.warn('Clover: could not place patch after max attempts');
             }
-            console.log(`${CLOVER_COUNT} clover patches loaded`);
+            _cloverLoaded = true;
+            console.log(`${grassPatches.length - cloverStart} clover patches placed (target ${CLOVER_COUNT})`);
+
+            }); // end waitForIslandMeshes
         },
         undefined,
         (error) => {
@@ -648,7 +930,7 @@ export function Start(): void {
                 islandPosition.z + radioOffset.z
             );
             radio.scale.setScalar(radioScale);
-            radio.rotation.y = 0.0;
+            radio.rotation.y = radioRotY;
             console.log('Radio loaded with ocean lighting');
         },
         undefined,
@@ -676,12 +958,7 @@ export function Start(): void {
                 islandPosition.z + swordOffset.z
             );
             sword.scale.setScalar(swordScale);
-            // Upside down and tilted diagonally towards the bonfire
-            sword.rotation.set(
-                Math.PI + 0.3,  // Upside down + tilt forward
-                0.2,            // Slight rotation on Y axis
-                -0.15           // Tilt to the side
-            );
+            sword.rotation.set(swordRot.x, swordRot.y, swordRot.z);
             console.log('Sword loaded with ocean lighting and shadow casting');
         },
         undefined,
@@ -709,19 +986,24 @@ export function Start(): void {
                 islandPosition.z + pugOffset.z
             );
             pug.scale.setScalar(pugScale);
-            // Face to the right of the island (positive X)
-            pug.rotation.y = Math.PI / 2;
+            pug.rotation.y = pugRotY;
 
-            // Setup idle animation (index 4)
-            if (gltf.animations && gltf.animations.length > 4) {
+            // Store all clips and setup idle animation
+            pugAnimClips = gltf.animations ?? [];
+            if (pugAnimClips.length > 0) {
                 pugMixer = new AnimationMixer(gltf.scene);
-                const idleClip = gltf.animations[4];
+                const startIdx = Math.min(3, pugAnimClips.length - 1);
+                pugCurrentAnimIndex = startIdx;
+                const idleClip = pugAnimClips[startIdx];
                 const action = pugMixer.clipAction(idleClip);
                 action.setLoop(LoopRepeat, Infinity);
                 action.play();
-                console.log(`Pug loaded with animation: ${idleClip.name || 'index 4'} (${gltf.animations.length} total animations)`);
+                _pugCurrentAction = action;
+                console.log(`Pug loaded — ${pugAnimClips.length} animations:`, pugAnimClips.map((c, i) => `${i}: "${c.name || '(unnamed)'}"`))
+                // Apply correct anim immediately — handles page opened in night mode
+                _restorePugNightState();
             } else {
-                console.warn(`Pug model has ${gltf.animations?.length ?? 0} animations, expected at least 5`);
+                console.warn('Pug model has no animations');
             }
         },
         undefined,
@@ -748,8 +1030,7 @@ export function Start(): void {
                 islandPosition.z + tentOffset.z
             );
             tent.scale.setScalar(tentScale);
-            // Face camera with slight left-angle offset (from camera's perspective)
-            tent.rotation.y = -0.4;
+            tent.rotation.y = tentRotY;
             console.log('Tent loaded');
         },
         undefined,
@@ -774,46 +1055,39 @@ export function Start(): void {
                 islandPosition.z + dogBedOffset.z
             );
             dogBed.scale.setScalar(dogBedScale);
-            dogBed.rotation.y = -1.5;
+            dogBed.rotation.y = dogBedRotY;
             console.log('Dog bed loaded');
         },
         undefined,
         (error) => { console.error('Error loading dog bed:', error); }
     );
 
-    // Load dog bowl beside the dog bed
-    loader.load(
-        'models/surface/dog_bowl.glb',
-        (gltf) => {
-            applyOceanLightingToModel(gltf.scene);
-            gltf.scene.traverse((child) => {
-                if ((child as any).isMesh) {
-                    child.castShadow = true;
-                    (child as any).receiveShadow = true;
-                }
-            });
-            dogBowl.add(gltf.scene);
-            dogBowl.position.set(
-                islandPosition.x + dogBowlOffset.x,
-                islandPosition.y + dogBowlOffset.y,
-                islandPosition.z + dogBowlOffset.z
-            );
-            dogBowl.scale.setScalar(dogBowlScale);
-            dogBowl.rotation.y = -0.4;
-            console.log('Dog bowl loaded');
-        },
-        undefined,
-        (error) => { console.error('Error loading dog bowl:', error); }
-    );
-
     // Setup mouse/touch event listeners for grass interaction
     setupGrassInteraction();
+
+    // Register multi-touch tracker (must run before interaction handlers)
+    _setupMultiTouchTracker();
 
     // Setup radio click/hover interaction
     setupRadioInteraction();
 
     // Setup pug click/hover interaction
     setupPugInteraction();
+}
+
+// ── Multi-touch gesture tracker ─────────────────────────────────────────────
+// Tracks whether 2+ fingers were ever active simultaneously during the current
+// gesture. Prevents scroll-gesture finger-lifts from triggering click actions.
+let _touchWasMulti = false;
+
+function _setupMultiTouchTracker(): void {
+    const canvas = renderer.domElement;
+    canvas.addEventListener('touchstart', (e: TouchEvent) => {
+        if (e.touches.length >= 2) _touchWasMulti = true;
+    }, { passive: true });
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (e.touches.length === 0) _touchWasMulti = false; // all fingers lifted — reset
+    }, { passive: true });
 }
 
 // Setup mouse and touch events for grass interaction
@@ -875,14 +1149,87 @@ const pugRaycaster = new Raycaster();
 const pugMouse = new Vector2();
 let isPugHovered = false;
 
+// Reusable Vector3 for projecting pug world-pos to screen coords (avoids per-frame allocation)
+const _pugScreenVec = new Vector3();
+
+function _getPugScreenPos(): { x: number; y: number } | null {
+    _pugScreenVec.copy(pug.position);
+    _pugScreenVec.y += 0.35;  // project from well above pug head so bubble sits higher
+    _pugScreenVec.project(camera);
+    return {
+        x: (_pugScreenVec.x * 0.5 + 0.5) * window.innerWidth,
+        y: (-_pugScreenVec.y * 0.5 + 0.5) * window.innerHeight,
+    };
+}
+
+const PUG_DIALOG_LINES: DialogLine[] = [
+    {
+        textKey: 'pug.dialog.0',
+        sound: '/audio/character/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
+        onLineStart: () => playPugAnimationThenReturn(4),
+    },
+    {
+        textKey: 'pug.dialog.1',
+        sound: '/audio/character/freesound_community-pug-woof-2-103762_SEGUNDA.wav',
+        onLineStart: () => playPugAnimationThenReturn(4),
+    },
+];
+
+function _clearPugZParticles(): void {
+    for (const z of _pugZParticles) {
+        z.sprite.parent?.remove(z.sprite);
+        (z.sprite.material as SpriteMaterial).dispose();
+    }
+    _pugZParticles.length = 0;
+    _pugZTimer = 0;
+    stopPugSnore();
+}
+
+/** Re-evaluate sun visibility and apply the correct idle animation. Safe to call any time. */
+function _restorePugNightState(): void {
+    const sunVis = sunVisibilityUniform.value as number;
+    if (sunVis < PUG_NIGHT_THRESHOLD) {
+        const idx = _findPugNightAnim();
+        if (idx >= 0) {
+            _pugIsNight = true;
+            pugDefaultAnimIndex = idx;
+            setPugAnimation(idx);
+        }
+    } else {
+        _pugIsNight = false;
+        pugDefaultAnimIndex = 3;
+        setPugAnimation(3);
+        stopPugSnore();
+    }
+}
+
+function _startPugDialog(): void {
+    // During dialog always use day idle, regardless of night mode
+    pugDefaultAnimIndex = 3;
+    setPugAnimation(3);
+    _clearPugZParticles();
+
+    showDialog(PUG_DIALOG_LINES, _getPugScreenPos, () => {
+        zoomOutFromPug();
+        // Re-check night state now that dialog is over
+        _restorePugNightState();
+    });
+}
+
 function setupPugInteraction(): void {
     const canvas = renderer.domElement;
     if (!canvas) return;
 
     const onPugClick = (clientX: number, clientY: number) => {
-        // If already zoomed into pug, any click zooms out
+        // Ignore clicks while another zoom is active — let that handler close itself first
+        if (isRadioZoomActive()) return;
+        // If already zoomed in: advance dialog (which calls zoomOut when done) or just zoom out
         if (isPugZoomActive()) {
-            zoomOutFromPug();
+            if (isDialogActive()) {
+                advanceDialog();
+            } else {
+                zoomOutFromPug();
+            }
             return;
         }
         if (pug.children.length === 0) return;
@@ -893,6 +1240,7 @@ function setupPugInteraction(): void {
         const intersects = pugRaycaster.intersectObjects(pug.children, true);
         if (intersects.length > 0) {
             zoomToPug();
+            _startPugDialog();
         }
     };
 
@@ -901,6 +1249,7 @@ function setupPugInteraction(): void {
     });
 
     canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (_touchWasMulti) return;  // was a 2-finger scroll gesture — skip click
         if (e.changedTouches.length > 0) {
             const touch = e.changedTouches[0];
             onPugClick(touch.clientX, touch.clientY);
@@ -941,18 +1290,32 @@ function setupRadioInteraction(): void {
     const canvas = renderer.domElement;
     if (!canvas) return;
 
-    // Click handler — open media player when clicking on radio
+    // Click handler — open media player when clicking on radio, close when clicking elsewhere
     const onRadioClick = (clientX: number, clientY: number) => {
-        if (getIsExpanded()) return;  // Already open
         if (radio.children.length === 0) return;  // Not loaded yet
+        // Ignore clicks while another zoom is active — let that handler close itself first
+        if (isPugZoomActive()) return;
+
+        // Any canvas click while the player is open closes it.
+        // Don't raycast here — the zoomed-in model fills most of the canvas so hitsRadio
+        // would be true even when the user clearly clicked "outside" the player UI.
+        if (getIsExpanded()) {
+            collapsePlayer();
+            return;
+        }
+
         if (!document.body.classList.contains('music-visible')) return;  // Not ready yet
 
         radioMouse.x = (clientX / window.innerWidth) * 2 - 1;
         radioMouse.y = -(clientY / window.innerHeight) * 2 + 1;
-
         radioRaycaster.setFromCamera(radioMouse, camera);
-        const intersects = radioRaycaster.intersectObjects(radio.children, true);
-        if (intersects.length > 0) {
+        const hitsRadio = radioRaycaster.intersectObjects(radio.children, true).length > 0;
+
+        if (hitsRadio) {
+            // Force-clear hover state so scale and cursor reset instantly before zoom starts
+            isRadioHovered = false;
+            canvas.style.cursor = '';
+            radio.scale.setScalar(radioBaseScale);
             expandPlayer();
         }
     };
@@ -962,6 +1325,7 @@ function setupRadioInteraction(): void {
     });
 
     canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (_touchWasMulti) return;  // was a 2-finger scroll gesture — skip click
         if (e.changedTouches.length > 0) {
             const touch = e.changedTouches[0];
             onRadioClick(touch.clientX, touch.clientY);
@@ -1026,7 +1390,6 @@ export function Update(): void {
     foliageWindStrengthUniform.value = FOLIAGE_WIND_STRENGTH * breezeIntensity;
     
     // Flickering wind: overlapping inharmonic sine waves for chaotic, natural feel
-    // Apply to grass patches
     grassPatches.forEach((patch, i) => {
         const phase = i * 0.5;
         const flicker = Math.sin(windTime * 3.7 + phase) * 0.4
@@ -1121,6 +1484,25 @@ export function Update(): void {
         pugMixer.update(deltaTime);
     }
 
+    // ── Pug night-mode: crossfade on day↔night transitions
+    if (pugMixer && pugAnimClips.length > 0 && !isDialogActive()) {
+        const sunVis = sunVisibilityUniform.value as number;
+        const shouldBeNight = sunVis < PUG_NIGHT_THRESHOLD;
+        if (shouldBeNight !== _pugIsNight) {
+            _restorePugNightState();
+        }
+    }
+
+    // ── Pug sleep Z particles (only during night, not during dialog)
+    if (_pugIsNight && !isDialogActive() && pug.children.length > 0) {
+        _pugZTimer += deltaTime;
+        if (_pugZTimer >= PUG_Z_SPAWN_INTERVAL && _pugZParticles.length < PUG_Z_MAX) {
+            _pugZTimer = 0;
+            _spawnPugZ();
+        }
+    }
+    _updatePugZParticles();
+
     // Update music note particles
     updateMusicNotes();
 }
@@ -1209,5 +1591,105 @@ function updateMusicNotes(): void {
         
         // Gentle rotation for visual variety
         note.sprite.material.rotation += deltaTime * (i % 2 === 0 ? 0.5 : -0.5);
+    }
+}
+
+// ─── Pug sleep Z particles ────────────────────────────────────────────────────
+
+function _buildZTexture(): CanvasTexture {
+    const size = 64;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, size, size);
+    ctx.save();
+    ctx.translate(size / 2, size / 2);
+    ctx.rotate(-0.35);         // slight tilt — classic comic-book Z angle
+    ctx.font = `bold ${Math.round(size * 0.78)}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('Z', 0, 0);
+    ctx.restore();
+    const tex = new CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    return tex;
+}
+
+function _spawnPugZ(): void {
+    if (!_pugZTexture) _pugZTexture = _buildZTexture();
+
+    // Start snore whenever a Z spawns — idempotent (no-op if already playing).
+    // Calling every spawn handles the race where pugSnoreSound wasn't loaded yet
+    // on the very first particle.
+    playPugSnore();
+
+    const mat = new SpriteMaterial({
+        map: _pugZTexture,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: AdditiveBlending,
+    });
+    const sprite = new Sprite(mat);
+
+    // Size: small Zs near head, slight random variation — TWEAK range
+    const baseSize = 0.055 + Math.random() * 0.035;
+    sprite.scale.set(baseSize, baseSize, 1);
+
+    // Spawn just above pug's head with a small XZ jitter
+    const spawnX = pug.position.x + (Math.random() - 0.5) * 0.14;
+    const spawnY = pug.position.y + 0.22 + Math.random() * 0.06;
+    const spawnZ = pug.position.z + (Math.random() - 0.5) * 0.10;
+    sprite.position.set(spawnX, spawnY, spawnZ);
+
+    // Drift: mostly upward, tiny lateral wander — TWEAK speeds
+    const vy = 0.055 + Math.random() * 0.035;   // upward drift
+    const vx = (Math.random() - 0.5) * 0.025;   // lateral X
+    const vz = (Math.random() - 0.5) * 0.020;   // lateral Z
+
+    const lifetime = 2.8 + Math.random() * 1.2;  // TWEAK
+    const baseOpacity = 0.65 + Math.random() * 0.25;
+
+    pug.parent?.add(sprite);
+    _pugZParticles.push({ sprite, age: 0, lifetime, vx, vy, vz, baseOpacity });
+}
+
+function _updatePugZParticles(): void {
+    for (let i = _pugZParticles.length - 1; i >= 0; i--) {
+        const z = _pugZParticles[i];
+        z.age += deltaTime;
+
+        if (z.age >= z.lifetime) {
+            z.sprite.parent?.remove(z.sprite);
+            (z.sprite.material as SpriteMaterial).dispose();
+            _pugZParticles.splice(i, 1);
+            continue;
+        }
+
+        const t = z.age / z.lifetime;
+
+        // Move
+        z.sprite.position.x += z.vx * deltaTime;
+        z.sprite.position.y += z.vy * deltaTime;
+        z.sprite.position.z += z.vz * deltaTime;
+
+        // Slight deceleration so Zs float lazily to a stop
+        z.vy *= 0.9985;
+
+        // Opacity: fade in fast (0-15%), hold (15-70%), fade out (70-100%)
+        let opacity: number;
+        if (t < 0.15) {
+            opacity = z.baseOpacity * (t / 0.15);
+        } else if (t < 0.70) {
+            opacity = z.baseOpacity;
+        } else {
+            opacity = z.baseOpacity * (1 - (t - 0.70) / 0.30);
+        }
+        (z.sprite.material as SpriteMaterial).opacity = opacity;
+
+        // Slow gentle rotation — tumbles like a floating letter
+        z.sprite.material.rotation += deltaTime * 0.25;
     }
 }
