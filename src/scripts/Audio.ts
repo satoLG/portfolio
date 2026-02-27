@@ -400,6 +400,7 @@ export function transitionToUnderwater(): void {
         breezeActive = false;
     }
     if (fireplaceActive) stopFireplace();
+    stopPugSnore();
 
     // Start underwater sounds
     if (!natureMuted) {
@@ -470,6 +471,7 @@ function checkHealth(): void {
         if (waterSound2 && isBufferPlaying(waterSound2)) stopBufferSound(waterSound2);
         if (breezeSound && isBufferPlaying(breezeSound)) { stopBufferSound(breezeSound); breezeActive = false; }
         if (fireplaceSound && isBufferPlaying(fireplaceSound)) { stopBufferSound(fireplaceSound); fireplaceActive = false; }
+        if (_snoreActive) stopPugSnore();
         // Ensure underwater ambient is playing
         if (underwaterAmbSound && !isBufferPlaying(underwaterAmbSound)) {
             underwaterAmbSound.gain.gain.value = UNDERWATER_AMB_VOLUME;
