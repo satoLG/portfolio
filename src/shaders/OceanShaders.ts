@@ -5,6 +5,7 @@ export const surfaceVertex =
     varying vec2 _worldPos;
     varying vec2 _uv;
     varying float _elevation;
+    varying vec4 vReflCoord;
 
     void main()
     {
@@ -16,6 +17,7 @@ export const surfaceVertex =
         _uv = _worldPos * _NormalMapScale;
         _elevation = elevation;
         gl_Position = projectionMatrix * viewMatrix * worldPos;
+        vReflCoord = gl_Position;
     }
 `;
 
@@ -23,12 +25,12 @@ export const surfaceFragment =
 /*glsl*/`
     #include <ocean>
 
-    uniform vec2 _OceanHalfSize;
     uniform float _EdgeFadeDistance;
     
     // Foam mask — top-down island silhouette rendered at runtime
     uniform sampler2D _FoamMask;
-    uniform vec2 _FoamMaskCenter;   // World XZ center of the mask region
+    uniform vec2 _FoamMaskCenter;   // World XZ center of the mask region (auto-baked from island)
+    uniform vec2 _FoamCenterOffset; // User-controllable XZ nudge on top of baked center
     uniform vec2 _FoamMaskSize;     // World XZ extent of the mask region
     uniform float _FoamWidth;
     uniform float _FoamIntensity;
@@ -43,12 +45,21 @@ export const surfaceFragment =
     uniform int _RippleCount;
     uniform float _RippleSpeed;
     uniform float _RippleLifetime;
-    uniform float _RippleAmplitude;
     uniform float _RippleWidth;
+
+    uniform sampler2D _ReflectionTexture;
+    uniform float _ReflectionStrength;
+    uniform float _ReflectionFresnelPower;  // lower = visible at steeper angles (try 0.5–2.0)
+    uniform float _ReflectionFloor;         // minimum reflectivity regardless of angle (try 0.0–0.5)
+    uniform float _SkyReflBrightness;       // scales the analytical skybox reflection (0–1)
+    uniform float _SkyReflFalloff;          // exponent on fresnelBase for sky only — sharpens near→far gradient
+    uniform vec3  _SurfaceColor;            // RGB tint (1,1,1 = no tint)
+    uniform float _SurfaceOpacity;          // overall surface alpha multiplier
 
     varying vec2 _worldPos;
     varying vec2 _uv;
     varying float _elevation;
+    varying vec4 vReflCoord;
 
     float calcEdgeFade(vec2 pos) {
         float distFromNearEdge = -pos.y;
@@ -92,7 +103,8 @@ export const surfaceFragment =
         vec2 wobbledPos = pos + wobble;
 
         // Convert world XZ to mask UV (0-1 range within the captured region)
-        vec2 maskUV = (wobbledPos - _FoamMaskCenter) / _FoamMaskSize + 0.5;
+        // _FoamCenterOffset lets you nudge the ring without regenerating the mask.
+        vec2 maskUV = (wobbledPos - (_FoamMaskCenter + _FoamCenterOffset)) / _FoamMaskSize + 0.5;
         // The ortho camera's right axis = world -X, so flip U to match
         maskUV.x = 1.0 - maskUV.x;
 
@@ -208,18 +220,36 @@ export const surfaceFragment =
 
         if (cameraPosition.y > _elevation)
         {
-            float reflectivity = pow2(1.0 - max(0.0, dot(-viewDir, normal)));
+            // fresnelBase: raw Fresnel curve, no floor — approaches 0 directly overhead.
+            // reflectivity: floored version used for body-color blending only.
+            float fresnelBase = pow(1.0 - max(0.0, dot(-viewDir, normal)), _ReflectionFresnelPower);
+            float reflectivity = max(fresnelBase, _ReflectionFloor);
 
-            vec3 reflection = sampleSkybox(reflect(viewDir, normal));
-            vec3 surface = reflectivity * reflection;
+            // Planar reflection: sample the render-target texture using projected UVs,
+            // distorted by the water normal for a natural ripple shimmer.
+            vec2 reflUV = (vReflCoord.xy / vReflCoord.w) * 0.5 + 0.5;
+            reflUV += normal.xz * 0.035;  // normal-map distortion
+            reflUV = clamp(reflUV, 0.001, 0.999);
+            vec4 reflectionRTSample = texture2D(_ReflectionTexture, reflUV);
+            // Use RT alpha as a model mask: 0 = no model (sky), 1 = model reflected.
+            // Where there's no model the RT is transparent (cleared before render),
+            // so fall back entirely to the analytical skybox sample.
+            vec3 skyRefl = sampleSkybox(reflect(viewDir, normal)) * _SkyReflBrightness;
+            vec3 reflectionRT = mix(skyRefl, reflectionRTSample.rgb, reflectionRTSample.a);
+            vec3 reflection = mix(skyRefl, reflectionRT, _ReflectionStrength);
+            // fresnelBase (no floor) drives reflection weight.
+            // _SkyReflFalloff raises it to a power, sharpening the near→far gradient:
+            //   1.0 = same as fresnelBase (gentle), 2.0 = squared (more contrast), 4.0 = very steep.
+            // reflectivity (floored) drives body color blend only.
+            vec3 surface = pow(fresnelBase, _SkyReflFalloff) * reflection;
+            surface += (1.0 - reflectivity) * _SurfaceColor;
 
             float fog = clamp(viewLen / FOG_DISTANCE + dither, 0.0, 1.0);
             surface = mix(surface, sampleFog(viewDir), fog);
-            
             vec3 foamColor = vec3(1.0, 1.0, 1.0);
             surface = mix(surface, foamColor, foam);
 
-            gl_FragColor = vec4(surface, max(max(reflectivity, fog), foam) * edgeFade);
+            gl_FragColor = vec4(surface, max(max(reflectivity, fog), foam) * edgeFade * _SurfaceOpacity);
             return;
         }
 

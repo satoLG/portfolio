@@ -168,8 +168,8 @@ body.day-mode {
     height: 100%;
     pointer-events: none;
     z-index: 5;
-    backdrop-filter: blur(60px);
-    -webkit-backdrop-filter: blur(60px);
+    backdrop-filter: blur(50px);
+    -webkit-backdrop-filter: blur(50px);
     background: rgba(10, 22, 40, 0.3);
     opacity: 1;
     transition: opacity 1.5s ease-out;
