@@ -11,11 +11,11 @@ export function getAudioContext(): AudioContext | null { return _audioContext; }
 // ============================================
 // AUDIO SETTINGS (easily tweakable)
 // ============================================
-const WATER_VOLUME = 0.7;
-const BREEZE_VOLUME = 0.3;
+const WATER_VOLUME = 1.0;
+const BREEZE_VOLUME = 0.5;
 const BREEZE_MIN_DELAY = 3;
 const BREEZE_MAX_DELAY = 6;
-const FIREPLACE_VOLUME_MAX = 0.35;
+const FIREPLACE_VOLUME_MAX = 0.4;
 const FIREPLACE_FADE_DURATION = 1.5;
 const UNDERWATER_AMB_VOLUME = 0.25;
 const TRANSITION_SFX_VOLUME = 0.1;
@@ -205,6 +205,7 @@ function _scheduleNextSnore(): void {
     const delay = SNORE_MIN_PAUSE + Math.random() * (SNORE_MAX_PAUSE - SNORE_MIN_PAUSE);
     _snoreTimeout = setTimeout(() => {
         if (!_snoreActive || !pugSnoreSound) return;
+        if (isCurrentlyUnderwater) { stopPugSnore(); return; }  // Don't snore underwater
         playBufferSound(pugSnoreSound, {
             onEnded: () => { if (_snoreActive) _scheduleNextSnore(); }
         });
@@ -570,11 +571,19 @@ export function setCharacterMuted(muted: boolean): void {
 export function playPugSnore(): void {
     if (!audioInitialized || !pugSnoreSound) return;
     if (_snoreActive) return;  // already playing/scheduled
+    if (isCurrentlyUnderwater) return;  // Don't snore underwater
     _snoreActive = true;
     // Play first clip immediately, then schedule repeats via onEnded
     playBufferSound(pugSnoreSound, {
         onEnded: () => { if (_snoreActive) _scheduleNextSnore(); }
     });
+}
+
+/** Play pug snore sound exactly once — no loop scheduling. Used for dialog line cues. */
+export function playPugSnoreOnce(): void {
+    if (!audioInitialized || !pugSnoreSound) return;
+    if (isCurrentlyUnderwater) return;
+    playBufferSound(pugSnoreSound, {});
 }
 
 /** Stop pug snore and cancel any pending replay. */

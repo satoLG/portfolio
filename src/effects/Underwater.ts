@@ -11,14 +11,15 @@ import {
     NearestFilter
 } from "three";
 import { time } from "../scripts/Time";
+import { distortionStrength, distortionSpeed, distortionScale } from '../scene/OceanConfig';
 
 // ============================================
 // DISTORTION SETTINGS
 // ============================================
 export const UNDERWATER_Y_THRESHOLD = 0.0;
-export const DISTORTION_STRENGTH = 0.006;
-export const DISTORTION_SPEED = 1.2;
-export const DISTORTION_SCALE = 12.0;
+export const DISTORTION_STRENGTH = distortionStrength;
+export const DISTORTION_SPEED    = distortionSpeed;
+export const DISTORTION_SCALE    = distortionScale;
 // ============================================
 
 const orthoCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);

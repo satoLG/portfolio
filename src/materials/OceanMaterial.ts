@@ -3,6 +3,7 @@ import * as OceanShaders from "../shaders/OceanShaders";
 import { cameraForward } from "../scripts/Scene";
 import { timeUniform } from "../scripts/Time";
 import { SetSkyboxUniforms } from "./SkyboxMaterial";
+import * as OceanConfig from '../scene/OceanConfig';
 
 export const surface = new ShaderMaterial();
 export const volume = new ShaderMaterial();
@@ -32,36 +33,40 @@ landTexture.wrapT = RepeatWrapping;
 const blendSharpness = 3;
 const triplanarScale = 1;
 
-export const oceanAbsorptionUniform = new Uniform(new Vector3(0.085, 0.022, 0.015));
+export const oceanAbsorptionUniform = new Uniform(new Vector3(OceanConfig.oceanAbsorption.r, OceanConfig.oceanAbsorption.g, OceanConfig.oceanAbsorption.b));
 
-export const bigWavesElevationUniform = new Uniform(0.2);
-export const bigWavesFrequencyUniform = new Uniform({ x: 4.0, y: 1.5 });
-export const bigWavesSpeedUniform = new Uniform(0.75);
-export const smallWavesElevationUniform = new Uniform(0.03);
-export const smallWavesFrequencyUniform = new Uniform(3.0);
-export const smallWavesSpeedUniform = new Uniform(0.2);
-export const smallIterationsUniform = new Uniform(2.0);
+export const normalMapScaleUniform    = new Uniform(OceanConfig.normalMapScale);
+export const normalMapStrengthUniform = new Uniform(OceanConfig.normalMapStrength);
+export const waveVelocity1Uniform     = new Uniform({ x: OceanConfig.waveVelocity1.x, y: OceanConfig.waveVelocity1.y });
+export const waveVelocity2Uniform     = new Uniform({ x: OceanConfig.waveVelocity2.x, y: OceanConfig.waveVelocity2.y });
 
-export const normalMapScaleUniform = new Uniform(0.15);
-export const normalMapStrengthUniform = new Uniform(0.85);
-export const waveVelocity1Uniform = new Uniform({ x: 0.065, y: 0.0 });
-export const waveVelocity2Uniform = new Uniform({ x: 0.0, y: 0.065 });
-
-export const oceanHalfSizeUniform = new Uniform({ x: 200.0, y: 200.0 });
-export const edgeFadeDistanceUniform = new Uniform(1.0);
+export const edgeFadeDistanceUniform = new Uniform(OceanConfig.edgeFadeDistance);
 
 // Foam mask — generated at runtime from island silhouette
-export const foamMaskUniform = new Uniform(null as Texture | null);              // Top-down silhouette texture
-export const foamMaskCenterUniform = new Uniform(new Vector2(0.0, -1));       // World XZ center of mask region
-export const foamMaskSizeUniform = new Uniform(new Vector2(4.0, 4.0));          // World XZ extent of mask region
-export const foamWidthUniform = new Uniform(0.12);             // TWEAK: Width of foam band around edge
-export const foamIntensityUniform = new Uniform(0.35);         // TWEAK: Overall foam brightness
-export const foamAnimSpeedUniform = new Uniform(0.5);          // TWEAK: Speed of foam animation
-export const foamEdgeNoiseAmtUniform = new Uniform(0.06);      // TWEAK: How much brightness shimmers near edge
-export const foamWobbleAmtUniform = new Uniform(0.07);         // TWEAK: How far (world units) the foam line wobbles
-export const foamWobbleFreqUniform = new Uniform(3.0);         // TWEAK: Spatial frequency of the wobble pattern
-export const foamWobbleSpeedUniform = new Uniform(0.5);        // TWEAK: How fast the wobble animates
-export const foamRadiusUniform = new Uniform(0.94);             // TWEAK: Foam ring scale — >1 pushes foam outward, <1 pulls inward
+export const foamMaskUniform         = new Uniform(null as Texture | null);         // Top-down silhouette texture
+export const foamMaskCenterUniform   = new Uniform(new Vector2(0.0, 0.0));          // World XZ center — overwritten by setFoamMask()
+export const foamMaskSizeUniform     = new Uniform(new Vector2(4.0, 4.0));          // World XZ extent — overwritten by setFoamMask()
+export const foamCenterOffsetUniform = new Uniform(new Vector2(OceanConfig.foamCenterOffset.x, OceanConfig.foamCenterOffset.y)); // user nudge on top of baked center
+export const foamWidthUniform        = new Uniform(OceanConfig.foamWidth);
+export const foamIntensityUniform    = new Uniform(OceanConfig.foamIntensity);
+export const foamAnimSpeedUniform    = new Uniform(OceanConfig.foamAnimSpeed);
+export const foamEdgeNoiseAmtUniform = new Uniform(OceanConfig.foamEdgeNoiseAmt);
+export const foamWobbleAmtUniform    = new Uniform(OceanConfig.foamWobbleAmt);
+export const foamWobbleFreqUniform   = new Uniform(OceanConfig.foamWobbleFreq);
+export const foamWobbleSpeedUniform  = new Uniform(OceanConfig.foamWobbleSpeed);
+export const foamRadiusUniform       = new Uniform(OceanConfig.foamRadius);
+
+// Planar reflection — render target texture set by OceanReflection.ts each frame
+export const reflectionTextureUniform = new Uniform(null as Texture | null);
+export const reflectionStrengthUniform          = new Uniform(OceanConfig.reflectionStrength);
+export const reflectionFresnelPowerUniform      = new Uniform(OceanConfig.reflectionFresnelPower);
+export const reflectionFloorUniform             = new Uniform(OceanConfig.reflectionFloor);
+export const skyReflectionBrightnessUniform = new Uniform(OceanConfig.skyReflectionBrightness);
+export const skyReflFalloffUniform          = new Uniform(OceanConfig.skyReflFalloff);
+
+// Surface appearance — independent of underwater fog
+export const surfaceColorUniform   = new Uniform(new Vector3(OceanConfig.surfaceColor.r, OceanConfig.surfaceColor.g, OceanConfig.surfaceColor.b));
+export const surfaceOpacityUniform = new Uniform(OceanConfig.surfaceOpacity);
 
 /** Call after generating the foam mask to wire the texture + bounds into the shader */
 export function setFoamMask(texture: Texture, center: { x: number; y: number }, size: { x: number; y: number }): void {
@@ -88,7 +93,6 @@ export const ripplesUniform = new Uniform(_rippleInitData);
 export const rippleCountUniform = new Uniform(0);  // was 3 — caused ghost ripples on startup
 export const rippleSpeedUniform = new Uniform(1.0);      // How fast ripples expand
 export const rippleLifetimeUniform = new Uniform(1.2);   // Reduced from 1.5 for faster cleanup
-export const rippleAmplitudeUniform = new Uniform(0.85); // Height of ripple wave
 export const rippleWidthUniform = new Uniform(0.15);      // Width of the wave band
 
 export function addRipple(x: number, z: number): void {
@@ -149,22 +153,15 @@ export function Start(): void
         _NormalMap1: normalMap1,
         _NormalMap2: normalMap2,
         _Absorption: oceanAbsorptionUniform,
-        uBigWavesElevation: bigWavesElevationUniform,
-        uBigWavesFrequency: bigWavesFrequencyUniform,
-        uBigWavesSpeed: bigWavesSpeedUniform,
-        uSmallWavesElevation: smallWavesElevationUniform,
-        uSmallWavesFrequency: smallWavesFrequencyUniform,
-        uSmallWavesSpeed: smallWavesSpeedUniform,
-        uSmallIterations: smallIterationsUniform,
         _NormalMapScale: normalMapScaleUniform,
         _NormalMapStrength: normalMapStrengthUniform,
         _WaveVelocity1: waveVelocity1Uniform,
         _WaveVelocity2: waveVelocity2Uniform,
-        _OceanHalfSize: oceanHalfSizeUniform,
         _EdgeFadeDistance: edgeFadeDistanceUniform,
         _FoamMask: foamMaskUniform,
         _FoamMaskCenter: foamMaskCenterUniform,
         _FoamMaskSize: foamMaskSizeUniform,
+        _FoamCenterOffset: foamCenterOffsetUniform,
         _FoamWidth: foamWidthUniform,
         _FoamIntensity: foamIntensityUniform,
         _FoamAnimSpeed: foamAnimSpeedUniform,
@@ -177,8 +174,15 @@ export function Start(): void
         _RippleCount: rippleCountUniform,
         _RippleSpeed: rippleSpeedUniform,
         _RippleLifetime: rippleLifetimeUniform,
-        _RippleAmplitude: rippleAmplitudeUniform,
-        _RippleWidth: rippleWidthUniform
+        _RippleWidth: rippleWidthUniform,
+        _ReflectionTexture: reflectionTextureUniform,
+        _ReflectionStrength: reflectionStrengthUniform,
+        _ReflectionFresnelPower: reflectionFresnelPowerUniform,
+        _ReflectionFloor: reflectionFloorUniform,
+        _SkyReflBrightness: skyReflectionBrightnessUniform,
+        _SkyReflFalloff: skyReflFalloffUniform,
+        _SurfaceColor: surfaceColorUniform,
+        _SurfaceOpacity: surfaceOpacityUniform,
     };
     SetSkyboxUniforms(surface);
     

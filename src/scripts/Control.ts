@@ -15,16 +15,16 @@ const moveSpeedExpMultiplier = 0;
 let webPageMode = true;  // Start in web page mode
 
 // ABOVE WATER zone (ocean surface is at Y=0)
-const aboveWaterTopY = 1.5;       // Top camera position above water
-const aboveWaterBottomY = 0.5; // Bottom limit above water (avoid looking at surface)
+const aboveWaterTopY = 1.8;       // Top camera position above water
+const aboveWaterBottomY = 1; // Bottom limit above water (avoid looking at surface)
 
 // UNDERWATER zone
-const underwaterTopY = -0.5;   // Top limit underwater (avoid looking at surface from below)
+const underwaterTopY = -1;   // Top limit underwater (avoid looking at surface from below)
 const underwaterBottomY = -8;   // Bottom camera position (near sea floor)
 
 // Dead zone: camera must not rest between aboveWaterBottomY and underwaterTopY
-const deadZoneTop = aboveWaterBottomY;   // 0.5
-const deadZoneBottom = underwaterTopY;   // -0.5
+const deadZoneTop = aboveWaterBottomY;   // 1
+const deadZoneBottom = underwaterTopY;   // -1
 const deadZoneMidpoint = (deadZoneTop + deadZoneBottom) / 2; // 0.0
 
 const scrollSpeed = 0.005;    // How fast scroll moves camera

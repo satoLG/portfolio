@@ -15,7 +15,7 @@ export const dogBedOffset   = { x: 0.4450, y: 0.9580, z: -0.3100 };
 // ── Scales ────────────────────────────────────────────────────────────────────
 export const islandScale   = 0.2500;
 export const firecampScale = 1.4000;
-export const palmtreeScale = 0.5000;
+export const palmtreeScale = 0.4330;
 export const radioScale    = 0.2200;
 export const swordScale    = 0.2500;
 export const pugScale      = 0.4500;
@@ -31,11 +31,11 @@ export const tentRotY     = -0.4000;
 export const dogBedRotY   = -1.9556;
 
 // ── Foliage clusters ──────────────────────────────────────────────────────────
-export const CLUSTER_MAIN = { wx: -0.1070, wz: -2.0200, minR: 1.0520, maxR: 1.7580 };
-export const CLUSTER_PALM = { wx: 0.0720, wz: -3.0660, minR: 0.1500, maxR: 0.5850 };
+export const CLUSTER_MAIN = { wx: -0.0120, wz: -2.4380, minR: 1.0520, maxR: 1.9830 };
+export const CLUSTER_PALM = { wx: -0.0040, wz: -3.1590, minR: 0.1500, maxR: 0.5850 };
 
 // ── Foliage counts ────────────────────────────────────────────────────────────
-export const GRASS_COUNT      = 118;
+export const GRASS_COUNT      = 200;
 export const GRASS_COUNT_PALM = 90;
 export const CLOVER_COUNT     = 69;
 

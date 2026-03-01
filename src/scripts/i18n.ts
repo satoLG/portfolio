@@ -73,6 +73,10 @@ const translations: Record<Language, TranslationDict> = {
         // Pug dialog
         'pug.dialog.0': 'au au.',
         'pug.dialog.1': 'au au...',
+
+        // Pug night dialog
+        'pug.night.0': 'ZzZzZz...',
+        'pug.night.1': 'ZzZzZz...',
     },
 
     'pt-br': {
@@ -139,6 +143,10 @@ const translations: Record<Language, TranslationDict> = {
         // Diálogo do pug
         'pug.dialog.0': 'au au.',
         'pug.dialog.1': 'au au...',
+
+        // Diálogo do pug de noite
+        'pug.night.0': 'ZzZzZz...',
+        'pug.night.1': 'ZzZzZz...',
     }
 };
 

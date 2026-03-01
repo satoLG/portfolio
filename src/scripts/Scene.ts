@@ -9,10 +9,14 @@ import * as Audio from "./Audio.ts";
 import * as UI from "./UI.ts";
 import * as MediaPlayer from "./MediaPlayer.ts";
 import * as Underwater from "../effects/Underwater.ts";
+import * as OceanReflection from "../effects/OceanReflection.ts";
 import * as Bubbles from "../effects/Bubbles.ts";
 import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
+import * as WindLines from "../effects/WindLines.ts";
 import { axes } from "./Debug.ts";
+import { deltaTime } from "./Time.ts";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
+import { reflectionTextureUniform } from "../materials/OceanMaterial";
 
 export const body = document.createElement("div");
 
@@ -234,6 +238,10 @@ export function Start(): void
     Ocean.Start();
     scene.add(Ocean.surface);
 
+    // Wire the reflection render-target texture into the ocean surface shader once.
+    // The RT texture object is stable; its contents are updated each frame by OceanReflection.update().
+    reflectionTextureUniform.value = OceanReflection.renderTarget.texture;
+
     SeaFloor.Start();
     for (let i = 0; i < SeaFloor.tiles.length; i++)
     {
@@ -303,6 +311,9 @@ export function Start(): void
 
     // Initialize audio system
     Audio.Start();
+
+    // Wind lines canvas overlay (synced with breeze audio)
+    WindLines.Start();
 }
 
 export function Update(): void
@@ -319,6 +330,9 @@ export function Update(): void
     Underwater.Update(camera.position.y);
     Bubbles.Update(camera.position.y);
     UnderwaterParticles.Update(camera.position.y);
+
+    // Reflection pre-pass — renders scene from mirror camera into RT before the main render
+    OceanReflection.update(camera, renderer, scene, Ocean.surface);
 
     // Sync lights with skybox sun position and intensity
     // Keep light close enough for shadow mapping to work
@@ -344,6 +358,9 @@ export function Update(): void
 
     Underwater.renderScene(renderer, scene, camera);
     renderer.render(axes, staticCamera);
+
+    // Wind streak overlay — canvas drawn after all WebGL passes
+    WindLines.Update(deltaTime, camera.position.y, camera.fov);
 }
 
 // Shadow configuration helpers

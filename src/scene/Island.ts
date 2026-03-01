@@ -7,9 +7,10 @@ import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicInte
 import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive } from "../scripts/Control";
 import { showDialog, advanceDialog, isDialogActive } from "../scripts/Dialog";
 import type { DialogLine } from "../scripts/Dialog";
-import { isBreezeActive, playPugSnore, stopPugSnore } from "../scripts/Audio";
+import { isBreezeActive, playPugSnoreOnce, stopPugSnore } from "../scripts/Audio";
 import { camera, renderer, scene as threeScene } from "../scripts/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
+import { UNDERWATER_Y_THRESHOLD } from "../effects/Underwater";
 import {
     islandPosition, firecampOffset, palmtreeOffset, radioOffset, swordOffset,
     pugOffset, tentOffset, dogBedOffset,
@@ -110,18 +111,54 @@ function _findPugNightAnim(): number {
 }
 
 // ── Sleep-Z particle settings ─────────────────────────────────────────────────
-/** Seconds between each spawned Z — TWEAK */
-const PUG_Z_SPAWN_INTERVAL = 3.0;  // seconds between Z particle spawns (also snore start delay)
-/** Maximum simultaneous Z sprites — TWEAK */
-const PUG_Z_MAX = 5;
-let _pugZTimer = 0;
+/** How many Zs to spawn each time the sleep animation loops — TWEAK */
+const PUG_Z_BURST_COUNT = 3;
+/** Seconds between consecutive Zs in a burst — TWEAK */
+const PUG_Z_BURST_DELAY = 0.65;
+/** Rise speed (world units/sec) — TWEAK */
+const PUG_Z_RISE_SPEED  = 0.065;
+/** Lateral sine-wave amplitude (world units) — TWEAK */
+const PUG_Z_WAVE_AMP    = 0.042;
+/** Wave frequency (radians/sec) — TWEAK */
+const PUG_Z_WAVE_FREQ   = 2.8;
+/** Local-space head tip in the pug GLTF — TWEAK if spawn drifts off the snout */
+const _pugHeadLocal = new Vector3(0, 0.65, 0.60);
+const _pugHeadWorld = new Vector3();
 let _pugZTexture: CanvasTexture | null = null;
-const _pugZParticles: MusicNote[] = [];   // reuse same shape as music notes
+
+/** Pending Z that hasn't been materialised into a sprite yet */
+interface ZSpawnJob {
+    countdown:   number;   // seconds until this Z should actually spawn
+    burstIndex:  number;   // 0-based (determines size & phase)
+    waveAxisX:   number;
+    waveAxisZ:   number;
+    headX:       number;   // world head position captured at burst time
+    headY:       number;
+    headZ:       number;
+}
+const _pugZSpawnQueue: ZSpawnJob[] = [];
+
+interface ZParticle {
+    sprite:      Sprite;
+    age:         number;
+    lifetime:    number;
+    spawnX:      number;    // world X at spawn
+    spawnY:      number;    // world Y at spawn
+    spawnZ:      number;    // world Z at spawn
+    waveAxisX:   number;    // world right direction (perpendicular to pug facing)
+    waveAxisZ:   number;
+    phaseOffset: number;    // stagger burst particles along the wave
+    riseSpeed:   number;
+    baseOpacity: number;
+}
+const _pugZParticles: ZParticle[] = [];
 
 // Currently active AnimationAction — needed to crossfade from it
 let _pugCurrentAction: AnimationAction | null = null;
 // Pending loop-return listener — stored so it can be cancelled on re-entry
 let _pugReturnListener: ((e: any) => void) | null = null;
+// Sleep-Z burst listener — fires on every loop of the captured sleep action
+let _pugSleepLoopListener: ((e: any) => void) | null = null;
 
 /**
  * Crossfade to the clip at `index`, looping infinitely.
@@ -1177,13 +1214,42 @@ const PUG_DIALOG_LINES: DialogLine[] = [
     },
 ];
 
+const PUG_NIGHT_DIALOG_LINES: DialogLine[] = [
+    {
+        textKey: 'pug.night.0',
+        onLineStart: () => playPugSnoreOnce(),
+    },
+    {
+        textKey: 'pug.night.1',
+        onLineStart: () => playPugSnoreOnce(),
+    },
+];
+
+function _unregisterSleepLoopListener(): void {
+    if (!pugMixer || !_pugSleepLoopListener) return;
+    pugMixer.removeEventListener('loop', _pugSleepLoopListener);
+    _pugSleepLoopListener = null;
+}
+
+function _registerSleepLoopListener(): void {
+    if (!pugMixer || _pugSleepLoopListener) return;  // already registered
+    const sleepAction = _pugCurrentAction;            // capture specific sleep action
+    _pugSleepLoopListener = (e: { action: AnimationAction }) => {
+        if (e.action !== sleepAction) return;         // ignore temp-anim loops
+        if (!_pugIsNight || isDialogActive()) return;
+        _spawnPugZBurst();
+    };
+    pugMixer.addEventListener('loop', _pugSleepLoopListener as any);
+}
+
 function _clearPugZParticles(): void {
     for (const z of _pugZParticles) {
         z.sprite.parent?.remove(z.sprite);
         (z.sprite.material as SpriteMaterial).dispose();
     }
     _pugZParticles.length = 0;
-    _pugZTimer = 0;
+    _pugZSpawnQueue.length = 0;
+    _unregisterSleepLoopListener();
     stopPugSnore();
 }
 
@@ -1196,22 +1262,33 @@ function _restorePugNightState(): void {
             _pugIsNight = true;
             pugDefaultAnimIndex = idx;
             setPugAnimation(idx);
+            _registerSleepLoopListener();  // start spawning Zs on each animation loop
         }
     } else {
         _pugIsNight = false;
         pugDefaultAnimIndex = 3;
         setPugAnimation(3);
+        _unregisterSleepLoopListener();
+        _clearPugZParticles();
         stopPugSnore();
     }
 }
 
 function _startPugDialog(): void {
-    // During dialog always use day idle, regardless of night mode
-    pugDefaultAnimIndex = _pugMusicWasPlaying ? 4 : 3;
-    setPugAnimation(pugDefaultAnimIndex);
-    _clearPugZParticles();
+    // Night dialog only when it's actually night AND music isn't playing.
+    // Music overrides night — pug wakes up to dance, so day dialog applies.
+    const useNightDialog = _pugIsNight && !_pugMusicWasPlaying;
 
-    showDialog(PUG_DIALOG_LINES, _getPugScreenPos, () => {
+    // At night (no music) keep the sleeping animation; otherwise switch to idle/music anim
+    if (!useNightDialog) {
+        pugDefaultAnimIndex = _pugMusicWasPlaying ? 4 : 3;
+        setPugAnimation(pugDefaultAnimIndex);
+    }
+    _clearPugZParticles();  // stops Z particles (and any residual snore state)
+
+    const lines = useNightDialog ? PUG_NIGHT_DIALOG_LINES : PUG_DIALOG_LINES;
+
+    showDialog(lines, _getPugScreenPos, () => {
         zoomOutFromPug();
         // If music is playing, stay on the music-default anim; otherwise restore night state
         if (_pugMusicWasPlaying) {
@@ -1228,6 +1305,8 @@ function setupPugInteraction(): void {
     if (!canvas) return;
 
     const onPugClick = (clientX: number, clientY: number) => {
+        // Ignore interactions while underwater — models are above water
+        if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
         // Ignore clicks while another zoom is active — let that handler close itself first
         if (isRadioZoomActive()) return;
         // If already zoomed in: advance dialog (which calls zoomOut when done) or just zoom out
@@ -1264,7 +1343,7 @@ function setupPugInteraction(): void {
     });
 
     canvas.addEventListener('mousemove', (e: MouseEvent) => {
-        if (pug.children.length === 0 || isPugZoomActive()) {
+        if (pug.children.length === 0 || isPugZoomActive() || camera.position.y < UNDERWATER_Y_THRESHOLD) {
             if (isPugHovered) { isPugHovered = false; canvas.style.cursor = ''; }
             return;
         }
@@ -1300,6 +1379,8 @@ function setupRadioInteraction(): void {
     // Click handler — open media player when clicking on radio, close when clicking elsewhere
     const onRadioClick = (clientX: number, clientY: number) => {
         if (radio.children.length === 0) return;  // Not loaded yet
+        // Ignore interactions while underwater — models are above water
+        if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
         // Ignore clicks while another zoom is active — let that handler close itself first
         if (isPugZoomActive()) return;
 
@@ -1341,10 +1422,11 @@ function setupRadioInteraction(): void {
 
     // Hover handler — scale radio and change cursor
     canvas.addEventListener('mousemove', (e: MouseEvent) => {
-        if (radio.children.length === 0 || getIsExpanded()) {
+        if (radio.children.length === 0 || getIsExpanded() || camera.position.y < UNDERWATER_Y_THRESHOLD) {
             if (isRadioHovered) {
                 isRadioHovered = false;
                 canvas.style.cursor = '';
+                radio.scale.setScalar(radioBaseScale);
             }
             return;
         }
@@ -1515,14 +1597,8 @@ export function Update(): void {
         }
     }
 
-    // ── Pug sleep Z particles (only during night, not during dialog, not while music plays)
-    if (_pugIsNight && !isDialogActive() && !_pugMusicWasPlaying && pug.children.length > 0) {
-        _pugZTimer += deltaTime;
-        if (_pugZTimer >= PUG_Z_SPAWN_INTERVAL && _pugZParticles.length < PUG_Z_MAX) {
-            _pugZTimer = 0;
-            _spawnPugZ();
-        }
-    }
+    // ── Pug sleep Z particles — spawning is driven by the animation loop listener;
+    //    here we only advance existing particles every frame.
     _updatePugZParticles();
 
     // Update music note particles
@@ -1639,16 +1715,38 @@ function _buildZTexture(): CanvasTexture {
     return tex;
 }
 
-function _spawnPugZ(): void {
+/**
+ * Queue a burst of Z particles — each trickles out PUG_Z_BURST_DELAY seconds apart.
+ * Called by the sleep-animation loop listener — once per animation loop.
+ */
+function _spawnPugZBurst(): void {
     if (!_pugZTexture) _pugZTexture = _buildZTexture();
 
-    // Start snore whenever a Z spawns — idempotent (no-op if already playing).
-    // Calling every spawn handles the race where pugSnoreSound wasn't loaded yet
-    // on the very first particle.
-    playPugSnore();
+    // Resolve head world position from the pug's local model space.
+    pug.localToWorld(_pugHeadWorld.copy(_pugHeadLocal));
 
+    // Wave sweeps perpendicular to the pug's facing direction (local +Z → world).
+    const ry = pug.rotation.y;
+    const waveAxisX =  Math.cos(ry);
+    const waveAxisZ = -Math.sin(ry);
+
+    for (let i = 0; i < PUG_Z_BURST_COUNT; i++) {
+        _pugZSpawnQueue.push({
+            countdown:  i * PUG_Z_BURST_DELAY,
+            burstIndex: i,
+            waveAxisX, waveAxisZ,
+            headX: _pugHeadWorld.x,
+            headY: _pugHeadWorld.y,
+            headZ: _pugHeadWorld.z,
+        });
+    }
+}
+
+/** Materialise one queued Z job into a live sprite + particle entry. */
+function _spawnOneZ(job: ZSpawnJob): void {
+    const i = job.burstIndex;
     const mat = new SpriteMaterial({
-        map: _pugZTexture,
+        map: _pugZTexture!,
         transparent: true,
         opacity: 0,
         depthWrite: false,
@@ -1656,29 +1754,42 @@ function _spawnPugZ(): void {
     });
     const sprite = new Sprite(mat);
 
-    // Size: small Zs near head, slight random variation — TWEAK range
-    const baseSize = 0.055 + Math.random() * 0.035;
+    // Grow each successive Z a little larger so the trail reads naturally
+    const baseSize = 0.045 + i * 0.012 + Math.random() * 0.010;
     sprite.scale.set(baseSize, baseSize, 1);
 
-    // Spawn just above pug's head with a small XZ jitter
-    const spawnX = pug.position.x + (Math.random() - 0.5) * 0.14;
-    const spawnY = pug.position.y + 0.22 + Math.random() * 0.06;
-    const spawnZ = pug.position.z + (Math.random() - 0.5) * 0.10;
+    // Tiny random jitter so they don't stack perfectly
+    const spawnX = job.headX + (Math.random() - 0.5) * 0.025;
+    const spawnY = job.headY + (Math.random() + 1.8) * 0.015;
+    const spawnZ = job.headZ + (Math.random() - 0.5) * 0.025;
     sprite.position.set(spawnX, spawnY, spawnZ);
 
-    // Drift: mostly upward, tiny lateral wander — TWEAK speeds
-    const vy = 0.055 + Math.random() * 0.035;   // upward drift
-    const vx = (Math.random() - 0.5) * 0.025;   // lateral X
-    const vz = (Math.random() - 0.5) * 0.020;   // lateral Z
+    // Each Z starts its wave at a consistent offset so the chain looks connected
+    const phaseOffset = i * (Math.PI * 2 / PUG_Z_BURST_COUNT);
 
-    const lifetime = 2.8 + Math.random() * 1.2;  // TWEAK
-    const baseOpacity = 0.65 + Math.random() * 0.25;
+    const lifetime    = 2.6 + i * 0.28 + Math.random() * 0.3;
+    const riseSpeed   = PUG_Z_RISE_SPEED * (0.85 + Math.random() * 0.30);
+    const baseOpacity = 0.60 + Math.random() * 0.30;
 
     pug.parent?.add(sprite);
-    _pugZParticles.push({ sprite, age: 0, lifetime, vx, vy, vz, baseOpacity });
+    _pugZParticles.push({
+        sprite, age: 0, lifetime,
+        spawnX, spawnY, spawnZ,
+        waveAxisX: job.waveAxisX, waveAxisZ: job.waveAxisZ,
+        phaseOffset, riseSpeed, baseOpacity,
+    });
 }
 
 function _updatePugZParticles(): void {
+    // Tick the spawn queue — materialise jobs whose countdown has elapsed
+    for (let i = _pugZSpawnQueue.length - 1; i >= 0; i--) {
+        _pugZSpawnQueue[i].countdown -= deltaTime;
+        if (_pugZSpawnQueue[i].countdown <= 0) {
+            _spawnOneZ(_pugZSpawnQueue[i]);
+            _pugZSpawnQueue.splice(i, 1);
+        }
+    }
+
     for (let i = _pugZParticles.length - 1; i >= 0; i--) {
         const z = _pugZParticles[i];
         z.age += deltaTime;
@@ -1692,15 +1803,15 @@ function _updatePugZParticles(): void {
 
         const t = z.age / z.lifetime;
 
-        // Move
-        z.sprite.position.x += z.vx * deltaTime;
-        z.sprite.position.y += z.vy * deltaTime;
-        z.sprite.position.z += z.vz * deltaTime;
+        // ── Sine-wave path ────────────────────────────────────────────────────
+        // All particles follow the exact same wave shape from their spawn point,
+        // staggered by phaseOffset so the burst reads as a continuous stream.
+        const waveOffset = PUG_Z_WAVE_AMP * Math.sin(PUG_Z_WAVE_FREQ * z.age + z.phaseOffset);
+        z.sprite.position.x = z.spawnX + waveOffset * z.waveAxisX;
+        z.sprite.position.y = z.spawnY + z.riseSpeed * z.age;
+        z.sprite.position.z = z.spawnZ + waveOffset * z.waveAxisZ;
 
-        // Slight deceleration so Zs float lazily to a stop
-        z.vy *= 0.9985;
-
-        // Opacity: fade in fast (0-15%), hold (15-70%), fade out (70-100%)
+        // ── Opacity: fade in (0–15 %), hold (15–70 %), fade out (70–100 %) ──
         let opacity: number;
         if (t < 0.15) {
             opacity = z.baseOpacity * (t / 0.15);
@@ -1711,7 +1822,7 @@ function _updatePugZParticles(): void {
         }
         (z.sprite.material as SpriteMaterial).opacity = opacity;
 
-        // Slow gentle rotation — tumbles like a floating letter
-        z.sprite.material.rotation += deltaTime * 0.25;
+        // Slow tumble — each particle rotates a tiny bit
+        z.sprite.material.rotation += deltaTime * 0.20;
     }
 }
