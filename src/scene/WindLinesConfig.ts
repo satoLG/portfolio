@@ -4,35 +4,43 @@
 
 // ── Spawning ──────────────────────────────────────────────────────────────────
 export const maxLines  = 5;
-export const spawnRate = 4.0000;       // lines spawned per second at full breeze intensity
-export const rampUp    = 0.8000;     // seconds to reach full intensity (breeze start)
-export const rampDown  = 3.5000;     // seconds to fade out (breeze end)
+export const spawnRate = 3.3000;       // lines spawned per second at full breeze intensity
+export const rampUp    = 2.1000;     // seconds to reach full intensity (breeze start)
+export const rampDown  = 5.3000;     // seconds to fade out (breeze end)
 
 // ── Line shape ────────────────────────────────────────────────────────────────
-export const minLength = 80;      // px
-export const maxLength = 250;     // px
+export const minLength = 251;      // px
+export const maxLength = 485;     // px
 export const tiltY     = 0.0400;    // downward drift — px per px traveled left (0 = horizontal)
 
 // ── Vertical spread ───────────────────────────────────────────────────────────
-export const minYFrac  = 0.0500;    // fraction of screen height (0 = top)
-export const maxYFrac  = 0.8200;
+export const minWorldY = 0.7500;   // lowest spawn Y in Three.js world units
+export const maxWorldY =  3.5500;   // highest spawn Y in Three.js world units
 
 // ── Width ─────────────────────────────────────────────────────────────────────
 export const minWidth  = 1.6000;     // px
-export const maxWidth  = 3.8500;     // px
+export const maxWidth  = 3.0000;     // px
 
 // ── Speed ─────────────────────────────────────────────────────────────────────
 export const minSpeed  = 200;     // px/s
 export const maxSpeed  = 315;     // px/s
 
 // ── Appearance ────────────────────────────────────────────────────────────────
-export const lineOpacity = 0.6200;  // peak opacity per line (0–1)
+export const lineOpacity = 0.5100;  // peak opacity per line (0–1)
 export const colorR      = 232;   // RGB 0–255
 export const colorG      = 228;
 export const colorB      = 228;
 
 // ── Wave / wobble ─────────────────────────────────────────────────────────────
-export const waveAmplitude = 5.0000;   // max vertical displacement (px); 0 = straight lines
-export const waveFrequency = 0.7000; // full sine cycles per line (1 = one wave, 2 = two waves)
-export const waveSpeed     = 1.2000;// animation speed — radians per second phase shift
+export const waveAmplitude = 6.5000;   // max vertical displacement (px); 0 = straight lines
+export const waveFrequency = 1.4000; // full sine cycles per line (1 = one wave, 2 = two waves)
+export const waveSpeed     = 4.3000;// animation speed — radians per second phase shift
 export const waveSegments  = 16;  // sub-divisions per line (higher = smoother, min 4)
+
+// ── 3D World-Space Depth ──────────────────────────────────────────────────────
+export const minZOffset = -2.8000;  // Z offset relative to island Z (negative = further from camera)
+export const maxZOffset =  0.5000;  // Z offset relative to island Z (positive = closer to camera)
+
+// ── Island Proximity Fade ─────────────────────────────────────────────────────
+export const islandDisappearDist = 4.4000;  // dist where lines START fading out (moving away from island)
+export const islandAppearDist    = 4.7000;  // dist where lines START appearing (approaching island)

@@ -8,7 +8,7 @@ import {
     Vector2,
     Camera,
     FramebufferTexture,
-    NearestFilter
+    LinearFilter
 } from "three";
 import { time } from "../scripts/Time";
 import { distortionStrength, distortionSpeed, distortionScale } from '../scene/OceanConfig';
@@ -59,19 +59,32 @@ const fragmentShader = /* glsl */`
     void main() {
         vec2 uv = vUv;
         
-        // Underwater distortion
+        // Multi-frequency underwater distortion.
+        // Three waves per axis at irrational frequency/phase ratios so their
+        // zero-crossings never align — this eliminates the static seam line
+        // that a single sin/cos wave produces where its amplitude is exactly 0.
         float t = uTime * uSpeed;
-        float dx = sin(uv.y * uScale + t) * uDistortion * uAmount;
-        float dy = cos(uv.x * uScale * 0.8 + t * 0.9) * uDistortion * 0.7 * uAmount;
+        float dx = (sin(uv.y * uScale          + t)           * 0.60
+                  + sin(uv.y * uScale * 1.7    + t * 1.3 + 1.9) * 0.25
+                  + sin(uv.y * uScale * 3.1    + t * 0.7 + 4.1) * 0.15
+                   ) * uDistortion * uAmount;
+        float dy = (cos(uv.x * uScale * 0.8    + t * 0.9)        * 0.60
+                  + cos(uv.x * uScale * 1.4    + t * 0.6 + 2.7)  * 0.25
+                  + cos(uv.x * uScale * 2.6    + t * 1.1 + 5.2)  * 0.15
+                   ) * uDistortion * 0.7 * uAmount;
         uv.x += dx;
         uv.y += dy;
-        
+
+        // Guard against UVs escaping [0,1] — clamping to a tiny inset avoids
+        // the edge-smear that appears when the sampler clamps to the border.
+        uv = clamp(uv, vec2(0.001), vec2(0.999));
+
         // Pixelation effect
         if (uPixelSize > 0.5) {
             vec2 pixelCount = uResolution / uPixelSize;
             uv = floor(uv * pixelCount) / pixelCount;
         }
-        
+
         gl_FragColor = texture2D(tDiffuse, uv);
     }
 `;
@@ -81,11 +94,11 @@ export function Start(renderer: WebGLRenderer): void {
     renderer.getSize(size);
     width = size.x;
     height = size.y;
-    
+
     // FramebufferTexture copies directly from the framebuffer - no color conversion
     framebufferTexture = new FramebufferTexture(width, height);
-    framebufferTexture.minFilter = NearestFilter;
-    framebufferTexture.magFilter = NearestFilter;
+    framebufferTexture.minFilter = LinearFilter;
+    framebufferTexture.magFilter = LinearFilter;
     
     material = new ShaderMaterial({
         vertexShader,
@@ -115,8 +128,8 @@ export function onResize(w: number, h: number): void {
     if (framebufferTexture) {
         framebufferTexture.dispose();
         framebufferTexture = new FramebufferTexture(width, height);
-        framebufferTexture.minFilter = NearestFilter;
-        framebufferTexture.magFilter = NearestFilter;
+        framebufferTexture.minFilter = LinearFilter;
+        framebufferTexture.magFilter = LinearFilter;
         if (material) {
             material.uniforms.tDiffuse.value = framebufferTexture;
             material.uniforms.uResolution.value.set(width, height);

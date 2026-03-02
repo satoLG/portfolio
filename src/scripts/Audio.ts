@@ -13,8 +13,8 @@ export function getAudioContext(): AudioContext | null { return _audioContext; }
 // ============================================
 const WATER_VOLUME = 1.0;
 const BREEZE_VOLUME = 0.5;
-const BREEZE_MIN_DELAY = 3;
-const BREEZE_MAX_DELAY = 6;
+const BREEZE_MIN_DELAY = 6;
+const BREEZE_MAX_DELAY = 9;
 const FIREPLACE_VOLUME_MAX = 0.4;
 const FIREPLACE_FADE_DURATION = 1.5;
 const UNDERWATER_AMB_VOLUME = 0.25;

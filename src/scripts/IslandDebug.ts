@@ -56,6 +56,7 @@ import {
 } from '../materials/OceanMaterial';
 import * as OceanReflection from '../effects/OceanReflection';
 import * as WindLines from '../effects/WindLines';
+import * as Clouds from '../effects/Clouds';
 import {
     setDistortion as setUnderwaterDistortion,
     setSpeed as setUnderwaterSpeed,
@@ -385,8 +386,8 @@ function buildGUI(): void {
                 `export const tiltY     = ${f(c.tiltY)};    // downward drift — px per px traveled left (0 = horizontal)`,
                 ``,
                 `// ── Vertical spread ───────────────────────────────────────────────────────────`,
-                `export const minYFrac  = ${f(c.minYFrac)};    // fraction of screen height (0 = top)`,
-                `export const maxYFrac  = ${f(c.maxYFrac)};`,
+                `export const minWorldY = ${f(c.minWorldY)};   // lowest spawn Y in Three.js world units`,
+                `export const maxWorldY =  ${f(c.maxWorldY)};   // highest spawn Y in Three.js world units`,
                 ``,
                 `// ── Width ─────────────────────────────────────────────────────────────────────`,
                 `export const minWidth  = ${f(c.minWidth)};     // px`,
@@ -407,6 +408,14 @@ function buildGUI(): void {
                 `export const waveFrequency = ${f(c.waveFrequency)}; // full sine cycles per line (1 = one wave, 2 = two waves)`,
                 `export const waveSpeed     = ${f(c.waveSpeed)};// animation speed — radians per second phase shift`,
                 `export const waveSegments  = ${fi(c.waveSegments)};  // sub-divisions per line (higher = smoother, min 4)`,
+                ``,
+                `// ── 3D World-Space Depth ──────────────────────────────────────────────────────`,
+                `export const minZOffset = ${f(c.minZOffset)};  // Z offset relative to island Z (negative = further from camera)`,
+                `export const maxZOffset =  ${f(c.maxZOffset)};  // Z offset relative to island Z (positive = closer to camera)`,
+                ``,
+                `// ── Island Proximity Fade ─────────────────────────────────────────────────────`,
+                `export const islandDisappearDist = ${f(c.islandDisappearDist)};  // dist where lines START fading out (moving away from island)`,
+                `export const islandAppearDist    = ${f(c.islandAppearDist)};  // dist where lines START appearing (approaching island)`,
             ].join('\n');
             navigator.clipboard.writeText(content).then(() => {
                 console.log('[IslandDebug] WindLinesConfig.ts content copied to clipboard!');
@@ -612,10 +621,10 @@ function buildGUI(): void {
         set maxLength(v)  { wc.maxLength = v; },
         get tiltY()       { return wc.tiltY; },
         set tiltY(v)      { wc.tiltY = v; },
-        get minYFrac()    { return wc.minYFrac; },
-        set minYFrac(v)   { wc.minYFrac = v; },
-        get maxYFrac()    { return wc.maxYFrac; },
-        set maxYFrac(v)   { wc.maxYFrac = v; },
+        get minWorldY()   { return wc.minWorldY; },
+        set minWorldY(v)  { wc.minWorldY = v; },
+        get maxWorldY()   { return wc.maxWorldY; },
+        set maxWorldY(v)  { wc.maxWorldY = v; },
         // width
         get minWidth()    { return wc.minWidth; },
         set minWidth(v)   { wc.minWidth = v; },
@@ -644,6 +653,16 @@ function buildGUI(): void {
         set waveSpeed(v)     { wc.waveSpeed = v; },
         get waveSegments()   { return wc.waveSegments; },
         set waveSegments(v)  { wc.waveSegments = Math.round(v); },
+        // depth
+        get minZOffset()          { return wc.minZOffset; },
+        set minZOffset(v)         { wc.minZOffset = v; },
+        get maxZOffset()          { return wc.maxZOffset; },
+        set maxZOffset(v)         { wc.maxZOffset = v; },
+        // proximity fade
+        get islandDisappearDist() { return wc.islandDisappearDist; },
+        set islandDisappearDist(v){ wc.islandDisappearDist = v; },
+        get islandAppearDist()    { return wc.islandAppearDist; },
+        set islandAppearDist(v)   { wc.islandAppearDist = v; },
     };
 
     const windSpawnFolder = windFolder.addFolder('Spawning');
@@ -657,8 +676,8 @@ function buildGUI(): void {
     windLineFolder.add(windProxy, 'minLength',  10, 500,  1    ).name('Min Length (px)').listen();
     windLineFolder.add(windProxy, 'maxLength',  10, 800,  1    ).name('Max Length (px)').listen();
     windLineFolder.add(windProxy, 'tiltY',       0,  0.3, 0.001).name('Tilt Y').listen();
-    windLineFolder.add(windProxy, 'minYFrac',    0,  1,   0.01 ).name('Y Spread Min').listen();
-    windLineFolder.add(windProxy, 'maxYFrac',    0,  1,   0.01 ).name('Y Spread Max').listen();
+    windLineFolder.add(windProxy, 'minWorldY', -5,  5,  0.05).name('Y Spawn Min (world)').listen();
+    windLineFolder.add(windProxy, 'maxWorldY', -5,  5,  0.05).name('Y Spawn Max (world)').listen();
     windLineFolder.close();
 
     const windVisFolder = windFolder.addFolder('Appearance');
@@ -679,8 +698,142 @@ function buildGUI(): void {
     windWaveFolder.add(windProxy, 'waveSegments',   4, 60,  1  ).name('Segments (quality)').listen();
     windWaveFolder.close();
 
-    windFolder.close();
+    const windDepthFolder = windFolder.addFolder('3D Depth (Z spread)');
+    windDepthFolder.add(windProxy, 'minZOffset', -6, 0,   0.1).name('Z Offset Min (further)').listen();
+    windDepthFolder.add(windProxy, 'maxZOffset', -2, 4,   0.1).name('Z Offset Max (closer)').listen();
+    windDepthFolder.close();
 
+    const windFadeFolder = windFolder.addFolder('Proximity Fade');
+    windFadeFolder.add(windProxy, 'islandDisappearDist', 0, 20, 0.1).name('Fade-out dist left of island').listen();
+    windFadeFolder.add(windProxy, 'islandAppearDist',    0, 20, 0.1).name('Fade-in dist right of island').listen();
+    windFadeFolder.close();
+
+    windFolder.close();
+    // ── Volumetric Clouds ────────────────────────────────────────────────
+    const cloudFolder = gui.addFolder('☁️ Volumetric Clouds');
+
+    const cloudsActions = {
+        copyCloudsConfig: () => {
+            const f  = (n: number) => n.toFixed(4);
+            const fi = (n: number) => String(Math.round(n));
+            const c  = Clouds.config;
+            const content = [
+                `// src/scene/CloudsConfig.ts`,
+                `// Volumetric clouds configuration -- generated by IslandDebug.`,
+                `// Paste this entire file to replace src/scene/CloudsConfig.ts`,
+                ``,
+                `// -- Mesh placement (world-space centre + scale) ---`,
+                `export const posX   = ${f(c.posX)};`,
+                `export const posY   = ${f(c.posY)};`,
+                `export const posZ   = ${f(c.posZ)};`,
+                `export const scaleX = ${f(c.scaleX)};`,
+                `export const scaleY = ${f(c.scaleY)};`,
+                `export const scaleZ = ${f(c.scaleZ)};`,
+                ``,
+                `// -- Wind (right -> left) ---`,
+                `export const windSpeed = ${f(c.windSpeed)};`,
+                ``,
+                `// -- Noise ---`,
+                `export const noiseScale = ${f(c.noiseScale)};`,
+                ``,
+                `// -- Turbulence (domain warp) ---`,
+                `export const turbulenceStrength = ${f(c.turbulenceStrength)};`,
+                `export const turbulenceSpeed    = ${f(c.turbulenceSpeed)};`,
+                ``,
+                `// -- Shape ---`,
+                `export const threshold = ${f(c.threshold)};`,
+                `export const range     = ${f(c.range)};`,
+                `export const opacity   = ${f(c.opacity)};`,
+                `export const edgeFade  = ${f(c.edgeFade)};`,
+                ``,
+                `// -- Quality ---`,
+                `export const marchSteps = ${fi(c.marchSteps)};`,
+                ``,
+                `// -- Day colors ---`,
+                `export const dayR = ${f(c.dayR)};`,
+                `export const dayG = ${f(c.dayG)};`,
+                `export const dayB = ${f(c.dayB)};`,
+                ``,
+                `// -- Night colors ---`,
+                `export const nightR = ${f(c.nightR)};`,
+                `export const nightG = ${f(c.nightG)};`,
+                `export const nightB = ${f(c.nightB)};`,
+            ].join('\n');
+            navigator.clipboard.writeText(content).then(() => {
+                console.log('[IslandDebug] CloudsConfig.ts content copied to clipboard!');
+            });
+        },
+    };
+    cloudFolder.add(cloudsActions, 'copyCloudsConfig').name('📋 Copy CloudsConfig.ts');
+
+    const cc = Clouds.config;
+
+    const cloudProxy = {
+        // shape
+        get threshold()  { return cc.threshold; },  set threshold(v)  { cc.threshold  = v; },
+        get range()      { return cc.range; },       set range(v)      { cc.range      = v; },
+        get opacity()    { return cc.opacity; },     set opacity(v)    { cc.opacity    = v; },
+        get edgeFade()   { return cc.edgeFade; },   set edgeFade(v)   { cc.edgeFade   = v; },
+        get noiseScale()         { return cc.noiseScale; },         set noiseScale(v)         { cc.noiseScale          = v; },
+        get turbulenceStrength() { return cc.turbulenceStrength; }, set turbulenceStrength(v) { cc.turbulenceStrength = v; },
+        get turbulenceSpeed()    { return cc.turbulenceSpeed; },    set turbulenceSpeed(v)    { cc.turbulenceSpeed    = v; },
+        get windSpeed()          { return cc.windSpeed; },          set windSpeed(v)          { cc.windSpeed          = v; },
+        // quality
+        get marchSteps() { return cc.marchSteps; }, set marchSteps(v) { cc.marchSteps = Math.round(v); },
+        // day colors
+        get dayR() { return cc.dayR; }, set dayR(v) { cc.dayR = v; },
+        get dayG() { return cc.dayG; }, set dayG(v) { cc.dayG = v; },
+        get dayB() { return cc.dayB; }, set dayB(v) { cc.dayB = v; },
+        // night colors
+        get nightR() { return cc.nightR; }, set nightR(v) { cc.nightR = v; },
+        get nightG() { return cc.nightG; }, set nightG(v) { cc.nightG = v; },
+        get nightB() { return cc.nightB; }, set nightB(v) { cc.nightB = v; },
+        // placement
+        get posX()   { return cc.posX; },   set posX(v)   { cc.posX   = v; },
+        get posY()   { return cc.posY; },   set posY(v)   { cc.posY   = v; },
+        get posZ()   { return cc.posZ; },   set posZ(v)   { cc.posZ   = v; },
+        get scaleX() { return cc.scaleX; }, set scaleX(v) { cc.scaleX = v; },
+        get scaleY() { return cc.scaleY; }, set scaleY(v) { cc.scaleY = v; },
+        get scaleZ() { return cc.scaleZ; }, set scaleZ(v) { cc.scaleZ = v; },
+    };
+
+    const cloudShapeFolder = cloudFolder.addFolder('Shape');
+    cloudShapeFolder.add(cloudProxy, 'threshold',  0,    1,    0.01 ).name('Threshold (density)').listen();
+    cloudShapeFolder.add(cloudProxy, 'range',      0.01, 0.5,  0.005).name('Range (softness)').listen();
+    cloudShapeFolder.add(cloudProxy, 'opacity',    0,    1,    0.005).name('Opacity per step').listen();
+    cloudShapeFolder.add(cloudProxy, 'edgeFade',   0,    0.5,  0.01 ).name('Edge Fade (top/bot)').listen();
+    cloudShapeFolder.add(cloudProxy, 'noiseScale',         0.1, 2.0,  0.01 ).name('Noise Scale').listen();
+    cloudShapeFolder.add(cloudProxy, 'turbulenceStrength', 0,   0.5,  0.005).name('Turbulence Strength').listen();
+    cloudShapeFolder.add(cloudProxy, 'turbulenceSpeed',    0,   0.25, 0.002).name('Turbulence Speed').listen();
+    cloudShapeFolder.add(cloudProxy, 'windSpeed',          0,   0.1,  0.001).name('Wind Speed').listen();
+    cloudShapeFolder.close();
+
+    const cloudQualityFolder = cloudFolder.addFolder('Quality');
+    cloudQualityFolder.add(cloudProxy, 'marchSteps', 16, 200, 1).name('March Steps').listen();
+    cloudQualityFolder.close();
+
+    const cloudDayFolder = cloudFolder.addFolder('Day Colors');
+    cloudDayFolder.add(cloudProxy, 'dayR', 0, 1, 0.01).name('R').listen();
+    cloudDayFolder.add(cloudProxy, 'dayG', 0, 1, 0.01).name('G').listen();
+    cloudDayFolder.add(cloudProxy, 'dayB', 0, 1, 0.01).name('B').listen();
+    cloudDayFolder.close();
+
+    const cloudNightFolder = cloudFolder.addFolder('Night Colors');
+    cloudNightFolder.add(cloudProxy, 'nightR', 0, 1, 0.01).name('R').listen();
+    cloudNightFolder.add(cloudProxy, 'nightG', 0, 1, 0.01).name('G').listen();
+    cloudNightFolder.add(cloudProxy, 'nightB', 0, 1, 0.01).name('B').listen();
+    cloudNightFolder.close();
+
+    const cloudPlaceFolder = cloudFolder.addFolder('Placement');
+    cloudPlaceFolder.add(cloudProxy, 'posX',   -500, 500,  1.0).name('Centre X').listen();
+    cloudPlaceFolder.add(cloudProxy, 'posY',      0, 500,  1.0).name('Centre Y').listen();
+    cloudPlaceFolder.add(cloudProxy, 'posZ',   -800,   0,  1.0).name('Centre Z').listen();
+    cloudPlaceFolder.add(cloudProxy, 'scaleX',   10,2000,  5.0).name('Width').listen();
+    cloudPlaceFolder.add(cloudProxy, 'scaleY',    1, 300,  1.0).name('Height').listen();
+    cloudPlaceFolder.add(cloudProxy, 'scaleZ',   10,1000,  5.0).name('Depth').listen();
+    cloudPlaceFolder.close();
+
+    cloudFolder.close();
     // ── Underwater Fog ───────────────────────────────────────────────────────
     const fogFolder = gui.addFolder('🌊 Underwater Fog');
 
