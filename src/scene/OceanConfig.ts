@@ -34,6 +34,6 @@ export const reflectionRTSize       = 512 as 256 | 512; // render target resolut
 
 // ── Underwater ────────────────────────────────────────────────────────────────
 export const oceanAbsorption    = { r: 0.1290, g: 0.0440, b: 0.0350 }; // per-channel fog depth
-export const distortionStrength = 0.0056;
-export const distortionSpeed    = 0.4300;
-export const distortionScale    = 3.1000;
+export const distortionStrength = 0.0115;
+export const distortionSpeed    = 0.6200;
+export const distortionScale    = 8.5000;

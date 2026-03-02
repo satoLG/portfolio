@@ -13,6 +13,7 @@ import * as OceanReflection from "../effects/OceanReflection.ts";
 import * as Bubbles from "../effects/Bubbles.ts";
 import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
 import * as WindLines from "../effects/WindLines.ts";
+import * as Clouds from "../effects/Clouds.ts";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
@@ -97,6 +98,14 @@ function applyPixelBodyClass(value: number): void {
     document.body.classList.remove('pixel-medium', 'pixel-max');
     if (value === 5) document.body.classList.add('pixel-medium');
     else if (value >= 10) document.body.classList.add('pixel-max');
+
+    const logoSrc = value > 0 ? '/favicon_pixel.svg' : '/favicon.svg';
+
+    const faviconLink = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (faviconLink) faviconLink.href = logoSrc;
+
+    const nameLogo = document.querySelector<HTMLImageElement>('img.name-logo');
+    if (nameLogo) nameLogo.src = logoSrc;
 }
 
 export function SetColorFilter(value: ColorFilter): void {
@@ -312,8 +321,13 @@ export function Start(): void
     // Initialize audio system
     Audio.Start();
 
-    // Wind lines canvas overlay (synced with breeze audio)
+    // Wind lines — 3D ribbon meshes in the Three.js scene (synced with breeze audio)
     WindLines.Start();
+    scene.add(WindLines.windLinesGroup);
+
+    // Volumetric clouds
+    Clouds.Start();
+    scene.add(Clouds.cloudsGroup);
 }
 
 export function Update(): void
@@ -359,8 +373,11 @@ export function Update(): void
     Underwater.renderScene(renderer, scene, camera);
     renderer.render(axes, staticCamera);
 
-    // Wind streak overlay — canvas drawn after all WebGL passes
-    WindLines.Update(deltaTime, camera.position.y, camera.fov);
+    // Wind lines 3D update — moves ribbon meshes and updates vertex positions
+    WindLines.Update(deltaTime, camera.position.x, camera.position.y, camera.position.z, camera.fov);
+
+    // Volumetric clouds — sunVisible drives day(1)/night(0) color transition
+    Clouds.Update(deltaTime, sunVisible);
 }
 
 // Shadow configuration helpers
