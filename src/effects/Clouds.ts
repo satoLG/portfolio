@@ -12,8 +12,15 @@
 } from 'three';
 import * as CC from '../scene/CloudsConfig';
 
-// ── 3D noise texture ──────────────────────────────────────────────────────────
-const NOISE_SIZE = 64;
+// ── Device quality tier ───────────────────────────────────────────────────────
+// Inline detection (avoids circular dep with Scene.ts which imports Clouds).
+const _isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+    || window.innerWidth < 768;
+
+// Scale noise texture size to device capability.
+// 64³ = 262 144 voxels (desktop) · 32³ = 32 768 (mobile) — 8× cheaper to build
+// and to sample (smaller 3-D texture → better GPU cache utilisation).
+const NOISE_SIZE = _isMobile ? 32 : 64;
 
 function buildNoiseTexture(): Data3DTexture {
     const N = NOISE_SIZE;
@@ -249,6 +256,13 @@ void main() {
 export function Start(): void {
     const noiseTex = buildNoiseTexture();
 
+    // Clamp default march steps to a device-appropriate ceiling.
+    // CC.marchSteps (64) is the high-quality target; real visitors rarely have
+    // the GPU headroom for it.  Desktop gets 36 steps (visually indistinguishable
+    // thanks to jitter + alpha early-exit), mobile gets 20 steps.
+    const stepCeil = _isMobile ? 20 : 36;
+    config.marchSteps = Math.min(CC.marchSteps, stepCeil);
+
     _material = new RawShaderMaterial({
         glslVersion: GLSL3,
         uniforms: {
@@ -262,7 +276,7 @@ export function Start(): void {
             uRange:       { value: CC.range },
             uOpacity:     { value: CC.opacity },
             uEdgeFade:    { value: CC.edgeFade },
-            uSteps:       { value: CC.marchSteps },
+            uSteps:       { value: config.marchSteps },
             uFrame:       { value: 0 },
             uColorDay:    { value: [CC.dayR,   CC.dayG,   CC.dayB]   },
             uColorNight:  { value: [CC.nightR, CC.nightG, CC.nightB] },
