@@ -4,30 +4,30 @@
 
 // -- Mesh placement (world-space centre + scale) ---
 export const posX   = 0.0000;
-export const posY   = 417.0000;
+export const posY   = 500.0000;
 export const posZ   = -424.0000;
 export const scaleX = 3000.0000;
 export const scaleY = 500.0000;
 export const scaleZ = 1500.0000;
 
 // -- Wind (right -> left) ---
-export const windSpeed = 0.0250;
+export const windSpeed = 0.0110;
 
 // -- Noise ---
-export const noiseScale = 2;
+export const noiseScale = 2.0000;
 
 // -- Turbulence (domain warp) ---
 export const turbulenceStrength = 0.2400;
-export const turbulenceSpeed    = 0.0220;
+export const turbulenceSpeed    = 0.0240;
 
 // -- Shape ---
-export const threshold = 0.9600;
+export const threshold = 0.9900;
 export const range     = 0.3450;
 export const opacity   = 0.7450;
 export const edgeFade  = 0.5000;
 
 // -- Quality ---
-export const marchSteps = 36;
+export const marchSteps = 16;
 
 // -- Day colors ---
 export const dayR = 1.0000;

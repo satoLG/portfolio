@@ -7,11 +7,39 @@ import { isDayTime } from "./Skybox";
 
 // Clown & Dori fish settings (circling the island)
 const CIRCLE_FISH_SCALE = 0.03;
-const CIRCLE_RADIUS = 1.2;
+const CIRCLE_RADIUS = 1.6;       // increased from 1.2
 const CIRCLE_SPEED = 0.3;
 const CIRCLE_Y_LEVEL = -0.7;
 const FISH_SEPARATION = 0.3;
 const CIRCLE_FISH_ROTATION_OFFSET = Math.PI * 2;
+
+// ── Dori lazy-zone (camera-facing arc) ───────────────────────────────────────
+// The front of the circle (closest to camera) is where sin(angle) = +1  →  angle ≈ π/2.
+// When the clown crosses this arc, Dori slows down, falls behind, then speeds back up.
+const DORI_LAZY_CENTER  = Math.PI / 2;  // angle at camera-facing apex
+const DORI_LAZY_HALF    = Math.PI * 0.5; // half-width of the lazy zone (90° each side = full front-half)
+const DORI_LAZY_MAX_LAG = 0.65;         // peak extra angular lag (radians) at zone centre
+
+/**
+ * Returns the extra angular lag Dori has BEHIND the clown at a given circleAngle.
+ * Uses a smooth (cos²) bell centred on DORI_LAZY_CENTER so the slowdown and
+ * catch-up feel organic rather than abrupt.
+ */
+function _doriLag(angle: number): number {
+    // Normalise to [0, 2π)
+    const tau = Math.PI * 2;
+    const norm = ((angle % tau) + tau) % tau;
+    // Signed angular distance from the lazy-zone centre, wrapped to [−π, π]
+    let delta = norm - DORI_LAZY_CENTER;
+    if (delta >  Math.PI) delta -= tau;
+    if (delta < -Math.PI) delta += tau;
+    // Outside the zone: zero lag
+    if (Math.abs(delta) >= DORI_LAZY_HALF) return 0;
+    // Smooth bell: cos²(π*t/2) gives 1 at centre and 0 at ±half-width
+    const t = delta / DORI_LAZY_HALF;          // −1 … +1
+    const bell = Math.cos((t * Math.PI) / 2);  // 1 at 0, 0 at ±1
+    return bell * bell * DORI_LAZY_MAX_LAG;
+}
 
 // Generic fish spawn settings
 const GENERIC_FISH_SCALE = 0.03;
@@ -422,7 +450,7 @@ export function Update(): void {
     
     // Circle fish movement
     circleAngle += CIRCLE_SPEED * deltaTime;
-    
+
     const clownAngle = circleAngle;
     clownFish.position.set(
         islandCenter.x + Math.cos(clownAngle) * CIRCLE_RADIUS,
@@ -430,8 +458,9 @@ export function Update(): void {
         islandCenter.z + Math.sin(clownAngle) * CIRCLE_RADIUS
     );
     clownFish.rotation.y = -clownAngle + CIRCLE_FISH_ROTATION_OFFSET;
-    
-    const doriAngle = circleAngle - FISH_SEPARATION;
+
+    // Dori: normal separation PLUS a lazy-zone lag that peaks when facing the camera
+    const doriAngle = circleAngle - FISH_SEPARATION - _doriLag(circleAngle);
     doriFish.position.set(
         islandCenter.x + Math.cos(doriAngle) * (CIRCLE_RADIUS + 0.08),
         CIRCLE_Y_LEVEL - 0.03,

@@ -12,7 +12,7 @@
     <!-- Pixel Fonts (Jersey) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Jersey+10&family=Jersey+15&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Jersey+10&family=Jersey+15&family=Margarine&display=swap" rel="stylesheet" />
     
     <!-- Primary Meta Tags -->
     <meta name="title" content="leosato." />
@@ -54,6 +54,15 @@
     <meta name="twitter:image" content="/icons/og-image.png" />
   </head>
   <body>
+    <!-- SVG filter for dialog bubble hand-drawn wobble effect -->
+    <svg style="position:absolute;width:0;height:0;overflow:hidden;" aria-hidden="true">
+      <defs>
+        <filter id="dialog-wobble" x="-10%" y="-8%" width="120%" height="160%" color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.028 0.022" numOctaves="3" seed="9" result="noise"/>
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="5" xChannelSelector="R" yChannelSelector="G"/>
+        </filter>
+      </defs>
+    </svg>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

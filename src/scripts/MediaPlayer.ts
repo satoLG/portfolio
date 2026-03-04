@@ -24,12 +24,6 @@ interface SongData {
 // Playlist that can be reordered
 let playlist: SongData[] = [
     {
-        file: 'audio/music/Aventure - Afternoon Coffee (freetouse.com).mp3',
-        name: 'Afternoon Coffee',
-        artist: 'Aventure',
-        cover: 'images/music/afternooncoffee.webp'
-    },
-    {
         file: 'audio/music/Hazelwood - At Ease (freetouse.com).mp3',
         name: 'At Ease',
         artist: 'Hazelwood',
@@ -42,40 +36,16 @@ let playlist: SongData[] = [
         cover: 'images/music/breeze.webp'
     },
     {
-        file: 'audio/music/Aventure - Chill Walk (freetouse.com).mp3',
-        name: 'Chill Walk',
-        artist: 'Aventure',
-        cover: 'images/music/chillwalk.webp'
-    },
-    {
-        file: 'audio/music/Moavii - City Lights (freetouse.com).mp3',
-        name: 'City Lights',
-        artist: 'Moavii',
-        cover: 'images/music/blur.webp'
-    },
-    {
         file: 'audio/music/Walen - Dark Heart (freetouse.com).mp3',
         name: 'Dark Heart',
         artist: 'Walen',
         cover: 'images/music/darkheart.webp'
     },
     {
-        file: 'audio/music/Alegend - Dawn (freetouse.com).mp3',
-        name: 'Dawn',
-        artist: 'Alegend',
-        cover: 'images/music/dawn.webp'
-    },
-    {
         file: 'audio/music/Moavii - Fly With Me (freetouse.com).mp3',
         name: 'Fly With Me',
         artist: 'Moavii',
         cover: 'images/music/flywithme.webp'
-    },
-    {
-        file: 'audio/music/massobeats - honey jam (freetouse.com).mp3',
-        name: 'honey jam',
-        artist: 'massobeats',
-        cover: 'images/music/massobeats.webp'
     },
     {
         file: 'audio/music/595751__yellowtree__late-nights-in-osaka.wav',
@@ -94,12 +64,6 @@ let playlist: SongData[] = [
         name: 'ocean',
         artist: 'massobeats',
         cover: 'images/music/ocean.webp'
-    },
-    {
-        file: 'audio/music/massobeats - peach prosecco (freetouse.com).mp3',
-        name: 'peach prosecco',
-        artist: 'massobeats',
-        cover: 'images/music/prosecco.webp'
     },
     {
         file: 'audio/music/Hazelwood - Reflection (freetouse.com).mp3',
