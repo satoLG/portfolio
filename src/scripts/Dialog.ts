@@ -58,8 +58,24 @@ function ensureBubble(): void {
     _promptEl.className = 'dialog-prompt';
     _promptEl.textContent = '▼';
 
+    // SVG curved tail — pinned to bottom-left of bubble, tip hangs 8 px left and 22 px below,
+    // pointing toward the character standing to the left.
+    const ns = 'http://www.w3.org/2000/svg';
+    const tailSvg = document.createElementNS(ns, 'svg');
+    tailSvg.classList.add('dialog-tail');
+    tailSvg.setAttribute('width', '30');
+    tailSvg.setAttribute('height', '22');
+    tailSvg.setAttribute('viewBox', '-8 0 30 22');
+    tailSvg.setAttribute('aria-hidden', 'true');
+    const tailPath = document.createElementNS(ns, 'path');
+    tailPath.classList.add('dialog-tail-path');
+    // Bezier teardrop: base spans bottom-left of bubble; tip at (−8, 22) = below-left
+    tailPath.setAttribute('d', 'M 2,0 C -1,7 -5,14 -8,22 C 0,15 11,8 22,0 Z');
+    tailSvg.appendChild(tailPath);
+
     _bubbleEl.appendChild(_textEl);
     _bubbleEl.appendChild(_promptEl);
+    _bubbleEl.appendChild(tailSvg);
     document.body.appendChild(_bubbleEl);
 
     // Clicking the bubble itself advances the dialog
@@ -71,8 +87,11 @@ function ensureBubble(): void {
 
 // ─── Positioning ──────────────────────────────────────────────────────────────
 
-const TAIL_HEIGHT = 20;   // px — height of the triangle tail
-const BUBBLE_ABOVE = 10;  // px — extra clearance between tail tip and anchor point
+const TAIL_HEIGHT     = 22;  // px — height of the SVG tail below the bubble
+const BUBBLE_ABOVE    = 10;  // px — extra clearance between tail tip and anchor point
+// The SVG tail tip overhangs TAIL_TIP_OVERHANG px to the LEFT of bubble.left.
+// Setting rawLeft = anchor.x + TAIL_TIP_OVERHANG aligns the tip with the character.
+const TAIL_TIP_OVERHANG = 8;  // px
 
 function _updatePosition(): void {
     if (!_state || !_bubbleEl) return;
@@ -84,19 +103,16 @@ function _updatePosition(): void {
     const ww = window.innerWidth;
     const wh = window.innerHeight;
 
-    // Clamp bubble so it stays fully inside the viewport horizontally
-    const rawLeft = anchor.x - bw / 2;
+    // Bubble sits to the RIGHT of the character — tail at bottom-left points back at them.
+    // tail tip x  =  left − TAIL_TIP_OVERHANG  ⇒  left = anchor.x + TAIL_TIP_OVERHANG
+    const rawLeft = anchor.x + TAIL_TIP_OVERHANG;
     const left = Math.max(8, Math.min(ww - bw - 8, rawLeft));
-
-    // Tail x is the anchor point expressed relative to the bubble's left edge
-    const tailX = Math.max(14, Math.min(bw - 14, anchor.x - left));
 
     // Place bubble above anchor
     const top = Math.max(8, Math.min(wh - bh - 8, anchor.y - bh - TAIL_HEIGHT - BUBBLE_ABOVE));
 
     _bubbleEl.style.left = `${left}px`;
     _bubbleEl.style.top  = `${top}px`;
-    _bubbleEl.style.setProperty('--tail-x', `${tailX}px`);
 }
 
 function _trackLoop(): void {

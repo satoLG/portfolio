@@ -18,16 +18,16 @@ export const normalMapScale    = 0.1500;
 export const normalMapStrength = 0.0900;
 export const waveVelocity1     = { x: 0.0650, y: 0.0000 };
 export const waveVelocity2     = { x: 0.0000, y: 0.0650 };
-export const edgeFadeDistance  = 0.9200;
+export const edgeFadeDistance  = 0.5400;
 
 // ── Ocean Surface ─────────────────────────────────────────────────────────────
 export const surfaceColor   = { r: 0.0000, g: 0.3500, b: 0.7700 }; // RGB tint (1,1,1 = no tint)
-export const surfaceOpacity = 1.0000;
+export const surfaceOpacity = 0.6100;
 
 // ── Reflection ────────────────────────────────────────────────────────────────
-export const reflectionStrength     = 0.1500; // 0 = skybox only, 1 = RT only
-export const reflectionFresnelPower = 0.4500; // lower = visible at more angles
-export const reflectionFloor        = 0.0000; // minimum reflectivity at any angle
+export const reflectionStrength     = 0.4300; // 0 = skybox only, 1 = RT only
+export const reflectionFresnelPower = 0.4000; // lower = visible at more angles
+export const reflectionFloor        = 0.2200; // minimum reflectivity at any angle
 export const skyReflectionBrightness = 1.0000; // scales the analytical skybox reflection (0 = none, 1 = full)
 export const skyReflFalloff         = 6.5000; // sharpens near→far gradient: 1 = linear, 2 = squared, 4 = very steep
 export const reflectionRTSize       = 512 as 256 | 512; // render target resolution

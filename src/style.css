@@ -2332,15 +2332,24 @@ a:visited
     max-width: 300px;
     min-width: 130px;
     padding: 11px 16px 9px;
-    background: #ffffffcc;
+    background: #ffffffd8;
     /* border: 3px solid #1a1a1a; */
-    border-radius: 14px;
+    border-radius: 40px;
     box-shadow: 2px 2px 0 #1a1a1a5c;
     pointer-events: auto;
     cursor: pointer;
     user-select: none;
     display: none;
-    transform-origin: var(--tail-x, 50%) calc(100% + 20px);
+    /* Pop animation scales from the tail tip: 8 px left of bubble, 22 px below */
+    transform-origin: -8px calc(100% + 22px);
+    /* Hand-drawn wobble edge (normal mode only) */
+    filter: url(#dialog-wobble);
+}
+
+/* Remove wobble in pixel modes — clean sharp edges fit the pixel aesthetic */
+body.pixel-medium .dialog-bubble,
+body.pixel-max .dialog-bubble {
+    filter: none;
 }
 
 .dialog-bubble.dialog-visible {
@@ -2353,37 +2362,54 @@ a:visited
     animation: dialog-pop-out 0.18s ease-in forwards;
 }
 
-/* Tail outer border (black) */
+/* ::after and ::before reserved for pixel-mode CSS triangle (hidden by default) */
 .dialog-bubble::after {
     content: '';
     position: absolute;
-    bottom: -22px;
-    left: var(--tail-x, 50%);
-    transform: translateX(-50%);
-    border-left: 12px solid transparent;
-    border-right: 12px solid transparent;
-    /* border-top: 22px solid #1a1a1a; */
     pointer-events: none;
 }
 
-/* Tail inner fill (white) */
 .dialog-bubble::before {
     content: '';
     position: absolute;
+    pointer-events: none;
+    /* hidden in normal mode — SVG tail used instead */
+    border-top: none;
+}
+
+/* SVG curved tail — normal (non-pixel) mode */
+.dialog-tail {
+    position: absolute;
+    left: 20px;
+    bottom: -22px;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.dialog-tail-path {
+    fill: #ffffffd8;
+}
+
+/* Pixel modes: hide SVG tail, restore sharp CSS triangle at the left */
+body.pixel-medium .dialog-bubble .dialog-tail,
+body.pixel-max    .dialog-bubble .dialog-tail {
+    display: none;
+}
+
+body.pixel-medium .dialog-bubble::before,
+body.pixel-max    .dialog-bubble::before {
     bottom: -16px;
-    left: var(--tail-x, 50%);
-    transform: translateX(-50%);
-    z-index: 1;
+    left: 16px;
     border-left: 9px solid transparent;
     border-right: 9px solid transparent;
     border-top: 16px solid #ffffffcc;
-    pointer-events: none;
 }
 
 .dialog-text {
     margin: 0 0 2px;
     font-size: 25px !important;
-    font-weight: 700 !important;
+    font-family: 'Margarine', cursive !important;
+    font-weight: 400 !important;   /* Margarine is a single-weight display font */
     color: #1a1a1a;
     line-height: 1.4;
     min-height: 1.4em;

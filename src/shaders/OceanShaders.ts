@@ -54,7 +54,7 @@ export const surfaceFragment =
     uniform float _SkyReflBrightness;       // scales the analytical skybox reflection (0–1)
     uniform float _SkyReflFalloff;          // exponent on fresnelBase for sky only — sharpens near→far gradient
     uniform vec3  _SurfaceColor;            // RGB tint (1,1,1 = no tint)
-    uniform float _SurfaceOpacity;          // overall surface alpha multiplier
+    uniform float _SurfaceOpacity;          // 0 = physics-Fresnel alpha, 1 = fully opaque
 
     varying vec2 _worldPos;
     varying vec2 _uv;
@@ -249,7 +249,11 @@ export const surfaceFragment =
             vec3 foamColor = vec3(1.0, 1.0, 1.0);
             surface = mix(surface, foamColor, foam);
 
-            gl_FragColor = vec4(surface, max(max(reflectivity, fog), foam) * edgeFade * _SurfaceOpacity);
+            // _SurfaceOpacity blends from physics-based alpha (Fresnel + fog) to full opacity.
+            // At 0: transparent where Fresnel is low (looking straight down).
+            // At 1: fully opaque regardless of view angle — makes reflection clearly visible.
+            float physicsAlpha = max(max(reflectivity, fog), foam);
+            gl_FragColor = vec4(surface, mix(physicsAlpha, 1.0, _SurfaceOpacity) * edgeFade);
             return;
         }
 

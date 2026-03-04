@@ -105,6 +105,13 @@ const PUG_ZOOM_TARGET_Z = _pugWorldZ + PUG_ZOOM_DIST * Math.cos(cfgPugRotY);
 // phi = 2π − rotY makes camera look along −frontNormal (same derivation as radio)
 const PUG_ZOOM_PHI = Math.PI * 2 - cfgPugRotY;
 
+// Shift camera rightward (in camera-local space) during pug zoom so the character
+// appears left-of-centre, leaving visual room for the dialog bubble on the right.
+// Camera-right at PUG_ZOOM_PHI = (cos(cfgPugRotY), 0, −sin(cfgPugRotY)).
+const PUG_LATERAL = 0.15;   // world-unit rightward offset
+const PUG_FINAL_X = PUG_ZOOM_TARGET_X + PUG_LATERAL * Math.cos(cfgPugRotY);
+const PUG_FINAL_Z = PUG_ZOOM_TARGET_Z - PUG_LATERAL * Math.sin(cfgPugRotY);
+
 export function isRadioZoomActive(): boolean {
     return radioZoomActive;
 }
@@ -441,9 +448,9 @@ export function Update(): void
     if (webPageMode) {
         if (radioZoomActive || pugZoomActive) {
             // ZOOM MODE: Smoothly move camera to target position
-            const zoomTargetX = pugZoomActive ? PUG_ZOOM_TARGET_X : RADIO_ZOOM_TARGET_X;
+            const zoomTargetX = pugZoomActive ? PUG_FINAL_X : RADIO_ZOOM_TARGET_X;
             const zoomTargetY = pugZoomActive ? PUG_ZOOM_TARGET_Y : RADIO_ZOOM_TARGET_Y;
-            const zoomTargetZ = pugZoomActive ? PUG_ZOOM_TARGET_Z : RADIO_ZOOM_TARGET_Z;
+            const zoomTargetZ = pugZoomActive ? PUG_FINAL_Z : RADIO_ZOOM_TARGET_Z;
             currentZoomX = MathUtils.damp(currentZoomX, zoomTargetX, ZOOM_SMOOTH, deltaTime);
             currentZoomY = MathUtils.damp(currentZoomY, zoomTargetY, ZOOM_SMOOTH, deltaTime);
             currentZoomZ = MathUtils.damp(currentZoomZ, zoomTargetZ, ZOOM_SMOOTH, deltaTime);
