@@ -1,6 +1,6 @@
 import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, MeshDepthMaterial, RGBADepthPacking } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { oceanAbsorptionUniform, setFoamMask } from "../materials/OceanMaterial";
+import { oceanAbsorptionUniform, underwaterFogDistUniform, setFoamMask } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../scripts/Time";
 import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../scripts/MediaPlayer";
@@ -455,8 +455,7 @@ const oceanLightingPars = /*glsl*/`
     uniform vec3 uLight;
     uniform vec3 uAbsorption;
     uniform float uSunVisibility;
-    
-    const float MAX_VIEW_DEPTH = 80.0;
+    uniform float uFogDist;
     const float DENSITY = 0.35;
     const float FOG_DISTANCE = 600.0;
 `;
@@ -484,11 +483,11 @@ const oceanLightingFragment = /*glsl*/`
             uwLen -= cameraPosition.y / -viewDir.y;
             originY = 0.0;
         }
-        uwLen = min(uwLen, MAX_VIEW_DEPTH);
+        uwLen = min(uwLen, uFogDist);
         float sampleY = originY + viewDir.y * uwLen;
         vec3 underwaterLight = exp((sampleY - uwLen * DENSITY) * uAbsorption) * uLight;
         outgoingLight *= underwaterLight;
-        float uwFog = min(uwLen / MAX_VIEW_DEPTH, 1.0);
+        float uwFog = min(uwLen / uFogDist, 1.0);
         outgoingLight = mix(outgoingLight, underwaterLight * 0.3, uwFog);
     }
 `;
@@ -504,6 +503,7 @@ function applyOceanLightingToModel(model: Group): void {
                     mat.onBeforeCompile = (shader: any) => {
                         shader.uniforms.uLight = lightUniform;
                         shader.uniforms.uAbsorption = oceanAbsorptionUniform;
+                        shader.uniforms.uFogDist = underwaterFogDistUniform;
                         shader.uniforms.uSunVisibility = sunVisibilityUniform;
                         
                         shader.vertexShader = shader.vertexShader.replace(
@@ -523,9 +523,9 @@ function applyOceanLightingToModel(model: Group): void {
                             ${oceanLightingPars}`
                         );
                         shader.fragmentShader = shader.fragmentShader.replace(
-                            '#include <dithering_fragment>',
+                            '#include <opaque_fragment>',
                             `${oceanLightingFragment}
-                            #include <dithering_fragment>`
+                            #include <opaque_fragment>`
                         );
                     };
                     mat.needsUpdate = true;
@@ -603,9 +603,9 @@ function applyPalmWindShader(model: Group): void {
                             ${oceanLightingPars}`
                         );
                         shader.fragmentShader = shader.fragmentShader.replace(
-                            '#include <dithering_fragment>',
+                            '#include <opaque_fragment>',
                             `${oceanLightingFragment}
-                            #include <dithering_fragment>`
+                            #include <opaque_fragment>`
                         );
                     };
                     mat.needsUpdate = true;
@@ -690,9 +690,9 @@ function applyFoliageWindShader(model: Group): void {
                             ${oceanLightingPars}`
                         );
                         shader.fragmentShader = shader.fragmentShader.replace(
-                            '#include <dithering_fragment>',
+                            '#include <opaque_fragment>',
                             `${oceanLightingFragment}
-                            #include <dithering_fragment>`
+                            #include <opaque_fragment>`
                         );
                     };
                     mat.needsUpdate = true;

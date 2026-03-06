@@ -142,6 +142,16 @@ let isPlaylistView = false;  // Expanded playlist view
 let isUnderwater = false;
 let isLoopEnabled = false;  // Loop current song or go to next
 
+// ── Transition-guard flag ─────────────────────────────────────────────────────
+// Set to true while wavesurfer is loading a new track.  During this window the
+// HTMLAudioElement fires a spurious 'pause' event (internally changing src)
+// which would otherwise flip isPlaying=false and break the button state.
+let _isLoadingNewSong = false;
+
+// ── Watchdog stall detection ──────────────────────────────────────────────────
+let _watchdogLastTime = -1;   // audioElement.currentTime sampled by the watchdog
+let _watchdogStallCount = 0;  // consecutive intervals where currentTime hasn't moved
+
 // DOM Elements
 let playerContainer: HTMLDivElement | null = null;
 
@@ -276,6 +286,81 @@ export function Start(): void {
     onLanguageChange(() => {
         updatePlaylistCount();
     });
+
+    // ── Tab-visibility recovery ───────────────────────────────────────────────
+    // When the user backgrounds the tab and comes back:
+    //   • The Web Audio AudioContext may have been suspended by the browser.
+    //   • On mobile, the HTMLAudioElement may have been paused.
+    // Resume both so music continues without requiring a manual press.
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') return;
+
+        // Always try to resume the AudioContext — harmless if already running.
+        const ctx = getAudioContext();
+        if (ctx && ctx.state === 'suspended') {
+            ctx.resume().catch(() => {});
+        }
+
+        // If we were supposed to be playing but the element was paused by the
+        // browser (common on iOS when backgrounding), resume it now.
+        // The return from background counts as a user-activation context on most
+        // browsers, so .play() is typically allowed here.
+        if (isPlaying && !pendingPlayOnReady && audioElement && audioElement.paused) {
+            audioElement.play().catch(() => {});
+        }
+    });
+
+    // ── Periodic watchdog (every 5 s) ─────────────────────────────────────────
+    // Purpose 1: Hard-sync the play/pause button to the real audio element state
+    //            so any edge-case desync is corrected within 5 s.
+    // Purpose 2: Detect audio that has ended without the 'finish' event firing
+    //            (can happen after tab backgrounding / AudioContext suspension)
+    //            and advance to the next song.
+    // Purpose 3: Detect a stall where isPlaying=true but currentTime is frozen
+    //            (AudioContext suspended mid-song) and attempt to recover.
+    setInterval(() => {
+        if (!audioElement || _isLoadingNewSong || pendingPlayOnReady) return;
+
+        // ── Hard state sync ────────────────────────────────────────────────────
+        const actuallyPlaying = !audioElement.paused && !audioElement.ended;
+        if (actuallyPlaying !== isPlaying) {
+            isPlaying = actuallyPlaying;
+            updatePlayButton();
+            updateBubblePlayingState();
+        }
+
+        // ── Stuck-ended recovery ───────────────────────────────────────────────
+        // Song ended but 'finish' event was swallowed (e.g. network issue or
+        // AudioContext was suspended exactly at song end).
+        if (isPlaying && audioElement.ended && !isLoopEnabled) {
+            console.warn('[MediaPlayer] Watchdog: audio ended without finish event — advancing');
+            _songEndHandled = false;
+            handleSongEnded();
+            return;
+        }
+
+        // ── Stall recovery: currentTime frozen while playing ──────────────────
+        if (isPlaying && !audioElement.paused && !audioElement.ended) {
+            const t = audioElement.currentTime;
+            if (_watchdogLastTime >= 0 && Math.abs(t - _watchdogLastTime) < 0.1) {
+                _watchdogStallCount++;
+                if (_watchdogStallCount >= 2) {
+                    // Frozen for ~10 s while supposedly playing — try to kick it
+                    console.warn('[MediaPlayer] Watchdog: playback appears stalled, attempting recovery');
+                    _watchdogStallCount = 0;
+                    const ctx = getAudioContext();
+                    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+                    audioElement.play().catch(() => {});
+                }
+            } else {
+                _watchdogStallCount = 0;
+            }
+            _watchdogLastTime = t;
+        } else {
+            _watchdogLastTime = -1;
+            _watchdogStallCount = 0;
+        }
+    }, 5000);
 }
 
 function createPlayerUI(): void {
@@ -397,7 +482,9 @@ function createPlayerUI(): void {
     // Control buttons
     prevBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        previousSong(!audioElement?.paused);
+        // Use `isPlaying` (authoritative state) rather than audioElement.paused
+        // which may be unreliable mid-transition.
+        previousSong(isPlaying);
     });
     
     playBtn.addEventListener('click', (e) => {
@@ -407,7 +494,7 @@ function createPlayerUI(): void {
     
     nextBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        nextSong(!audioElement?.paused);
+        nextSong(isPlaying);
     });
     
     // Loop button
@@ -688,11 +775,37 @@ function createAudioElement(): void {
     // Single source of truth: sync isPlaying from the actual audio element state
     audioElement.addEventListener('play', () => syncPlayState());
     audioElement.addEventListener('pause', () => syncPlayState());
+
+    // 'canplay' fires earlier than wavesurfer's 'ready' event (which waits for
+    // full waveform decode). Using it as a play trigger makes song starts more
+    // reliable — especially on mobile and after tab backgrounding where 'ready'
+    // may be delayed by seconds or may never fire at all.
+    audioElement.addEventListener('canplay', () => {
+        if (!pendingPlayOnReady) return;
+        pendingPlayOnReady = false;
+        _isLoadingNewSong = false;
+        // Let wavesurfer drive playback if it's available (keeps waveform in sync)
+        if (wavesurfer) {
+            wavesurfer.play().catch(() => audioElement?.play().catch(() => {}));
+        } else {
+            audioElement!.play().catch(() => {});
+        }
+    });
+
+    // Safety net: if the audio errors out during load, clear the loading flag
+    // so subsequent state changes aren't silently suppressed.
+    audioElement.addEventListener('error', () => {
+        _isLoadingNewSong = false;
+        pendingPlayOnReady = false;
+    });
 }
 
-// Read the real state from the audio element and update everything to match
+// Read the real state from the audio element and update everything to match.
+// Suppressed during song-load transitions to prevent the mid-load spurious
+// 'pause' event from flipping isPlaying=false while a new track is queued.
 function syncPlayState(): void {
     if (!audioElement) return;
+    if (_isLoadingNewSong) return;  // Ignore transient pause events during src swap
     const playing = !audioElement.paused;
     if (playing === isPlaying) return;  // No change, skip DOM updates
     isPlaying = playing;
@@ -787,10 +900,11 @@ function initWavesurfer(): void {
         updateTimeDisplay();
     });
     wavesurfer.on('ready', () => {
+        _isLoadingNewSong = false;  // Transition complete — re-enable syncPlayState
         updateTimeDisplay();
         updateWaveformColors();
         preloadAdjacentSongs();
-        // Auto-play if a song switch requested it
+        // Auto-play if a song switch requested it and canplay hasn't fired yet
         if (pendingPlayOnReady && wavesurfer) {
             pendingPlayOnReady = false;
             wavesurfer.play();
@@ -1267,11 +1381,20 @@ function nextSong(autoPlay: boolean = false): void {
 function loadSong(index: number, forcePlay: boolean = false): void {
     if (playlist.length === 0) return;
     
-    // Decide if we should auto-play: either forced or was already playing
-    const shouldPlay = forcePlay || (audioElement ? !audioElement.paused : isPlaying);
+    // Decide if we should auto-play: either forced or was already playing.
+    // Use the authoritative `isPlaying` flag rather than audioElement.paused —
+    // the element may already be pausing mid-transition, giving a false reading.
+    const shouldPlay = forcePlay || isPlaying;
     const songFile = playlist[index].file;
     
-    // Store intent so the wavesurfer 'ready' handler can auto-play
+    // Mark that a load is in progress so syncPlayState() ignores the transient
+    // 'pause' event that HTMLAudioElement fires when its src is changed.
+    _isLoadingNewSong = true;
+    // Allow the upcoming song's 'finish' event to fire, even if the previous
+    // song also ended (otherwise the second song end is swallowed by the guard).
+    _songEndHandled = false;
+    
+    // Store intent so wavesurfer 'ready' / canplay handlers can auto-play
     pendingPlayOnReady = shouldPlay;
     
     updatePlayerDisplay();
@@ -1289,25 +1412,30 @@ function loadSong(index: number, forcePlay: boolean = false): void {
             wavesurfer.load(songFile);
         } catch {
             // Fallback if wavesurfer.load fails: set src directly
+            _isLoadingNewSong = false;
             if (audioElement) {
                 audioElement.src = songFile;
                 if (shouldPlay) audioElement.play().catch(() => {});
             }
         }
     } else if (audioElement) {
+        _isLoadingNewSong = false;
         audioElement.src = songFile;
         if (shouldPlay) audioElement.play().catch(() => {});
     }
     
-    // Mobile fallback: if wavesurfer 'ready' doesn't fire (e.g. screen locked),
-    // start playback directly after a short delay
+    // Last-resort fallback: if neither 'canplay' nor wavesurfer 'ready' fires
+    // (e.g. network timeout, locked screen on iOS), attempt playback after 3 s.
+    // This timeout is intentionally generous — mobile browsers often delay media
+    // events by 1-2 s when the tab is freshly foregrounded.
     if (shouldPlay && audioElement) {
         setTimeout(() => {
             if (pendingPlayOnReady && audioElement && audioElement.paused) {
                 pendingPlayOnReady = false;
+                _isLoadingNewSong = false;
                 audioElement.play().catch(() => {});
             }
-        }, 1500);
+        }, 3000);
     }
     
     // Preload adjacent songs into browser cache
@@ -1436,7 +1564,9 @@ function buildPlaylistItems(): void {
             if (target.closest('.playlist-item-drag')) return;
             
             currentSongIndex = index;
-            loadSong(index, true);
+            // Inherit the current play/pause state rather than always starting
+            // playback — if the user was paused, the new song loads paused too.
+            loadSong(index, isPlaying);
         });
         
         // Drag and drop for reordering

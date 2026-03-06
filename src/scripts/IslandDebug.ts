@@ -1,4 +1,4 @@
-/**
+﻿/**
  * IslandDebug — press H to toggle
  *
  * lil-gui panel with position, scale, and rotation sliders for every
@@ -53,10 +53,12 @@ import {
     foamWobbleAmtUniform,
     foamWobbleFreqUniform,
     foamWobbleSpeedUniform,
+    underwaterFogDistUniform,
 } from '../materials/OceanMaterial';
 import * as OceanReflection from '../effects/OceanReflection';
 import * as WindLines from '../effects/WindLines';
 import * as Clouds from '../effects/Clouds';
+import * as SeaFloorDecor from '../scene/SeaFloorDecor';
 import {
     setDistortion as setUnderwaterDistortion,
     setSpeed as setUnderwaterSpeed,
@@ -844,6 +846,8 @@ function buildGUI(): void {
         set absG(v)      { oceanAbsorptionUniform.value.y = v; },
         get absB()       { return oceanAbsorptionUniform.value.z; },
         set absB(v)      { oceanAbsorptionUniform.value.z = v; },
+        get fogDist()    { return underwaterFogDistUniform.value; },
+        set fogDist(v)   { underwaterFogDistUniform.value = v; },
         get distortion() { return _fogState.distortion; },
         set distortion(v){ _fogState.distortion = v; setUnderwaterDistortion(v); },
         get speed()      { return _fogState.speed; },
@@ -855,11 +859,128 @@ function buildGUI(): void {
     fogFolder.add(fogProxy, 'absR',  0, 1,    0.001 ).name('Absorption R').listen();
     fogFolder.add(fogProxy, 'absG',  0, 1,    0.001 ).name('Absorption G').listen();
     fogFolder.add(fogProxy, 'absB',  0, 1,    0.001 ).name('Absorption B').listen();
+    fogFolder.add(fogProxy, 'fogDist', 1, 400, 1    ).name('Fog Far Distance').listen();
     fogFolder.add(fogProxy, 'distortion', 0, 0.05,  0.0001).name('Distortion Strength').listen();
     fogFolder.add(fogProxy, 'speed',      0, 5,     0.01  ).name('Distortion Speed').listen();
     fogFolder.add(fogProxy, 'scale',      0, 30,    0.1   ).name('Distortion Scale').listen();
 
     fogFolder.close();
+
+    // ── Seafloor Decorations ──────────────────────────────────────────────────
+    const sfFolder = gui.addFolder('🪸 Seafloor Decor');
+    const sf = SeaFloorDecor.config;
+
+    // ── Copy config action ────────────────────────────────────────────────────
+    const sfActions = {
+        copyConfig: () => {
+            const f = (n: number) => n.toFixed(4);
+            const content = [
+                `// src/scene/SeaFloorConfig.ts`,
+                `// Explicit placement for every seafloor decoration.`,
+                `// All rotations are in radians.`,
+                ``,
+                `// -- Coral Rocks ---------------------------------------------------------------`,
+                `export const rock1 = { x: ${f(sf.rock1.x)}, y: ${f(sf.rock1.y)}, z: ${f(sf.rock1.z)}, scale: ${f(sf.rock1.scale)}, rx: ${f(sf.rock1.rx)}, ry: ${f(sf.rock1.ry)}, rz: ${f(sf.rock1.rz)} };`,
+                `export const rock2 = { x: ${f(sf.rock2.x)}, y: ${f(sf.rock2.y)}, z: ${f(sf.rock2.z)}, scale: ${f(sf.rock2.scale)}, rx: ${f(sf.rock2.rx)}, ry: ${f(sf.rock2.ry)}, rz: ${f(sf.rock2.rz)} };`,
+                `export const rock3 = { x: ${f(sf.rock3.x)}, y: ${f(sf.rock3.y)}, z: ${f(sf.rock3.z)}, scale: ${f(sf.rock3.scale)}, rx: ${f(sf.rock3.rx)}, ry: ${f(sf.rock3.ry)}, rz: ${f(sf.rock3.rz)} };`,
+                ``,
+                `// -- Corals --------------------------------------------------------------------`,
+                `export const coral1 = { x: ${f(sf.coral1.x)}, y: ${f(sf.coral1.y)}, z: ${f(sf.coral1.z)}, scale: ${f(sf.coral1.scale)}, rx: ${f(sf.coral1.rx)}, ry: ${f(sf.coral1.ry)}, rz: ${f(sf.coral1.rz)}, r: ${f(sf.coral1.r)}, g: ${f(sf.coral1.g)}, b: ${f(sf.coral1.b)} };`,
+                `export const coral2 = { x: ${f(sf.coral2.x)}, y: ${f(sf.coral2.y)}, z: ${f(sf.coral2.z)}, scale: ${f(sf.coral2.scale)}, rx: ${f(sf.coral2.rx)}, ry: ${f(sf.coral2.ry)}, rz: ${f(sf.coral2.rz)}, r: ${f(sf.coral2.r)}, g: ${f(sf.coral2.g)}, b: ${f(sf.coral2.b)} };`,
+                `export const coral3 = { x: ${f(sf.coral3.x)}, y: ${f(sf.coral3.y)}, z: ${f(sf.coral3.z)}, scale: ${f(sf.coral3.scale)}, rx: ${f(sf.coral3.rx)}, ry: ${f(sf.coral3.ry)}, rz: ${f(sf.coral3.rz)}, r: ${f(sf.coral3.r)}, g: ${f(sf.coral3.g)}, b: ${f(sf.coral3.b)} };`,
+                ``,
+                `// -- Kelps ---------------------------------------------------------------------`,
+                `export const kelp1 = { x: ${f(sf.kelp1.x)}, y: ${f(sf.kelp1.y)}, z: ${f(sf.kelp1.z)}, scale: ${f(sf.kelp1.scale)}, rx: ${f(sf.kelp1.rx)}, ry: ${f(sf.kelp1.ry)}, rz: ${f(sf.kelp1.rz)} };`,
+                `export const kelp2 = { x: ${f(sf.kelp2.x)}, y: ${f(sf.kelp2.y)}, z: ${f(sf.kelp2.z)}, scale: ${f(sf.kelp2.scale)}, rx: ${f(sf.kelp2.rx)}, ry: ${f(sf.kelp2.ry)}, rz: ${f(sf.kelp2.rz)} };`,
+                `export const kelp3 = { x: ${f(sf.kelp3.x)}, y: ${f(sf.kelp3.y)}, z: ${f(sf.kelp3.z)}, scale: ${f(sf.kelp3.scale)}, rx: ${f(sf.kelp3.rx)}, ry: ${f(sf.kelp3.ry)}, rz: ${f(sf.kelp3.rz)} };`,
+                ``,
+                `// -- Kelp Sway (underwater current) -------------------------------------------`,
+                `export const kelpTopY          = ${f(sf.kelpTopY)};`,
+                `export const kelpSwayStrength  = ${f(sf.kelpSwayStrength)};`,
+                `export const kelpSwaySpeed     = ${f(sf.kelpSwaySpeed)};`,
+                `export const kelpSwayFrequency = ${f(sf.kelpSwayFrequency)};`,
+            ].join('\n');
+            navigator.clipboard.writeText(content).then(() => {
+                console.log('[IslandDebug] SeaFloorConfig.ts content copied to clipboard!');
+            });
+        },
+    };
+    sfFolder.add(sfActions, 'copyConfig').name('📋 Copy SeaFloorConfig.ts');
+
+    // ── Helper: make per-model placement sub-folder ───────────────────────────
+    function makePlacementFolder(
+        parent: any,
+        label: string,
+        getCfg: () => { x: number; y: number; z: number; scale: number; rx: number; ry: number; rz: number },
+        onTransform: () => void,
+    ): void {
+        const folder = parent.addFolder(label);
+        const proxy = {
+            get x()     { return getCfg().x;     }, set x(v)     { getCfg().x     = v; onTransform(); },
+            get y()     { return getCfg().y;     }, set y(v)     { getCfg().y     = v; onTransform(); },
+            get z()     { return getCfg().z;     }, set z(v)     { getCfg().z     = v; onTransform(); },
+            get scale() { return getCfg().scale; }, set scale(v) { getCfg().scale = v; onTransform(); },
+            get rx()    { return getCfg().rx;    }, set rx(v)    { getCfg().rx    = v; onTransform(); },
+            get ry()    { return getCfg().ry;    }, set ry(v)    { getCfg().ry    = v; onTransform(); },
+            get rz()    { return getCfg().rz;    }, set rz(v)    { getCfg().rz    = v; onTransform(); },
+        };
+        folder.add(proxy, 'x',     -30, 30,   0.05).name('X').listen();
+        folder.add(proxy, 'y',     -20,  0,   0.05).name('Y').listen();
+        folder.add(proxy, 'z',     -30, 30,   0.05).name('Z').listen();
+        folder.add(proxy, 'scale',   0,  5,   0.01).name('Scale').listen();
+        folder.add(proxy, 'rx', -3.14, 3.14,  0.01).name('Rot X').listen();
+        folder.add(proxy, 'ry', -3.14, 3.14,  0.01).name('Rot Y').listen();
+        folder.add(proxy, 'rz', -3.14, 3.14,  0.01).name('Rot Z').listen();
+        folder.close();
+    }
+
+    // ── Coral Rocks ─────────────────────────────────────────────────────────
+    const sfRocksFolder = sfFolder.addFolder('🪨 Coral Rocks');
+    makePlacementFolder(sfRocksFolder, 'Rock 1', () => sf.rock1,  () => SeaFloorDecor.updateRockTransform(0));
+    makePlacementFolder(sfRocksFolder, 'Rock 2', () => sf.rock2,  () => SeaFloorDecor.updateRockTransform(1));
+    makePlacementFolder(sfRocksFolder, 'Rock 3', () => sf.rock3,  () => SeaFloorDecor.updateRockTransform(2));
+    sfRocksFolder.close();
+
+    // ── Corals ───────────────────────────────────────────────────────────────
+    const sfCoralsFolder = sfFolder.addFolder('🌸 Corals');
+    ([0, 1, 2] as const).forEach((i) => {
+        const key = (['coral1', 'coral2', 'coral3'] as const)[i];
+        const num = i + 1;
+        makePlacementFolder(sfCoralsFolder, `Coral ${num}`, () => sf[key], () => SeaFloorDecor.updateCoralTransform(i));
+        // Color sub-folder inside each coral folder (last added child)
+        const coralFolder = sfCoralsFolder.children[sfCoralsFolder.children.length - 1] as any;
+        const colorProxy = {
+            get r() { return sf[key].r; }, set r(v) { sf[key].r = v; SeaFloorDecor.updateCoralColor(i); },
+            get g() { return sf[key].g; }, set g(v) { sf[key].g = v; SeaFloorDecor.updateCoralColor(i); },
+            get b() { return sf[key].b; }, set b(v) { sf[key].b = v; SeaFloorDecor.updateCoralColor(i); },
+        };
+        coralFolder.add(colorProxy, 'r', 0, 1, 0.01).name('Color R').listen();
+        coralFolder.add(colorProxy, 'g', 0, 1, 0.01).name('Color G').listen();
+        coralFolder.add(colorProxy, 'b', 0, 1, 0.01).name('Color B').listen();
+    });
+    sfCoralsFolder.close();
+
+    // ── Kelps ────────────────────────────────────────────────────────────────
+    const sfKelpFolder = sfFolder.addFolder('🌿 Kelps');
+    // Shared sway settings at top of kelp folder
+    const swayProxy = {
+        get kelpTopY()          { return sf.kelpTopY;          }, set kelpTopY(v)          { sf.kelpTopY          = v; },
+        get kelpSwayStrength()  { return sf.kelpSwayStrength;  }, set kelpSwayStrength(v)  { sf.kelpSwayStrength  = v; },
+        get kelpSwaySpeed()     { return sf.kelpSwaySpeed;     }, set kelpSwaySpeed(v)     { sf.kelpSwaySpeed     = v; },
+        get kelpSwayFrequency() { return sf.kelpSwayFrequency; }, set kelpSwayFrequency(v) { sf.kelpSwayFrequency = v; },
+    };
+    const sfKelpSwayFolder = sfKelpFolder.addFolder('Sway (live)');
+    sfKelpSwayFolder.add(swayProxy, 'kelpTopY',          0.5, 10,  0.1  ).name('Tip Y (local)').listen();
+    sfKelpSwayFolder.add(swayProxy, 'kelpSwayStrength',    0,  1,  0.005).name('Strength').listen();
+    sfKelpSwayFolder.add(swayProxy, 'kelpSwaySpeed',    0.05,  4,  0.01 ).name('Speed').listen();
+    sfKelpSwayFolder.add(swayProxy, 'kelpSwayFrequency', 0.2,  8,  0.05 ).name('Frequency').listen();
+    sfKelpSwayFolder.close();
+    makePlacementFolder(sfKelpFolder, 'Kelp 1', () => sf.kelp1, () => SeaFloorDecor.updateKelpTransform(0));
+    makePlacementFolder(sfKelpFolder, 'Kelp 2', () => sf.kelp2, () => SeaFloorDecor.updateKelpTransform(1));
+    makePlacementFolder(sfKelpFolder, 'Kelp 3', () => sf.kelp3, () => SeaFloorDecor.updateKelpTransform(2));
+    sfKelpFolder.close();
+
+    sfFolder.close();
 
     gui.hide();
     visible = false;
