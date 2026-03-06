@@ -34,6 +34,14 @@ export const reflectionRTSize       = 512 as 256 | 512; // render target resolut
 
 // ── Underwater ────────────────────────────────────────────────────────────────
 export const oceanAbsorption    = { r: 0.1290, g: 0.0440, b: 0.0350 }; // per-channel fog depth
+export const underwaterFogDist  = 80.0;                                  // far distance — objects beyond this are fully fogged
 export const distortionStrength = 0.0115;
 export const distortionSpeed    = 0.6200;
 export const distortionScale    = 8.5000;
+
+// ── Click Ripple Effect ───────────────────────────────────────────────────────
+export const rippleSpeed           = 0.7;    // World-units/sec the ring expands (max radius = speed × lifetime)
+export const rippleLifetime        = 1.0;    // Seconds before the wave fully fades out
+export const rippleWidth           = 0.12;   // Width of the wave band in world units
+export const rippleNormalStrength  = 1.2;    // Normal-perturbation amplitude — keep in line with wave normals
+export const rippleMaxClickDistance = 70.0;  // Max XZ distance (world units) from camera for the effect to trigger

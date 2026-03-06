@@ -2,6 +2,7 @@ import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector3, WebG
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
 import * as SeaFloor from "../scene/SeaFloor";
+import * as SeaFloorDecor from "../scene/SeaFloorDecor";
 import * as Island from "../scene/Island";
 import * as Fire from "../scene/Fire.ts";
 import * as Fish from "../scene/Fish.ts";
@@ -257,6 +258,10 @@ export function Start(): void
         scene.add(SeaFloor.tiles[i]);
     }
 
+    // Seafloor decorations (coral rocks, corals, kelp) — loads async
+    SeaFloorDecor.Start();
+    scene.add(SeaFloorDecor.decorGroup);
+
     // Load island and firecamp models
     Island.Start();
     scene.add(Island.island);
@@ -335,6 +340,7 @@ export function Update(): void
     Skybox.Update();
     Ocean.Update();
     SeaFloor.Update();
+    SeaFloorDecor.Update(deltaTime);
     Island.Update();
     Fish.Update();
     Fire.Update();

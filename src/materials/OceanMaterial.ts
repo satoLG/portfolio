@@ -33,7 +33,8 @@ landTexture.wrapT = RepeatWrapping;
 const blendSharpness = 3;
 const triplanarScale = 1;
 
-export const oceanAbsorptionUniform = new Uniform(new Vector3(OceanConfig.oceanAbsorption.r, OceanConfig.oceanAbsorption.g, OceanConfig.oceanAbsorption.b));
+export const oceanAbsorptionUniform  = new Uniform(new Vector3(OceanConfig.oceanAbsorption.r, OceanConfig.oceanAbsorption.g, OceanConfig.oceanAbsorption.b));
+export const underwaterFogDistUniform = new Uniform(OceanConfig.underwaterFogDist);
 
 export const normalMapScaleUniform    = new Uniform(OceanConfig.normalMapScale);
 export const normalMapStrengthUniform = new Uniform(OceanConfig.normalMapStrength);
@@ -91,9 +92,12 @@ const _rippleInitData = new Float32Array(MAX_RIPPLES * 3);
 for (let i = 0; i < MAX_RIPPLES; i++) _rippleInitData[i * 3 + 2] = -999;
 export const ripplesUniform = new Uniform(_rippleInitData);
 export const rippleCountUniform = new Uniform(0);  // was 3 — caused ghost ripples on startup
-export const rippleSpeedUniform = new Uniform(1.0);      // How fast ripples expand
-export const rippleLifetimeUniform = new Uniform(1.2);   // Reduced from 1.5 for faster cleanup
-export const rippleWidthUniform = new Uniform(0.15);      // Width of the wave band
+export const rippleSpeedUniform           = new Uniform(OceanConfig.rippleSpeed);
+export const rippleLifetimeUniform        = new Uniform(OceanConfig.rippleLifetime);
+export const rippleWidthUniform           = new Uniform(OceanConfig.rippleWidth);
+export const rippleNormalStrengthUniform  = new Uniform(OceanConfig.rippleNormalStrength);
+/** Max XZ world-space distance from camera within which a click can trigger a ripple. */
+export const rippleMaxClickDistance       = OceanConfig.rippleMaxClickDistance;
 
 export function addRipple(x: number, z: number): void {
     // Remove oldest ripple if at max capacity
@@ -175,6 +179,7 @@ export function Start(): void
         _RippleSpeed: rippleSpeedUniform,
         _RippleLifetime: rippleLifetimeUniform,
         _RippleWidth: rippleWidthUniform,
+        _RippleNormalStrength: rippleNormalStrengthUniform,
         _ReflectionTexture: reflectionTextureUniform,
         _ReflectionStrength: reflectionStrengthUniform,
         _ReflectionFresnelPower: reflectionFresnelPowerUniform,

@@ -46,6 +46,7 @@ export const surfaceFragment =
     uniform float _RippleSpeed;
     uniform float _RippleLifetime;
     uniform float _RippleWidth;
+    uniform float _RippleNormalStrength;  // normal perturbation amplitude
 
     uniform sampler2D _ReflectionTexture;
     uniform float _ReflectionStrength;
@@ -175,14 +176,15 @@ export const surfaceFragment =
             float fade = 1.0 - (rippleTime / _RippleLifetime);
             fade = fade * fade;
             
-            // Create radial normal distortion (like circular water ripple)
+            // Create radial normal distortion — strength matches ocean wave normals
             vec2 direction = normalize(toCenter);
             float angle = (dist - radius) * 15.0;  // Wave frequency
             float waveHeight = sin(angle) * mask * fade;
-            
-            // Stronger normal perturbation for visibility
-            normalOffset.x += direction.x * waveHeight * 5.0;
-            normalOffset.z += direction.y * waveHeight * 5.0;
+
+            // Normal perturbation: use _RippleNormalStrength so it is consistent
+            // with the normal-map wave normals and produces matching reflections.
+            normalOffset.x += direction.x * waveHeight * _RippleNormalStrength;
+            normalOffset.z += direction.y * waveHeight * _RippleNormalStrength;
             
             // Very subtle foam on wave crests (not pure white)
             float crest = smoothstep(-0.3, 0.3, sin(angle)) * mask * fade;

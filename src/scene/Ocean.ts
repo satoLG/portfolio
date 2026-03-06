@@ -1,6 +1,6 @@
 import { BufferAttribute, BufferGeometry, Mesh, PlaneGeometry, Raycaster, Vector2 } from "three";
 import * as oceanMaterials from "../materials/OceanMaterial";
-import { camera, scene } from "../scripts/Scene";
+import { camera } from "../scripts/Scene";
 import { deltaTime } from "../scripts/Time";
 import * as Audio from "../scripts/Audio";
 import { isPugZoomActive, isRadioZoomActive } from "../scripts/Control";
@@ -97,27 +97,25 @@ function setupRippleInteraction(): void {
 
         raycaster.setFromCamera(mouse, camera);
 
-        // Single-pass: walk the sorted hit list and determine what the ray hits first.
-        // • Sprites (music notes, Z particles) are transparent overlays — skip them.
-        // • The ocean volume backdrop is a non-surface ocean mesh — skip it.
-        // • First remaining hit that is `surface` → ripple allowed.
-        // • First remaining hit that is anything else → blocked by geometry.
-        const allIntersects = raycaster.intersectObjects(scene.children, true);
+        // Cast directly against the ocean surface mesh — the ONLY object that matters.
+        // Scanning scene.children (the old approach) lets any scene geometry that
+        // happens to intersect the ray before y=0 block the click silently.
+        // Wind-line meshes float at y=0.75–3.55 (between camera and ocean surface)
+        // and are the confirmed culprit for intermittent failures.
+        // By querying the surface mesh directly we bypass every possible blocker.
+        const surfaceHits = raycaster.intersectObject(surface, false);
+        if (surfaceHits.length === 0) return;  // Ray missed ocean entirely (clicked sky / horizon)
 
-        for (const hit of allIntersects) {
-            const obj = hit.object;
-            // Skip transparent overlays and the ocean volume side-box
-            if ((obj as any).isSprite) continue;
-            if (obj === volume) continue;
+        const hit = surfaceHits[0];
 
-            if (obj === surface) {
-                // Ocean surface is the first solid hit — spawn ripple
-                oceanMaterials.addRipple(hit.point.x, hit.point.z);
-                Audio.playWaterSplash();
-            }
-            // Whether it was surface or a blocker, stop scanning
-            break;
-        }
+        // ── Far-distance limit ─────────────────────────────────────────────────
+        const dx = hit.point.x - camera.position.x;
+        const dz = hit.point.z - camera.position.z;
+        const maxDist = oceanMaterials.rippleMaxClickDistance;
+        if (dx * dx + dz * dz > maxDist * maxDist) return;
+
+        oceanMaterials.addRipple(hit.point.x, hit.point.z);
+        Audio.playWaterSplash();
     };
 
     // Mouse click
