@@ -3,7 +3,7 @@ import { deltaTime, time } from "./Time";
 import { camera, cameraRight, cameraForward, UpdateCameraRotation, renderer, staticCamera } from "./Scene.ts"; //body,
 import { KeyCodes, PointerPhase, PointerType, keysJustPressed, keysPressed, lastPointerLockChange, mouseMovement, pointers } from "./Input";
 import { spotLightDistance, spotLightDistanceUniform } from "../materials/OceanMaterial";
-import { islandPosition as cfgIslandPos, radioOffset as cfgRadioOffset, radioRotY as cfgRadioRotY, pugOffset as cfgPugOffset, pugRotY as cfgPugRotY } from '../scene/IslandConfig';
+import { islandPosition as cfgIslandPos, radioOffset as cfgRadioOffset, radioRotY as cfgRadioRotY, pugOffset as cfgPugOffset, pugRotY as cfgPugRotY, phoneOffset as cfgPhoneOffset } from '../scene/IslandConfig';
 
 const baseMoveSpeed = 10;
 const shiftMoveSpeed = baseMoveSpeed * 5;
@@ -62,10 +62,11 @@ export function enableScroll(): void {
 }
 
 // ============================================
-// ZOOM MODE (radio and pug)
+// ZOOM MODE (radio, pug and phone)
 // ============================================
 let radioZoomActive = false;
 let pugZoomActive = false;
+let phoneZoomActive = false;
 
 // Saved camera state before zoom
 let savedCameraX = 0;
@@ -93,6 +94,18 @@ const RADIO_ZOOM_TARGET_Z = _radioWorldZ + RADIO_ZOOM_DIST * Math.cos(cfgRadioRo
 // Camera yaw: phi = 2π − rotY makes the camera look along −frontNormal (directly at radio front)
 const RADIO_ZOOM_PHI = Math.PI * 2 - cfgRadioRotY;
 let zoomPhi = Math.PI * 2;  // Smoothly interpolated camera yaw, only active in webPageMode
+let zoomTetha = 0;           // Smoothly interpolated camera pitch, for phone top-down view
+let currentFov = 70;         // Smoothly interpolated FOV — narrows during phone zoom
+
+// Camera follow offset applied on top of the pug zoom target during cutscenes.
+// Set each frame by Island.ts while the pug is moving, reset to 0 when done.
+let _pugCamOffsetX = 0;
+let _pugCamOffsetZ = 0;
+/** Shift the pug-zoom camera target by (dx, dz) in world space. Call every frame while pug moves. */
+export function setPugCamOffset(dx: number, dz: number): void {
+    _pugCamOffsetX = dx;
+    _pugCamOffsetZ = dz;
+}
 
 // Pug zoom target — computed from IslandConfig respecting pug rotation
 const PUG_ZOOM_DIST    = 1.2;   // World-units in front of pug face
@@ -112,12 +125,32 @@ const PUG_LATERAL = 0.15;   // world-unit rightward offset
 const PUG_FINAL_X = PUG_ZOOM_TARGET_X + PUG_LATERAL * Math.cos(cfgPugRotY);
 const PUG_FINAL_Z = PUG_ZOOM_TARGET_Z - PUG_LATERAL * Math.sin(cfgPugRotY);
 
+// Phone zoom target — camera looks nearly straight down at the phone lying flat
+// Tweak these live from the debug GUI (H key) while zoomed into the phone.
+export const phoneZoomConfig = {
+    height: 0.37,   // World-units above the phone surface
+    tilt:   0.04,   // Z forward offset for slight viewing angle
+    pitch:  -1.45,  // Camera pitch in radians (~-83° = nearly straight down)
+    fov:    23,     // Camera FOV during phone zoom (telephoto — lower = more zoom)
+};
+const _phoneWorldX = cfgIslandPos.x + cfgPhoneOffset.x;
+const _phoneWorldY = cfgIslandPos.y + cfgPhoneOffset.y;
+const _phoneWorldZ = cfgIslandPos.z + cfgPhoneOffset.z;
+// Phone zoom targets are computed live each frame in Update() from phoneZoomConfig
+// Camera yaw: face negative Z to look toward the phone
+const PHONE_ZOOM_PHI = Math.PI * 2;
+// Camera pitch for top-down view (handled via tetha override in Update)
+
 export function isRadioZoomActive(): boolean {
     return radioZoomActive;
 }
 
 export function isPugZoomActive(): boolean {
     return pugZoomActive;
+}
+
+export function isPhoneZoomActive(): boolean {
+    return phoneZoomActive;
 }
 
 function saveAndStartZoom(): void {
@@ -132,7 +165,7 @@ function saveAndStartZoom(): void {
 
 // Zoom camera to focus on radio (called when expanding media player above water)
 export function zoomToRadio(): void {
-    if (radioZoomActive || pugZoomActive || isUnderwater) return;
+    if (radioZoomActive || pugZoomActive || phoneZoomActive || isUnderwater) return;
     saveAndStartZoom();
     radioZoomActive = true;
 }
@@ -146,7 +179,7 @@ export function zoomOutFromRadio(): void {
 
 // Zoom camera to focus on pug
 export function zoomToPug(): void {
-    if (pugZoomActive || radioZoomActive || isUnderwater) return;
+    if (pugZoomActive || radioZoomActive || phoneZoomActive || isUnderwater) return;
     saveAndStartZoom();
     pugZoomActive = true;
 }
@@ -155,6 +188,21 @@ export function zoomToPug(): void {
 export function zoomOutFromPug(): void {
     if (!pugZoomActive) return;
     pugZoomActive = false;
+    targetY = savedTargetY;
+}
+
+// Zoom camera to focus on phone (top-down view)
+export function zoomToPhone(): void {
+    if (phoneZoomActive || radioZoomActive || pugZoomActive || isUnderwater) return;
+    saveAndStartZoom();
+    phoneZoomActive = true;
+}
+
+// Zoom out from phone
+export function zoomOutFromPhone(): void {
+    if (!phoneZoomActive) return;
+    phoneZoomActive = false;
+    // Don't snap zoomTetha — let the normal-mode damp smoothly return it to 0
     targetY = savedTargetY;
 }
 
@@ -198,7 +246,7 @@ export function toggleCameraMode(): boolean {
 
 export function handleScroll(deltaY: number): void {
     if (!scrollEnabled) return;  // Block scroll during intro
-    if (radioZoomActive || pugZoomActive) return;  // Block scroll during zoom
+    if (radioZoomActive || pugZoomActive || phoneZoomActive) return;  // Block scroll during zoom
     if (webPageMode) {
         // Free scroll across the full range
         targetY = MathUtils.clamp(targetY - deltaY * scrollSpeed, underwaterBottomY, aboveWaterTopY);
@@ -446,11 +494,22 @@ export function Update(): void
 
     // Web page mode: override camera position with smooth scroll/zoom
     if (webPageMode) {
-        if (radioZoomActive || pugZoomActive) {
+        if (radioZoomActive || pugZoomActive || phoneZoomActive) {
             // ZOOM MODE: Smoothly move camera to target position
-            const zoomTargetX = pugZoomActive ? PUG_FINAL_X : RADIO_ZOOM_TARGET_X;
-            const zoomTargetY = pugZoomActive ? PUG_ZOOM_TARGET_Y : RADIO_ZOOM_TARGET_Y;
-            const zoomTargetZ = pugZoomActive ? PUG_FINAL_Z : RADIO_ZOOM_TARGET_Z;
+            let zoomTargetX: number, zoomTargetY: number, zoomTargetZ: number;
+            if (phoneZoomActive) {
+                zoomTargetX = _phoneWorldX;
+                zoomTargetY = _phoneWorldY + phoneZoomConfig.height;
+                zoomTargetZ = _phoneWorldZ + phoneZoomConfig.tilt;
+            } else if (pugZoomActive) {
+                zoomTargetX = PUG_FINAL_X + _pugCamOffsetX;
+                zoomTargetY = PUG_ZOOM_TARGET_Y;
+                zoomTargetZ = PUG_FINAL_Z + _pugCamOffsetZ;
+            } else {
+                zoomTargetX = RADIO_ZOOM_TARGET_X;
+                zoomTargetY = RADIO_ZOOM_TARGET_Y;
+                zoomTargetZ = RADIO_ZOOM_TARGET_Z;
+            }
             currentZoomX = MathUtils.damp(currentZoomX, zoomTargetX, ZOOM_SMOOTH, deltaTime);
             currentZoomY = MathUtils.damp(currentZoomY, zoomTargetY, ZOOM_SMOOTH, deltaTime);
             currentZoomZ = MathUtils.damp(currentZoomZ, zoomTargetZ, ZOOM_SMOOTH, deltaTime);
@@ -467,6 +526,12 @@ export function Update(): void
                 zoomPhi = MathUtils.damp(zoomPhi, RADIO_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
             } else if (pugZoomActive) {
                 zoomPhi = MathUtils.damp(zoomPhi, PUG_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
+            } else if (phoneZoomActive) {
+                zoomPhi = MathUtils.damp(zoomPhi, PHONE_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
+                // Tilt camera down for top-down phone view
+                zoomTetha = MathUtils.damp(zoomTetha, phoneZoomConfig.pitch, ZOOM_SMOOTH, deltaTime);
+                // Narrow FOV for telephoto phone zoom
+                currentFov = MathUtils.damp(currentFov, phoneZoomConfig.fov, ZOOM_SMOOTH, deltaTime);
             }
         } else {
             // NORMAL MODE: Smooth Y scrolling, fixed X and Z
@@ -509,6 +574,16 @@ export function Update(): void
                 if (Math.abs(zoomPhi - Math.PI * 2) < 0.001) zoomPhi = Math.PI * 2;
             }
 
+            // Smoothly return camera pitch to default after phone zoom
+            if (Math.abs(zoomTetha) > 0.001) {
+                zoomTetha = MathUtils.damp(zoomTetha, 0, ZOOM_SMOOTH, deltaTime);
+                if (Math.abs(zoomTetha) < 0.001) zoomTetha = 0;
+            }
+
+            // Smoothly restore FOV after phone zoom
+            currentFov = MathUtils.damp(currentFov, 70, ZOOM_SMOOTH, deltaTime);
+            if (Math.abs(currentFov - 70) < 0.05) currentFov = 70;
+
             currentY = MathUtils.damp(currentY, targetY, smoothFactor, deltaTime);
             camera.position.y = currentY;
         }
@@ -524,11 +599,17 @@ export function Update(): void
     // In web-page mode, zoomPhi drives camera yaw (smoothly rotates to face radio front on zoom)
     qx.setFromAxisAngle(new Vector3(0, -1, 0), webPageMode ? zoomPhi : phi);
     const qy = new Quaternion();
-    qy.setFromAxisAngle(new Vector3(1, 0, 0), tetha);
+    qy.setFromAxisAngle(new Vector3(1, 0, 0), webPageMode ? (tetha + zoomTetha) : tetha);
 
     const q = new Quaternion();
     q.multiply(qx);
     q.multiply(qy);
+
+    // Apply interpolated FOV (narrows during phone zoom, restores afterwards)
+    if (camera.fov !== currentFov) {
+        camera.fov = currentFov;
+        camera.updateProjectionMatrix();
+    }
 
     camera.quaternion.copy(q);
     UpdateCameraRotation();

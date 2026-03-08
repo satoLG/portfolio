@@ -68,6 +68,8 @@ import {
     DISTORTION_SCALE,
 } from '../effects/Underwater';
 import { Object3D } from 'three';
+import { phoneZoomConfig } from '../scripts/Control';
+import { phoneScreenConfig, updateOverlayStyle } from './PhoneScreen';
 
 let gui: GUI | null = null;
 let visible = false;
@@ -247,6 +249,13 @@ function buildGUI(): void {
     gui.domElement.style.right = '8px';
     gui.domElement.style.zIndex = '9999';
 
+    // ── Top-level group folders ────────────────────────────────────────
+    const surfaceFolder  = gui.addFolder('Surface');
+    const oceanFolder    = gui.addFolder('Ocean');
+    const skyFolder      = gui.addFolder('Sky');
+    const seafloorFolder = gui.addFolder('Seafloor');
+    const cameraFolder   = gui.addFolder('Camera');
+
     // Fog distortion state — must be declared before copy actions
     const _fogState = {
         distortion: DISTORTION_STRENGTH,
@@ -309,7 +318,7 @@ function buildGUI(): void {
             });
         },
     };
-    gui.add(actions, 'copyConfig').name('📋 Copy IslandConfig.ts');
+    surfaceFolder.add(actions, 'copyConfig').name('Copy IslandConfig.ts');
 
     const oceanActions = {
         copyOceanConfig: () => {
@@ -364,7 +373,7 @@ function buildGUI(): void {
             });
         },
     };
-    gui.add(oceanActions, 'copyOceanConfig').name('📋 Copy OceanConfig.ts');
+    oceanFolder.add(oceanActions, 'copyOceanConfig').name('Copy OceanConfig.ts');
 
     const windLinesActions = {
         copyWindLinesConfig: () => {
@@ -424,18 +433,18 @@ function buildGUI(): void {
             });
         },
     };
-    gui.add(windLinesActions, 'copyWindLinesConfig').name('📋 Copy WindLinesConfig.ts');
+    skyFolder.add(windLinesActions, 'copyWindLinesConfig').name('Copy WindLinesConfig.ts');
 
     // ── Objects ──────────────────────────────────────────────────────────────
     //   scaleRange: [min, max]   rotAxes: axes where rotation is meaningful
     // ─────────────────────────────────────────────────────────────────────────
-    addObjectFolder(gui, 'Island',    island,    { scaleRange: [0.01, 1.0]                          });
-    addObjectFolder(gui, 'Firecamp',  firecamp,  { scaleRange: [0.1,  5.0]                          });
-    addObjectFolder(gui, 'Palm Tree', palmtree,  { scaleRange: [0.1,  2.0], rotAxes: ['y']          });
-    addObjectFolder(gui, 'Radio',     radio,     { scaleRange: [0.01, 1.0], rotAxes: ['y']          });
-    addObjectFolder(gui, 'Sword',     sword,     { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
+    addObjectFolder(surfaceFolder, 'Island',    island,    { scaleRange: [0.01, 1.0]                           });
+    addObjectFolder(surfaceFolder, 'Firecamp',  firecamp,  { scaleRange: [0.1,  5.0]                           });
+    addObjectFolder(surfaceFolder, 'Palm Tree', palmtree,  { scaleRange: [0.1,  2.0], rotAxes: ['y']           });
+    addObjectFolder(surfaceFolder, 'Radio',     radio,     { scaleRange: [0.01, 1.0], rotAxes: ['y']           });
+    addObjectFolder(surfaceFolder, 'Sword',     sword,     { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
 
-    const pugFolder = addObjectFolder(gui, 'Pug', pug, { scaleRange: [0.01, 2.0], rotAxes: ['y'] });
+    const pugFolder = addObjectFolder(surfaceFolder, 'Pug', pug, { scaleRange: [0.01, 2.0], rotAxes: ['y'] });
 
     // Add animation select lazily — the pug GLB may still be loading when the GUI builds.
     (function waitForPugAnims() {
@@ -450,19 +459,20 @@ function buildGUI(): void {
             get anim() { return Island.pugCurrentAnimIndex; },
             set anim(v: number) { Island.setPugAnimation(v); },
         };
-        pugFolder.add(proxy, 'anim', options).name('🎬 Animation').listen();
+        pugFolder.add(proxy, 'anim', options).name('Animation').listen();
     })();
 
-    addObjectFolder(gui, 'Tent',      tent,      { scaleRange: [0.1,  5.0], rotAxes: ['y']          });
-    addObjectFolder(gui, 'Dog Bed',   dogBed,    { scaleRange: [0.01, 1.5], rotAxes: ['y']          });
+    addObjectFolder(surfaceFolder, 'Tent',    tent,         { scaleRange: [0.1,  5.0], rotAxes: ['y']           });
+    addObjectFolder(surfaceFolder, 'Dog Bed', dogBed,       { scaleRange: [0.01, 1.5], rotAxes: ['y']           });
+    addObjectFolder(surfaceFolder, 'Phone',   Island.phone, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
 
     // ── Foliage clusters ──
-    addClusterFolder(gui, 'Grass – Main Cluster', 'grass-main', CLUSTER_MAIN, 'GRASS_COUNT',      setGrassCount);
-    addClusterFolder(gui, 'Grass – Palm Cluster', 'grass-palm', CLUSTER_PALM, 'GRASS_COUNT_PALM', setGrassPalmCount);
-    addClusterFolder(gui, 'Clover',               'clover',     CLUSTER_MAIN, 'CLOVER_COUNT',     setCloverCount);
+    addClusterFolder(surfaceFolder, 'Grass – Main Cluster', 'grass-main', CLUSTER_MAIN, 'GRASS_COUNT',      setGrassCount);
+    addClusterFolder(surfaceFolder, 'Grass – Palm Cluster', 'grass-palm', CLUSTER_PALM, 'GRASS_COUNT_PALM', setGrassPalmCount);
+    addClusterFolder(surfaceFolder, 'Clover',               'clover',     CLUSTER_MAIN, 'CLOVER_COUNT',     setCloverCount);
 
-    // ── Ocean Reflection ──────────────────────────────────────────────────
-    const reflFolder = gui.addFolder('💧 Ocean Reflection');
+    // ── Ocean Reflection ──────────────────────────────────────────
+    const reflFolder = oceanFolder.addFolder('Reflection');
 
     const reflProxy = {
         get strength()     { return reflectionStrengthUniform.value as number; },
@@ -512,7 +522,7 @@ function buildGUI(): void {
     reflFolder.close();
 
     // ── Ocean Waves ──────────────────────────────────────────────────────────
-    const wavesFolder = gui.addFolder('🌊 Ocean Waves');
+    const wavesFolder = oceanFolder.addFolder('Waves');
 
     const wavesProxy = {
         get nmScale()    { return normalMapScaleUniform.value as number; },
@@ -542,7 +552,7 @@ function buildGUI(): void {
     wavesFolder.close();
 
     // ── Ocean Surface ────────────────────────────────────────────────────────
-    const surfFolder = gui.addFolder('🎨 Ocean Surface');
+    const surfFolder = oceanFolder.addFolder('Surface Color');
 
     const surfProxy = {
         get r()       { return surfaceColorUniform.value.x; },
@@ -563,7 +573,7 @@ function buildGUI(): void {
     surfFolder.close();
 
     // ── Ocean Foam ───────────────────────────────────────────────────────────
-    const foamFolder = gui.addFolder('🫧 Ocean Foam');
+    const foamFolder = oceanFolder.addFolder('Foam');
 
     const foamProxy = {
         get offsetX()    { return foamCenterOffsetUniform.value.x; },
@@ -602,7 +612,7 @@ function buildGUI(): void {
     foamFolder.close();
 
     // ── Wind Lines ────────────────────────────────────────────────────────────
-    const windFolder = gui.addFolder('💨 Wind Lines');
+    const windFolder = skyFolder.addFolder('Wind Lines');
 
     const wc = WindLines.config;
 
@@ -712,7 +722,7 @@ function buildGUI(): void {
 
     windFolder.close();
     // ── Volumetric Clouds ────────────────────────────────────────────────
-    const cloudFolder = gui.addFolder('☁️ Volumetric Clouds');
+    const cloudFolder = skyFolder.addFolder('Clouds');
 
     const cloudsActions = {
         copyCloudsConfig: () => {
@@ -766,7 +776,7 @@ function buildGUI(): void {
             });
         },
     };
-    cloudFolder.add(cloudsActions, 'copyCloudsConfig').name('📋 Copy CloudsConfig.ts');
+    cloudFolder.add(cloudsActions, 'copyCloudsConfig').name('Copy CloudsConfig.ts');
 
     const cc = Clouds.config;
 
@@ -837,7 +847,7 @@ function buildGUI(): void {
 
     cloudFolder.close();
     // ── Underwater Fog ───────────────────────────────────────────────────────
-    const fogFolder = gui.addFolder('🌊 Underwater Fog');
+    const fogFolder = oceanFolder.addFolder('Underwater');
 
     const fogProxy = {
         get absR()       { return oceanAbsorptionUniform.value.x; },
@@ -867,7 +877,7 @@ function buildGUI(): void {
     fogFolder.close();
 
     // ── Seafloor Decorations ──────────────────────────────────────────────────
-    const sfFolder = gui.addFolder('🪸 Seafloor Decor');
+    const sfFolder = seafloorFolder;
     const sf = SeaFloorDecor.config;
 
     // ── Copy config action ────────────────────────────────────────────────────
@@ -905,7 +915,7 @@ function buildGUI(): void {
             });
         },
     };
-    sfFolder.add(sfActions, 'copyConfig').name('📋 Copy SeaFloorConfig.ts');
+    sfFolder.add(sfActions, 'copyConfig').name('Copy SeaFloorConfig.ts');
 
     // ── Helper: make per-model placement sub-folder ───────────────────────────
     function makePlacementFolder(
@@ -935,14 +945,14 @@ function buildGUI(): void {
     }
 
     // ── Coral Rocks ─────────────────────────────────────────────────────────
-    const sfRocksFolder = sfFolder.addFolder('🪨 Coral Rocks');
+    const sfRocksFolder = sfFolder.addFolder('Coral Rocks');
     makePlacementFolder(sfRocksFolder, 'Rock 1', () => sf.rock1,  () => SeaFloorDecor.updateRockTransform(0));
     makePlacementFolder(sfRocksFolder, 'Rock 2', () => sf.rock2,  () => SeaFloorDecor.updateRockTransform(1));
     makePlacementFolder(sfRocksFolder, 'Rock 3', () => sf.rock3,  () => SeaFloorDecor.updateRockTransform(2));
     sfRocksFolder.close();
 
     // ── Corals ───────────────────────────────────────────────────────────────
-    const sfCoralsFolder = sfFolder.addFolder('🌸 Corals');
+    const sfCoralsFolder = sfFolder.addFolder('Corals');
     ([0, 1, 2] as const).forEach((i) => {
         const key = (['coral1', 'coral2', 'coral3'] as const)[i];
         const num = i + 1;
@@ -961,7 +971,7 @@ function buildGUI(): void {
     sfCoralsFolder.close();
 
     // ── Kelps ────────────────────────────────────────────────────────────────
-    const sfKelpFolder = sfFolder.addFolder('🌿 Kelps');
+    const sfKelpFolder = sfFolder.addFolder('Kelps');
     // Shared sway settings at top of kelp folder
     const swayProxy = {
         get kelpTopY()          { return sf.kelpTopY;          }, set kelpTopY(v)          { sf.kelpTopY          = v; },
@@ -981,6 +991,45 @@ function buildGUI(): void {
     sfKelpFolder.close();
 
     sfFolder.close();
+
+    // ── Camera: Phone Zoom ──────────────────────────────────────────
+    //   Active only while phone zoom is active, but sliders affect it instantly.
+    const phoneZoomFolder = cameraFolder.addFolder('Phone Zoom');
+    phoneZoomFolder.add(phoneZoomConfig, 'height', 0.05, 1.0,  0.005).name('Height above phone').listen();
+    phoneZoomFolder.add(phoneZoomConfig, 'tilt',  -0.5,  0.5,  0.01 ).name('Tilt (Z offset)').listen();
+    phoneZoomFolder.add(phoneZoomConfig, 'pitch', -1.57, -0.1,  0.01 ).name('Pitch (radians)').listen();
+    phoneZoomFolder.add(phoneZoomConfig, 'fov',   5,     70,   0.5  ).name('FOV (telephoto)').listen();
+
+    // ── Camera: Phone Screen placement & overlay ────────────────────────────
+    const screenFolder = cameraFolder.addFolder('Phone Screen');
+    screenFolder.add(phoneScreenConfig, 'screenWidth',  0.01, 0.5, 0.001).name('Screen Width (wu)').listen();
+    screenFolder.add(phoneScreenConfig, 'screenHeight', 0.01, 0.8, 0.001).name('Screen Height (wu)').listen();
+    screenFolder.add(phoneScreenConfig, 'offsetX', -0.2, 0.2, 0.001).name('Offset X').listen();
+    screenFolder.add(phoneScreenConfig, 'offsetY', -0.1, 0.2, 0.001).name('Offset Y (above surf)').listen();
+    screenFolder.add(phoneScreenConfig, 'offsetZ', -0.2, 0.2, 0.001).name('Offset Z').listen();
+    screenFolder.close();
+
+    const overlayFolder = cameraFolder.addFolder('Phone Screen — Overlay');
+    overlayFolder.add(phoneScreenConfig, 'overlayOpacity',      0, 1,   0.001).name('Tint Opacity').listen()
+        .onChange(() => updateOverlayStyle());
+    overlayFolder.add(phoneScreenConfig, 'overlayTintR',        0, 255, 1).name('Tint R').listen()
+        .onChange(() => updateOverlayStyle());
+    overlayFolder.add(phoneScreenConfig, 'overlayTintG',        0, 255, 1).name('Tint G').listen()
+        .onChange(() => updateOverlayStyle());
+    overlayFolder.add(phoneScreenConfig, 'overlayTintB',        0, 255, 1).name('Tint B').listen()
+        .onChange(() => updateOverlayStyle());
+    overlayFolder.add(phoneScreenConfig, 'overlayGlareOpacity', 0, 1,   0.001).name('Glare Opacity').listen()
+        .onChange(() => updateOverlayStyle());
+    overlayFolder.add(phoneScreenConfig, 'overlayGlareAngle',   0, 360, 1).name('Glare Angle (deg)').listen()
+        .onChange(() => updateOverlayStyle());
+    overlayFolder.close();
+
+    // ── Close all top-level groups by default ───────────────────────────────
+    surfaceFolder.close();
+    oceanFolder.close();
+    skyFolder.close();
+    cameraFolder.close();
+    // seafloorFolder ≡ sfFolder, already closed above
 
     gui.hide();
     visible = false;

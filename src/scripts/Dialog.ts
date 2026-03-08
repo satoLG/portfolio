@@ -9,9 +9,17 @@
  */
 
 import { getAudioContext, getCharacterDestination } from './Audio';
-import { t } from './i18n';
+import { t, onLanguageChange } from './i18n';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
+
+/** A clickable reply option shown inside the reply speech bubble. */
+export interface ReplyOption {
+    /** i18n translation key for the reply label */
+    textKey: string;
+    /** Called when the user clicks this option. The reply bubble is hidden before calling. */
+    onSelect: () => void;
+}
 
 export interface DialogLine {
     /** i18n translation key — falls back to the literal string if not found */
@@ -22,6 +30,11 @@ export interface DialogLine {
     onLineStart?: () => void;
     /** Called when the sound clip finishes playing (or immediately if no sound) */
     onLineSoundEnd?: () => void;
+    /**
+     * When provided, after this line finishes typing the reply bubble appears
+     * with these options instead of the normal ▼ advance-prompt.
+     */
+    replies?: ReplyOption[];
 }
 
 // ─── Internal state ───────────────────────────────────────────────────────────
@@ -45,44 +58,72 @@ let _bubbleEl: HTMLDivElement | null = null;
 let _textEl: HTMLParagraphElement | null = null;
 let _promptEl: HTMLSpanElement | null = null;
 
+// Reply bubble (user-side, right edge)
+let _replyBubbleEl: HTMLDivElement | null = null;
+let _replyOptionsEl: HTMLDivElement | null = null;
+let _replyActive = false;
+
+function _buildTailSvg(ns: string, mirrored: boolean): SVGSVGElement {
+    const svg = document.createElementNS(ns, 'svg') as SVGSVGElement;
+    svg.setAttribute('width', '30');
+    svg.setAttribute('height', '22');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(ns, 'path');
+    path.classList.add('dialog-tail-path');
+    if (!mirrored) {
+        // Left tail — tip at (−8, 22), points toward character on the left
+        svg.setAttribute('viewBox', '-8 0 30 22');
+        svg.classList.add('dialog-tail');
+        path.setAttribute('d', 'M 2,0 C -1,7 -5,14 -8,22 C 0,15 11,8 22,0 Z');
+    } else {
+        // Right tail — tip at (30, 22) mirrored, points toward user on the right
+        svg.setAttribute('viewBox', '0 0 30 22');
+        svg.classList.add('dialog-reply-tail');
+        path.setAttribute('d', 'M 20,0 C 23,7 27,14 30,22 C 22,15 11,8 0,0 Z');
+    }
+    svg.appendChild(path);
+    return svg;
+}
+
 function ensureBubble(): void {
-    if (_bubbleEl) return;
-
-    _bubbleEl = document.createElement('div');
-    _bubbleEl.className = 'dialog-bubble';
-
-    _textEl = document.createElement('p');
-    _textEl.className = 'dialog-text';
-
-    _promptEl = document.createElement('span');
-    _promptEl.className = 'dialog-prompt';
-    _promptEl.textContent = '▼';
-
-    // SVG curved tail — pinned to bottom-left of bubble, tip hangs 8 px left and 22 px below,
-    // pointing toward the character standing to the left.
     const ns = 'http://www.w3.org/2000/svg';
-    const tailSvg = document.createElementNS(ns, 'svg');
-    tailSvg.classList.add('dialog-tail');
-    tailSvg.setAttribute('width', '30');
-    tailSvg.setAttribute('height', '22');
-    tailSvg.setAttribute('viewBox', '-8 0 30 22');
-    tailSvg.setAttribute('aria-hidden', 'true');
-    const tailPath = document.createElementNS(ns, 'path');
-    tailPath.classList.add('dialog-tail-path');
-    // Bezier teardrop: base spans bottom-left of bubble; tip at (−8, 22) = below-left
-    tailPath.setAttribute('d', 'M 2,0 C -1,7 -5,14 -8,22 C 0,15 11,8 22,0 Z');
-    tailSvg.appendChild(tailPath);
 
-    _bubbleEl.appendChild(_textEl);
-    _bubbleEl.appendChild(_promptEl);
-    _bubbleEl.appendChild(tailSvg);
-    document.body.appendChild(_bubbleEl);
+    // ─ Character bubble ────────────────────────────────────────────────────────
+    if (!_bubbleEl) {
+        _bubbleEl = document.createElement('div');
+        _bubbleEl.className = 'dialog-bubble';
 
-    // Clicking the bubble itself advances the dialog
-    _bubbleEl.addEventListener('pointerdown', (e) => {
-        e.stopPropagation();
-        advanceDialog();
-    });
+        _textEl = document.createElement('p');
+        _textEl.className = 'dialog-text';
+
+        _promptEl = document.createElement('span');
+        _promptEl.className = 'dialog-prompt';
+        _promptEl.textContent = '▼';
+
+        _bubbleEl.appendChild(_textEl);
+        _bubbleEl.appendChild(_promptEl);
+        _bubbleEl.appendChild(_buildTailSvg(ns, false));
+        document.body.appendChild(_bubbleEl);
+
+        // Clicking the bubble itself advances the dialog
+        _bubbleEl.addEventListener('pointerdown', (e) => {
+            e.stopPropagation();
+            advanceDialog();
+        });
+    }
+
+    // ─ Reply bubble ───────────────────────────────────────────────────────────
+    if (!_replyBubbleEl) {
+        _replyBubbleEl = document.createElement('div');
+        _replyBubbleEl.className = 'dialog-reply-bubble';
+
+        _replyOptionsEl = document.createElement('div');
+        _replyOptionsEl.className = 'dialog-reply-options';
+
+        _replyBubbleEl.appendChild(_replyOptionsEl);
+        _replyBubbleEl.appendChild(_buildTailSvg(ns, true));
+        document.body.appendChild(_replyBubbleEl);
+    }
 }
 
 // ─── Positioning ──────────────────────────────────────────────────────────────
@@ -118,6 +159,7 @@ function _updatePosition(): void {
 function _trackLoop(): void {
     if (!_state) return;
     _updatePosition();
+    if (_replyActive) _positionReplyBubble();
     _state.rafId = requestAnimationFrame(_trackLoop);
 }
 
@@ -141,9 +183,20 @@ function _startTyping(text: string): void {
             clearInterval(_state.typeTimer!);
             _state.typeTimer = null;
             _state.isTyping  = false;
-            _promptEl?.classList.add('dialog-prompt--visible');
+            _onLineDoneTyping();
         }
     }, interval);
+}
+
+/** Called whenever a line finishes typing (naturally or via skip). */
+function _onLineDoneTyping(): void {
+    if (!_state || !_promptEl) return;
+    const currentLine = _state.lines[_state.lineIdx];
+    if (currentLine.replies?.length) {
+        _showReplyBubble(currentLine.replies);
+    } else {
+        _promptEl.classList.add('dialog-prompt--visible');
+    }
 }
 
 function _completeTyping(): void {
@@ -151,7 +204,65 @@ function _completeTyping(): void {
     if (_state.typeTimer) { clearInterval(_state.typeTimer); _state.typeTimer = null; }
     _state.isTyping = false;
     _textEl.textContent = t(_state.lines[_state.lineIdx].textKey);
-    _promptEl.classList.add('dialog-prompt--visible');
+    _onLineDoneTyping();
+}
+
+// ─── Reply bubble ─────────────────────────────────────────────────────────────
+
+/** px — reply bubble left edge sits this far right of the main bubble's right edge */
+const REPLY_OFFSET_X = 24;
+/** px — reply bubble top sits this far below the main bubble's top edge */
+const REPLY_OFFSET_Y = 90;
+
+function _positionReplyBubble(): void {
+    if (!_replyBubbleEl || !_bubbleEl) return;
+
+    const mainLeft  = parseInt(_bubbleEl.style.left || '0', 10);
+    const mainTop   = parseInt(_bubbleEl.style.top  || '0', 10);
+    const mainW     = _bubbleEl.offsetWidth  || 240;
+    const replyW    = _replyBubbleEl.offsetWidth  || 200;
+    const replyH    = _replyBubbleEl.offsetHeight || 60;
+    const ww        = window.innerWidth;
+    const wh        = window.innerHeight;
+
+    const left = Math.max(8, Math.min(ww - replyW - 8, mainLeft + mainW + REPLY_OFFSET_X));
+    const top  = Math.max(8, Math.min(wh - replyH - 8, mainTop  + REPLY_OFFSET_Y));
+
+    _replyBubbleEl.style.left = `${left}px`;
+    _replyBubbleEl.style.top  = `${top}px`;
+}
+
+function _showReplyBubble(replies: ReplyOption[]): void {
+    if (!_replyBubbleEl || !_replyOptionsEl) return;
+    _replyActive = true;
+
+    _replyOptionsEl.innerHTML = '';
+    for (const reply of replies) {
+        const optEl = document.createElement('span');
+        optEl.className = 'dialog-reply-option';
+        optEl.textContent = t(reply.textKey);
+        optEl.dataset.textKey = reply.textKey;
+        optEl.addEventListener('pointerdown', (e) => {
+            e.stopPropagation();
+            _hideReplyBubble();
+            reply.onSelect();
+        });
+        _replyOptionsEl.appendChild(optEl);
+    }
+
+    _positionReplyBubble();
+
+    _replyBubbleEl.classList.remove('dialog-out');
+    void _replyBubbleEl.offsetWidth;  // force reflow for animation restart
+    _replyBubbleEl.classList.add('dialog-visible');
+}
+
+function _hideReplyBubble(): void {
+    _replyActive = false;
+    if (_replyBubbleEl) {
+        _replyBubbleEl.classList.remove('dialog-visible');
+        _replyBubbleEl.classList.add('dialog-out');
+    }
 }
 
 // ─── Audio ────────────────────────────────────────────────────────────────────
@@ -234,10 +345,12 @@ export function showDialog(
  * Advance the dialog:
  * - If still typing → instantly complete the current line.
  * - If done typing  → move to next line, or complete if it was the last.
+ * - If reply bubble is active → ignore (waiting for reply selection).
  * Returns `true` while dialog is still active, `false` when it finishes.
  */
 export function advanceDialog(): boolean {
     if (!_state) return false;
+    if (_replyActive) return true;  // waiting for user to pick a reply
 
     if (_state.isTyping) {
         _completeTyping();
@@ -262,6 +375,11 @@ export function advanceDialog(): boolean {
 
 /** Force-close the bubble immediately (e.g. triggered by external zoom-out). */
 export function dismissDialog(): void {
+    _replyActive = false;
+    if (_replyBubbleEl) {
+        _replyBubbleEl.classList.remove('dialog-visible');
+        _replyBubbleEl.classList.add('dialog-out');
+    }
     _clearState();
     if (_bubbleEl) {
         _bubbleEl.classList.remove('dialog-visible');
@@ -281,3 +399,21 @@ function _clearState(): void {
     cancelAnimationFrame(_state.rafId);
     _state = null;
 }
+
+// ─── Live language update ───────────────────────────────────────────────────────
+
+onLanguageChange(() => {
+    if (!_state) return;
+    // Re-translate the currently displayed line (whether done typing or mid-type)
+    const key = _state.lines[_state.lineIdx].textKey;
+    if (!_state.isTyping && _textEl) {
+        _textEl.textContent = t(key);
+    }
+    // Re-translate visible reply options
+    if (_replyActive && _replyOptionsEl) {
+        _replyOptionsEl.querySelectorAll<HTMLElement>('.dialog-reply-option').forEach(el => {
+            const rk = el.dataset.textKey;
+            if (rk) el.textContent = t(rk);
+        });
+    }
+});
