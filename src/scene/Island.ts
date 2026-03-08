@@ -4,18 +4,19 @@ import { oceanAbsorptionUniform, underwaterFogDistUniform, setFoamMask } from ".
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../scripts/Time";
 import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../scripts/MediaPlayer";
-import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive } from "../scripts/Control";
-import { showDialog, advanceDialog, isDialogActive } from "../scripts/Dialog";
-import type { DialogLine } from "../scripts/Dialog";
+import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, setPugCamOffset } from "../scripts/Control";
+import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../scripts/Dialog";
+import type { DialogLine, ReplyOption } from "../scripts/Dialog";
 import { isBreezeActive, playPugSnoreOnce, stopPugSnore } from "../scripts/Audio";
 import { camera, renderer, scene as threeScene } from "../scripts/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
+import * as PhoneScreen from '../scripts/PhoneScreen';
 import { UNDERWATER_Y_THRESHOLD } from "../effects/Underwater";
 import {
     islandPosition, firecampOffset, palmtreeOffset, radioOffset, swordOffset,
-    pugOffset, tentOffset, dogBedOffset,
-    islandScale, firecampScale, palmtreeScale, radioScale, swordScale, pugScale, tentScale, dogBedScale,
-    palmtreeRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY,
+    pugOffset, tentOffset, dogBedOffset, phoneOffset,
+    islandScale, firecampScale, palmtreeScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, phoneScale,
+    palmtreeRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, phoneRot,
     CLUSTER_MAIN as CLUSTER_MAIN_CFG,
     CLUSTER_PALM as CLUSTER_PALM_CFG,
     GRASS_COUNT  as GRASS_COUNT_CFG,
@@ -32,6 +33,8 @@ export const sword = new Group();
 export const pug = new Group();
 export const tent = new Group();
 export const dogBed = new Group();
+export const phone = new Group();
+let phoneDropped = false;  // True after the cutscene drops the phone onto the island
 export const grassPatches: Group[] = [];
 
 // Store palm tree leaves for wind animation
@@ -1101,6 +1104,35 @@ export function Start(): void {
         (error) => { console.error('Error loading dog bed:', error); }
     );
 
+    // Pre-load phone model (hidden until dialog cutscene drops it)
+    loader.load(
+        'models/overall/phone.glb',
+        (gltf) => {
+            applyOceanLightingToModel(gltf.scene);
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    (child as any).receiveShadow = true;
+                }
+            });
+            phone.add(gltf.scene);
+            phone.position.set(
+                islandPosition.x + phoneOffset.x,
+                islandPosition.y + phoneOffset.y,
+                islandPosition.z + phoneOffset.z
+            );
+            phone.scale.setScalar(phoneScale);
+            phone.rotation.set(phoneRot.x, phoneRot.y, phoneRot.z);
+            phone.visible = false;  // hidden until cutscene
+            threeScene.add(phone);
+            // Initialise the phone screen overlay (hidden until setVisible is called)
+            PhoneScreen.init();
+            console.log('Phone loaded (hidden)');
+        },
+        undefined,
+        (error) => { console.error('Error loading phone:', error); }
+    );
+
     // Setup mouse/touch event listeners for grass interaction
     setupGrassInteraction();
 
@@ -1112,6 +1144,9 @@ export function Start(): void {
 
     // Setup pug click/hover interaction
     setupPugInteraction();
+
+    // Setup phone click/hover interaction
+    setupPhoneInteraction();
 }
 
 // ── Multi-touch gesture tracker ─────────────────────────────────────────────
@@ -1201,16 +1236,149 @@ function _getPugScreenPos(): { x: number; y: number } | null {
     };
 }
 
+// ── Configurable pug animation indices ────────────────────────────────────────
+const PUG_ANIM_BARK = 4;   // bark / react animation clip index
+const PUG_ANIM_WALK = 10;  // walk animation clip index
+const PUG_ANIM_DROP = 0;   // drop / place item animation clip index
+/** Walk animation playback speed during the phone drop cutscene — TWEAK (1.0 = normal) */
+const PUG_CUTSCENE_WALK_SPEED = 0.55;
+
+// ── Helper: build the "who's Leo?" branch (ends with phone drop cutscene) ────
+function _buildLeoBranch(): DialogLine[] {
+    return [
+        {
+            textKey: 'pug.day.leo.0',
+            onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
+        },
+        {
+            textKey: 'pug.day.leo.1',
+            onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
+        },
+    ];
+}
+
+// ── Helper: build the "what is this place?" branch ───────────────────────────
+function _buildPlaceBranch(): DialogLine[] {
+    return [
+        {
+            textKey: 'pug.day.place.0',
+            onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
+        },
+        {
+            textKey: 'pug.day.place.1',
+            onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
+        },
+        {
+            textKey: 'pug.day.place.2',
+            onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
+        },
+        {
+            textKey: 'pug.day.place.3',
+            onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
+            replies: (() => {
+                const opts: ReplyOption[] = [
+                    {
+                        textKey: 'pug.reply.likeit',
+                        onSelect: () => {
+                            showDialog([
+                                {
+                                    textKey: 'pug.reply.response.likeit',
+                                    onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
+                                },
+                            ], _getPugScreenPos, _onPugDialogComplete);
+                        },
+                    } as ReplyOption,
+                ];
+                // Only offer "who's Leo?" before the phone has been dropped
+                if (!phoneDropped) {
+                    opts.push({
+                        textKey: 'pug.reply.wholeo',
+                        onSelect: () => {
+                            showDialog(_buildLeoBranch(), _getPugScreenPos, () => {
+                                // After "let me show you on my phone" — start the cutscene
+                                _startPhoneDropSequence();
+                            });
+                        },
+                    } as ReplyOption);
+                }
+                return opts;
+            })(),
+        },
+    ];
+}
+
+// ── Helper: build the second-level replies (after "what?") ───────────────────
+function _buildSecondLevelReplies(): ReplyOption[] {
+    return [
+        {
+            textKey: 'pug.reply.thisplace',
+            onSelect: () => {
+                showDialog(_buildPlaceBranch(), _getPugScreenPos, _onPugDialogComplete);
+            },
+        } as ReplyOption,
+        {
+            textKey: 'pug.reply.youtalk',
+            onSelect: () => {
+                showDialog([
+                    {
+                        textKey: 'pug.reply.response.youtalk',
+                        sound: '/audio/character/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
+                        onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
+                    },
+                ], _getPugScreenPos, _onPugDialogComplete);
+            },
+        } as ReplyOption,
+        {
+            textKey: 'pug.reply.bye',
+            onSelect: () => {
+                dismissDialog();
+                _onPugDialogComplete();
+            },
+        } as ReplyOption,
+    ];
+}
+
 const PUG_DIALOG_LINES: DialogLine[] = [
     {
         textKey: 'pug.dialog.0',
         sound: '/audio/character/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
-        onLineStart: () => playPugAnimationThenReturn(4),
+        onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
     },
     {
         textKey: 'pug.dialog.1',
         sound: '/audio/character/freesound_community-pug-woof-2-103762_SEGUNDA.wav',
-        onLineStart: () => playPugAnimationThenReturn(4),
+        onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
+        replies: [
+            {
+                textKey: 'pug.reply.hi',
+                onSelect: () => {
+                    // "hi" → pug responds "what?" → "hey..." → "what's up?" then 3 reply options
+                    showDialog([
+                        {
+                            textKey: 'pug.reply.response.hi.day',
+                            sound: '/audio/character/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
+                            onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
+                        },
+                        {
+                            textKey: 'pug.day.opa',
+                            onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
+                        },
+                        {
+                            textKey: 'pug.day.whatsup',
+                            onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
+                            replies: _buildSecondLevelReplies(),
+                        },
+                    ], _getPugScreenPos, _onPugDialogComplete);
+                },
+            } as ReplyOption,
+            {
+                textKey: 'pug.reply.bye',
+                onSelect: () => {
+                    dismissDialog();
+                    _onPugDialogComplete();
+                },
+            } as ReplyOption,
+        ],
     },
 ];
 
@@ -1222,8 +1390,252 @@ const PUG_NIGHT_DIALOG_LINES: DialogLine[] = [
     {
         textKey: 'pug.night.1',
         onLineStart: () => playPugSnoreOnce(),
+        replies: [
+            {
+                textKey: 'pug.reply.hi',
+                onSelect: () => {
+                    showDialog([
+                        {
+                            textKey: 'pug.reply.response.hi.night',
+                            onLineStart: () => playPugSnoreOnce(),
+                        },
+                    ], _getPugScreenPos, _onPugDialogComplete);
+                },
+            } as ReplyOption,
+            {
+                textKey: 'pug.reply.bye',
+                onSelect: () => {
+                    dismissDialog();
+                    _onPugDialogComplete();
+                },
+            } as ReplyOption,
+        ],
     },
 ];
+
+// ============================================
+// PHONE DROP CUTSCENE
+// ============================================
+
+/** Simple promise-based delay (ms). */
+function _delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Smooth tween helper — animates a numeric property over `duration` ms.
+ * Uses requestAnimationFrame for smooth interpolation.
+ */
+function _tweenValue(
+    from: number, to: number, duration: number,
+    onUpdate: (v: number) => void
+): Promise<void> {
+    return new Promise(resolve => {
+        const start = performance.now();
+        function tick(now: number) {
+            const elapsed = now - start;
+            const t = Math.min(1, elapsed / duration);
+            // Smooth ease-in-out (cubic)
+            const eased = t < 0.5
+                ? 4 * t * t * t
+                : 1 - Math.pow(-2 * t + 2, 3) / 2;
+            onUpdate(from + (to - from) * eased);
+            if (t < 1) {
+                requestAnimationFrame(tick);
+            } else {
+                resolve();
+            }
+        }
+        requestAnimationFrame(tick);
+    });
+}
+
+/**
+ * Phone drop cutscene — pug walks sideways, drops the phone, walks back.
+ * Called after the "let me show you on my phone" dialog line completes.
+ */
+async function _startPhoneDropSequence(): Promise<void> {
+    // ── 1. Save current pug position & rotation ──────────────────────────────
+    const savedPosX = pug.position.x;
+    const savedPosZ = pug.position.z;
+    const savedRotY = pug.rotation.y;
+
+    // Where to walk: a bit to the left (negative X in local space)
+    const walkTargetX = savedPosX - 0.3;
+    const walkTargetZ = savedPosZ + 0.15;
+
+    // ── 2. Walk to drop position ─────────────────────────────────────────────
+    // Model faces +Z by default; atan2(dx, dz) rotates it to face the walk direction
+    const dxWalk = walkTargetX - savedPosX;
+    const dzWalk = walkTargetZ - savedPosZ;
+    pug.rotation.y = Math.atan2(dxWalk, dzWalk);
+    setPugAnimation(PUG_ANIM_WALK);
+    if (_pugCurrentAction) _pugCurrentAction.timeScale = PUG_CUTSCENE_WALK_SPEED;
+
+    await Promise.all([
+        _tweenValue(savedPosX, walkTargetX, 1200, v => {
+            pug.position.x = v;
+            setPugCamOffset(pug.position.x - savedPosX, pug.position.z - savedPosZ);
+        }),
+        _tweenValue(savedPosZ, walkTargetZ, 1200, v => { pug.position.z = v; }),
+    ]);
+
+    // ── 3. Play drop animation & make phone visible ──────────────────────────
+    setPugAnimation(PUG_ANIM_DROP);
+    await _delay(400); // let the drop anim start
+
+    // Animate phone: parabolic arc from pug to ground
+    const pugWorldY = pug.position.y;
+    phone.position.set(pug.position.x, pugWorldY + 0.25, pug.position.z + 0.15);
+    phone.visible = true;
+    PhoneScreen.setVisible(true);
+
+    const phoneStartY = pugWorldY + 0.25;
+    // Recalculate final phone position from config
+    const phoneFinalX = islandPosition.x + phoneOffset.x;
+    const phoneFinalY = islandPosition.y + phoneOffset.y;
+    const phoneFinalZ = islandPosition.z + phoneOffset.z;
+
+    // Arc animation: parabolic toss
+    const arcDuration = 600; // ms
+    const arcStartX = phone.position.x;
+    const arcStartZ = phone.position.z;
+    const arcPeakHeight = 0.15; // extra height at midpoint
+
+    await new Promise<void>(resolve => {
+        const start = performance.now();
+        function arcTick(now: number) {
+            const elapsed = now - start;
+            const t = Math.min(1, elapsed / arcDuration);
+            // Ease out
+            const eased = 1 - (1 - t) * (1 - t);
+            phone.position.x = arcStartX + (phoneFinalX - arcStartX) * eased;
+            phone.position.z = arcStartZ + (phoneFinalZ - arcStartZ) * eased;
+            // Parabolic Y: rises then falls
+            const parabola = -4 * arcPeakHeight * (t - 0.5) * (t - 0.5) + arcPeakHeight;
+            phone.position.y = phoneStartY + (phoneFinalY - phoneStartY) * eased + parabola;
+            // Rotation: tumble slightly during toss
+            phone.rotation.z = phoneRot.z + t * Math.PI * 0.5;
+            if (t < 1) {
+                requestAnimationFrame(arcTick);
+            } else {
+                // Snap to final config position & rotation
+                phone.position.set(phoneFinalX, phoneFinalY, phoneFinalZ);
+                phone.rotation.set(phoneRot.x, phoneRot.y, phoneRot.z);
+                resolve();
+            }
+        }
+        requestAnimationFrame(arcTick);
+    });
+
+    await _delay(300);
+
+    // ── 4. Walk back to original position ────────────────────────────────────
+    const dxReturn = savedPosX - pug.position.x;
+    const dzReturn = savedPosZ - pug.position.z;
+    pug.rotation.y = Math.atan2(dxReturn, dzReturn);
+    setPugAnimation(PUG_ANIM_WALK);
+    if (_pugCurrentAction) _pugCurrentAction.timeScale = PUG_CUTSCENE_WALK_SPEED;
+
+    await Promise.all([
+        _tweenValue(pug.position.x, savedPosX, 1200, v => {
+            pug.position.x = v;
+            setPugCamOffset(pug.position.x - savedPosX, pug.position.z - savedPosZ);
+        }),
+        _tweenValue(pug.position.z, savedPosZ, 1200, v => { pug.position.z = v; }),
+    ]);
+
+    // ── 5. Restore idle and finish ───────────────────────────────────────────
+    // Restore timeScale in case it was slowed for the cutscene walk
+    if (pugMixer && pugAnimClips[PUG_ANIM_WALK]) {
+        pugMixer.clipAction(pugAnimClips[PUG_ANIM_WALK]).timeScale = 1;
+    }
+    pug.rotation.y = savedRotY;
+    setPugCamOffset(0, 0);  // ensure clean reset
+    phoneDropped = true;
+    _onPugDialogComplete();
+}
+
+// ============================================
+// PHONE CLICK/HOVER INTERACTION
+// ============================================
+const phoneRaycaster = new Raycaster();
+const phoneMouse = new Vector2();
+let isPhoneHovered = false;
+
+function setupPhoneInteraction(): void {
+    const canvas = renderer.domElement;
+    if (!canvas) return;
+
+    const onPhoneClick = (clientX: number, clientY: number) => {
+        // Only interactive after cutscene drops the phone
+        if (!phoneDropped || !phone.visible) return;
+        // Ignore interactions while underwater
+        if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
+        // Ignore clicks while pug or radio zoom is active
+        if (isPugZoomActive() || isRadioZoomActive()) return;
+
+        // If already zoomed into phone, zoom out only if the click missed the
+        // phone model entirely — clicking on the model itself does nothing.
+        if (isPhoneZoomActive()) {
+            if (phone.children.length > 0) {
+                phoneMouse.x = (clientX / window.innerWidth) * 2 - 1;
+                phoneMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+                phoneRaycaster.setFromCamera(phoneMouse, camera);
+                const hits = phoneRaycaster.intersectObjects(phone.children, true);
+                if (hits.length > 0) return; // clicked on phone model — stay zoomed
+            }
+            zoomOutFromPhone();
+            return;
+        }
+
+        if (phone.children.length === 0) return;
+
+        phoneMouse.x = (clientX / window.innerWidth) * 2 - 1;
+        phoneMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+        phoneRaycaster.setFromCamera(phoneMouse, camera);
+        const intersects = phoneRaycaster.intersectObjects(phone.children, true);
+        if (intersects.length > 0) {
+            // Clear hover state before zoom
+            isPhoneHovered = false;
+            canvas.style.cursor = '';
+            zoomToPhone();
+        }
+    };
+
+    canvas.addEventListener('click', (e: MouseEvent) => {
+        onPhoneClick(e.clientX, e.clientY);
+    });
+
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (_touchWasMulti) return;
+        if (e.changedTouches.length > 0) {
+            const touch = e.changedTouches[0];
+            onPhoneClick(touch.clientX, touch.clientY);
+        }
+    });
+
+    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+        if (!phoneDropped || !phone.visible || phone.children.length === 0
+            || isPhoneZoomActive() || camera.position.y < UNDERWATER_Y_THRESHOLD) {
+            if (isPhoneHovered) { isPhoneHovered = false; canvas.style.cursor = ''; }
+            return;
+        }
+        phoneMouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        phoneMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        phoneRaycaster.setFromCamera(phoneMouse, camera);
+        const intersects = phoneRaycaster.intersectObjects(phone.children, true);
+        if (intersects.length > 0) {
+            if (!isPhoneHovered) { isPhoneHovered = true; canvas.style.cursor = 'pointer'; }
+        } else {
+            if (isPhoneHovered) { isPhoneHovered = false; canvas.style.cursor = ''; }
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (isPhoneHovered) { isPhoneHovered = false; canvas.style.cursor = ''; }
+    });
+}
 
 function _unregisterSleepLoopListener(): void {
     if (!pugMixer || !_pugSleepLoopListener) return;
@@ -1274,6 +1686,17 @@ function _restorePugNightState(): void {
     }
 }
 
+/** Shared onComplete for all pug dialogs — zooms out and restores the correct idle state. */
+function _onPugDialogComplete(): void {
+    zoomOutFromPug();
+    if (_pugMusicWasPlaying) {
+        pugDefaultAnimIndex = 4;
+        setPugAnimation(4);
+    } else {
+        _restorePugNightState();
+    }
+}
+
 function _startPugDialog(): void {
     // Night dialog only when it's actually night AND music isn't playing.
     // Music overrides night — pug wakes up to dance, so day dialog applies.
@@ -1288,16 +1711,7 @@ function _startPugDialog(): void {
 
     const lines = useNightDialog ? PUG_NIGHT_DIALOG_LINES : PUG_DIALOG_LINES;
 
-    showDialog(lines, _getPugScreenPos, () => {
-        zoomOutFromPug();
-        // If music is playing, stay on the music-default anim; otherwise restore night state
-        if (_pugMusicWasPlaying) {
-            pugDefaultAnimIndex = 4;
-            setPugAnimation(4);
-        } else {
-            _restorePugNightState();
-        }
-    });
+    showDialog(lines, _getPugScreenPos, _onPugDialogComplete);
 }
 
 function setupPugInteraction(): void {
@@ -1308,7 +1722,7 @@ function setupPugInteraction(): void {
         // Ignore interactions while underwater — models are above water
         if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
         // Ignore clicks while another zoom is active — let that handler close itself first
-        if (isRadioZoomActive()) return;
+        if (isRadioZoomActive() || isPhoneZoomActive()) return;
         // If already zoomed in: advance dialog (which calls zoomOut when done) or just zoom out
         if (isPugZoomActive()) {
             if (isDialogActive()) {
@@ -1382,7 +1796,7 @@ function setupRadioInteraction(): void {
         // Ignore interactions while underwater — models are above water
         if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
         // Ignore clicks while another zoom is active — let that handler close itself first
-        if (isPugZoomActive()) return;
+        if (isPugZoomActive() || isPhoneZoomActive()) return;
 
         // Any canvas click while the player is open closes it.
         // Don't raycast here — the zoomed-in model fills most of the canvas so hitsRadio

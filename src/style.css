@@ -1,4 +1,4 @@
-/* ============================================
+﻿/* ============================================
    WOTFARD FONT IMPORT
    ============================================ */
 @import url('https://fonts.cdnfonts.com/css/wotfard');
@@ -1092,7 +1092,7 @@ body.night-mode #start-button .wave2 {
     top: 0;
     left: 0;
     right: 0;
-    z-index: 30;
+    z-index: 1500;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2449,4 +2449,94 @@ body.pixel-max    .dialog-bubble::before {
 @keyframes dialog-prompt-bob {
     0%, 100% { transform: translateY(0);   }
     50%      { transform: translateY(3px); }
+}
+
+/* ============================================
+   DIALOG REPLY BUBBLE (user side — right edge)
+   ============================================ */
+
+.dialog-reply-bubble {
+    position: fixed;
+    z-index: 1200;
+    max-width: 280px;
+    min-width: 100px;
+    padding: 11px 16px 9px;
+    background: #ffffffd8;
+    border-radius: 40px;
+    box-shadow: 2px 2px 0 #1a1a1a5c;
+    pointer-events: auto;
+    cursor: default;
+    user-select: none;
+    display: none;
+    /* Pop animation scales from the tail tip: 8 px right of bubble, 22 px below */
+    transform-origin: calc(100% + 8px) calc(100% + 22px);
+    filter: url(#dialog-wobble);
+}
+
+body.pixel-medium .dialog-reply-bubble,
+body.pixel-max    .dialog-reply-bubble {
+    filter: none;
+}
+
+.dialog-reply-bubble.dialog-visible {
+    display: block;
+    animation: dialog-pop-in 0.48s cubic-bezier(0.34, 1.6, 0.64, 1) forwards;
+}
+
+.dialog-reply-bubble.dialog-out {
+    display: block;
+    animation: dialog-pop-out 0.18s ease-in forwards;
+}
+
+/* Right-pointing SVG tail — tip overhangs ~8 px to the RIGHT of the bubble */
+.dialog-reply-tail {
+    position: absolute;
+    right: 20px;
+    bottom: -21px;
+    overflow: visible;
+    pointer-events: none;
+    transform: rotateY(354deg);
+    transform-origin: 50% 50%;
+}
+
+body.pixel-medium .dialog-reply-bubble .dialog-reply-tail,
+body.pixel-max    .dialog-reply-bubble .dialog-reply-tail {
+    display: none;
+}
+
+/* Pixel-mode: CSS triangle pointing right */
+body.pixel-medium .dialog-reply-bubble::before,
+body.pixel-max    .dialog-reply-bubble::before {
+    content: '';
+    position: absolute;
+    pointer-events: none;
+    bottom: -16px;
+    right: 16px;
+    border-left: 9px solid transparent;
+    border-right: 9px solid transparent;
+    border-top: 16px solid #ffffffcc;
+}
+
+.dialog-reply-options {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+}
+
+.dialog-reply-option {
+    display: block;
+    font-size: 25px !important;
+    font-family: 'Margarine', cursive !important;
+    font-weight: 400 !important;
+    color: #1a1a1a;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: color 0.12s ease;
+    white-space: nowrap;
+}
+
+.dialog-reply-option:hover {
+    color: #cc0000;
 }

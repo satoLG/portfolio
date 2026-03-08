@@ -71,12 +71,48 @@ const translations: Record<Language, TranslationDict> = {
         'player.songs': 'songs',
 
         // Pug dialog
-        'pug.dialog.0': 'au au.',
-        'pug.dialog.1': 'au au...',
+        'pug.dialog.0': 'woof woof.',
+        'pug.dialog.1': 'woof woof...',
 
         // Pug night dialog
         'pug.night.0': 'ZzZzZz...',
         'pug.night.1': 'ZzZzZz...',
+
+        // Pug reply options
+        'pug.reply.hi':  'hi',
+        'pug.reply.bye': 'bye',
+
+        // Pug responses to reply
+        'pug.reply.response.hi.day':   'what?',
+        'pug.reply.response.hi.night': 'ZzZzZzZzZzz...',
+
+        // Day dialog tree — after "hi" reply
+        'pug.day.opa':         'hey...',
+        'pug.day.whatsup':     "what's up?",
+
+        // Second-level reply options
+        'pug.reply.thisplace': 'what is this place?',
+        'pug.reply.youtalk':   'you talk??',
+
+        // Response to "you talk?"
+        'pug.reply.response.youtalk': 'woof woof',
+
+        // Place description sequence
+        'pug.day.place.0': "it's a place where we can isolate ourselves a bit from the world",
+        'pug.day.place.1': 'you can just close your eyes and listen to the sound of the wild',
+        'pug.day.place.2': 'my family loves this place, especially Leo',
+        'pug.day.place.3': "my name is Bartô, by the way",
+
+        // Third-level reply options
+        'pug.reply.likeit': 'I like it here, Bartô',
+        'pug.reply.wholeo':  "who's Leo?",
+
+        // Response to "I like it here"
+        'pug.reply.response.likeit': 'glad to hear it, enjoy the view!',
+
+        // Leo description sequence
+        'pug.day.leo.0': "well.. he's the guy who gives me water, food and brought me here for a walk",
+        'pug.day.leo.1': 'he also does other stuff in his free time, like these... let me show you on my phone',
     },
 
     'pt-br': {
@@ -147,6 +183,42 @@ const translations: Record<Language, TranslationDict> = {
         // Diálogo do pug de noite
         'pug.night.0': 'ZzZzZz...',
         'pug.night.1': 'ZzZzZz...',
+
+        // Opções de resposta do pug
+        'pug.reply.hi':  'oi',
+        'pug.reply.bye': 'tchau',
+
+        // Respostas do pug às escolhas
+        'pug.reply.response.hi.day':   'que foi ?',
+        'pug.reply.response.hi.night': 'ZzZzZzZzZzz...',
+
+        // Árvore de diálogo do dia — após resposta "oi"
+        'pug.day.opa':         'opa...',
+        'pug.day.whatsup':     'qual a boa ?',
+
+        // Opções de resposta nível 2
+        'pug.reply.thisplace': 'que lugar é esse ?',
+        'pug.reply.youtalk':   'você fala ??',
+
+        // Resposta a "você fala?"
+        'pug.reply.response.youtalk': 'au au',
+
+        // Sequência descrição do lugar
+        'pug.day.place.0': 'é um lugar onde podemos nos isolar um pouco do mundo',
+        'pug.day.place.1': 'você pode só fechar os olhos e ouvir o som da natureza',
+        'pug.day.place.2': 'minha família gosta muito deste lugar, principalmente o Leo',
+        'pug.day.place.3': 'meu nome é Bartô, a propósito',
+
+        // Opções de resposta nível 3
+        'pug.reply.likeit': 'gostei daqui, Bartô',
+        'pug.reply.wholeo':  'quem é Leo ?',
+
+        // Resposta a "gostei daqui"
+        'pug.reply.response.likeit': 'fico feliz, aproveite a vista!',
+
+        // Sequência descrição do Leo
+        'pug.day.leo.0': 'bom.. é o cara que me dá água, comida e me trouxe pra passear aqui',
+        'pug.day.leo.1': 'ele faz outras coisas também no tempo livre, tipo essas aqui... deixa eu mostrar no meu celular',
     }
 };
 

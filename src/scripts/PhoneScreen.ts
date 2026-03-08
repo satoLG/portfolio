@@ -1,0 +1,351 @@
+/**
+ * PhoneScreen.ts — CSS3D iframe on the phone screen
+ *
+ * Uses the proven "CSS3D-behind-alpha-canvas" technique (henryjeff pattern):
+ *
+ *   1. CSS3DRenderer div sits BEHIND the WebGL canvas (lower z-index)
+ *   2. WebGL canvas has alpha:true → transparent where no geometry
+ *   3. A NoBlending plane in the WebGL scene at the screen position
+ *      "punches" a transparent hole through the canvas
+ *   4. The CSS3D iframe shows through the hole
+ *   5. When zoomed: canvas pointer-events:none → clicks reach the iframe
+ *
+ * Debug: export `phoneScreenConfig` and `updateOverlayStyle` so IslandDebug
+ *   can attach live-tweak sliders.
+ */
+
+import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
+import {
+    Scene as ThreeScene,
+    PerspectiveCamera,
+    WebGLRenderer,
+    Group,
+    Vector3,
+    Quaternion,
+    Mesh,
+    PlaneGeometry,
+    MeshBasicMaterial,
+    CustomBlending,
+    AddEquation,
+    ZeroFactor,
+    OneFactor,
+    Raycaster,
+    Vector2,
+} from 'three';
+import { isPhoneZoomActive, zoomOutFromPhone } from './Control';
+
+// ─── CONFIG — all tweakable from the debug GUI (Camera → Phone Screen) ────────
+export const phoneScreenConfig = {
+    // World-unit dimensions of the visible screen rectangle on the phone model
+    screenWidth:  0.048,   // world units  — tweak live with debug GUI
+    screenHeight: 0.078,   // world units
+
+    // Fine-tune placement relative to the phone Group's world origin
+    offsetX:  0.0,
+    offsetY:  0.012,       // slightly above phone surface (screen faces +Y)
+    offsetZ:  0.0,
+
+    // Iframe base resolution (px) — aspect kept 9:16 to match a phone screen
+    iframeWidth:  1000,
+    iframeHeight: 1778,
+
+    // Glass overlay
+    overlayOpacity:      0.08,
+    overlayTintR:        180,
+    overlayTintG:        200,
+    overlayTintB:        255,
+    overlayGlareOpacity: 0.06,
+    overlayGlareAngle:   135,
+};
+
+// ─── INTERNALS ────────────────────────────────────────────────────────────────
+let cssRenderer: CSS3DRenderer | null = null;
+let cssScene: ThreeScene | null = null;
+let cssObject: CSS3DObject | null = null;
+let occluderScene: ThreeScene | null = null;  // separate scene — rendered after ALL post-processing
+let occludingPlane: Mesh | null = null;
+let containerEl: HTMLDivElement | null = null;
+let overlayEl: HTMLDivElement | null = null;
+let iframeEl: HTMLIFrameElement | null = null;
+
+let _canvasEl: HTMLCanvasElement | null = null;
+let _initialized = false;
+let _visible = false;
+
+// Stored each frame for use in the CSS3D click handler
+let _phoneGroup: Group | null = null;
+let _camera: PerspectiveCamera | null = null;
+
+const _worldPos  = new Vector3();
+const _worldQuat = new Quaternion();
+const _raycaster = new Raycaster();
+const _mouse     = new Vector2();
+
+// ─── PUBLIC API ───────────────────────────────────────────────────────────────
+
+/**
+ * Create the CSS3DRenderer and insert its div BEHIND the WebGL canvas.
+ * The canvas must have alpha:true so the CSS3D layer shows through the
+ * NoBlending hole.
+ *
+ * Call once from Scene.Start() right after appending renderer.domElement.
+ */
+export function initRenderer(parentEl: HTMLElement, canvasEl: HTMLCanvasElement): void {
+    _canvasEl = canvasEl;
+
+    // Parent needs relative positioning for absolute children
+    parentEl.style.position = 'relative';
+
+    cssRenderer = new CSS3DRenderer();
+    cssRenderer.setSize(window.innerWidth, window.innerHeight);
+
+    const el = cssRenderer.domElement;
+    el.style.position   = 'absolute';
+    el.style.top        = '0';
+    el.style.left       = '0';
+    el.style.width      = '100%';
+    el.style.height     = '100%';
+    el.style.overflow   = 'hidden';
+    el.style.background = 'transparent';  // must NOT be white (browser default)
+    // Default: non-interactive — enabled only when phone zoom is active
+    el.style.pointerEvents = 'none';
+
+    // Insert BEFORE the canvas → lower in stacking order (behind)
+    parentEl.insertBefore(el, canvasEl);
+
+    // Canvas above with z-index
+    canvasEl.style.position = 'relative';
+    canvasEl.style.zIndex   = '1';
+
+    // Any click on the CSS3D background zooms out — ONLY if the click doesn't
+    // land on the phone model itself (raycasted against phone children).
+    el.addEventListener('click', (e: MouseEvent) => {
+        if (!isPhoneZoomActive()) return;
+        if (_camera && _phoneGroup && _phoneGroup.children.length > 0) {
+            _mouse.set(
+                (e.clientX / window.innerWidth)  *  2 - 1,
+                (e.clientY / window.innerHeight) * -2 + 1,
+            );
+            _raycaster.setFromCamera(_mouse, _camera);
+            const hits = _raycaster.intersectObjects(_phoneGroup.children, true);
+            if (hits.length > 0) return;  // clicked on phone model — do nothing
+        }
+        zoomOutFromPhone();
+    });
+
+    cssScene = new ThreeScene();
+}
+
+/**
+ * Build the iframe + overlay CSS3DObject AND the NoBlending occluding plane.
+ * The occluding plane is added to the WebGL scene to punch a transparent hole
+ * in the canvas so the CSS3D iframe behind is visible.
+ *
+ * @param glScene  The main WebGL scene (for the occluding plane).
+ */
+export function init(): void {
+    if (!cssRenderer || !cssScene) {
+        console.warn('[PhoneScreen] initRenderer() must be called first');
+        return;
+    }
+    if (_initialized) return;
+    _initialized = true;
+
+    const cfg = phoneScreenConfig;
+
+    // ── Container (CSS px resolution) ────────────────────────────────────────
+    containerEl = document.createElement('div');
+    containerEl.style.width        = `${cfg.iframeWidth}px`;
+    containerEl.style.height       = `${cfg.iframeHeight}px`;
+    containerEl.style.overflow     = 'hidden';
+    containerEl.style.position     = 'relative';
+    containerEl.style.borderRadius = '14px';
+    containerEl.style.background   = '#000';
+
+    // Stop clicks on the phone screen area from bubbling to the CSS3D div's
+    // zoom-out handler — only clicks OUTSIDE this container should zoom out.
+    containerEl.addEventListener('click', (e) => e.stopPropagation());
+
+    // ── Iframe ───────────────────────────────────────────────────────────────
+    iframeEl = document.createElement('iframe');
+    iframeEl.src = 'https://satolg.github.io/projects_hub/';
+    iframeEl.style.width   = '100%';
+    iframeEl.style.height  = '100%';
+    iframeEl.style.border  = 'none';
+    iframeEl.style.display = 'block';
+    iframeEl.setAttribute('sandbox',
+        'allow-scripts allow-same-origin allow-forms allow-popups allow-pointer-lock'
+    );
+    containerEl.appendChild(iframeEl);
+
+    // ── Glass overlay ────────────────────────────────────────────────────────
+    overlayEl = document.createElement('div');
+    overlayEl.style.position      = 'absolute';
+    overlayEl.style.inset         = '0';
+    overlayEl.style.pointerEvents = 'none';
+    overlayEl.style.borderRadius  = '14px';
+    updateOverlayStyle();
+    containerEl.appendChild(overlayEl);
+
+    // ── CSS3DObject ──────────────────────────────────────────────────────────
+    cssObject = new CSS3DObject(containerEl);
+    // Scale: world-unit size  /  CSS-pixel size
+    cssObject.scale.set(
+        cfg.screenWidth  / cfg.iframeWidth,
+        cfg.screenHeight / cfg.iframeHeight,
+        1,
+    );
+    cssObject.visible = false;   // shown when zoomed
+    cssScene.add(cssObject);
+
+    // ── Occluding plane (CustomBlending — alpha-only zero-out) ──────────────────────
+    // Lives in its own scene so it can be rendered AFTER Underwater post-
+    // processing (which would otherwise overwrite the transparent pixels).
+    //
+    // CustomBlending setup:
+    //   RGB  = 0 * src  +  1 * dst  → preserve existing scene colours
+    //   Alpha= 0 * src  +  0 * dst  → force alpha to 0 (transparent hole)
+    const occMat = new MeshBasicMaterial({
+        color:       0x000000,          // black — irrelevant since RGB is preserved
+        transparent: true,
+        opacity:     1,
+        depthTest:   false,             // never blocked by phone geometry
+        depthWrite:  false,
+        blending:    CustomBlending,
+        blendEquation:  AddEquation,
+        blendSrc:    ZeroFactor,        // RGB: 0 * src
+        blendDst:    OneFactor,         // RGB: 1 * dst  → keep scene colours
+        blendEquationAlpha: AddEquation,
+        blendSrcAlpha:  ZeroFactor,     // Alpha: 0 * src
+        blendDstAlpha:  ZeroFactor,     // Alpha: 0 * dst  → = 0 (transparent)
+    });
+    const occGeo = new PlaneGeometry(cfg.iframeWidth, cfg.iframeHeight);
+    occludingPlane = new Mesh(occGeo, occMat);
+    occludingPlane.visible = false;
+    occluderScene = new ThreeScene();
+    occluderScene.add(occludingPlane);
+}
+
+/**
+ * Regenerate the glass gradient on `overlayEl` from the current config.
+ * Call from debug GUI onChange handlers.
+ */
+export function updateOverlayStyle(): void {
+    if (!overlayEl) return;
+    const { overlayTintR: r, overlayTintG: g, overlayTintB: b,
+            overlayGlareOpacity: glo, overlayGlareAngle: ang,
+            overlayOpacity: opa } = phoneScreenConfig;
+
+    overlayEl.style.background = [
+        `linear-gradient(${ang}deg,`,
+        `  rgba(${r},${g},${b},${glo.toFixed(3)}) 0%,`,
+        `  transparent 45%,`,
+        `  rgba(0,0,10,${opa.toFixed(3)}) 100%`,
+        `)`,
+    ].join(' ');
+}
+
+/**
+ * Show or hide the phone screen (matches phone.visible in Island.ts).
+ */
+export function setVisible(v: boolean): void {
+    _visible = v;
+}
+
+/**
+ * Per-frame update — PART 1.
+ *
+ * Must be called BEFORE the WebGL scene render (before Underwater.renderScene).
+ * Sets occluding plane + CSS3DObject visibility and syncs their world
+ * transforms so the NoBlending hole is present when the scene is drawn.
+ */
+export function preRender(phoneGroup: Group): void {
+    if (!_initialized || !_visible) {
+        if (occludingPlane) occludingPlane.visible = false;
+        if (cssObject) cssObject.visible = false;
+        if (_canvasEl) _canvasEl.style.pointerEvents = '';
+        if (cssRenderer) cssRenderer.domElement.style.pointerEvents = 'none';
+        return;
+    }
+
+    const zoomed = isPhoneZoomActive();
+
+    if (cssObject) cssObject.visible = zoomed;
+    // occludingPlane visibility is set in renderOccluder() which runs after post-processing
+
+    if (!zoomed) return;
+
+    // ── Store refs for click-handler raycasting ───────────────────────────────
+    _phoneGroup = phoneGroup;
+
+    // ── Sync world transform ──────────────────────────────────────────────────
+    phoneGroup.getWorldPosition(_worldPos);
+    phoneGroup.getWorldQuaternion(_worldQuat);
+
+    const cfg = phoneScreenConfig;
+
+    cssObject!.position.set(
+        _worldPos.x + cfg.offsetX,
+        _worldPos.y + cfg.offsetY,
+        _worldPos.z + cfg.offsetZ,
+    );
+    cssObject!.quaternion.copy(_worldQuat);
+
+    // Live-update scale in case config changed via debug GUI
+    cssObject!.scale.set(
+        cfg.screenWidth  / cfg.iframeWidth,
+        cfg.screenHeight / cfg.iframeHeight,
+        1,
+    );
+
+    // Occluding plane — mirror the CSS3DObject's full transform
+    if (occludingPlane) {
+        occludingPlane.position.copy(cssObject!.position);
+        occludingPlane.quaternion.copy(cssObject!.quaternion);
+        occludingPlane.scale.copy(cssObject!.scale);
+    }
+}
+
+/**
+ * Render the occluding plane that punches an alpha=0 hole through the canvas.
+ *
+ * MUST be called AFTER Underwater.renderScene and ALL other WebGL passes so
+ * the post-processing quad cannot overwrite the transparent pixels.
+ */
+export function renderOccluder(wr: WebGLRenderer, cam: PerspectiveCamera): void {
+    if (!occluderScene || !occludingPlane || !_initialized || !_visible) return;
+    const zoomed = isPhoneZoomActive();
+    occludingPlane.visible = zoomed;
+    if (zoomed) wr.render(occluderScene, cam);
+}
+
+/**
+ * Per-frame update — PART 2.
+ *
+ * Called AFTER the WebGL render.
+ * Toggles pointer-events on the canvas / CSS3D layer and renders the CSS3D scene.
+ */
+export function render(cam: PerspectiveCamera): void {
+    if (!cssRenderer || !cssScene || !_initialized || !_visible) return;
+
+    const zoomed = isPhoneZoomActive();
+
+    // ── Pointer events ───────────────────────────────────────────────────────
+    if (zoomed) {
+        if (_canvasEl) _canvasEl.style.pointerEvents = 'none';
+        cssRenderer.domElement.style.pointerEvents = 'auto';
+    } else {
+        if (_canvasEl) _canvasEl.style.pointerEvents = '';
+        cssRenderer.domElement.style.pointerEvents = 'none';
+    }
+
+    cssRenderer.render(cssScene, cam);
+    _camera = cam;  // store for click-handler raycasting
+}
+
+/**
+ * Call from Scene's onresize handler.
+ */
+export function onResize(w: number, h: number): void {
+    if (cssRenderer) cssRenderer.setSize(w, h);
+}

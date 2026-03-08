@@ -17,6 +17,7 @@ import * as WindLines from "../effects/WindLines.ts";
 import * as Clouds from "../effects/Clouds.ts";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
+import * as PhoneScreen from './PhoneScreen';
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { reflectionTextureUniform } from "../materials/OceanMaterial";
 
@@ -47,7 +48,7 @@ export let colorFilterValue: ColorFilter = (localStorage.getItem('portfolio-colo
 let ambientLight: AmbientLight;
 let directionalLight: DirectionalLight;
 
-export let renderer = new WebGLRenderer({ antialias });
+export let renderer = new WebGLRenderer({ antialias, alpha: true });
 export const scene = new Scene();
 export const camera = new PerspectiveCamera();
 export const staticCamera = new PerspectiveCamera();
@@ -178,6 +179,11 @@ export function Start(): void
     renderer.shadowMap.enabled = shadowsEnabled;
     renderer.shadowMap.type = VSMShadowMap;  // Variance shadows — real Gaussian blur
     body.appendChild(renderer.domElement);
+
+    // CSS3D renderer for the phone screen iframe — inserted behind the canvas.
+    // The canvas has alpha:true so the NoBlending occluding plane can punch a
+    // transparent hole, letting the CSS3D iframe show through.
+    PhoneScreen.initRenderer(body, renderer.domElement);
     
     camera.fov = fov;
     camera.aspect = width / height;
@@ -212,6 +218,7 @@ export function Start(): void
         staticCamera.updateProjectionMatrix();
 
         Underwater.onResize(width, height);
+        PhoneScreen.onResize(window.innerWidth, window.innerHeight);
     }
 
     Skybox.Start();
@@ -376,8 +383,18 @@ export function Update(): void
     // Ambient light - higher = lighter/softer shadows
     ambientLight.intensity = 0.3 + sunVisible * lightIntensity * 0.9;  // TWEAK: Higher base = brighter scene
 
+    // Phone screen occluding plane — must be set BEFORE the WebGL render
+    // so the NoBlending hole is present when the scene is drawn.
+    PhoneScreen.preRender(Island.phone);
+
     Underwater.renderScene(renderer, scene, camera);
     renderer.render(axes, staticCamera);
+
+    // Punch the alpha hole AFTER all post-processing so it can't be overwritten
+    PhoneScreen.renderOccluder(renderer, camera);
+
+    // CSS3D phone screen — pointer events + CSS3D render after WebGL
+    PhoneScreen.render(camera);
 
     // Wind lines 3D update — moves ribbon meshes and updates vertex positions
     WindLines.Update(deltaTime, camera.position.x, camera.position.y, camera.position.z, camera.fov);
