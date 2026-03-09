@@ -1,4 +1,4 @@
-import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap } from "three";
+import { AmbientLight, DirectionalLight, MeshDepthMaterial, PerspectiveCamera, Scene, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap } from "three";
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
 import * as SeaFloor from "../scene/SeaFloor";
@@ -20,6 +20,13 @@ import { deltaTime } from "./Time.ts";
 import * as PhoneScreen from './PhoneScreen';
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { reflectionTextureUniform } from "../materials/OceanMaterial";
+
+// Depth-prepass material — used to rebuild the scene depth buffer before the
+// phone-screen occluder renders, so depthTest correctly hides the CSS3D layer
+// when 3D objects are in front of the phone. colorWrite=false preserves the
+// post-processed colour output.
+const _depthPrepassMat = new MeshDepthMaterial();
+_depthPrepassMat.colorWrite = false;
 
 export const body = document.createElement("div");
 
@@ -72,7 +79,8 @@ export function UpdateCameraRotation(): void
     cameraForward.copy(_basisZ.set(0, 0, -1).applyQuaternion(camera.quaternion));
 }
 
-export let fov = 70;
+import { defaultFov } from '../scene/CameraConfig';
+export let fov = defaultFov;
 export function SetFOV(value: number): void
 {
     fov = value;
@@ -390,8 +398,23 @@ export function Update(): void
     Underwater.renderScene(renderer, scene, camera);
     renderer.render(axes, staticCamera);
 
-    // Punch the alpha hole AFTER all post-processing so it can't be overwritten
-    PhoneScreen.renderOccluder(renderer, camera);
+    // Punch the alpha hole AFTER all post-processing so it can't be overwritten.
+    // A depth-only prepass first repopulates the depth buffer with all scene
+    // geometry so the occluder's depthTest correctly hides the hole where any
+    // 3D object is closer to the camera than the phone screen plane.
+    if (PhoneScreen.isVisible()) {
+        // Prepass: clear depth, re-render scene geometry depth-only (no colour write).
+        // renderer.autoClearColor is already false — post-processing output preserved.
+        scene.overrideMaterial = _depthPrepassMat;
+        renderer.render(scene, camera);
+        scene.overrideMaterial = null;
+
+        // Occluder: keep the prepass depths intact (don't clear), then punch
+        // the alpha hole only where the phone is in front of all other geometry.
+        renderer.autoClearDepth = false;
+        PhoneScreen.renderOccluder(renderer, camera);
+        renderer.autoClearDepth = true;
+    }
 
     // CSS3D phone screen — pointer events + CSS3D render after WebGL
     PhoneScreen.render(camera);

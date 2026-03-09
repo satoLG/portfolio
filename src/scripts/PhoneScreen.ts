@@ -33,29 +33,35 @@ import {
     Vector2,
 } from 'three';
 import { isPhoneZoomActive, zoomOutFromPhone } from './Control';
+import {
+    phoneScreenWidth, phoneScreenHeight,
+    phoneScreenOffsetX, phoneScreenOffsetY, phoneScreenOffsetZ,
+    phoneOverlayOpacity, phoneOverlayTintR, phoneOverlayTintG, phoneOverlayTintB,
+    phoneOverlayGlareOpacity, phoneOverlayGlareAngle,
+} from '../scene/CameraConfig';
 
 // ─── CONFIG — all tweakable from the debug GUI (Camera → Phone Screen) ────────
 export const phoneScreenConfig = {
     // World-unit dimensions of the visible screen rectangle on the phone model
-    screenWidth:  0.048,   // world units  — tweak live with debug GUI
-    screenHeight: 0.078,   // world units
+    screenWidth:  phoneScreenWidth,    // world units — tweak live with debug GUI
+    screenHeight: phoneScreenHeight,   // world units
 
     // Fine-tune placement relative to the phone Group's world origin
-    offsetX:  0.0,
-    offsetY:  0.012,       // slightly above phone surface (screen faces +Y)
-    offsetZ:  0.0,
+    offsetX:  phoneScreenOffsetX,
+    offsetY:  phoneScreenOffsetY,      // slightly above phone surface
+    offsetZ:  phoneScreenOffsetZ,
 
     // Iframe base resolution (px) — aspect kept 9:16 to match a phone screen
-    iframeWidth:  1000,
-    iframeHeight: 1778,
+    iframeWidth:  500,
+    iframeHeight: 888,
 
     // Glass overlay
-    overlayOpacity:      0.08,
-    overlayTintR:        180,
-    overlayTintG:        200,
-    overlayTintB:        255,
-    overlayGlareOpacity: 0.06,
-    overlayGlareAngle:   135,
+    overlayOpacity:      phoneOverlayOpacity,
+    overlayTintR:        phoneOverlayTintR,
+    overlayTintG:        phoneOverlayTintG,
+    overlayTintB:        phoneOverlayTintB,
+    overlayGlareOpacity: phoneOverlayGlareOpacity,
+    overlayGlareAngle:   phoneOverlayGlareAngle,
 };
 
 // ─── INTERNALS ────────────────────────────────────────────────────────────────
@@ -71,6 +77,7 @@ let iframeEl: HTMLIFrameElement | null = null;
 let _canvasEl: HTMLCanvasElement | null = null;
 let _initialized = false;
 let _visible = false;
+let _iframeSrcSet = false;  // guard: src set only once, after first DOM-attached render
 
 // Stored each frame for use in the CSS3D click handler
 let _phoneGroup: Group | null = null;
@@ -157,7 +164,7 @@ export function init(): void {
     containerEl = document.createElement('div');
     containerEl.style.width        = `${cfg.iframeWidth}px`;
     containerEl.style.height       = `${cfg.iframeHeight}px`;
-    containerEl.style.overflow     = 'hidden';
+    // containerEl.style.overflow     = 'hidden';
     containerEl.style.position     = 'relative';
     containerEl.style.borderRadius = '14px';
     containerEl.style.background   = '#000';
@@ -168,11 +175,15 @@ export function init(): void {
 
     // ── Iframe ───────────────────────────────────────────────────────────────
     iframeEl = document.createElement('iframe');
-    iframeEl.src = 'https://satolg.github.io/projects_hub/';
+    // src is intentionally NOT set here.
+    // The container is a detached DOM node until CSS3DRenderer first renders it.
+    // Setting src on a detached iframe causes ERR_CONNECTION_RESET in Chromium.
+    // The real src is injected after the first render() call (see below).
     iframeEl.style.width   = '100%';
     iframeEl.style.height  = '100%';
     iframeEl.style.border  = 'none';
     iframeEl.style.display = 'block';
+    iframeEl.frameBorder = '0';
     iframeEl.setAttribute('sandbox',
         'allow-scripts allow-same-origin allow-forms allow-popups allow-pointer-lock'
     );
@@ -195,7 +206,7 @@ export function init(): void {
         cfg.screenHeight / cfg.iframeHeight,
         1,
     );
-    cssObject.visible = false;   // shown when zoomed
+    cssObject.visible = true;   // always visible once phone is spawned — browser loads iframe immediately
     cssScene.add(cssObject);
 
     // ── Occluding plane (CustomBlending — alpha-only zero-out) ──────────────────────
@@ -209,7 +220,7 @@ export function init(): void {
         color:       0x000000,          // black — irrelevant since RGB is preserved
         transparent: true,
         opacity:     1,
-        depthTest:   false,             // never blocked by phone geometry
+        depthTest:   true,              // blocked by scene geometry closer to camera
         depthWrite:  false,
         blending:    CustomBlending,
         blendEquation:  AddEquation,
@@ -246,6 +257,14 @@ export function updateOverlayStyle(): void {
 }
 
 /**
+ * Returns true when the phone screen is currently active (visible flag set).
+ * Used by Scene.ts to skip the depth prepass when the phone isn't shown.
+ */
+export function isVisible(): boolean {
+    return _visible;
+}
+
+/**
  * Show or hide the phone screen (matches phone.visible in Island.ts).
  */
 export function setVisible(v: boolean): void {
@@ -268,17 +287,14 @@ export function preRender(phoneGroup: Group): void {
         return;
     }
 
-    const zoomed = isPhoneZoomActive();
-
-    if (cssObject) cssObject.visible = zoomed;
-    // occludingPlane visibility is set in renderOccluder() which runs after post-processing
-
-    if (!zoomed) return;
+    // CSS3D is always visible while phone is spawned — keeps the iframe alive
+    // and shows the screen content at all distances, not just when zoomed.
+    if (cssObject) cssObject.visible = true;
 
     // ── Store refs for click-handler raycasting ───────────────────────────────
     _phoneGroup = phoneGroup;
 
-    // ── Sync world transform ──────────────────────────────────────────────────
+    // ── Sync world transform every frame (not only when zoomed) ──────────────
     phoneGroup.getWorldPosition(_worldPos);
     phoneGroup.getWorldQuaternion(_worldQuat);
 
@@ -298,7 +314,7 @@ export function preRender(phoneGroup: Group): void {
         1,
     );
 
-    // Occluding plane — mirror the CSS3DObject's full transform
+    // Occluding plane — mirror the CSS3DObject's full transform every frame
     if (occludingPlane) {
         occludingPlane.position.copy(cssObject!.position);
         occludingPlane.quaternion.copy(cssObject!.quaternion);
@@ -314,9 +330,10 @@ export function preRender(phoneGroup: Group): void {
  */
 export function renderOccluder(wr: WebGLRenderer, cam: PerspectiveCamera): void {
     if (!occluderScene || !occludingPlane || !_initialized || !_visible) return;
-    const zoomed = isPhoneZoomActive();
-    occludingPlane.visible = zoomed;
-    if (zoomed) wr.render(occluderScene, cam);
+    // Always punch the alpha hole while phone is visible — not only when zoomed.
+    // Without this the canvas would cover the CSS3D content at normal view distance.
+    occludingPlane.visible = true;
+    wr.render(occluderScene, cam);
 }
 
 /**
@@ -341,7 +358,15 @@ export function render(cam: PerspectiveCamera): void {
 
     cssRenderer.render(cssScene, cam);
     _camera = cam;  // store for click-handler raycasting
-}
+    // Inject the real iframe src on the very first render, now that CSS3DRenderer
+    // has attached the container element to the live DOM.  Deferred one more
+    // rAF so the element is fully laid-out before the navigation starts.
+    if (!_iframeSrcSet && iframeEl) {
+        _iframeSrcSet = true;
+        requestAnimationFrame(() => {
+            if (iframeEl) iframeEl.src = 'https://projects-hub-one.vercel.app/';
+        });
+    }}
 
 /**
  * Call from Scene's onresize handler.

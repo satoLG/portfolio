@@ -4,6 +4,11 @@ import { camera } from "../scripts/Scene";
 import { deltaTime } from "../scripts/Time";
 import * as Audio from "../scripts/Audio";
 import { isPugZoomActive, isRadioZoomActive } from "../scripts/Control";
+import { island, firecamp, palmtree, radio, sword, pug, tent, dogBed, phone } from "./Island";
+
+// All solid island objects that should occlude ripple clicks.
+// Built lazily so we never hold stale references.
+const _islandBlockers = () => [island, firecamp, palmtree, radio, sword, pug, tent, dogBed, phone];
 
 export const surface = new Mesh();
 export const volume = new Mesh();
@@ -107,6 +112,15 @@ function setupRippleInteraction(): void {
         if (surfaceHits.length === 0) return;  // Ray missed ocean entirely (clicked sky / horizon)
 
         const hit = surfaceHits[0];
+
+        // ── Island occlusion check ─────────────────────────────────────────────
+        // If any solid island geometry intersects the ray closer than the ocean
+        // surface, the user clicked "through" the island — skip the ripple.
+        const blockers = _islandBlockers().filter(g => g.children.length > 0);
+        if (blockers.length > 0) {
+            const islandHits = raycaster.intersectObjects(blockers, true);
+            if (islandHits.length > 0 && islandHits[0].distance < hit.distance) return;
+        }
 
         // ── Far-distance limit ─────────────────────────────────────────────────
         const dx = hit.point.x - camera.position.x;
