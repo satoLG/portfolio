@@ -4,7 +4,7 @@ import { oceanAbsorptionUniform, underwaterFogDistUniform, setFoamMask } from ".
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../scripts/Time";
 import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../scripts/MediaPlayer";
-import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, setPugCamOffset } from "../scripts/Control";
+import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive } from "../scripts/Control";
 import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../scripts/Dialog";
 import type { DialogLine, ReplyOption } from "../scripts/Dialog";
 import { isBreezeActive, playPugSnoreOnce, stopPugSnore } from "../scripts/Audio";
