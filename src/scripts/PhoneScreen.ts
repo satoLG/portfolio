@@ -184,6 +184,9 @@ export function init(): void {
     iframeEl.style.border  = 'none';
     iframeEl.style.display = 'block';
     iframeEl.frameBorder = '0';
+    // iOS/WebKit fix: a running CSS transform animation forces the browser to
+    // composite this element inside preserve-3d, making it visible on Safari.
+    iframeEl.className = 'phone-screen-jitter';
     iframeEl.setAttribute('sandbox',
         'allow-scripts allow-same-origin allow-forms allow-popups allow-pointer-lock'
     );
