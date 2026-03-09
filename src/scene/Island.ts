@@ -14,9 +14,9 @@ import * as PhoneScreen from '../scripts/PhoneScreen';
 import { UNDERWATER_Y_THRESHOLD } from "../effects/Underwater";
 import {
     islandPosition, firecampOffset, palmtreeOffset, radioOffset, swordOffset,
-    pugOffset, tentOffset, dogBedOffset, phoneOffset,
-    islandScale, firecampScale, palmtreeScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, phoneScale,
-    palmtreeRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, phoneRot,
+    pugOffset, tentOffset, dogBedOffset, littleRocksOffset, phoneOffset,
+    islandScale, firecampScale, palmtreeScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, littleRocksScale, phoneScale,
+    palmtreeRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, littleRocksRot, phoneRot,
     CLUSTER_MAIN as CLUSTER_MAIN_CFG,
     CLUSTER_PALM as CLUSTER_PALM_CFG,
     GRASS_COUNT  as GRASS_COUNT_CFG,
@@ -33,8 +33,10 @@ export const sword = new Group();
 export const pug = new Group();
 export const tent = new Group();
 export const dogBed = new Group();
+export const littleRocks = new Group();
 export const phone = new Group();
-let phoneDropped = false;  // True after the cutscene drops the phone onto the island
+
+let phoneDropped = false;  // True after the cutscene sequence (runtime only, no localStorage)
 export const grassPatches: Group[] = [];
 
 // Store palm tree leaves for wind animation
@@ -324,6 +326,7 @@ const SPAWN_EXCLUSION_ZONES: ExclusionZone[] = [
     { x: -0.35,  z: -3.60, r: 0.14 },  // Palm trunk (small — palm-cluster grass grows around it)
     { x:  0.65,  z: -2.30, r: 0.34 },  // Pug
     { x: -0.65,  z: -3.10, r: 0.26 },  // Radio
+    { x:  0.32,  z: -2.60, r: 0.20 },  // Little rocks + phone
 ];
 const PATCH_MIN_SPACING  = 0.055;  // Min world-space gap between any two patches
 const SPAWN_MAX_ATTEMPTS = 40;     // Retries per patch before giving up
@@ -1104,7 +1107,33 @@ export function Start(): void {
         (error) => { console.error('Error loading dog bed:', error); }
     );
 
-    // Pre-load phone model (hidden until dialog cutscene drops it)
+    // Load little rocks (between pug and firecamp — phone leans on them)
+    loader.load(
+        'models/surface/little_rocks.glb',
+        (gltf) => {
+            applyOceanLightingToModel(gltf.scene);
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    (child as any).receiveShadow = true;
+                }
+            });
+            littleRocks.add(gltf.scene);
+            littleRocks.position.set(
+                islandPosition.x + littleRocksOffset.x,
+                islandPosition.y + littleRocksOffset.y,
+                islandPosition.z + littleRocksOffset.z
+            );
+            littleRocks.scale.setScalar(littleRocksScale);
+            littleRocks.rotation.set(littleRocksRot.x, littleRocksRot.y, littleRocksRot.z);
+            threeScene.add(littleRocks);
+            console.log('Little rocks loaded');
+        },
+        undefined,
+        (error) => { console.error('Error loading little rocks:', error); }
+    );
+
+    // Phone model — always spawned on the little rocks
     loader.load(
         'models/overall/phone.glb',
         (gltf) => {
@@ -1123,11 +1152,12 @@ export function Start(): void {
             );
             phone.scale.setScalar(phoneScale);
             phone.rotation.set(phoneRot.x, phoneRot.y, phoneRot.z);
-            phone.visible = false;  // hidden until cutscene
             threeScene.add(phone);
-            // Initialise the phone screen overlay (hidden until setVisible is called)
+            // Phone is always visible — no cutscene gate
+            phone.visible = true;
             PhoneScreen.init();
-            console.log('Phone loaded (hidden)');
+            PhoneScreen.setVisible(true);
+            console.log('Phone loaded (always visible on little rocks)');
         },
         undefined,
         (error) => { console.error('Error loading phone:', error); }
@@ -1451,21 +1481,25 @@ function _tweenValue(
 }
 
 /**
- * Phone drop cutscene — pug walks sideways, drops the phone, walks back.
+ * Phone cutscene — pug walks to the phone, does a pointing gesture, camera
+ * zooms into the phone, pug walks back.  Phone is always already visible.
  * Called after the "let me show you on my phone" dialog line completes.
  */
 async function _startPhoneDropSequence(): Promise<void> {
-    // ── 1. Save current pug position & rotation ──────────────────────────────
+    // ── 1. Release pug zoom & dismiss dialog so camera returns to orbit ──────
+    zoomOutFromPug();
+    dismissDialog();
+
+    // ── 2. Save current pug position & rotation ──────────────────────────────
     const savedPosX = pug.position.x;
     const savedPosZ = pug.position.z;
     const savedRotY = pug.rotation.y;
 
-    // Where to walk: a bit to the left (negative X in local space)
-    const walkTargetX = savedPosX - 0.3;
-    const walkTargetZ = savedPosZ + 0.15;
+    // Walk target: just beside the phone (slightly behind it so the pug faces it)
+    const walkTargetX = phone.position.x + 0.12;
+    const walkTargetZ = phone.position.z + 0.14;
 
-    // ── 2. Walk to drop position ─────────────────────────────────────────────
-    // Model faces +Z by default; atan2(dx, dz) rotates it to face the walk direction
+    // ── 3. Walk to phone position ─────────────────────────────────────────────
     const dxWalk = walkTargetX - savedPosX;
     const dzWalk = walkTargetZ - savedPosZ;
     pug.rotation.y = Math.atan2(dxWalk, dzWalk);
@@ -1473,64 +1507,19 @@ async function _startPhoneDropSequence(): Promise<void> {
     if (_pugCurrentAction) _pugCurrentAction.timeScale = PUG_CUTSCENE_WALK_SPEED;
 
     await Promise.all([
-        _tweenValue(savedPosX, walkTargetX, 1200, v => {
-            pug.position.x = v;
-            setPugCamOffset(pug.position.x - savedPosX, pug.position.z - savedPosZ);
-        }),
+        _tweenValue(savedPosX, walkTargetX, 1200, v => { pug.position.x = v; }),
         _tweenValue(savedPosZ, walkTargetZ, 1200, v => { pug.position.z = v; }),
     ]);
 
-    // ── 3. Play drop animation & make phone visible ──────────────────────────
+    // ── 4. Play drop/point animation (reused as "pointing at phone") ─────────
     setPugAnimation(PUG_ANIM_DROP);
-    await _delay(400); // let the drop anim start
+    await _delay(500);  // let the pointing gesture start
 
-    // Animate phone: parabolic arc from pug to ground
-    const pugWorldY = pug.position.y;
-    phone.position.set(pug.position.x, pugWorldY + 0.25, pug.position.z + 0.15);
-    phone.visible = true;
-    PhoneScreen.setVisible(true);
-
-    const phoneStartY = pugWorldY + 0.25;
-    // Recalculate final phone position from config
-    const phoneFinalX = islandPosition.x + phoneOffset.x;
-    const phoneFinalY = islandPosition.y + phoneOffset.y;
-    const phoneFinalZ = islandPosition.z + phoneOffset.z;
-
-    // Arc animation: parabolic toss
-    const arcDuration = 600; // ms
-    const arcStartX = phone.position.x;
-    const arcStartZ = phone.position.z;
-    const arcPeakHeight = 0.15; // extra height at midpoint
-
-    await new Promise<void>(resolve => {
-        const start = performance.now();
-        function arcTick(now: number) {
-            const elapsed = now - start;
-            const t = Math.min(1, elapsed / arcDuration);
-            // Ease out
-            const eased = 1 - (1 - t) * (1 - t);
-            phone.position.x = arcStartX + (phoneFinalX - arcStartX) * eased;
-            phone.position.z = arcStartZ + (phoneFinalZ - arcStartZ) * eased;
-            // Parabolic Y: rises then falls
-            const parabola = -4 * arcPeakHeight * (t - 0.5) * (t - 0.5) + arcPeakHeight;
-            phone.position.y = phoneStartY + (phoneFinalY - phoneStartY) * eased + parabola;
-            // Rotation: tumble slightly during toss
-            phone.rotation.z = phoneRot.z + t * Math.PI * 0.5;
-            if (t < 1) {
-                requestAnimationFrame(arcTick);
-            } else {
-                // Snap to final config position & rotation
-                phone.position.set(phoneFinalX, phoneFinalY, phoneFinalZ);
-                phone.rotation.set(phoneRot.x, phoneRot.y, phoneRot.z);
-                resolve();
-            }
-        }
-        requestAnimationFrame(arcTick);
-    });
-
+    // ── 5. Zoom into the phone using the default zoom logic ──────────────────
+    zoomToPhone();
     await _delay(300);
 
-    // ── 4. Walk back to original position ────────────────────────────────────
+    // ── 6. Walk back to original position (while phone is zoomed in) ─────────
     const dxReturn = savedPosX - pug.position.x;
     const dzReturn = savedPosZ - pug.position.z;
     pug.rotation.y = Math.atan2(dxReturn, dzReturn);
@@ -1538,22 +1527,17 @@ async function _startPhoneDropSequence(): Promise<void> {
     if (_pugCurrentAction) _pugCurrentAction.timeScale = PUG_CUTSCENE_WALK_SPEED;
 
     await Promise.all([
-        _tweenValue(pug.position.x, savedPosX, 1200, v => {
-            pug.position.x = v;
-            setPugCamOffset(pug.position.x - savedPosX, pug.position.z - savedPosZ);
-        }),
+        _tweenValue(pug.position.x, savedPosX, 1200, v => { pug.position.x = v; }),
         _tweenValue(pug.position.z, savedPosZ, 1200, v => { pug.position.z = v; }),
     ]);
 
-    // ── 5. Restore idle and finish ───────────────────────────────────────────
-    // Restore timeScale in case it was slowed for the cutscene walk
+    // ── 7. Restore idle and finish ───────────────────────────────────────────
     if (pugMixer && pugAnimClips[PUG_ANIM_WALK]) {
         pugMixer.clipAction(pugAnimClips[PUG_ANIM_WALK]).timeScale = 1;
     }
     pug.rotation.y = savedRotY;
-    setPugCamOffset(0, 0);  // ensure clean reset
     phoneDropped = true;
-    _onPugDialogComplete();
+    _restorePugNightState();
 }
 
 // ============================================
@@ -1568,8 +1552,8 @@ function setupPhoneInteraction(): void {
     if (!canvas) return;
 
     const onPhoneClick = (clientX: number, clientY: number) => {
-        // Only interactive after cutscene drops the phone
-        if (!phoneDropped || !phone.visible) return;
+        // Ignore interactions while phone hasn't loaded yet
+        if (!phone.visible) return;
         // Ignore interactions while underwater
         if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
         // Ignore clicks while pug or radio zoom is active
@@ -1616,7 +1600,7 @@ function setupPhoneInteraction(): void {
     });
 
     canvas.addEventListener('mousemove', (e: MouseEvent) => {
-        if (!phoneDropped || !phone.visible || phone.children.length === 0
+        if (!phone.visible || phone.children.length === 0
             || isPhoneZoomActive() || camera.position.y < UNDERWATER_Y_THRESHOLD) {
             if (isPhoneHovered) { isPhoneHovered = false; canvas.style.cursor = ''; }
             return;

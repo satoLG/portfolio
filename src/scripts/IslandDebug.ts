@@ -18,6 +18,7 @@ import {
     pug,
     tent,
     dogBed,
+    littleRocks,
     CLUSTER_MAIN,
     CLUSTER_PALM,
     clusterMainPatches,
@@ -68,7 +69,8 @@ import {
     DISTORTION_SCALE,
 } from '../effects/Underwater';
 import { Object3D } from 'three';
-import { phoneZoomConfig } from '../scripts/Control';
+import { phoneZoomConfig, mainCameraConfig } from '../scripts/Control';
+import { SetFOV } from '../scripts/Scene';
 import { phoneScreenConfig, updateOverlayStyle } from './PhoneScreen';
 
 let gui: GUI | null = null;
@@ -281,25 +283,31 @@ function buildGUI(): void {
                 `export const swordOffset    = { x: ${f(sword.position.x - ip.x)}, y: ${f(sword.position.y - ip.y)}, z: ${f(sword.position.z - ip.z)} };`,
                 `export const pugOffset      = { x: ${f(pug.position.x - ip.x)}, y: ${f(pug.position.y - ip.y)}, z: ${f(pug.position.z - ip.z)} };`,
                 `export const tentOffset     = { x: ${f(tent.position.x - ip.x)}, y: ${f(tent.position.y - ip.y)}, z: ${f(tent.position.z - ip.z)} };`,
-                `export const dogBedOffset   = { x: ${f(dogBed.position.x - ip.x)}, y: ${f(dogBed.position.y - ip.y)}, z: ${f(dogBed.position.z - ip.z)} };`,
+                `export const dogBedOffset      = { x: ${f(dogBed.position.x - ip.x)}, y: ${f(dogBed.position.y - ip.y)}, z: ${f(dogBed.position.z - ip.z)} };`,
+                `export const littleRocksOffset = { x: ${f(littleRocks.position.x - ip.x)}, y: ${f(littleRocks.position.y - ip.y)}, z: ${f(littleRocks.position.z - ip.z)} };`,
+                `export const phoneOffset       = { x: ${f(Island.phone.position.x - ip.x)}, y: ${f(Island.phone.position.y - ip.y)}, z: ${f(Island.phone.position.z - ip.z)} };`,
                 ``,
                 `// ── Scales ────────────────────────────────────────────────────────────────────`,
-                `export const islandScale   = ${f(island.scale.x)};`,
-                `export const firecampScale = ${f(firecamp.scale.x)};`,
-                `export const palmtreeScale = ${f(palmtree.scale.x)};`,
-                `export const radioScale    = ${f(radio.scale.x)};`,
-                `export const swordScale    = ${f(sword.scale.x)};`,
-                `export const pugScale      = ${f(pug.scale.x)};`,
-                `export const tentScale     = ${f(tent.scale.x)};`,
-                `export const dogBedScale   = ${f(dogBed.scale.x)};`,
+                `export const islandScale      = ${f(island.scale.x)};`,
+                `export const firecampScale    = ${f(firecamp.scale.x)};`,
+                `export const palmtreeScale    = ${f(palmtree.scale.x)};`,
+                `export const radioScale       = ${f(radio.scale.x)};`,
+                `export const swordScale       = ${f(sword.scale.x)};`,
+                `export const pugScale         = ${f(pug.scale.x)};`,
+                `export const tentScale        = ${f(tent.scale.x)};`,
+                `export const dogBedScale      = ${f(dogBed.scale.x)};`,
+                `export const littleRocksScale = ${f(littleRocks.scale.x)};`,
+                `export const phoneScale       = ${f(Island.phone.scale.x)};`,
                 ``,
                 `// ── Rotations ─────────────────────────────────────────────────────────────────`,
-                `export const palmtreeRotY = ${f(palmtree.rotation.y)};`,
-                `export const radioRotY    = ${f(radio.rotation.y)};`,
-                `export const swordRot     = { x: ${f(sword.rotation.x)}, y: ${f(sword.rotation.y)}, z: ${f(sword.rotation.z)} };`,
-                `export const pugRotY      = ${f(pug.rotation.y)};`,
-                `export const tentRotY     = ${f(tent.rotation.y)};`,
-                `export const dogBedRotY   = ${f(dogBed.rotation.y)};`,
+                `export const palmtreeRotY   = ${f(palmtree.rotation.y)};`,
+                `export const radioRotY      = ${f(radio.rotation.y)};`,
+                `export const swordRot       = { x: ${f(sword.rotation.x)}, y: ${f(sword.rotation.y)}, z: ${f(sword.rotation.z)} };`,
+                `export const pugRotY        = ${f(pug.rotation.y)};`,
+                `export const tentRotY       = ${f(tent.rotation.y)};`,
+                `export const dogBedRotY     = ${f(dogBed.rotation.y)};`,
+                `export const littleRocksRot = { x: ${f(littleRocks.rotation.x)}, y: ${f(littleRocks.rotation.y)}, z: ${f(littleRocks.rotation.z)} };`,
+                `export const phoneRot       = { x: ${f(Island.phone.rotation.x)}, y: ${f(Island.phone.rotation.y)}, z: ${f(Island.phone.rotation.z)} };`,
                 ``,
                 `// ── Foliage clusters ──────────────────────────────────────────────────────────`,
                 `export const CLUSTER_MAIN = { wx: ${f(CLUSTER_MAIN.wx)}, wz: ${f(CLUSTER_MAIN.wz)}, minR: ${f(CLUSTER_MAIN.minR)}, maxR: ${f(CLUSTER_MAIN.maxR)} };`,
@@ -464,6 +472,7 @@ function buildGUI(): void {
 
     addObjectFolder(surfaceFolder, 'Tent',    tent,         { scaleRange: [0.1,  5.0], rotAxes: ['y']           });
     addObjectFolder(surfaceFolder, 'Dog Bed', dogBed,       { scaleRange: [0.01, 1.5], rotAxes: ['y']           });
+    addObjectFolder(surfaceFolder, 'Little Rocks', littleRocks, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
     addObjectFolder(surfaceFolder, 'Phone',   Island.phone, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
 
     // ── Foliage clusters ──
@@ -991,6 +1000,66 @@ function buildGUI(): void {
     sfKelpFolder.close();
 
     sfFolder.close();
+
+    // ── Camera: Main Camera live tweaks ────────────────────────────────────────
+    const mainCamFolder = cameraFolder.addFolder('Main Camera');
+    const mainCamProxy = {
+        get z()   { return mainCameraConfig.z; },
+        set z(v)  { mainCameraConfig.z = v; },
+        get fov() { return mainCameraConfig.fov; },
+        set fov(v) {
+            mainCameraConfig.fov = v;
+            SetFOV(v);  // apply immediately to base camera
+        },
+    };
+    mainCamFolder.add(mainCamProxy, 'z',   0.1, 5.0, 0.01).name('Camera Z (depth)').listen();
+    mainCamFolder.add(mainCamProxy, 'fov', 10,  120, 0.5 ).name('Field of View (°)').listen();
+    mainCamFolder.close();
+
+    // ── Camera: Copy CameraConfig.ts ────────────────────────────────────────────
+    const cameraConfigActions = {
+        copyConfig: () => {
+            const f = (n: number) => n.toFixed(4);
+            const fi = (n: number) => String(n);  // integer values (no decimal)
+            const pzc = phoneZoomConfig;
+            const psc = phoneScreenConfig;
+            const mcc = mainCameraConfig;
+            const content = [
+                `// src/scene/CameraConfig.ts`,
+                `// Camera configuration — generated by IslandDebug.`,
+                `// Paste this entire file to replace src/scene/CameraConfig.ts`,
+                ``,
+                `// ── Main Camera ─────────────────────────────────────────────────────────────────`,
+                `export const defaultCameraZ = ${f(mcc.z)};   // World-space Z position of the camera at rest`,
+                `export const defaultFov     = ${fi(mcc.fov)};    // Default camera Field-of-View in degrees`,
+                ``,
+                `// ── Phone Zoom ────────────────────────────────────────────────────────────────`,
+                `export const phoneZoomHeight = ${f(pzc.height)};    // World-units above phone surface`,
+                `export const phoneZoomTilt   = ${f(pzc.tilt)};    // Z forward offset for slight viewing angle`,
+                `export const phoneZoomPitch  = ${f(pzc.pitch)};   // Camera pitch in radians (~-83° = nearly straight down)`,
+                `export const phoneZoomFov    = ${fi(pzc.fov)};      // Camera FOV during phone zoom (telephoto)`,
+                ``,
+                `// ── Phone Screen ──────────────────────────────────────────────────────────────`,
+                `export const phoneScreenWidth   = ${f(psc.screenWidth)};              // world units`,
+                `export const phoneScreenHeight  = ${f(psc.screenHeight)};              // world units`,
+                `export const phoneScreenOffsetX = ${f(psc.offsetX)};`,
+                `export const phoneScreenOffsetY = ${f(psc.offsetY)};`,
+                `export const phoneScreenOffsetZ = ${f(psc.offsetZ)};`,
+                ``,
+                `// ── Phone Screen Overlay ──────────────────────────────────────────────────────`,
+                `export const phoneOverlayOpacity      = ${f(psc.overlayOpacity)};`,
+                `export const phoneOverlayTintR        = ${fi(psc.overlayTintR)};`,
+                `export const phoneOverlayTintG        = ${fi(psc.overlayTintG)};`,
+                `export const phoneOverlayTintB        = ${fi(psc.overlayTintB)};`,
+                `export const phoneOverlayGlareOpacity = ${f(psc.overlayGlareOpacity)};`,
+                `export const phoneOverlayGlareAngle   = ${fi(psc.overlayGlareAngle)};`,
+            ].join('\n');
+            navigator.clipboard.writeText(content).then(() => {
+                console.log('[IslandDebug] CameraConfig.ts content copied to clipboard!');
+            });
+        },
+    };
+    cameraFolder.add(cameraConfigActions, 'copyConfig').name('Copy CameraConfig.ts');
 
     // ── Camera: Phone Zoom ──────────────────────────────────────────
     //   Active only while phone zoom is active, but sliders affect it instantly.

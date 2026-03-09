@@ -4,6 +4,7 @@ import { camera, cameraRight, cameraForward, UpdateCameraRotation, renderer, sta
 import { KeyCodes, PointerPhase, PointerType, keysJustPressed, keysPressed, lastPointerLockChange, mouseMovement, pointers } from "./Input";
 import { spotLightDistance, spotLightDistanceUniform } from "../materials/OceanMaterial";
 import { islandPosition as cfgIslandPos, radioOffset as cfgRadioOffset, radioRotY as cfgRadioRotY, pugOffset as cfgPugOffset, pugRotY as cfgPugRotY, phoneOffset as cfgPhoneOffset } from '../scene/IslandConfig';
+import { phoneZoomHeight, phoneZoomTilt, phoneZoomPitch, phoneZoomFov, defaultCameraZ, defaultFov } from '../scene/CameraConfig';
 
 const baseMoveSpeed = 10;
 const shiftMoveSpeed = baseMoveSpeed * 5;
@@ -95,7 +96,12 @@ const RADIO_ZOOM_TARGET_Z = _radioWorldZ + RADIO_ZOOM_DIST * Math.cos(cfgRadioRo
 const RADIO_ZOOM_PHI = Math.PI * 2 - cfgRadioRotY;
 let zoomPhi = Math.PI * 2;  // Smoothly interpolated camera yaw, only active in webPageMode
 let zoomTetha = 0;           // Smoothly interpolated camera pitch, for phone top-down view
-let currentFov = 70;         // Smoothly interpolated FOV — narrows during phone zoom
+/** Mutable config for the main (non-zoom) camera — tweak live from the debug GUI. */
+export const mainCameraConfig = {
+    z:   defaultCameraZ,  // World-space Z at rest
+    fov: defaultFov,      // Default FOV in degrees
+};
+let currentFov = defaultFov;  // Smoothly interpolated FOV — narrows during phone zoom
 
 // Camera follow offset applied on top of the pug zoom target during cutscenes.
 // Set each frame by Island.ts while the pug is moving, reset to 0 when done.
@@ -128,10 +134,10 @@ const PUG_FINAL_Z = PUG_ZOOM_TARGET_Z - PUG_LATERAL * Math.sin(cfgPugRotY);
 // Phone zoom target — camera looks nearly straight down at the phone lying flat
 // Tweak these live from the debug GUI (H key) while zoomed into the phone.
 export const phoneZoomConfig = {
-    height: 0.37,   // World-units above the phone surface
-    tilt:   0.04,   // Z forward offset for slight viewing angle
-    pitch:  -1.45,  // Camera pitch in radians (~-83° = nearly straight down)
-    fov:    23,     // Camera FOV during phone zoom (telephoto — lower = more zoom)
+    height: phoneZoomHeight,   // World-units above the phone surface
+    tilt:   phoneZoomTilt,     // Z forward offset for slight viewing angle
+    pitch:  phoneZoomPitch,    // Camera pitch in radians (~-83° = nearly straight down)
+    fov:    phoneZoomFov,      // Camera FOV during phone zoom (telephoto — lower = more zoom)
 };
 const _phoneWorldX = cfgIslandPos.x + cfgPhoneOffset.x;
 const _phoneWorldY = cfgIslandPos.y + cfgPhoneOffset.y;
@@ -217,7 +223,7 @@ export function getSavedCameraPosition(): { x: number, y: number, z: number } {
 
 // Get default camera position (when not zooming)
 export const DEFAULT_CAMERA_X = 0;
-export const DEFAULT_CAMERA_Z = 0.9;
+export const DEFAULT_CAMERA_Z = defaultCameraZ;  // alias kept for back-compat
 
 // Track if camera is underwater (derived from position)
 let isUnderwater = false;
@@ -552,20 +558,20 @@ export function Update(): void
             isUnderwater = currentY < deadZoneMidpoint;
             
             // When exiting zoom, also smoothly return X and Z to default
-            if (currentZoomX !== 0 || currentZoomZ !== 0.9) {
+            if (currentZoomX !== 0 || currentZoomZ !== mainCameraConfig.z) {
                 currentZoomX = MathUtils.damp(currentZoomX, 0, RADIO_ZOOM_SMOOTH, deltaTime);
-                currentZoomZ = MathUtils.damp(currentZoomZ, 0.9, RADIO_ZOOM_SMOOTH, deltaTime);
+                currentZoomZ = MathUtils.damp(currentZoomZ, mainCameraConfig.z, RADIO_ZOOM_SMOOTH, deltaTime);
                 camera.position.x = currentZoomX;
                 camera.position.z = currentZoomZ;
                 
                 // Snap when close enough
-                if (Math.abs(currentZoomX) < 0.01 && Math.abs(currentZoomZ - 0.9) < 0.01) {
+                if (Math.abs(currentZoomX) < 0.01 && Math.abs(currentZoomZ - mainCameraConfig.z) < 0.01) {
                     currentZoomX = 0;
-                    currentZoomZ = 0.9;
+                    currentZoomZ = mainCameraConfig.z;
                 }
             } else {
                 camera.position.x = 0;
-                camera.position.z = 0.9;
+                camera.position.z = mainCameraConfig.z;
             }
 
             // Smoothly return camera yaw to default after radio zoom
@@ -581,8 +587,8 @@ export function Update(): void
             }
 
             // Smoothly restore FOV after phone zoom
-            currentFov = MathUtils.damp(currentFov, 70, ZOOM_SMOOTH, deltaTime);
-            if (Math.abs(currentFov - 70) < 0.05) currentFov = 70;
+            currentFov = MathUtils.damp(currentFov, mainCameraConfig.fov, ZOOM_SMOOTH, deltaTime);
+            if (Math.abs(currentFov - mainCameraConfig.fov) < 0.05) currentFov = mainCameraConfig.fov;
 
             currentY = MathUtils.damp(currentY, targetY, smoothFactor, deltaTime);
             camera.position.y = currentY;
