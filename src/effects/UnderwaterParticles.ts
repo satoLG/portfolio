@@ -141,11 +141,21 @@ export function Update(cameraY: number): void {
 
     // Smoothly fade in/out
     const targetOpacity = isUnderwater ? PARTICLE_OPACITY : 0;
+    const prevOpacity = currentOpacity;
     currentOpacity += (targetOpacity - currentOpacity) * Math.min(1, deltaTime * 4);
 
     if (currentOpacity < 0.001) {
-        points.visible = false;
-        material.uniforms.uOpacity.value = 0;
+        // Not visible — skip all CPU/GPU work, but still track camera so
+        // particles re-enter from sensible positions when we dive again.
+        if (points.visible) {
+            points.visible = false;
+            material.uniforms.uOpacity.value = 0;
+        }
+        // Keep lastCam* in sync so dCam is zero on first visible frame
+        lastCamX = camera.position.x;
+        lastCamY = camera.position.y;
+        lastCamZ = camera.position.z;
+        firstFrame = false;
         return;
     }
     points.visible = true;
@@ -199,10 +209,14 @@ export function Update(cameraY: number): void {
         }
     }
 
+    // Only push data to GPU when the buffer actually changed
     posAttr.needsUpdate = true;
 
     // The positions are local-space offsets — center on camera
     points.position.set(camX, camY, camZ);
 
-    material.uniforms.uOpacity.value = currentOpacity;
+    // Only write uniform when the value changed (avoids a driver round-trip on unchanged frames)
+    if (currentOpacity !== prevOpacity) {
+        material.uniforms.uOpacity.value = currentOpacity;
+    }
 }

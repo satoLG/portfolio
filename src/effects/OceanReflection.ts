@@ -48,12 +48,16 @@ const _clipPlane = new Plane(new Vector3(0, 1, 0), 0);
  * @param scene        The Three.js scene
  * @param oceanSurface The ocean surface Mesh (hidden during the reflection pass)
  */
+let _reflectionEnabled = true;
+
 export function update(
     mainCamera: PerspectiveCamera,
     renderer: WebGLRenderer,
     scene: Scene,
     oceanSurface: Mesh,
 ): void {
+    // Skip if reflection is globally disabled (Low quality preset)
+    if (!_reflectionEnabled) return;
     // Skip while underwater — the reflection surface is not visible from below
     if (mainCamera.position.y < UNDERWATER_Y_THRESHOLD) return;
 
@@ -117,4 +121,9 @@ export function setResolution(size: 256 | 512): void {
     currentResolution = size;
     renderTarget.setSize(size, size);
     // The texture object is stable after setSize — no need to re-assign the uniform.
+}
+
+/** Enable or disable the reflection pass entirely (disabled = Low quality preset). */
+export function setReflectionEnabled(enabled: boolean): void {
+    _reflectionEnabled = enabled;
 }

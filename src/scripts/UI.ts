@@ -1,10 +1,12 @@
-﻿import { body, shadowsEnabled, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter } from "./Scene";
+﻿import { body, shadowsEnabled, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setSceneReady } from "./Scene";
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
 import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, preloadUISounds, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
 import { getCameraY, setIntroProgress, enableScroll, toggleCameraMode, isWebPageMode } from "./Control";
 import { setLoadingCallback } from "../scene/Island";
 import { t, setLanguage, type Language } from "./i18n";
+import { setReflectionEnabled, setResolution } from "../effects/OceanReflection";
+import { setMarchSteps } from "../effects/Clouds";
 
 const THEME_STORAGE_KEY = 'portfolio-theme-mode';
 
@@ -122,8 +124,13 @@ export function Start(): void {
     startButton.onclick = function() {
         // Start audio (must happen synchronously in click handler for iOS)
         startAudio();
+
+        // Mark the scene as ready — this unblocks the WebGL render loop.
+        // Must happen BEFORE enableScroll() so the first rendered frame
+        // is the start of the cinematic camera descent, not a blank frame.
+        setSceneReady();
         
-        // Enable scrolling
+        // Enable scrolling / trigger cinematic camera descent
         enableScroll();
         
         // Mark as started
@@ -132,10 +139,10 @@ export function Start(): void {
         // Bounce out animation for the button
         startButton.classList.add('bounce-out');
         
-        // Fade out blur overlay after button bounce-out animation
-        setTimeout(() => {
-            blurOverlay.classList.add('fade-out');
-        }, 400);
+        // Fade out blur overlay — start immediately so the reveal
+        // unfolds across the full 2s ease-in-out transition rather than
+        // popping in after the button animation finishes.
+        blurOverlay.classList.add('fade-out');
         
         // Hide the start button overlay after bounce-out
         setTimeout(() => {
@@ -320,6 +327,25 @@ export function Start(): void {
     // Current settings for initial UI state
     const curShadows = shadowsEnabled;
     const curPixel = pixelSizeValue;
+    const curQuality = localStorage.getItem('portfolio-graphics-quality') || 'medium';
+
+    // Apply saved quality preset immediately (affects OceanReflection + Clouds uniforms)
+    function applyQuality(q: string): void {
+        if (q === 'low') {
+            setReflectionEnabled(false);
+            setMarchSteps(16);
+        } else if (q === 'high') {
+            setReflectionEnabled(true);
+            setResolution(512);
+            setMarchSteps(48);
+        } else {
+            setReflectionEnabled(true);
+            setResolution(256);
+            setMarchSteps(32);
+        }
+        localStorage.setItem('portfolio-graphics-quality', q);
+    }
+    applyQuality(curQuality);
     const currentLanguage = localStorage.getItem('portfolio-language') || 'en-us';
     const natureVol = Math.round(getNatureVolume() * 100);
     const musicVol = Math.round(getMusicVolume() * 100);
@@ -368,6 +394,16 @@ export function Start(): void {
                 <div class="settings-row">
                     <span class="settings-label" data-i18n="settings.shadows">${t('settings.shadows')}</span>
                     <button class="settings-toggle shadows-toggle" data-active="${curShadows}">${toggleOnSvg}${toggleOffSvg}</button>
+                </div>
+                <div class="settings-row" style="padding-bottom:2px">
+                    <span class="settings-label" data-i18n="settings.quality">${t('settings.quality')}</span>
+                </div>
+                <div class="settings-row" style="padding-top:2px">
+                    <div class="settings-mode-switch quality-switch">
+                        <button class="mode-option${curQuality === 'low' ? ' active' : ''}" data-value="low" data-i18n="settings.low">${t('settings.low')}</button>
+                        <button class="mode-option${curQuality === 'medium' ? ' active' : ''}" data-value="medium" data-i18n="settings.medium">${t('settings.medium')}</button>
+                        <button class="mode-option${curQuality === 'high' ? ' active' : ''}" data-value="high" data-i18n="settings.high">${t('settings.high')}</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -660,6 +696,18 @@ export function Start(): void {
         setShadowsEnabled(newValue);
     });
     
+    // ---- Graphics Controls: Quality Preset Switch ----
+    const qualitySwitch = settingsPanel.querySelector('.quality-switch') as HTMLElement;
+    qualitySwitch.querySelectorAll('.mode-option').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const value = (btn as HTMLElement).dataset.value || 'medium';
+            qualitySwitch.querySelectorAll('.mode-option').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            applyQuality(value);
+        });
+    });
+
     // ---- Misc Controls: Pixelation Mode Switch ----
     const pixelationSwitch = settingsPanel.querySelector('.pixelation-switch') as HTMLElement;
     pixelationSwitch.querySelectorAll('.mode-option').forEach(btn => {

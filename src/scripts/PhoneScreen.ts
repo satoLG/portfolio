@@ -52,8 +52,8 @@ export const phoneScreenConfig = {
     offsetZ:  phoneScreenOffsetZ,
 
     // Iframe base resolution (px) — aspect kept 9:16 to match a phone screen
-    iframeWidth:  500,
-    iframeHeight: 888,
+    iframeWidth:  550,
+    iframeHeight: 1100,
 
     // Glass overlay
     overlayOpacity:      phoneOverlayOpacity,

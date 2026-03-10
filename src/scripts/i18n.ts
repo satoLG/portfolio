@@ -23,6 +23,7 @@ const translations: Record<Language, TranslationDict> = {
         'settings.character': 'Pug',
 
         // Graphics settings
+        'settings.quality': 'Quality',
         'settings.preset': 'Preset',
         'settings.low': 'Low',
         'settings.custom': 'Custom',
@@ -129,6 +130,7 @@ const translations: Record<Language, TranslationDict> = {
         'settings.character': 'Pug',
 
         // Graphics settings
+        'settings.quality': 'Qualidade',
         'settings.preset': 'Predefinição',
         'settings.low': 'Baixo',
         'settings.custom': 'Personalizado',

@@ -299,6 +299,11 @@ export function Start(): void {
     cloudsGroup.add(_mesh);
 }
 
+/** Override the ray-march step count for quality presets (Low=16, Medium=32, High=48). */
+export function setMarchSteps(steps: number): void {
+    config.marchSteps = steps;
+}
+
 // ── Per-frame update ──────────────────────────────────────────────────────────
 export function Update(deltaTime: number, dayFraction: number): void {
     if (!_material || !_mesh) return;
@@ -325,7 +330,13 @@ export function Update(deltaTime: number, dayFraction: number): void {
     (u.uColorNight.value as number[])[1] = config.nightG;
     (u.uColorNight.value as number[])[2] = config.nightB;
 
-    // Mesh placement
-    _mesh.position.set(config.posX, config.posY, config.posZ);
-    _mesh.scale.set(config.scaleX, config.scaleY, config.scaleZ);
+    // Mesh placement — only dirty the matrix when values actually changed.
+    // Unconditional position.set/scale.set marks matrixWorldNeedsUpdate every
+    // frame (no-op cost + compositing impact on iOS/WebKit).
+    if (_mesh.position.x !== config.posX || _mesh.position.y !== config.posY || _mesh.position.z !== config.posZ) {
+        _mesh.position.set(config.posX, config.posY, config.posZ);
+    }
+    if (_mesh.scale.x !== config.scaleX || _mesh.scale.y !== config.scaleY || _mesh.scale.z !== config.scaleZ) {
+        _mesh.scale.set(config.scaleX, config.scaleY, config.scaleZ);
+    }
 }

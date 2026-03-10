@@ -1,4 +1,5 @@
 import { AmbientLight, DirectionalLight, MeshDepthMaterial, PerspectiveCamera, Scene, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap } from "three";
+import { getIsUnderwater } from "./Control";
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
 import * as SeaFloor from "../scene/SeaFloor";
@@ -27,6 +28,12 @@ import { reflectionTextureUniform } from "../materials/OceanMaterial";
 // post-processed colour output.
 const _depthPrepassMat = new MeshDepthMaterial();
 _depthPrepassMat.colorWrite = false;
+
+// Scene-ready flag — false during the loading screen.
+// While false, Update() returns early to save full GPU frame cost
+// (ocean shader, reflection RT, cloud march, fish, etc.) during loading.
+let _sceneReady = false;
+export function setSceneReady(): void { _sceneReady = true; }
 
 export const body = document.createElement("div");
 
@@ -352,6 +359,11 @@ export function Start(): void
 
 export function Update(): void
 {
+    // Skip all rendering during the loading screen — nothing is visible anyway
+    // (camera parked at introStartY, WebGL canvas behind the loading overlay).
+    // This frees the GPU entirely for model downloads and decoding.
+    if (!_sceneReady) return;
+
     Skybox.Update();
     Ocean.Update();
     SeaFloor.Update();
@@ -366,8 +378,11 @@ export function Update(): void
     Bubbles.Update(camera.position.y);
     UnderwaterParticles.Update(camera.position.y);
 
-    // Reflection pre-pass — renders scene from mirror camera into RT before the main render
-    OceanReflection.update(camera, renderer, scene, Ocean.surface);
+    // Reflection pre-pass — renders scene from mirror camera into RT before the main render.
+    // Skip when underwater: the mirrored surface is invisible from below.
+    if (!getIsUnderwater()) {
+        OceanReflection.update(camera, renderer, scene, Ocean.surface);
+    }
 
     // Sync lights with skybox sun position and intensity
     // Keep light close enough for shadow mapping to work
