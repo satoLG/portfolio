@@ -4,11 +4,22 @@
    preserve-3d, making iframes visible on iOS Safari.
    ============================================ */
 .phone-screen-jitter {
-    animation-duration: 0.4s;
+    /* Explicit z-index inside CSS3D context — required by some iOS WebKit versions */
+    z-index: -10;
+    /* Force GPU compositing layer promotion on WebKit */
+    will-change: transform;
+    /* Standard */
+    animation-duration: 0.3s;
     animation-timing-function: ease-in-out;
     animation-fill-mode: forwards;
     animation-iteration-count: infinite;
     animation-name: phone-screen-jittery;
+    /* -webkit- prefix for iOS 15 and below */
+    -webkit-animation-duration: 0.3s;
+    -webkit-animation-timing-function: ease-in-out;
+    -webkit-animation-fill-mode: forwards;
+    -webkit-animation-iteration-count: infinite;
+    -webkit-animation-name: phone-screen-jittery;
 }
 
 @keyframes phone-screen-jittery {
@@ -22,6 +33,19 @@
     80%  { transform: translate(0.075px, 0.125px) scale(1, 1); }
     90%  { transform: translate(-0.125px,-0.075px) scale(1, 1); }
     100% { transform: translate(0.075px, 0.025px) scale(1, 1); }
+}
+
+@-webkit-keyframes phone-screen-jittery {
+    10%  { -webkit-transform: translate(-0.1px, -0.15px) scale(1, 1); }
+    20%  { -webkit-transform: translate(0.15px,  0.1px)  scale(1, 1); }
+    30%  { -webkit-transform: translate(-0.2px, -0.25px) scale(1, 1); }
+    40%  { -webkit-transform: translate(0.05px,  0.1px)  scale(1, 1); }
+    50%  { -webkit-transform: translate(-0.025px,-0.05px) scale(1, 1); }
+    60%  { -webkit-transform: translate(0px,     0.075px) scale(1, 1); }
+    70%  { -webkit-transform: translate(-0.075px,-0.1px)  scale(1, 1); }
+    80%  { -webkit-transform: translate(0.075px, 0.125px) scale(1, 1); }
+    90%  { -webkit-transform: translate(-0.125px,-0.075px) scale(1, 1); }
+    100% { -webkit-transform: translate(0.075px, 0.025px) scale(1, 1); }
 }
 
 /* ============================================
@@ -200,6 +224,13 @@ body.day-mode {
     opacity: 1;
     transition: opacity 1.5s ease-out;
     will-change: opacity;
+    /* iOS fix: isolation:isolate + translateZ(0) contains this element's
+       compositing layer so it does NOT flatten the CSS3D preserve-3d context
+       for the rest of the page. backdrop-filter siblings are a known iOS
+       Safari bug that kills preserve-3d on the entire page. */
+    isolation: isolate;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
 }
 
 body.day-mode #blur-overlay {
