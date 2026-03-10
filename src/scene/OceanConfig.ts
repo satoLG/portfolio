@@ -30,7 +30,7 @@ export const reflectionFresnelPower = 0.4000; // lower = visible at more angles
 export const reflectionFloor        = 0.2200; // minimum reflectivity at any angle
 export const skyReflectionBrightness = 1.0000; // scales the analytical skybox reflection (0 = none, 1 = full)
 export const skyReflFalloff         = 6.5000; // sharpens near→far gradient: 1 = linear, 2 = squared, 4 = very steep
-export const reflectionRTSize       = 512 as 256 | 512; // render target resolution
+export const reflectionRTSize       = 256 as 256 | 512; // render target resolution — 256 saves 4× fill vs 512
 
 // ── Underwater ────────────────────────────────────────────────────────────────
 export const oceanAbsorption    = { r: 0.1290, g: 0.0440, b: 0.0350 }; // per-channel fog depth

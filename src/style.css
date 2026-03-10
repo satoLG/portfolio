@@ -222,7 +222,7 @@ body.day-mode {
     -webkit-backdrop-filter: blur(50px);
     background: rgba(10, 22, 40, 0.3);
     opacity: 1;
-    transition: opacity 1.5s ease-out;
+    transition: opacity 2s ease-in-out;
     will-change: opacity;
     /* iOS fix: isolation:isolate + translateZ(0) contains this element's
        compositing layer so it does NOT flatten the CSS3D preserve-3d context

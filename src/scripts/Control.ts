@@ -12,6 +12,20 @@ const smoothSpeed = 15;
 const mindelta = 0.0001;
 const moveSpeedExpMultiplier = 0;
 
+// ============================================
+// MODULE-LEVEL SCRATCH OBJECTS  (pre-allocated once, reused every frame)
+// Eliminates ~7 short-lived heap allocations per Update() call that would
+// otherwise trigger GC micro-pauses and stutter on low-end devices.
+// ============================================
+const _scratchV3a  = new Vector3();  // general purpose
+const _scratchV3b  = new Vector3();  // second scratch
+const _scratchV3c  = new Vector3();  // third scratch (world-up)
+const _scratchV3d  = new Vector3();  // targetVector
+const _scratchQx   = new Quaternion();
+const _scratchQy   = new Quaternion();
+const _scratchQ    = new Quaternion();
+const _scratchV2   = new Vector2();  // for pointerPosNormalized
+
 // Web page mode settings
 let webPageMode = true;  // Start in web page mode
 
@@ -41,25 +55,24 @@ let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
 // ============================================
 const introStartY = 5;         // Camera starts high above scene (can't see island)
 const introEndY = aboveWaterTopY;  // Camera ends at normal top position
-const introSmooth = 0.8;       // How fast intro camera descends (lower = slower, higher = faster)
-let introProgress = 0;         // Loading progress (0 to 1)
-let introActive = true;        // Whether intro descent is active
-let scrollEnabled = false;     // Prevent scrolling until button clicked
+const introSmooth = 1.2;       // Cinematic descent speed after start click (lower = slower)
+let introActive = false;       // Kept false during loading — camera parked. True only during post-click descent.
+let scrollEnabled = false;     // Prevent scrolling until descent completes
 
-// Set intro loading progress (called from UI.ts)
-export function setIntroProgress(progress: number): void {
-    introProgress = Math.min(1, Math.max(0, progress));
-    if (introActive) {
-        targetY = introStartY - (introProgress * (introStartY - introEndY));
-    }
+// Set intro loading progress (called from UI.ts for the loading bar animation).
+// Camera no longer follows loading progress — it stays parked at introStartY
+// until the user clicks Start, then descends cinematically in Update().
+// The progress value is forwarded to the loading bar only (not used for camera movement).
+export function setIntroProgress(_progress: number): void {
+    // no-op for camera — progress is only used by UI.ts for the loading bar display
 }
 
-// Enable normal scroll (called when start button clicked)
+// Enable normal scroll (called when start button clicked).
+// Triggers the cinematic camera descent from introStartY → introEndY.
 export function enableScroll(): void {
-    scrollEnabled = true;
-    introActive = false;
-    // Ensure we end at the correct position
-    targetY = introEndY;
+    introActive = true;   // triggers smooth descent in Update()
+    targetY = introEndY;  // destination
+    // scrollEnabled will be set true once the descent reaches the destination
 }
 
 // ============================================
@@ -331,7 +344,7 @@ export function Update(): void
 
         if (touchControls && !webPageMode)
         {
-            const pointerPosNormalized = pointer.position.clone().divide(new Vector2(window.innerWidth, window.innerHeight));
+            const pointerPosNormalized = _scratchV2.copy(pointer.position).divide(_scratchV2.set(window.innerWidth, window.innerHeight));
 
             if (pointer.phase == PointerPhase.began)
             {
@@ -389,7 +402,7 @@ export function Update(): void
         }
     }
 
-    const targetVector = new Vector3();
+    const targetVector = _scratchV3d.set(0, 0, 0);
 
     if (!touchControls && !webPageMode)
     {
@@ -494,9 +507,9 @@ export function Update(): void
     }
     moveSpeed *= moveSpeedMultiplier;
 
-    camera.position.add(new Vector3().copy(cameraRight).multiplyScalar(moveVector.x * moveSpeed * deltaTime));
-    camera.position.add(new Vector3().copy(new Vector3(0, 1, 0)).multiplyScalar(moveVector.y * moveSpeed * deltaTime));
-    camera.position.add(new Vector3().copy(cameraForward).multiplyScalar(moveVector.z * moveSpeed * deltaTime));
+    camera.position.add(_scratchV3a.copy(cameraRight).multiplyScalar(moveVector.x * moveSpeed * deltaTime));
+    camera.position.add(_scratchV3b.set(0, moveVector.y * moveSpeed * deltaTime, 0));
+    camera.position.add(_scratchV3c.copy(cameraForward).multiplyScalar(moveVector.z * moveSpeed * deltaTime));
 
     // Web page mode: override camera position with smooth scroll/zoom
     if (webPageMode) {
@@ -592,6 +605,14 @@ export function Update(): void
 
             currentY = MathUtils.damp(currentY, targetY, smoothFactor, deltaTime);
             camera.position.y = currentY;
+
+            // Once the post-click intro descent is within a hair of the target,
+            // unlock scroll. No hard snap — let damp finish the last tiny delta
+            // so there is no visible position jump or sudden speed change.
+            if (introActive && Math.abs(currentY - introEndY) < 0.003) {
+                introActive = false;
+                scrollEnabled = true;
+            }
         }
     }
 
@@ -601,15 +622,12 @@ export function Update(): void
         tetha = MathUtils.clamp(tetha + mouseMovement.y * lookSensitivity * sensitivityMult, -Math.PI / 2, Math.PI / 2);
     }
 
-    const qx = new Quaternion();
     // In web-page mode, zoomPhi drives camera yaw (smoothly rotates to face radio front on zoom)
-    qx.setFromAxisAngle(new Vector3(0, -1, 0), webPageMode ? zoomPhi : phi);
-    const qy = new Quaternion();
-    qy.setFromAxisAngle(new Vector3(1, 0, 0), webPageMode ? (tetha + zoomTetha) : tetha);
+    _scratchQx.setFromAxisAngle(_scratchV3a.set(0, -1, 0), webPageMode ? zoomPhi : phi);
+    _scratchQy.setFromAxisAngle(_scratchV3b.set(1, 0, 0), webPageMode ? (tetha + zoomTetha) : tetha);
 
-    const q = new Quaternion();
-    q.multiply(qx);
-    q.multiply(qy);
+    _scratchQ.copy(_scratchQx);
+    _scratchQ.multiply(_scratchQy);
 
     // Apply interpolated FOV (narrows during phone zoom, restores afterwards)
     if (camera.fov !== currentFov) {
@@ -617,7 +635,7 @@ export function Update(): void
         camera.updateProjectionMatrix();
     }
 
-    camera.quaternion.copy(q);
+    camera.quaternion.copy(_scratchQ);
     UpdateCameraRotation();
-    staticCamera.quaternion.copy(q);
+    staticCamera.quaternion.copy(_scratchQ);
 }

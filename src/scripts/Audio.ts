@@ -50,11 +50,13 @@ const AUDIO_PATHS = {
 const _prefetchCache = new Map<string, ArrayBuffer>();
 let _prefetchPromise: Promise<void> | null = null;
 
-/** Pre-fetch all audio files as raw ArrayBuffers (no AudioContext needed).
- *  Called early during loading screen so data is ready when user clicks Start. */
+/** Pre-fetch ambient/music audio files as raw ArrayBuffers (no AudioContext needed).
+ *  Called early during loading screen so ambient audio is ready when user clicks Start.
+ *  UI sounds (/audio/ui/) are excluded — they are loaded by preloadUISounds() after
+ *  the start click so they don't compete with GLTF model downloads during loading. */
 function prefetchAudioData(): void {
     if (_prefetchPromise) return;
-    const paths = Object.values(AUDIO_PATHS);
+    const paths = Object.values(AUDIO_PATHS).filter(url => !url.includes('/audio/ui/'));
     _prefetchPromise = Promise.all(
         paths.map(async (url) => {
             try {
