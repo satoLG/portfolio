@@ -112,7 +112,8 @@ export function initRenderer(parentEl: HTMLElement, canvasEl: HTMLCanvasElement)
     el.style.left       = '0';
     el.style.width      = '100%';
     el.style.height     = '100%';
-    el.style.overflow   = 'hidden';
+    // iOS fix: do NOT set overflow:hidden — it flattens preserve-3d on WebKit
+    // and makes iframes inside CSS3DRenderer invisible on iOS Safari.
     el.style.background = 'transparent';  // must NOT be white (browser default)
     // Default: non-interactive — enabled only when phone zoom is active
     el.style.pointerEvents = 'none';
@@ -120,8 +121,9 @@ export function initRenderer(parentEl: HTMLElement, canvasEl: HTMLCanvasElement)
     // Insert BEFORE the canvas → lower in stacking order (behind)
     parentEl.insertBefore(el, canvasEl);
 
-    // Canvas above with z-index
-    canvasEl.style.position = 'relative';
+    // iOS fix: position:absolute (not relative) avoids creating an intermediate
+    // 2D compositing layer inside the preserve-3d context on WebKit.
+    canvasEl.style.position = 'absolute';
     canvasEl.style.zIndex   = '1';
 
     // Any click on the CSS3D background zooms out — ONLY if the click doesn't
