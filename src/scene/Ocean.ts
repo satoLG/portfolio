@@ -150,6 +150,18 @@ function setupRippleInteraction(): void {
     isEnabled = true;
 }
 
+/**
+ * Rebuild the ocean surface geometry at a new subdivision level.
+ * @param segs  Width and height segment count (64 = low quality, 256 = high quality).
+ */
+export function setOceanSegments(segs: 64 | 128 | 256): void {
+    const old = surface.geometry;
+    const geo = new PlaneGeometry(oceanWidth, oceanDepth, segs, segs);
+    geo.rotateX(-Math.PI / 2);
+    surface.geometry = geo;
+    old.dispose();
+}
+
 export function Update(): void
 {   
     // Update ripples

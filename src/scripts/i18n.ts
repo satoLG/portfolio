@@ -30,6 +30,12 @@ const translations: Record<Language, TranslationDict> = {
         'settings.high': 'High',
         'settings.antialias': 'Antialias',
         'settings.shadows': 'Shadows',
+        'settings.cloudSteps': 'Cloud Steps',
+        'settings.segments': 'Ocean Mesh',
+        'settings.foam': 'Foam',
+        'settings.bubbles': 'Bubbles',
+        'settings.reflection': 'Ocean Reflection',
+        'settings.off': 'Off',
 
         // Misc settings
         'settings.pixelation': 'Pixelation',
@@ -43,6 +49,7 @@ const translations: Record<Language, TranslationDict> = {
         // Button titles / tooltips
         'tooltip.toggleTheme': 'Toggle theme',
         'tooltip.settings': 'Settings',
+        'tooltip.reflectionWarning': 'Ocean reflection renders the entire scene a second time each frame from a mirrored camera. This roughly doubles GPU cost and can heavily impact performance, especially on mobile. Disabled by default.',
         'tooltip.dive': 'Dive underwater',
         'tooltip.surface': 'Surface',
 
@@ -137,6 +144,12 @@ const translations: Record<Language, TranslationDict> = {
         'settings.high': 'Alto',
         'settings.antialias': 'Antialias',
         'settings.shadows': 'Sombras',
+        'settings.cloudSteps': 'Passos de Nuvem',
+        'settings.segments': 'Malha do Oceano',
+        'settings.foam': 'Espuma',
+        'settings.bubbles': 'Bolhas',
+        'settings.reflection': 'Reflexo do Oceano',
+        'settings.off': 'Desligado',
 
         // Misc settings
         'settings.pixelation': 'Pixelização',
@@ -150,6 +163,7 @@ const translations: Record<Language, TranslationDict> = {
         // Button titles / tooltips
         'tooltip.toggleTheme': 'Alternar tema',
         'tooltip.settings': 'Configurações',
+        'tooltip.reflectionWarning': 'O reflexo do oceano renderiza a cena inteira uma segunda vez por frame a partir de uma câmera espelhada. Isso praticamente dobra o custo de GPU e pode impactar bastante o desempenho, especialmente em dispositivos móveis. Desativado por padrão.',
         'tooltip.dive': 'Mergulhar',
         'tooltip.surface': 'Voltar à superfície',
 

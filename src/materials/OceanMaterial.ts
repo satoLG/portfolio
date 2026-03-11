@@ -56,6 +56,12 @@ export const foamWobbleAmtUniform    = new Uniform(OceanConfig.foamWobbleAmt);
 export const foamWobbleFreqUniform   = new Uniform(OceanConfig.foamWobbleFreq);
 export const foamWobbleSpeedUniform  = new Uniform(OceanConfig.foamWobbleSpeed);
 export const foamRadiusUniform       = new Uniform(OceanConfig.foamRadius);
+export const foamQualityUniform      = new Uniform(3); // 1=fast, 2=medium, 3=full FBM
+
+/** Set foam noise quality: 1 = single tap, 2 = 2 octaves, 3 = 3-octave FBM (default). */
+export function setFoamQuality(quality: 1 | 2 | 3): void {
+    foamQualityUniform.value = quality;
+}
 
 // Planar reflection — render target texture set by OceanReflection.ts each frame
 export const reflectionTextureUniform = new Uniform(null as Texture | null);
@@ -174,6 +180,7 @@ export function Start(): void
         _FoamWobbleFreq: foamWobbleFreqUniform,
         _FoamWobbleSpeed: foamWobbleSpeedUniform,
         _FoamRadius: foamRadiusUniform,
+        _FoamQuality: foamQualityUniform,
         _Ripples: ripplesUniform,
         _RippleCount: rippleCountUniform,
         _RippleSpeed: rippleSpeedUniform,

@@ -84,12 +84,17 @@ export const surfaceFragment =
         float d = foamHash(i + vec2(1.0, 1.0));
         return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
     }
-    // 3-octave FBM
+    // Quality-adaptive FBM (controlled by _FoamQuality uniform)
+    // 1 = single noise tap (fastest), 2 = 2 octaves, 3 = full 3-octave FBM (default)
+    uniform int _FoamQuality;
     float foamFbm(vec2 p) {
-        float v = 0.0;
-        v += 0.50 * foamNoise(p); p *= 2.01;
-        v += 0.30 * foamNoise(p); p *= 2.03;
-        v += 0.20 * foamNoise(p);
+        if (_FoamQuality <= 1) return foamNoise(p);
+        vec2 q = p;
+        float v = 0.50 * foamNoise(q); q *= 2.01;
+        v += 0.30 * foamNoise(q);
+        if (_FoamQuality <= 2) return v / 0.80;
+        q *= 2.03;
+        v += 0.20 * foamNoise(q);
         return v;
     }
 

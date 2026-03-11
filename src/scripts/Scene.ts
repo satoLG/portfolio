@@ -109,6 +109,7 @@ export function SetPixelSize(value: number): void
     Underwater.setPixelSize(value);
     localStorage.setItem('portfolio-pixel-size', value.toString());
     applyPixelBodyClass(value);
+    PhoneScreen.applyPhonePixelSize(value);
 }
 
 function applyPixelBodyClass(value: number): void {
@@ -133,17 +134,13 @@ export function SetColorFilter(value: ColorFilter): void {
 
 function applyColorFilter(value: ColorFilter): void {
     const canvas = renderer.domElement;
+    let filterStr = '';
     switch (value) {
-        case 'bw':
-            canvas.style.filter = 'grayscale(1)';
-            break;
-        case 'sepia':
-            canvas.style.filter = 'sepia(1)';
-            break;
-        default:
-            canvas.style.filter = '';
-            break;
+        case 'bw':    filterStr = 'grayscale(1)'; break;
+        case 'sepia': filterStr = 'sepia(1)';     break;
     }
+    canvas.style.filter = filterStr;
+    PhoneScreen.applyPhoneColorFilter(filterStr);
 }
 
 export function setShadowsEnabled(value: boolean): void
