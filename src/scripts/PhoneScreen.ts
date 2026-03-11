@@ -79,6 +79,10 @@ let _initialized = false;
 let _visible = false;
 let _iframeSrcSet = false;  // guard: src set only once, after first DOM-attached render
 
+// Effect state
+let _pendingColorFilter = '';
+let _pixelActive = false;   // true when pixelation is active
+
 // Stored each frame for use in the CSS3D click handler
 let _phoneGroup: Group | null = null;
 let _camera: PerspectiveCamera | null = null;
@@ -240,6 +244,29 @@ export function init(): void {
     occludingPlane.visible = false;
     occluderScene = new ThreeScene();
     occluderScene.add(occludingPlane);
+
+    // Apply any effects that were requested before init() ran
+    applyPhoneColorFilter(_pendingColorFilter);
+}
+
+/**
+ * Called from SetPixelSize in Scene.ts. When pixelation is active and the
+ * phone is zoomed out, the CSS3D plane fades out (blurry scaled content
+ * misaligns with the pixelated model). Fades back in on zoom-in.
+ */
+export function applyPhonePixelSize(value: number): void {
+    _pixelActive = value > 0;
+}
+
+/**
+ * Apply a CSS filter string (e.g. 'grayscale(1)', 'sepia(1)', '') to the
+ * CSS3D renderer layer so color filters match the WebGL canvas.
+ */
+export function applyPhoneColorFilter(filter: string): void {
+    _pendingColorFilter = filter;
+    if (cssRenderer) {
+        cssRenderer.domElement.style.filter = filter;
+    }
 }
 
 /**
@@ -319,6 +346,11 @@ export function preRender(phoneGroup: Group): void {
         1,
     );
 
+    // ── Hide CSS3D plane when pixelated + zoomed out ─────────────────────
+    const zoomed = isPhoneZoomActive();
+    const visible = !_pixelActive || zoomed;
+    if (containerEl) containerEl.style.opacity = visible ? '1' : '0';
+
     // Occluding plane — mirror the CSS3DObject's full transform every frame
     if (occludingPlane) {
         occludingPlane.position.copy(cssObject!.position);
@@ -335,8 +367,8 @@ export function preRender(phoneGroup: Group): void {
  */
 export function renderOccluder(wr: WebGLRenderer, cam: PerspectiveCamera): void {
     if (!occluderScene || !occludingPlane || !_initialized || !_visible) return;
-    // Always punch the alpha hole while phone is visible — not only when zoomed.
-    // Without this the canvas would cover the CSS3D content at normal view distance.
+    // Suppress the alpha hole when the CSS3D plane is invisible.
+    if (_pixelActive && !isPhoneZoomActive()) return;
     occludingPlane.visible = true;
     wr.render(occluderScene, cam);
 }

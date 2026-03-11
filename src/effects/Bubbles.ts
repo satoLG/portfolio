@@ -89,6 +89,7 @@ let initialized = false;
 let lastSpawnTime = 0;
 let isUnderwater = false;
 let wasUnderwater = false;
+let _bubblesEnabled = true;
 
 // Ambient bubble timing
 let lastAmbientBubbleTime = 0;
@@ -159,7 +160,17 @@ export function Start(): void {
     initialized = true;
 }
 
+export function setBubblesEnabled(enabled: boolean): void {
+    _bubblesEnabled = enabled;
+    if (!enabled) {
+        for (const bubble of bubbles) {
+            if (bubble.life > 0) { bubble.life = 0; bubble.mesh.visible = false; }
+        }
+    }
+}
+
 function spawnBubble(position: Vector3): void {
+    if (!_bubblesEnabled) return;
     // Find inactive bubble
     for (const bubble of bubbles) {
         if (bubble.life <= 0) {
@@ -308,7 +319,7 @@ export function Update(cameraY: number): void {
     }
     
     // Detect entering underwater - stagger bubble burst across frames
-    if (isUnderwater && !wasUnderwater) {
+    if (isUnderwater && !wasUnderwater && _bubblesEnabled) {
         entryBubblesRemaining = ENTRY_BUBBLE_COUNT;
         lastAmbientBubbleTime = time;
         lastAmbientSoundTime = time;

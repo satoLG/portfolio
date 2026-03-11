@@ -13,6 +13,8 @@ import {
 import { UNDERWATER_Y_THRESHOLD } from "./Underwater";
 import { reflectionRTSize } from '../scene/OceanConfig';
 import { skybox } from '../scene/Skybox';
+import { reflectionStrengthUniform } from '../materials/OceanMaterial';
+import { reflectionStrength as _configStrength } from '../scene/OceanConfig';
 
 // ============================================
 // PLANAR OCEAN REFLECTION
@@ -126,4 +128,7 @@ export function setResolution(size: 256 | 512): void {
 /** Enable or disable the reflection pass entirely (disabled = Low quality preset). */
 export function setReflectionEnabled(enabled: boolean): void {
     _reflectionEnabled = enabled;
+    // Zero out the shader strength immediately so the stale RT texture
+    // doesn't linger on the ocean surface while the pass is skipped.
+    reflectionStrengthUniform.value = enabled ? _configStrength : 0;
 }

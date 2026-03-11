@@ -6,7 +6,6 @@ import { getCameraY, setIntroProgress, enableScroll, toggleCameraMode, isWebPage
 import { setLoadingCallback } from "../scene/Island";
 import { t, setLanguage, type Language } from "./i18n";
 import { setReflectionEnabled, setResolution } from "../effects/OceanReflection";
-import { setMarchSteps } from "../effects/Clouds";
 
 const THEME_STORAGE_KEY = 'portfolio-theme-mode';
 
@@ -325,27 +324,27 @@ export function Start(): void {
     const tabArrowSvg = `<svg class="tab-arrow icon-normal" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg><svg class="tab-arrow icon-pixel" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 8H5v2h2v2h2v2h2v2h2v-2h2v-2h2v-2h2V8h-2v2h-2v2h-2v2h-2v-2H9v-2H7V8z"/></svg>`;
     
     // Current settings for initial UI state
-    const curShadows = shadowsEnabled;
     const curPixel = pixelSizeValue;
-    const curQuality = localStorage.getItem('portfolio-graphics-quality') || 'medium';
 
-    // Apply saved quality preset immediately (affects OceanReflection + Clouds uniforms)
-    function applyQuality(q: string): void {
-        if (q === 'low') {
-            setReflectionEnabled(false);
-            setMarchSteps(16);
-        } else if (q === 'high') {
-            setReflectionEnabled(true);
-            setResolution(512);
-            setMarchSteps(48);
-        } else {
-            setReflectionEnabled(true);
-            setResolution(256);
-            setMarchSteps(32);
-        }
-        localStorage.setItem('portfolio-graphics-quality', q);
+    // ── Graphics settings ──────────────────────────────────────────────────────────
+    function loadQ(key: string, def: string): string { return localStorage.getItem('portfolio-q-' + key) ?? def; }
+    function saveQ(key: string, val: string): void  { localStorage.setItem('portfolio-q-' + key, val); }
+
+    const _isMobileQ = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.innerWidth < 768;
+    const curGfx = {
+        shadows:    loadQ('shadows',    _isMobileQ ? 'false' : 'true'),
+        reflection: loadQ('reflection', 'off'),
+    };
+
+    function applyReflection(val: string): void {
+        if (val === 'off') { setReflectionEnabled(false); }
+        else { setReflectionEnabled(true); setResolution(val === '512' ? 512 : 256); }
     }
-    applyQuality(curQuality);
+
+    // Apply saved settings to APIs immediately (DOM not yet created at this point)
+    setShadowsEnabled(curGfx.shadows === 'true');
+    applyReflection(curGfx.reflection);
+
     const currentLanguage = localStorage.getItem('portfolio-language') || 'en-us';
     const natureVol = Math.round(getNatureVolume() * 100);
     const musicVol = Math.round(getMusicVolume() * 100);
@@ -393,16 +392,17 @@ export function Start(): void {
             <div class="settings-tab-content">
                 <div class="settings-row">
                     <span class="settings-label" data-i18n="settings.shadows">${t('settings.shadows')}</span>
-                    <button class="settings-toggle shadows-toggle" data-active="${curShadows}">${toggleOnSvg}${toggleOffSvg}</button>
+                    <button class="settings-toggle shadows-toggle" data-active="${curGfx.shadows}">${toggleOnSvg}${toggleOffSvg}</button>
                 </div>
                 <div class="settings-row" style="padding-bottom:2px">
-                    <span class="settings-label" data-i18n="settings.quality">${t('settings.quality')}</span>
+                    <span class="settings-label" data-i18n="settings.reflection">${t('settings.reflection')}</span>
+                    <span class="settings-warning" data-i18n-title="tooltip.reflectionWarning" title="${t('tooltip.reflectionWarning')}">&#9888;</span>
                 </div>
                 <div class="settings-row" style="padding-top:2px">
-                    <div class="settings-mode-switch quality-switch">
-                        <button class="mode-option${curQuality === 'low' ? ' active' : ''}" data-value="low" data-i18n="settings.low">${t('settings.low')}</button>
-                        <button class="mode-option${curQuality === 'medium' ? ' active' : ''}" data-value="medium" data-i18n="settings.medium">${t('settings.medium')}</button>
-                        <button class="mode-option${curQuality === 'high' ? ' active' : ''}" data-value="high" data-i18n="settings.high">${t('settings.high')}</button>
+                    <div class="settings-mode-switch reflection-switch">
+                        <button class="mode-option${curGfx.reflection === 'off' ? ' active' : ''}" data-value="off" data-i18n="settings.off">${t('settings.off')}</button>
+                        <button class="mode-option${curGfx.reflection === '256' ? ' active' : ''}" data-value="256">256px</button>
+                        <button class="mode-option${curGfx.reflection === '512' ? ' active' : ''}" data-value="512">512px</button>
                     </div>
                 </div>
             </div>
@@ -685,26 +685,29 @@ export function Start(): void {
     });
     
     // ---- Graphics Controls ----
-    const shadowsToggle = settingsPanel.querySelector('.shadows-toggle') as HTMLButtonElement;
-    
+    const shadowsToggle   = settingsPanel.querySelector('.shadows-toggle')   as HTMLButtonElement;
+    const reflectionSwitch = settingsPanel.querySelector('.reflection-switch') as HTMLElement;
+
     // Shadows toggle
     shadowsToggle.addEventListener('click', (e) => {
         e.stopPropagation();
         const isActive = shadowsToggle.dataset.active === 'true';
-        const newValue = !isActive;
-        shadowsToggle.dataset.active = newValue.toString();
-        setShadowsEnabled(newValue);
+        const newVal = (!isActive).toString();
+        shadowsToggle.dataset.active = newVal;
+        setShadowsEnabled(!isActive);
+        curGfx.shadows = newVal;
+        saveQ('shadows', newVal);
     });
-    
-    // ---- Graphics Controls: Quality Preset Switch ----
-    const qualitySwitch = settingsPanel.querySelector('.quality-switch') as HTMLElement;
-    qualitySwitch.querySelectorAll('.mode-option').forEach(btn => {
+
+    // Ocean reflection
+    reflectionSwitch.querySelectorAll('.mode-option').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            const value = (btn as HTMLElement).dataset.value || 'medium';
-            qualitySwitch.querySelectorAll('.mode-option').forEach(b => b.classList.remove('active'));
+            const val = (btn as HTMLElement).dataset.value || 'off';
+            reflectionSwitch.querySelectorAll('.mode-option').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            applyQuality(value);
+            curGfx.reflection = val; saveQ('reflection', val);
+            applyReflection(val);
         });
     });
 
