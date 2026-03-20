@@ -19,6 +19,7 @@ import * as Clouds from "../effects/Clouds.ts";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import * as PhoneScreen from './PhoneScreen';
+import * as MonitorScreen from './MonitorScreen';
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { reflectionTextureUniform } from "../materials/OceanMaterial";
 
@@ -196,6 +197,11 @@ export function Start(): void
     // The canvas has alpha:true so the NoBlending occluding plane can punch a
     // transparent hole, letting the CSS3D iframe show through.
     PhoneScreen.initRenderer(body, renderer.domElement);
+
+    // CSS3D renderer for the floating monitor screen — separate renderer/layer
+    // inserted behind the canvas (same technique as PhoneScreen).
+    MonitorScreen.initRenderer(body, renderer.domElement);
+    MonitorScreen.init();
     
     camera.fov = fov;
     camera.aspect = width / height;
@@ -231,6 +237,7 @@ export function Start(): void
 
         Underwater.onResize(width, height);
         PhoneScreen.onResize(window.innerWidth, window.innerHeight);
+        MonitorScreen.onResize(window.innerWidth, window.innerHeight);
     }
 
     Skybox.Start();
@@ -403,33 +410,36 @@ export function Update(): void
     // Ambient light - higher = lighter/softer shadows
     ambientLight.intensity = 0.3 + sunVisible * lightIntensity * 0.9;  // TWEAK: Higher base = brighter scene
 
-    // Phone screen occluding plane — must be set BEFORE the WebGL render
-    // so the NoBlending hole is present when the scene is drawn.
+    // Occluding planes — must be set BEFORE the WebGL render
+    // so the alpha holes are present when the scene is drawn.
+    MonitorScreen.preRender(camera);
     PhoneScreen.preRender(Island.phone);
 
     Underwater.renderScene(renderer, scene, camera);
     renderer.render(axes, staticCamera);
 
-    // Punch the alpha hole AFTER all post-processing so it can't be overwritten.
+    // Punch alpha holes AFTER all post-processing so they can't be overwritten.
     // A depth-only prepass first repopulates the depth buffer with all scene
-    // geometry so the occluder's depthTest correctly hides the hole where any
-    // 3D object is closer to the camera than the phone screen plane.
-    if (PhoneScreen.isVisible()) {
+    // geometry so occluders' depthTest correctly hides holes where 3D objects
+    // are closer to the camera than the screen planes.
+    // Always runs (MonitorScreen is always visible; PhoneScreen may also need it).
+    {
         // Prepass: clear depth, re-render scene geometry depth-only (no colour write).
         // renderer.autoClearColor is already false — post-processing output preserved.
         scene.overrideMaterial = _depthPrepassMat;
         renderer.render(scene, camera);
         scene.overrideMaterial = null;
 
-        // Occluder: keep the prepass depths intact (don't clear), then punch
-        // the alpha hole only where the phone is in front of all other geometry.
+        // Occluders: keep prepass depths intact (don't clear) then punch holes.
         renderer.autoClearDepth = false;
-        PhoneScreen.renderOccluder(renderer, camera);
+        MonitorScreen.renderOccluder(renderer, camera);
+        if (PhoneScreen.isVisible()) PhoneScreen.renderOccluder(renderer, camera);
         renderer.autoClearDepth = true;
     }
 
-    // CSS3D phone screen — pointer events + CSS3D render after WebGL
+    // CSS3D renders — after WebGL
     PhoneScreen.render(camera);
+    MonitorScreen.render(camera);
 
     // Wind lines 3D update — moves ribbon meshes and updates vertex positions
     WindLines.Update(deltaTime, camera.position.x, camera.position.y, camera.position.z, camera.fov);

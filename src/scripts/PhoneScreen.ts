@@ -32,7 +32,7 @@ import {
     Raycaster,
     Vector2,
 } from 'three';
-import { isPhoneZoomActive, zoomOutFromPhone } from './Control';
+import { isPhoneZoomActive, zoomOutFromPhone, isMonitorZoomActive } from './Control';
 import {
     phoneScreenWidth, phoneScreenHeight,
     phoneScreenOffsetX, phoneScreenOffsetY, phoneScreenOffsetZ,
@@ -389,7 +389,8 @@ export function render(cam: PerspectiveCamera): void {
         if (_canvasEl) _canvasEl.style.pointerEvents = 'none';
         cssRenderer.domElement.style.pointerEvents = 'auto';
     } else {
-        if (_canvasEl) _canvasEl.style.pointerEvents = '';
+        // Don't release canvas if another screen (monitor) has locked it.
+        if (_canvasEl && !isMonitorZoomActive()) _canvasEl.style.pointerEvents = '';
         cssRenderer.domElement.style.pointerEvents = 'none';
     }
 
