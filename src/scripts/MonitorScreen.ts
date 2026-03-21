@@ -35,6 +35,7 @@ import { zoomToMonitor, zoomOutFromMonitor, isPhoneZoomActive } from './Control'
 // Iframe CSS pixel resolution — matches henryjeff MonitorScreen reference
 const IFRAME_WIDTH  = 1280;
 const IFRAME_HEIGHT = 1024;
+const IFRAME_PADDING = 32;
 
 // World-unit dimensions of the visible screen rectangle
 // Tweak SCREEN_WIDTH to resize the monitor in your scene
@@ -113,15 +114,6 @@ export function initRenderer(parentEl: HTMLElement, canvasEl: HTMLCanvasElement)
     el.style.height        = '100%';
     el.style.background    = 'transparent';
     el.style.pointerEvents = 'none';   // only the iframe area will be interactive
-    // WebKit fix: r137 CSS3DRenderer sets overflow:hidden on its domElement.
-    // overflow!=visible on any ancestor forces preserve-3d to flatten in WebKit.
-    el.style.overflow      = 'visible';
-    // Also patch cameraElement (firstChild) with -webkit-transform-style for
-    // older Safari versions that require the vendor prefix.
-    const cameraEl = el.firstElementChild as HTMLElement | null;
-    if (cameraEl) {
-        (cameraEl.style as any).webkitTransformStyle = 'preserve-3d';
-    }
 
     // Insert just before the canvas → behind it in stacking order
     parentEl.insertBefore(el, canvasEl);
@@ -195,25 +187,25 @@ export function init(): void {
 
     // ── Container div ─────────────────────────────────────────────────────────
     containerEl = document.createElement('div');
-    containerEl.style.width      = `${IFRAME_WIDTH}px`;
-    containerEl.style.height     = `${IFRAME_HEIGHT}px`;
-    containerEl.style.position   = 'relative';
+    containerEl.style.width      = IFRAME_WIDTH + 'px';
+    containerEl.style.height     = IFRAME_HEIGHT + 'px';
+    containerEl.style.opacity    = '1';
     containerEl.style.background = '#1d2e2f';
     // Prevent clicks on the monitor area from bubbling to the CSS3D background
     containerEl.addEventListener('click', (e) => e.stopPropagation());
 
     // ── Iframe ────────────────────────────────────────────────────────────────
     iframeEl = document.createElement('iframe');
-    // src is intentionally NOT set here — same deferred pattern as PhoneScreen.
-    // Setting src on a detached DOM node causes ERR_CONNECTION_RESET in Chromium.
-    // The real src is injected after the first render() call (see render()).
-    iframeEl.style.width   = '100%';
-    iframeEl.style.height  = '100%';
-    iframeEl.style.border  = 'none';
-    iframeEl.style.display = 'block';
+    iframeEl.src           = IFRAME_SRC;
+    iframeEl.style.width   = IFRAME_WIDTH + 'px';
+    iframeEl.style.height  = IFRAME_HEIGHT + 'px';
+    iframeEl.style.padding = IFRAME_PADDING + 'px';
+    iframeEl.style.boxSizing = 'border-box';
+    iframeEl.style.opacity = '1';
+    iframeEl.className     = 'jitter';
+    iframeEl.id            = 'computer-screen';
     iframeEl.frameBorder   = '0';
-    iframeEl.id            = 'monitor-screen';
-    iframeEl.title         = 'Monitor';
+    iframeEl.title         = 'HeffernanOS';
     // Bubble mouse/keyboard events from inside the iframe back to the parent document
     // so screen-enter/leave detection works when the cursor is inside the iframe.
     // Exact port of henryjeff MonitorScreen.createIframe() onload handler.
@@ -242,14 +234,6 @@ export function init(): void {
             });
         }
     };
-    // iOS/WebKit fix: running CSS transform forces compositing inside preserve-3d
-    iframeEl.className     = 'monitor-screen-jitter';
-    iframeEl.setAttribute('sandbox',
-        'allow-scripts allow-same-origin allow-forms allow-popups allow-pointer-lock'
-    );
-    // Set src immediately — matches Henry Jeff's createIframe() pattern.
-    // Setting src before DOM attachment works fine in all browsers.
-    iframeEl.src = IFRAME_SRC;
     containerEl.appendChild(iframeEl);
 
     // ── CSS3DObject ───────────────────────────────────────────────────────────

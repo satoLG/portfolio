@@ -422,7 +422,6 @@ export function Update(): void
     // A depth-only prepass first repopulates the depth buffer with all scene
     // geometry so occluders' depthTest correctly hides holes where 3D objects
     // are closer to the camera than the screen planes.
-    // Always runs (MonitorScreen is always visible; PhoneScreen may also need it).
     {
         // Prepass: clear depth, re-render scene geometry depth-only (no colour write).
         // renderer.autoClearColor is already false — post-processing output preserved.
