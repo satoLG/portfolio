@@ -65,7 +65,7 @@ export const phoneScreenConfig = {
 let cssRenderer: CSS3DRenderer | null = null;
 let cssScene: ThreeScene | null = null;
 let cssObject: CSS3DObject | null = null;
-let occluderScene: ThreeScene | null = null;  // separate scene — rendered after ALL post-processing
+let occluderScene: ThreeScene | null = null;
 let occludingPlane: Mesh | null = null;
 let containerEl: HTMLDivElement | null = null;
 let overlayEl: HTMLDivElement | null = null;
@@ -112,18 +112,9 @@ export function initRenderer(parentEl: HTMLElement, canvasEl: HTMLCanvasElement)
     el.style.left       = '0';
     el.style.width      = '100%';
     el.style.height     = '100%';
-    // WebKit fix: r137 CSS3DRenderer sets overflow:hidden on its domElement.
-    // overflow!=visible on ANY ancestor forces preserve-3d to flatten in WebKit —
-    // making CSS3D objects invisible on iOS Safari. Must be overridden to visible.
-    el.style.overflow   = 'visible';
     el.style.background = 'transparent';  // must NOT be white (browser default)
     // Default: non-interactive — enabled only when phone zoom is active
     el.style.pointerEvents = 'none';
-    // Also patch cameraElement (firstChild) with -webkit-transform-style for
-    // older Safari versions that require the vendor prefix.
-    const cameraEl = el.firstElementChild as HTMLElement | null;
-    if (cameraEl) (cameraEl.style as any).webkitTransformStyle = 'preserve-3d';
-
     // Insert BEFORE the canvas → lower in stacking order (behind)
     parentEl.insertBefore(el, canvasEl);
 
@@ -173,7 +164,6 @@ export function init(): void {
     containerEl.style.width        = `${cfg.iframeWidth}px`;
     containerEl.style.height       = `${cfg.iframeHeight}px`;
     // containerEl.style.overflow     = 'hidden';
-    containerEl.style.position     = 'relative';
     containerEl.style.borderRadius = '14px';
     containerEl.style.background   = '#000';
 
@@ -183,19 +173,14 @@ export function init(): void {
 
     // ── Iframe ───────────────────────────────────────────────────────────────
     iframeEl = document.createElement('iframe');
-    iframeEl.style.width   = '100%';
-    iframeEl.style.height  = '100%';
-    iframeEl.style.border  = 'none';
-    iframeEl.style.display = 'block';
-    iframeEl.frameBorder = '0';
-    // iOS/WebKit fix: a running CSS transform animation forces the browser to
-    // composite this element inside preserve-3d, making it visible on Safari.
-    iframeEl.className = 'phone-screen-jitter';
-    iframeEl.setAttribute('sandbox',
-        'allow-scripts allow-same-origin allow-forms allow-popups allow-pointer-lock'
-    );
-    // Set src immediately — matches Henry Jeff’s createIframe() pattern.
     iframeEl.src = 'https://projects-hub-one.vercel.app/';
+    iframeEl.style.width   = cfg.iframeWidth + 'px';
+    iframeEl.style.height  = cfg.iframeHeight + 'px';
+    iframeEl.style.padding = '32px';
+    iframeEl.style.boxSizing = 'border-box';
+    iframeEl.style.opacity = '1';
+    iframeEl.className = 'jitter';
+    iframeEl.frameBorder = '0';
     containerEl.appendChild(iframeEl);
 
     // ── Glass overlay ────────────────────────────────────────────────────────
