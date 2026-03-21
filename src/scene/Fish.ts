@@ -1,6 +1,8 @@
 import { Group, AnimationMixer, AnimationClip, LoopRepeat, Vector3, Color, MeshStandardMaterial, Mesh, Vector2 } from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — r137 @types declares a namespace but the module exports clone directly
+import { clone as _skeletonClone } from "three/examples/jsm/utils/SkeletonUtils";
 import { deltaTime } from "../scripts/Time";
 import { camera, renderer } from "../scripts/Scene";
 import { isDayTime } from "./Skybox";
@@ -187,7 +189,7 @@ function getPointerWorldAtZ(z: number): Vector3 {
 
 /** Pre-create a single pool entry from the template */
 function createPoolEntry(template: Group, animations: AnimationClip[], jellyfish = false): PooledFish {
-    const scene = skeletonClone(template) as Group;
+    const scene = _skeletonClone(template) as Group;
     const materials: MeshStandardMaterial[] = [];
     const baseTintColors: Color[] = [];
     scene.traverse((child) => {

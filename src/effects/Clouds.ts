@@ -3,7 +3,7 @@
     Mesh,
     RawShaderMaterial,
     Group,
-    Data3DTexture,
+    DataTexture3D,
     RGBAFormat,
     LinearFilter,
     RepeatWrapping,
@@ -22,7 +22,7 @@ const _isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini
 // and to sample (smaller 3-D texture → better GPU cache utilisation).
 const NOISE_SIZE = _isMobile ? 32 : 64;
 
-function buildNoiseTexture(): Data3DTexture {
+function buildNoiseTexture(): DataTexture3D {
     const N = NOISE_SIZE;
     function octave(nc: number): Float32Array {
         const grid = new Float32Array(nc * nc * nc);
@@ -56,10 +56,11 @@ function buildNoiseTexture(): Data3DTexture {
         data[i*4+2] = Math.round(o3[i]*255);
         data[i*4+3] = 255;
     }
-    const tex = new Data3DTexture(data, N, N, N);
+    const tex = new DataTexture3D(data, N, N, N);
     tex.format = RGBAFormat;
     tex.minFilter = tex.magFilter = LinearFilter;
-    tex.wrapS = tex.wrapT = tex.wrapR = RepeatWrapping;
+    tex.wrapS = tex.wrapT = RepeatWrapping;
+    (tex as any).wrapR = RepeatWrapping;
     tex.needsUpdate = true;
     return tex;
 }

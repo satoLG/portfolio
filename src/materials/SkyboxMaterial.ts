@@ -7,7 +7,7 @@ export const material = new ShaderMaterial();
 export let SetSkyboxUniforms: (material: ShaderMaterial) => void;
 
 const ditherSize = new Uniform(new Vector2());
-const dither = new Uniform<any>(null);
+const dither = new Uniform(null as any);
 const sunVisibility = new Uniform(1);
 const twilightTime = new Uniform(0);
 const twilightVisibility = new Uniform(0);
@@ -24,7 +24,7 @@ export let starsCount = 5000;
 
 const maxOffset = 0.43;
 const starsMap = new Uint8Array(gridSize * gridSize * 24);
-const stars = new Uniform<any>(null);
+const stars = new Uniform(null as any);
 
 export const lightUniform = new Uniform(new Vector3(1, 1, 1));
 export const sunVisibilityUniform = sunVisibility;
