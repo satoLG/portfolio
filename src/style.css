@@ -1,13 +1,16 @@
-﻿/* ============================================
+﻿html,
+body {
+    overflow: hidden;
+}
+
+/* ============================================
    iOS / WebKit CSS3D iframe fix
    A running transform animation forces WebKit to composite the element inside
    preserve-3d, making iframes visible on iOS Safari.
    ============================================ */
 .phone-screen-jitter {
-    /* Explicit z-index inside CSS3D context — required by some iOS WebKit versions */
-    z-index: -10;
     /* Force GPU compositing layer promotion on WebKit */
-    will-change: transform;
+    z-index: -10;
     /* Standard */
     animation-duration: 0.3s;
     animation-timing-function: ease-in-out;
@@ -54,7 +57,6 @@
    ============================================ */
 .monitor-screen-jitter {
     z-index: -10;
-    will-change: transform;
     animation-duration: 0.3s;
     animation-timing-function: ease-in-out;
     animation-fill-mode: forwards;
@@ -239,7 +241,10 @@ body.pixel-max .player-play.playing .icon-pause.icon-pixel {
 body
 {
     margin: 0px;
-    overflow: hidden;
+    /* overflow:hidden removed — WebKit strictly enforces the CSS spec rule that
+       any ancestor with overflow!=visible forces transform-style:preserve-3d to
+       flatten, breaking CSS3D. Chrome ignores this rule; Safari/WebKit does not.
+       The full-viewport canvas + touch-action:none handles scroll prevention. */
     font-family: 'Wotfard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
     touch-action: none;
     user-select: none;

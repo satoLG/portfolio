@@ -14,7 +14,7 @@
  *   can attach live-tweak sliders.
  */
 
-import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer.js';
+import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer';
 import {
     Scene as ThreeScene,
     PerspectiveCamera,
@@ -25,10 +25,7 @@ import {
     Mesh,
     PlaneGeometry,
     MeshBasicMaterial,
-    CustomBlending,
-    AddEquation,
-    ZeroFactor,
-    OneFactor,
+    NoBlending,
     Raycaster,
     Vector2,
 } from 'three';
@@ -77,7 +74,6 @@ let iframeEl: HTMLIFrameElement | null = null;
 let _canvasEl: HTMLCanvasElement | null = null;
 let _initialized = false;
 let _visible = false;
-let _iframeSrcSet = false;  // guard: src set only once, after first DOM-attached render
 
 // Effect state
 let _pendingColorFilter = '';
@@ -116,11 +112,17 @@ export function initRenderer(parentEl: HTMLElement, canvasEl: HTMLCanvasElement)
     el.style.left       = '0';
     el.style.width      = '100%';
     el.style.height     = '100%';
-    // iOS fix: do NOT set overflow:hidden — it flattens preserve-3d on WebKit
-    // and makes iframes inside CSS3DRenderer invisible on iOS Safari.
+    // WebKit fix: r137 CSS3DRenderer sets overflow:hidden on its domElement.
+    // overflow!=visible on ANY ancestor forces preserve-3d to flatten in WebKit —
+    // making CSS3D objects invisible on iOS Safari. Must be overridden to visible.
+    el.style.overflow   = 'visible';
     el.style.background = 'transparent';  // must NOT be white (browser default)
     // Default: non-interactive — enabled only when phone zoom is active
     el.style.pointerEvents = 'none';
+    // Also patch cameraElement (firstChild) with -webkit-transform-style for
+    // older Safari versions that require the vendor prefix.
+    const cameraEl = el.firstElementChild as HTMLElement | null;
+    if (cameraEl) (cameraEl.style as any).webkitTransformStyle = 'preserve-3d';
 
     // Insert BEFORE the canvas → lower in stacking order (behind)
     parentEl.insertBefore(el, canvasEl);
@@ -181,10 +183,6 @@ export function init(): void {
 
     // ── Iframe ───────────────────────────────────────────────────────────────
     iframeEl = document.createElement('iframe');
-    // src is intentionally NOT set here.
-    // The container is a detached DOM node until CSS3DRenderer first renders it.
-    // Setting src on a detached iframe causes ERR_CONNECTION_RESET in Chromium.
-    // The real src is injected after the first render() call (see below).
     iframeEl.style.width   = '100%';
     iframeEl.style.height  = '100%';
     iframeEl.style.border  = 'none';
@@ -196,6 +194,8 @@ export function init(): void {
     iframeEl.setAttribute('sandbox',
         'allow-scripts allow-same-origin allow-forms allow-popups allow-pointer-lock'
     );
+    // Set src immediately — matches Henry Jeff’s createIframe() pattern.
+    iframeEl.src = 'https://projects-hub-one.vercel.app/';
     containerEl.appendChild(iframeEl);
 
     // ── Glass overlay ────────────────────────────────────────────────────────
@@ -218,26 +218,21 @@ export function init(): void {
     cssObject.visible = true;   // always visible once phone is spawned — browser loads iframe immediately
     cssScene.add(cssObject);
 
-    // ── Occluding plane (CustomBlending — alpha-only zero-out) ──────────────────────
+    // ── Occluding plane (NoBlending — valid premultiplied alpha) ─────────────────────
     // Lives in its own scene so it can be rendered AFTER Underwater post-
     // processing (which would otherwise overwrite the transparent pixels).
     //
-    // CustomBlending setup:
-    //   RGB  = 0 * src  +  1 * dst  → preserve existing scene colours
-    //   Alpha= 0 * src  +  0 * dst  → force alpha to 0 (transparent hole)
+    // NoBlending disables GL blending; fragment rgba(0,0,0,0) from opacity:0
+    // is written directly — valid premultiplied transparent, which iOS WebKit
+    // composites correctly.  CustomBlending preserved RGB+zeroed alpha, producing
+    // invalid premultiplied values that WebKit treats as opaque.
     const occMat = new MeshBasicMaterial({
-        color:       0x000000,          // black — irrelevant since RGB is preserved
+        color:       0x000000,
         transparent: true,
-        opacity:     1,
-        depthTest:   true,              // blocked by scene geometry closer to camera
+        opacity:     0,
+        depthTest:   true,
         depthWrite:  false,
-        blending:    CustomBlending,
-        blendEquation:  AddEquation,
-        blendSrc:    ZeroFactor,        // RGB: 0 * src
-        blendDst:    OneFactor,         // RGB: 1 * dst  → keep scene colours
-        blendEquationAlpha: AddEquation,
-        blendSrcAlpha:  ZeroFactor,     // Alpha: 0 * src
-        blendDstAlpha:  ZeroFactor,     // Alpha: 0 * dst  → = 0 (transparent)
+        blending:    NoBlending,
     });
     const occGeo = new PlaneGeometry(cfg.iframeWidth, cfg.iframeHeight);
     occludingPlane = new Mesh(occGeo, occMat);
@@ -396,15 +391,7 @@ export function render(cam: PerspectiveCamera): void {
 
     cssRenderer.render(cssScene, cam);
     _camera = cam;  // store for click-handler raycasting
-    // Inject the real iframe src on the very first render, now that CSS3DRenderer
-    // has attached the container element to the live DOM.  Deferred one more
-    // rAF so the element is fully laid-out before the navigation starts.
-    if (!_iframeSrcSet && iframeEl) {
-        _iframeSrcSet = true;
-        requestAnimationFrame(() => {
-            if (iframeEl) iframeEl.src = 'https://projects-hub-one.vercel.app/';
-        });
-    }}
+}
 
 /**
  * Call from Scene's onresize handler.

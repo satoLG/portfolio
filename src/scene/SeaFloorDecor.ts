@@ -7,7 +7,7 @@
  * Add decorGroup to the Three.js scene from Scene.ts.
  */
 import { Group, Mesh, Uniform } from "three";
-import { GLTFLoader }           from "three/examples/jsm/loaders/GLTFLoader.js";
+import { GLTFLoader }           from "three/examples/jsm/loaders/GLTFLoader";
 import { oceanAbsorptionUniform, underwaterFogDistUniform, waveVelocity1Uniform, waveVelocity2Uniform } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { timeUniform }          from "../scripts/Time";

@@ -8,7 +8,8 @@ import {
     Vector2,
     Camera,
     FramebufferTexture,
-    LinearFilter
+    LinearFilter,
+    RGBAFormat
 } from "three";
 import { time } from "../scripts/Time";
 import { distortionStrength, distortionSpeed, distortionScale } from '../scene/OceanConfig';
@@ -96,7 +97,7 @@ export function Start(renderer: WebGLRenderer): void {
     height = size.y;
 
     // FramebufferTexture copies directly from the framebuffer - no color conversion
-    framebufferTexture = new FramebufferTexture(width, height);
+    framebufferTexture = new FramebufferTexture(width, height, RGBAFormat);
     framebufferTexture.minFilter = LinearFilter;
     framebufferTexture.magFilter = LinearFilter;
     
@@ -127,7 +128,7 @@ export function onResize(w: number, h: number): void {
     height = h;
     if (framebufferTexture) {
         framebufferTexture.dispose();
-        framebufferTexture = new FramebufferTexture(width, height);
+        framebufferTexture = new FramebufferTexture(width, height, RGBAFormat);
         framebufferTexture.minFilter = LinearFilter;
         framebufferTexture.magFilter = LinearFilter;
         if (material) {
@@ -157,7 +158,7 @@ export function renderScene(renderer: WebGLRenderer, scene: ThreeScene, camera: 
     
     // Copy the framebuffer (already has correct colors) to texture
     // Reuse static Vector2 to avoid allocation every frame
-    renderer.copyFramebufferToTexture(framebufferTexture, _copyOffset);
+    renderer.copyFramebufferToTexture(_copyOffset, framebufferTexture);
     
     // Render post-processed version on top
     renderer.render(quadScene, orthoCamera);
