@@ -36,7 +36,9 @@ _depthPrepassMat.colorWrite = false;
 let _sceneReady = false;
 export function setSceneReady(): void { _sceneReady = true; }
 
-export const body = document.createElement("div");
+// DOM containers — matching Henry's #css / #webgl structure
+export const cssContainer = document.querySelector('#css') as HTMLDivElement;
+export const webglContainer = document.querySelector('#webgl') as HTMLDivElement;
 
 // Detect device type for default graphics settings
 export const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
@@ -63,7 +65,7 @@ export let colorFilterValue: ColorFilter = (localStorage.getItem('portfolio-colo
 let ambientLight: AmbientLight;
 let directionalLight: DirectionalLight;
 
-export let renderer = new WebGLRenderer({ antialias, alpha: true });
+export let renderer = new WebGLRenderer({ antialias, alpha: true, powerPreference: 'high-performance' });
 export const scene = new Scene();
 export const camera = new PerspectiveCamera();
 export const staticCamera = new PerspectiveCamera();
@@ -178,29 +180,24 @@ export function setShadowsEnabled(value: boolean): void
 
 export function Start(): void
 {
-    document.body.appendChild(body);
-
     const dpr = Math.min(window.devicePixelRatio, 2);  // cap DPR to limit GPU memory
     let width = window.innerWidth * dpr;
     let height = window.innerHeight * dpr;
-    body.style.transform = "";
-    body.style.width = window.innerWidth + "px";
-    body.style.height = window.innerHeight + "px";
     
     renderer.setSize(width, height, false);
     renderer.autoClearColor = false;
     renderer.shadowMap.enabled = shadowsEnabled;
     renderer.shadowMap.type = VSMShadowMap;  // Variance shadows — real Gaussian blur
-    body.appendChild(renderer.domElement);
 
-    // CSS3D renderer for the phone screen iframe — inserted behind the canvas.
-    // The canvas has alpha:true so the NoBlending occluding plane can punch a
-    // transparent hole, letting the CSS3D iframe show through.
-    PhoneScreen.initRenderer(body, renderer.domElement);
+    // Canvas styling — matches Henry's Renderer.ts
+    renderer.domElement.style.position = 'absolute';
+    renderer.domElement.style.zIndex = '1';
+    renderer.domElement.style.top = '0px';
+    webglContainer.appendChild(renderer.domElement);
 
-    // CSS3D renderer for the floating monitor screen — separate renderer/layer
-    // inserted behind the canvas (same technique as PhoneScreen).
-    MonitorScreen.initRenderer(body, renderer.domElement);
+    // CSS3D renderers append their divs into #css (behind #webgl in stacking order)
+    PhoneScreen.initRenderer(renderer.domElement);
+    MonitorScreen.initRenderer(renderer.domElement);
     MonitorScreen.init();
     
     camera.fov = fov;
@@ -224,10 +221,6 @@ export function Start(): void
     {
         width = window.innerWidth * dpr;
         height = window.innerHeight * dpr;
-        body.style.transform = "";
-        body.style.width = window.innerWidth + "px";
-        body.style.height = window.innerHeight + "px";
-
         renderer.setSize(width, height, false);
         camera.aspect = width / height;
         camera.updateProjectionMatrix();

@@ -1,4 +1,4 @@
-﻿import { body, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setSceneReady } from "./Scene";
+﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setSceneReady } from "./Scene";
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
 import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, preloadUISounds, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
@@ -186,7 +186,7 @@ export function Start(): void {
     // Header container (hidden initially)
     const header = document.createElement("header");
     header.className = "site-header";
-    body.appendChild(header);
+    webglContainer.appendChild(header);
 
     // Name display on top left (text hidden initially for typewriter effect)
     const nameDisplay = document.createElement("div");
