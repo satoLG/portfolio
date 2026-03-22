@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Monitor Screen Test</title>
+    <style>
+      * { margin: 0; padding: 0; }
+      html, body { overflow: hidden; background: #1a1a2e; }
+      #webgl { pointer-events: none; }
+      #css   { cursor: default; }
+    </style>
+  </head>
+  <body>
+    <div id="css"></div>
+    <div id="webgl"></div>
+    <!-- Same hidden video elements used by texture layers in the main site -->
+    <div id="monitor-videos" style="pointer-events:none;position:absolute;opacity:0;width:0;height:0;top:0;left:0;">
+      <video id="video-1" muted loop autoplay playsinline width="0" height="0"
+             src="/textures/monitor/video/base-static.mp4" style="opacity:0;"></video>
+      <video id="video-2" muted loop autoplay playsinline width="0" height="0"
+             src="/textures/monitor/video/static-texture-layer.mp4" style="opacity:0;"></video>
+    </div>
+    <script type="module" src="/src/test-main.ts"></script>
+  </body>
+</html>
