@@ -199,6 +199,13 @@ export function Start(): void
     renderer.domElement.style.zIndex = '1px';
     renderer.domElement.style.top = '0px';
     renderer.domElement.style.pointerEvents = 'auto';   // override #webgl's none
+    // Explicitly constrain canvas CSS size to CSS-pixel viewport dimensions.
+    // Without this, canvas.width = innerWidth*dpr defaults the CSS size to
+    // innerWidth*dpr CSS pixels on iOS — 2x the viewport — making the WebGL
+    // coordinate space 2x larger than what CSS3DRenderer computes, causing
+    // CSS3D elements to render at completely wrong screen positions on iOS.
+    renderer.domElement.style.width  = window.innerWidth  + 'px';
+    renderer.domElement.style.height = window.innerHeight + 'px';
     webglContainer.appendChild(renderer.domElement);
 
     // Single shared CSS3DRenderer — one preserve-3d container (matches Henry)
@@ -240,6 +247,8 @@ export function Start(): void
         staticCamera.aspect = width / height;
         staticCamera.updateProjectionMatrix();
 
+        renderer.domElement.style.width  = window.innerWidth  + 'px';
+        renderer.domElement.style.height = window.innerHeight + 'px';
         Underwater.onResize(width, height);
         cssRenderer.setSize(window.innerWidth, window.innerHeight);
     }
