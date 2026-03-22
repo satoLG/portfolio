@@ -63,8 +63,8 @@ export const phoneScreenConfig = {
 };
 
 // ─── INTERNALS ────────────────────────────────────────────────────────────────
-let cssRenderer: CSS3DRenderer | null = null;
-let cssScene: ThreeScene | null = null;
+let cssRenderer: CSS3DRenderer | null = null;   // shared — set by initRenderer()
+let cssScene: ThreeScene | null = null;               // shared — set by initRenderer()
 let cssObject: CSS3DObject | null = null;
 let occluderScene: ThreeScene | null = null;
 let occludingPlane: Mesh | null = null;
@@ -98,24 +98,14 @@ const _mouse     = new Vector2();
  *
  * Call once from Scene.Start() right after appending renderer.domElement.
  */
-export function initRenderer(canvasEl: HTMLCanvasElement): void {
+export function initRenderer(canvasEl: HTMLCanvasElement, sharedRenderer: CSS3DRenderer, sharedScene: ThreeScene): void {
     _canvasEl = canvasEl;
-
-    cssRenderer = new CSS3DRenderer();
-    cssRenderer.setSize(window.innerWidth, window.innerHeight);
-
-    const el = cssRenderer.domElement;
-    el.style.position   = 'absolute';
-    el.style.top        = '0px';
-    // Default: non-interactive — enabled only when phone zoom is active
-    el.style.pointerEvents = 'none';
-
-    // Append into #css container — matches Henry's DOM structure
-    document.querySelector('#css')!.appendChild(el);
+    cssRenderer = sharedRenderer;
+    cssScene    = sharedScene;
 
     // Any click on the CSS3D background zooms out — ONLY if the click doesn't
     // land on the phone model itself (raycasted against phone children).
-    el.addEventListener('click', (e: MouseEvent) => {
+    sharedRenderer.domElement.addEventListener('click', (e: MouseEvent) => {
         if (!isPhoneZoomActive()) return;
         if (_camera && _phoneGroup && _phoneGroup.children.length > 0) {
             _mouse.set(
@@ -128,8 +118,6 @@ export function initRenderer(canvasEl: HTMLCanvasElement): void {
         }
         zoomOutFromPhone();
     });
-
-    cssScene = new ThreeScene();
 }
 
 /**
@@ -231,8 +219,8 @@ export function applyPhonePixelSize(value: number): void {
  */
 export function applyPhoneColorFilter(filter: string): void {
     _pendingColorFilter = filter;
-    if (cssRenderer) {
-        cssRenderer.domElement.style.filter = filter;
+    if (containerEl) {
+        containerEl.style.filter = filter;
     }
 }
 
@@ -281,8 +269,7 @@ export function preRender(phoneGroup: Group): void {
     if (!_initialized || !_visible) {
         if (occludingPlane) occludingPlane.visible = false;
         if (cssObject) cssObject.visible = false;
-        if (_canvasEl) _canvasEl.style.pointerEvents = '';
-        if (cssRenderer) cssRenderer.domElement.style.pointerEvents = 'none';
+        if (_canvasEl) _canvasEl.style.pointerEvents = 'auto';
         return;
     }
 
@@ -354,20 +341,10 @@ export function render(cam: PerspectiveCamera): void {
     // ── Pointer events ───────────────────────────────────────────────────────
     if (zoomed) {
         if (_canvasEl) _canvasEl.style.pointerEvents = 'none';
-        cssRenderer.domElement.style.pointerEvents = 'auto';
     } else {
         // Don't release canvas if another screen (monitor) has locked it.
-        if (_canvasEl && !isMonitorZoomActive()) _canvasEl.style.pointerEvents = '';
-        cssRenderer.domElement.style.pointerEvents = 'none';
+        if (_canvasEl && !isMonitorZoomActive()) _canvasEl.style.pointerEvents = 'auto';
     }
 
-    cssRenderer.render(cssScene, cam);
     _camera = cam;  // store for click-handler raycasting
-}
-
-/**
- * Call from Scene's onresize handler.
- */
-export function onResize(w: number, h: number): void {
-    if (cssRenderer) cssRenderer.setSize(w, h);
 }

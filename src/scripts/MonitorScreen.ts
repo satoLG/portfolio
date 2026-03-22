@@ -65,8 +65,8 @@ const SCALE_Y = SCREEN_HEIGHT / IFRAME_HEIGHT;
 const IFRAME_SRC = 'https://projects-hub-one.vercel.app/';
 
 // ── Module state ───────────────────────────────────────────────────────────────
-let cssRenderer:    CSS3DRenderer      | null = null;
-let cssScene:       ThreeScene         | null = null;
+let cssRenderer:    CSS3DRenderer      | null = null;   // shared — set by initRenderer()
+let cssScene:       ThreeScene         | null = null;   // shared — set by initRenderer()
 let cssObject:      CSS3DObject        | null = null;
 let occluderScene:  ThreeScene         | null = null;
 let occludingPlane: Mesh               | null = null;
@@ -101,14 +101,12 @@ function _enterZoom(): void {
     _isZoomed  = true;
     _isHovered = false;
     if (_canvasEl) { _canvasEl.style.cursor = ''; _canvasEl.style.pointerEvents = 'none'; }
-    if (cssRenderer) cssRenderer.domElement.style.pointerEvents = 'auto';
     zoomToMonitor();
 }
 
 function _exitZoom(): void {
     _isZoomed = false;
-    if (_canvasEl) _canvasEl.style.pointerEvents = '';
-    if (cssRenderer) cssRenderer.domElement.style.pointerEvents = 'none';
+    if (_canvasEl) _canvasEl.style.pointerEvents = 'auto';
     zoomOutFromMonitor();
 }
 
@@ -118,21 +116,10 @@ function _exitZoom(): void {
  * Create the CSS3DRenderer and insert its div BEHIND the WebGL canvas.
  * Call once from Scene.Start() right after creating the canvas.
  */
-export function initRenderer(canvasEl: HTMLCanvasElement): void {
+export function initRenderer(canvasEl: HTMLCanvasElement, sharedRenderer: CSS3DRenderer, sharedScene: ThreeScene): void {
     _canvasEl = canvasEl;
-
-    cssRenderer = new CSS3DRenderer();
-    cssRenderer.setSize(window.innerWidth, window.innerHeight);
-
-    const el = cssRenderer.domElement;
-    el.style.position      = 'absolute';
-    el.style.top           = '0px';
-    el.style.pointerEvents = 'none';   // only the iframe area will be interactive
-
-    // Append into #css container — matches Henry's DOM structure
-    document.querySelector('#css')!.appendChild(el);
-
-    cssScene = new ThreeScene();
+    cssRenderer = sharedRenderer;
+    cssScene    = sharedScene;
 
     // ── Hover: cursor pointer when over the monitor (WebGL canvas events) ────
     canvasEl.addEventListener('mousemove', (e: MouseEvent) => {
@@ -173,7 +160,7 @@ export function initRenderer(canvasEl: HTMLCanvasElement): void {
 
     // ── Click on CSS3D background (outside iframe container) → zoom out ───────
     // containerEl.stopPropagation() prevents clicks on the iframe from reaching here.
-    el.addEventListener('click', () => {
+    sharedRenderer.domElement.addEventListener('click', () => {
         if (_isZoomed) _exitZoom();
     }, false);
 
@@ -510,20 +497,10 @@ export function render(cam: PerspectiveCamera): void {
     // This runs AFTER PhoneScreen.render() so it has the final say on canvas state.
     if (_isZoomed) {
         if (_canvasEl) _canvasEl.style.pointerEvents = 'none';
-        cssRenderer.domElement.style.pointerEvents = 'auto';
     } else {
         // Don't release canvas if phone has locked it.
-        if (_canvasEl && !isPhoneZoomActive()) _canvasEl.style.pointerEvents = '';
-        cssRenderer.domElement.style.pointerEvents = 'none';
+        if (_canvasEl && !isPhoneZoomActive()) _canvasEl.style.pointerEvents = 'auto';
     }
 
     _currentCamera = cam;
-    cssRenderer.render(cssScene, cam);
-}
-
-/**
- * Call from Scene's onresize handler.
- */
-export function onResize(w: number, h: number): void {
-    if (cssRenderer) cssRenderer.setSize(w, h);
 }
