@@ -1229,11 +1229,11 @@ button:active
     background-color: #fffc;
 }
 
-body > div
+/* body > div
 {
     transform-origin: left top;
     position: fixed;
-}
+} */
 
 canvas
 {

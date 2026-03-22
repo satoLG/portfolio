@@ -24,6 +24,7 @@ import {
     Mesh,
     PlaneGeometry,
     MeshBasicMaterial,
+    MeshLambertMaterial,
     NoBlending,
     DoubleSide,
     Raycaster,
@@ -100,7 +101,7 @@ function _exitZoom(): void {
  * Create the CSS3DRenderer and insert its div BEHIND the WebGL canvas.
  * Call once from Scene.Start() right after creating the canvas.
  */
-export function initRenderer(parentEl: HTMLElement, canvasEl: HTMLCanvasElement): void {
+export function initRenderer(canvasEl: HTMLCanvasElement): void {
     _canvasEl = canvasEl;
 
     cssRenderer = new CSS3DRenderer();
@@ -108,19 +109,11 @@ export function initRenderer(parentEl: HTMLElement, canvasEl: HTMLCanvasElement)
 
     const el = cssRenderer.domElement;
     el.style.position      = 'absolute';
-    el.style.top           = '0';
-    el.style.left          = '0';
-    el.style.width         = '100%';
-    el.style.height        = '100%';
-    el.style.background    = 'transparent';
+    el.style.top           = '0px';
     el.style.pointerEvents = 'none';   // only the iframe area will be interactive
 
-    // Insert just before the canvas → behind it in stacking order
-    parentEl.insertBefore(el, canvasEl);
-
-    // Ensure canvas is positioned so z-index stacking works
-    canvasEl.style.position = 'absolute';
-    canvasEl.style.zIndex   = '1';
+    // Append into #css container — matches Henry's DOM structure
+    document.querySelector('#css')!.appendChild(el);
 
     cssScene = new ThreeScene();
 
@@ -212,17 +205,16 @@ export function init(): void {
     iframeEl.onload = () => {
         if (iframeEl!.contentWindow) {
             window.addEventListener('message', (event) => {
-                if (!event.data?.type) return;
-                const evt = new CustomEvent(event.data.type, {
+                var evt = new CustomEvent(event.data.type, {
                     bubbles: true,
                     cancelable: false,
                 }) as any;
                 evt.inComputer = true;
                 if (event.data.type === 'mousemove') {
-                    const clRect = iframeEl!.getBoundingClientRect();
+                    var clRect = iframeEl!.getBoundingClientRect();
                     const { top, left, width, height } = clRect;
-                    const widthRatio  = width  / IFRAME_WIDTH;
-                    const heightRatio = height / IFRAME_HEIGHT;
+                    const widthRatio  = width  / (IFRAME_WIDTH - IFRAME_PADDING);
+                    const heightRatio = height / (IFRAME_HEIGHT - IFRAME_PADDING);
                     evt.clientX = Math.round(event.data.clientX * widthRatio + left);
                     evt.clientY = Math.round(event.data.clientY * heightRatio + top);
                 } else if (event.data.type === 'keydown') {
@@ -248,14 +240,11 @@ export function init(): void {
     // transparent hole.  CustomBlending preserved RGB + zeroed only alpha, producing
     // invalid premultiplied-alpha values (non-zero RGB, alpha=0) that iOS WebKit's
     // GPU compositor treats as opaque.  NoBlending matches Henry Jeff's exact approach.
-    const occMat = new MeshBasicMaterial({
-        color:      0x000000,
-        transparent: true,
-        opacity:     0,
-        depthTest:   true,
-        depthWrite:  false,
-        blending:    NoBlending,
-    });
+    const occMat = new MeshLambertMaterial();
+    occMat.side = DoubleSide;
+    occMat.opacity = 0;
+    occMat.transparent = true;
+    occMat.blending = NoBlending;
     const occGeo = new PlaneGeometry(IFRAME_WIDTH, IFRAME_HEIGHT);
     occludingPlane = new Mesh(occGeo, occMat);
     occludingPlane.position.set(POS_X, POS_Y, POS_Z);

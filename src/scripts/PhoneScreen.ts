@@ -24,8 +24,9 @@ import {
     Quaternion,
     Mesh,
     PlaneGeometry,
-    MeshBasicMaterial,
+    MeshLambertMaterial,
     NoBlending,
+    DoubleSide,
     Raycaster,
     Vector2,
 } from 'three';
@@ -97,31 +98,20 @@ const _mouse     = new Vector2();
  *
  * Call once from Scene.Start() right after appending renderer.domElement.
  */
-export function initRenderer(parentEl: HTMLElement, canvasEl: HTMLCanvasElement): void {
+export function initRenderer(canvasEl: HTMLCanvasElement): void {
     _canvasEl = canvasEl;
-
-    // Parent needs relative positioning for absolute children
-    parentEl.style.position = 'relative';
 
     cssRenderer = new CSS3DRenderer();
     cssRenderer.setSize(window.innerWidth, window.innerHeight);
 
     const el = cssRenderer.domElement;
     el.style.position   = 'absolute';
-    el.style.top        = '0';
-    el.style.left       = '0';
-    el.style.width      = '100%';
-    el.style.height     = '100%';
-    el.style.background = 'transparent';  // must NOT be white (browser default)
+    el.style.top        = '0px';
     // Default: non-interactive — enabled only when phone zoom is active
     el.style.pointerEvents = 'none';
-    // Insert BEFORE the canvas → lower in stacking order (behind)
-    parentEl.insertBefore(el, canvasEl);
 
-    // iOS fix: position:absolute (not relative) avoids creating an intermediate
-    // 2D compositing layer inside the preserve-3d context on WebKit.
-    canvasEl.style.position = 'absolute';
-    canvasEl.style.zIndex   = '1';
+    // Append into #css container — matches Henry's DOM structure
+    document.querySelector('#css')!.appendChild(el);
 
     // Any click on the CSS3D background zooms out — ONLY if the click doesn't
     // land on the phone model itself (raycasted against phone children).
@@ -211,14 +201,11 @@ export function init(): void {
     // is written directly — valid premultiplied transparent, which iOS WebKit
     // composites correctly.  CustomBlending preserved RGB+zeroed alpha, producing
     // invalid premultiplied values that WebKit treats as opaque.
-    const occMat = new MeshBasicMaterial({
-        color:       0x000000,
-        transparent: true,
-        opacity:     0,
-        depthTest:   true,
-        depthWrite:  false,
-        blending:    NoBlending,
-    });
+    const occMat = new MeshLambertMaterial();
+    occMat.side = DoubleSide;
+    occMat.opacity = 0;
+    occMat.transparent = true;
+    occMat.blending = NoBlending;
     const occGeo = new PlaneGeometry(cfg.iframeWidth, cfg.iframeHeight);
     occludingPlane = new Mesh(occGeo, occMat);
     occludingPlane.visible = false;

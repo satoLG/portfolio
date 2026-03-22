@@ -1,5 +1,5 @@
 import { BufferGeometry, Group, Line, LineBasicMaterial, Vector3 } from "three";
-import { body, camera, cameraForward } from "./Scene";
+import { webglContainer, camera, cameraForward } from "./Scene";
 import { deltaTime } from "./Time";
 
 export const debugging = false;
@@ -104,7 +104,7 @@ export function Start(): void
     debugPanel.appendChild(memDiv);
     debugPanel.appendChild(posDiv);
 
-    body.appendChild(debugPanel);
+    webglContainer.appendChild(debugPanel);
 
     function AxisLine(a: Vector3, b: Vector3, color: number): Line
     {
