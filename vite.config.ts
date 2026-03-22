@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import glsl from 'vite-plugin-glsl'
+import { resolve } from 'path'
 
 export default defineConfig({
   plugins: [
@@ -25,9 +26,15 @@ export default defineConfig({
   publicDir: 'public',
   build: {
     outDir: 'dist',
-    target: 'esnext', // Support modern JS features including top-level await
+    target: 'esnext',
     minify: 'esbuild',
-    sourcemap: true
+    sourcemap: true,
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        test: resolve(__dirname, 'test/index.html'),
+      },
+    },
   },
   esbuild: {
     target: 'esnext' // Ensure esbuild uses modern JS features

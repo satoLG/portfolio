@@ -1,4 +1,4 @@
-import { AmbientLight, DirectionalLight, MeshDepthMaterial, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap } from "three";
+import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap } from "three";
 import { getIsUnderwater } from "./Control";
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
@@ -23,13 +23,6 @@ import * as PhoneScreen from './PhoneScreen';
 import * as MonitorScreen from './MonitorScreen';
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { reflectionTextureUniform } from "../materials/OceanMaterial";
-
-// Depth-prepass material — used to rebuild the scene depth buffer before the
-// phone-screen occluder renders, so depthTest correctly hides the CSS3D layer
-// when 3D objects are in front of the phone. colorWrite=false preserves the
-// post-processed colour output.
-const _depthPrepassMat = new MeshDepthMaterial();
-_depthPrepassMat.colorWrite = false;
 
 // Scene-ready flag — false during the loading screen.
 // While false, Update() returns early to save full GPU frame cost
@@ -187,9 +180,21 @@ export function Start(): void
 {
     const dpr = Math.min(window.devicePixelRatio, 2);  // cap DPR to limit GPU memory
     
+    // ── Viewport helpers ─────────────────────────────────────────────────────
+    // iOS Safari: window.innerHeight lags behind the actual visible area when
+    // the dynamic URL bar shows/hides.  window.visualViewport gives the real
+    // dimensions and fires its own resize event.  Fall back to window.inner*
+    // on desktop where visualViewport is always identical.
+    function getViewportWidth(): number {
+        return window.visualViewport?.width ?? window.innerWidth;
+    }
+    function getViewportHeight(): number {
+        return window.visualViewport?.height ?? window.innerHeight;
+    }
+
     renderer.setPixelRatio(dpr);
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.autoClearColor = false;
+    renderer.setSize(getViewportWidth(), getViewportHeight());
+    renderer.setClearColor(0x000000, 0.0);
     renderer.shadowMap.enabled = shadowsEnabled;
     renderer.shadowMap.type = VSMShadowMap;  // Variance shadows — real Gaussian blur
 
@@ -201,7 +206,7 @@ export function Start(): void
     webglContainer.appendChild(renderer.domElement);
 
     // Single shared CSS3DRenderer — one preserve-3d container (matches Henry)
-    cssRenderer.setSize(window.innerWidth, window.innerHeight);
+    cssRenderer.setSize(getViewportWidth(), getViewportHeight());
     cssRenderer.domElement.style.position = 'absolute';
     cssRenderer.domElement.style.top      = '0px';
     cssContainer.appendChild(cssRenderer.domElement);
@@ -212,7 +217,7 @@ export function Start(): void
     MonitorScreen.init(scene);
     
     camera.fov = fov;
-    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.aspect = getViewportWidth() / getViewportHeight();
     camera.near = 0.3;
     camera.far = 4000;
     camera.updateProjectionMatrix();
@@ -222,26 +227,37 @@ export function Start(): void
     UpdateCameraRotation();
 
     staticCamera.fov = 70;
-    staticCamera.aspect = window.innerWidth / window.innerHeight;
+    staticCamera.aspect = getViewportWidth() / getViewportHeight();
     staticCamera.near = 0.1;
     staticCamera.far = 10;
     staticCamera.updateProjectionMatrix();
     staticCamera.position.set(0, 0, 0);
 
-    window.onresize = function()
-    {
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        camera.aspect = window.innerWidth / window.innerHeight;
+    function onViewportResize() {
+        const w = getViewportWidth();
+        const h = getViewportHeight();
+
+        renderer.setSize(w, h);
+        camera.aspect = w / h;
         camera.updateProjectionMatrix();
 
-        staticCamera.aspect = window.innerWidth / window.innerHeight;
+        staticCamera.aspect = w / h;
         staticCamera.updateProjectionMatrix();
 
         // Underwater needs the actual pixel-buffer dimensions, not CSS dimensions
         const buf = new Vector2();
         renderer.getDrawingBufferSize(buf);
         Underwater.onResize(buf.x, buf.y);
-        cssRenderer.setSize(window.innerWidth, window.innerHeight);
+        cssRenderer.setSize(w, h);
+    }
+
+    window.onresize = onViewportResize;
+
+    // iOS Safari: visualViewport fires resize when the URL bar shows/hides,
+    // but window.resize does NOT.  Without this, the CSS3DRenderer stays at
+    // the initial (wrong) height and CSS3D content is displaced.
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', onViewportResize);
     }
 
     Skybox.Start();
@@ -414,31 +430,32 @@ export function Update(): void
     // Ambient light - higher = lighter/softer shadows
     ambientLight.intensity = 0.3 + sunVisible * lightIntensity * 0.9;  // TWEAK: Higher base = brighter scene
 
-    // Occluding planes — must be set BEFORE the WebGL render
-    // so the alpha holes are present when the scene is drawn.
+    // Sync occluder transforms BEFORE the render (so NoBlending holes are correct)
     MonitorScreen.preRender(camera);
     PhoneScreen.preRender(Island.phone);
 
-    Underwater.renderScene(renderer, scene, camera);
+    // Update projection matrix every frame (matches Henry's Renderer.update())
+    camera.updateProjectionMatrix();
+
+    // Main WebGL render — clears to transparent black (setClearColor ensures alpha=0),
+    // then renders full scene.  Depth buffer is intact after this call.
+    renderer.render(scene, camera);
+
+    // Occluder renders — MUST run after main render while depth buffer is intact,
+    // and before CSS3D render so transparent holes are in place.
+    // occluderScene has NO lights → Lambert outputs (0,0,0,0) → valid premultiplied
+    // transparent that iOS Safari and Chrome both handle correctly.
+    renderer.autoClearColor = false;
+    renderer.autoClearDepth = false;
+    MonitorScreen.renderOccluder(renderer, camera);
+    if (PhoneScreen.isVisible()) PhoneScreen.renderOccluder(renderer, camera);
+    renderer.autoClearColor = true;
+    renderer.autoClearDepth = true;
+
+    // Debug axes — rendered after occluder (depth state doesn't matter here)
+    renderer.autoClearColor = false;
     renderer.render(axes, staticCamera);
-
-    // Punch alpha holes AFTER all post-processing so they can't be overwritten.
-    // A depth-only prepass first repopulates the depth buffer with all scene
-    // geometry so occluders' depthTest correctly hides holes where 3D objects
-    // are closer to the camera than the screen planes.
-    {
-        // Prepass: clear depth, re-render scene geometry depth-only (no colour write).
-        // renderer.autoClearColor is already false — post-processing output preserved.
-        scene.overrideMaterial = _depthPrepassMat;
-        renderer.render(scene, camera);
-        scene.overrideMaterial = null;
-
-        // Occluders: keep prepass depths intact (don't clear) then punch holes.
-        renderer.autoClearDepth = false;
-        MonitorScreen.renderOccluder(renderer, camera);
-        if (PhoneScreen.isVisible()) PhoneScreen.renderOccluder(renderer, camera);
-        renderer.autoClearDepth = true;
-    }
+    renderer.autoClearColor = true;
 
     // Pointer-events + CSS3D update
     PhoneScreen.render(camera);

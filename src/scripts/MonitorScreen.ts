@@ -68,7 +68,7 @@ const IFRAME_SRC = 'https://projects-hub-one.vercel.app/';
 let cssRenderer:    CSS3DRenderer      | null = null;   // shared — set by initRenderer()
 let cssScene:       ThreeScene         | null = null;   // shared — set by initRenderer()
 let cssObject:      CSS3DObject        | null = null;
-let occluderScene:  ThreeScene         | null = null;
+let occluderScene:  ThreeScene         | null = null;   // separate light-free scene — Lambert outputs (0,0,0,0)
 let occludingPlane: Mesh               | null = null;
 /** Invisible plane used only for mouse-hover raycasting */
 let hoverPlane:     Mesh               | null = null;
@@ -182,6 +182,13 @@ export function init(_glScene?: ThreeScene): void {
     if (_initialized) return;
     _initialized = true;
 
+    // Separate light-free occluder scene.  MeshLambertMaterial with no lights
+    // computes outgoingLight=(0,0,0), so with opacity:0 the fragment outputs
+    // (0,0,0,0) — valid premultiplied transparent that iOS Safari composites
+    // correctly as a hole.  Adding lights here would give (r,g,b,0) which
+    // iOS treats as opaque and Chrome leaks as white.
+    occluderScene = new ThreeScene();
+
     // ── Container div ─────────────────────────────────────────────────────────
     containerEl = document.createElement('div');
     containerEl.style.width      = IFRAME_WIDTH + 'px';
@@ -253,9 +260,7 @@ export function init(_glScene?: ThreeScene): void {
     occludingPlane = new Mesh(occGeo, occMat);
     occludingPlane.position.set(POS_X, POS_Y, POS_Z);
     occludingPlane.scale.set(SCALE_X, SCALE_Y, 1);
-    occluderScene = new ThreeScene();
     occluderScene.add(occludingPlane);
-    occludingPlane.visible = false;  // only shown during renderOccluder pass
 
     // ── Hover hit-test plane ─────────────────────────────────────────────────
     // Invisible plane in world units — used only for pointer-events raycasting.
@@ -474,21 +479,22 @@ export function preRender(cam: PerspectiveCamera): void {
 }
 
 /**
- * Render the occluding plane that punches an alpha=0 hole through the canvas.
+ * Render the occluder scene that punches an alpha=0 hole through the canvas.
+ * The occluderScene has NO lights \u2014 Lambert computes outgoingLight=(0,0,0),
+ * so with opacity:0 the fragment outputs (0,0,0,0): valid premultiplied
+ * transparent on iOS Safari and all browsers.
  *
- * MUST be called AFTER all WebGL post-processing passes (Underwater, etc.)
- * and preceded by a depth prepass so the occluder's depthTest correctly hides
- * the hole when scene geometry is closer to the camera than the monitor plane.
+ * Call AFTER renderer.render(scene, camera) with autoClearColor=false and
+ * autoClearDepth=false so the main scene color and depth are preserved.
  */
 export function renderOccluder(wr: WebGLRenderer, cam: PerspectiveCamera): void {
-    if (!occluderScene || !occludingPlane || !_initialized) return;
-    occludingPlane.visible = true;
+    if (!occluderScene || !_initialized) return;
     wr.render(occluderScene, cam);
 }
 
 /**
  * Render the CSS3D scene.
- * Call AFTER the WebGL render (and after renderOccluder).
+ * Call AFTER the WebGL render and renderOccluder.
  */
 export function render(cam: PerspectiveCamera): void {
     if (!cssRenderer || !cssScene || !_initialized) return;

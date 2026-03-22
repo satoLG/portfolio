@@ -66,7 +66,7 @@ export const phoneScreenConfig = {
 let cssRenderer: CSS3DRenderer | null = null;   // shared — set by initRenderer()
 let cssScene: ThreeScene | null = null;               // shared — set by initRenderer()
 let cssObject: CSS3DObject | null = null;
-let occluderScene: ThreeScene | null = null;
+let occluderScene: ThreeScene | null = null;   // separate light-free scene — Lambert outputs (0,0,0,0)
 let occludingPlane: Mesh | null = null;
 let containerEl: HTMLDivElement | null = null;
 let overlayEl: HTMLDivElement | null = null;
@@ -310,14 +310,18 @@ export function preRender(phoneGroup: Group): void {
         occludingPlane.position.copy(cssObject!.position);
         occludingPlane.quaternion.copy(cssObject!.quaternion);
         occludingPlane.scale.copy(cssObject!.scale);
+        occludingPlane.visible = true;
     }
 }
 
 /**
- * Render the occluding plane that punches an alpha=0 hole through the canvas.
+ * Render the occluder scene that punches an alpha=0 hole through the canvas.
+ * The occluderScene has NO lights — Lambert computes outgoingLight=(0,0,0),
+ * so with opacity:0 the fragment outputs (0,0,0,0): valid premultiplied
+ * transparent on iOS Safari and all browsers.
  *
- * MUST be called AFTER Underwater.renderScene and ALL other WebGL passes so
- * the post-processing quad cannot overwrite the transparent pixels.
+ * Call AFTER renderer.render(scene, camera) with autoClearColor=false and
+ * autoClearDepth=false so main scene color and depth are preserved.
  */
 export function renderOccluder(wr: WebGLRenderer, cam: PerspectiveCamera): void {
     if (!occluderScene || !occludingPlane || !_initialized || !_visible) return;
