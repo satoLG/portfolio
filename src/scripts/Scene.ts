@@ -1,4 +1,4 @@
-import { AmbientLight, DirectionalLight, MeshDepthMaterial, PerspectiveCamera, Scene, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap } from "three";
+import { AmbientLight, DirectionalLight, MeshDepthMaterial, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap } from "three";
 import { getIsUnderwater } from "./Control";
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
@@ -186,10 +186,9 @@ export function setShadowsEnabled(value: boolean): void
 export function Start(): void
 {
     const dpr = Math.min(window.devicePixelRatio, 2);  // cap DPR to limit GPU memory
-    let width = window.innerWidth * dpr;
-    let height = window.innerHeight * dpr;
     
-    renderer.setSize(width, height, false);
+    renderer.setPixelRatio(dpr);
+    renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.autoClearColor = false;
     renderer.shadowMap.enabled = shadowsEnabled;
     renderer.shadowMap.type = VSMShadowMap;  // Variance shadows — real Gaussian blur
@@ -199,13 +198,6 @@ export function Start(): void
     renderer.domElement.style.zIndex = '1px';
     renderer.domElement.style.top = '0px';
     renderer.domElement.style.pointerEvents = 'auto';   // override #webgl's none
-    // Explicitly constrain canvas CSS size to CSS-pixel viewport dimensions.
-    // Without this, canvas.width = innerWidth*dpr defaults the CSS size to
-    // innerWidth*dpr CSS pixels on iOS — 2x the viewport — making the WebGL
-    // coordinate space 2x larger than what CSS3DRenderer computes, causing
-    // CSS3D elements to render at completely wrong screen positions on iOS.
-    renderer.domElement.style.width  = window.innerWidth  + 'px';
-    renderer.domElement.style.height = window.innerHeight + 'px';
     webglContainer.appendChild(renderer.domElement);
 
     // Single shared CSS3DRenderer — one preserve-3d container (matches Henry)
@@ -220,7 +212,7 @@ export function Start(): void
     MonitorScreen.init(scene);
     
     camera.fov = fov;
-    camera.aspect = width / height;
+    camera.aspect = window.innerWidth / window.innerHeight;
     camera.near = 0.3;
     camera.far = 4000;
     camera.updateProjectionMatrix();
@@ -230,7 +222,7 @@ export function Start(): void
     UpdateCameraRotation();
 
     staticCamera.fov = 70;
-    staticCamera.aspect = width / height;
+    staticCamera.aspect = window.innerWidth / window.innerHeight;
     staticCamera.near = 0.1;
     staticCamera.far = 10;
     staticCamera.updateProjectionMatrix();
@@ -238,18 +230,17 @@ export function Start(): void
 
     window.onresize = function()
     {
-        width = window.innerWidth * dpr;
-        height = window.innerHeight * dpr;
-        renderer.setSize(width, height, false);
-        camera.aspect = width / height;
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
 
-        staticCamera.aspect = width / height;
+        staticCamera.aspect = window.innerWidth / window.innerHeight;
         staticCamera.updateProjectionMatrix();
 
-        renderer.domElement.style.width  = window.innerWidth  + 'px';
-        renderer.domElement.style.height = window.innerHeight + 'px';
-        Underwater.onResize(width, height);
+        // Underwater needs the actual pixel-buffer dimensions, not CSS dimensions
+        const buf = new Vector2();
+        renderer.getDrawingBufferSize(buf);
+        Underwater.onResize(buf.x, buf.y);
         cssRenderer.setSize(window.innerWidth, window.innerHeight);
     }
 
