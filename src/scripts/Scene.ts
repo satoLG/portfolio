@@ -18,6 +18,7 @@ import * as WindLines from "../effects/WindLines.ts";
 import * as Clouds from "../effects/Clouds.ts";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
+import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
 import * as PhoneScreen from './PhoneScreen';
 import * as MonitorScreen from './MonitorScreen';
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
@@ -69,6 +70,10 @@ export let renderer = new WebGLRenderer({ antialias, alpha: true, powerPreferenc
 export const scene = new Scene();
 export const camera = new PerspectiveCamera();
 export const staticCamera = new PerspectiveCamera();
+
+// Single shared CSS3DRenderer + scene — one preserve-3d container matches Henry
+export const cssRenderer = new CSS3DRenderer();
+export const cssScene = new Scene();
 
 export const cameraRight = new Vector3();
 export const cameraUp = new Vector3();
@@ -191,13 +196,20 @@ export function Start(): void
 
     // Canvas styling — matches Henry's Renderer.ts
     renderer.domElement.style.position = 'absolute';
-    renderer.domElement.style.zIndex = '1';
+    renderer.domElement.style.zIndex = '1px';
     renderer.domElement.style.top = '0px';
+    renderer.domElement.style.pointerEvents = 'auto';   // override #webgl's none
     webglContainer.appendChild(renderer.domElement);
 
-    // CSS3D renderers append their divs into #css (behind #webgl in stacking order)
-    PhoneScreen.initRenderer(renderer.domElement);
-    MonitorScreen.initRenderer(renderer.domElement);
+    // Single shared CSS3DRenderer — one preserve-3d container (matches Henry)
+    cssRenderer.setSize(window.innerWidth, window.innerHeight);
+    cssRenderer.domElement.style.position = 'absolute';
+    cssRenderer.domElement.style.top      = '0px';
+    cssContainer.appendChild(cssRenderer.domElement);
+
+    // Both screens share the single renderer + scene
+    PhoneScreen.initRenderer(renderer.domElement, cssRenderer, cssScene);
+    MonitorScreen.initRenderer(renderer.domElement, cssRenderer, cssScene);
     MonitorScreen.init(scene);
     
     camera.fov = fov;
@@ -229,8 +241,7 @@ export function Start(): void
         staticCamera.updateProjectionMatrix();
 
         Underwater.onResize(width, height);
-        PhoneScreen.onResize(window.innerWidth, window.innerHeight);
-        MonitorScreen.onResize(window.innerWidth, window.innerHeight);
+        cssRenderer.setSize(window.innerWidth, window.innerHeight);
     }
 
     Skybox.Start();
@@ -429,9 +440,12 @@ export function Update(): void
         renderer.autoClearDepth = true;
     }
 
-    // CSS3D renders — after WebGL
+    // Pointer-events + CSS3D update
     PhoneScreen.render(camera);
     MonitorScreen.render(camera);
+
+    // Single CSS3D render — one preserve-3d container (matches Henry)
+    cssRenderer.render(cssScene, camera);
 
     // Wind lines 3D update — moves ribbon meshes and updates vertex positions
     WindLines.Update(deltaTime, camera.position.x, camera.position.y, camera.position.z, camera.fov);
