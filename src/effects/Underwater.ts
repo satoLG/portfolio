@@ -91,8 +91,9 @@ const fragmentShader = /* glsl */`
 `;
 
 export function Start(renderer: WebGLRenderer): void {
+    // Use drawing-buffer size (actual pixel dimensions) for framebuffer operations
     const size = new Vector2();
-    renderer.getSize(size);
+    renderer.getDrawingBufferSize(size);
     width = size.x;
     height = size.y;
 
