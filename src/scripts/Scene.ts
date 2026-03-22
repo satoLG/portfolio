@@ -198,7 +198,7 @@ export function Start(): void
     // CSS3D renderers append their divs into #css (behind #webgl in stacking order)
     PhoneScreen.initRenderer(renderer.domElement);
     MonitorScreen.initRenderer(renderer.domElement);
-    MonitorScreen.init();
+    MonitorScreen.init(scene);
     
     camera.fov = fov;
     camera.aspect = width / height;

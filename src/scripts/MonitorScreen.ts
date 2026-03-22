@@ -27,8 +27,16 @@ import {
     MeshLambertMaterial,
     NoBlending,
     DoubleSide,
+    AdditiveBlending,
+    NormalBlending,
     Raycaster,
     Vector2,
+    Vector3,
+    Euler,
+    TextureLoader,
+    VideoTexture,
+    Blending,
+    Texture,
 } from 'three';
 import { zoomToMonitor, zoomOutFromMonitor, isPhoneZoomActive } from './Control';
 
@@ -54,7 +62,7 @@ const SCALE_X = SCREEN_WIDTH  / IFRAME_WIDTH;
 const SCALE_Y = SCREEN_HEIGHT / IFRAME_HEIGHT;
 
 // URL loaded into the monitor iframe
-const IFRAME_SRC = 'https://os.henryheffernan.com/';
+const IFRAME_SRC = 'https://projects-hub-one.vercel.app/';
 
 // ── Module state ───────────────────────────────────────────────────────────────
 let cssRenderer:    CSS3DRenderer      | null = null;
@@ -75,6 +83,15 @@ let _isZoomed      = false;  // monitor is click-locked; iframe is interactive
 
 /** Camera stored each frame so the mousemove handler can raycast */
 let _currentCamera: PerspectiveCamera | null = null;
+
+/** Perspective dimmer plane — darkens screen at oblique angles / distances */
+let _dimmingPlane: Mesh | null = null;
+/** Video textures created from hidden <video> elements */
+const _videoTextures: { [key: string]: VideoTexture } = {};
+
+/** Monitor position in CSS-pixel space — used for layer offsets */
+const _monitorPos = new Vector3(POS_X, POS_Y, POS_Z);
+const _monitorRot = new Euler(0, 0, 0);  // no rotation (faces camera)
 
 const _raycaster = new Raycaster();
 const _mouse     = new Vector2();
@@ -170,7 +187,7 @@ export function initRenderer(canvasEl: HTMLCanvasElement): void {
  * Build the iframe container, CSS3DObject, and occluding plane.
  * Call once from Scene.Start() after initRenderer().
  */
-export function init(): void {
+export function init(_glScene?: ThreeScene): void {
     if (!cssRenderer || !cssScene) {
         console.warn('[MonitorScreen] initRenderer() must be called first');
         return;
@@ -265,6 +282,162 @@ export function init(): void {
     // raycasts against the correct world position (0, 0.45, -2.0) rather than
     // the identity matrix. preRender() then keeps it in sync every frame.
     hoverPlane.updateMatrixWorld(true);
+
+    // ── Texture layers — CRT/monitor effect (from Henry Jeff's repo) ─────────
+    const maxOffset = _createTextureLayers();
+    _createEnclosingPlanes(maxOffset);
+    _createPerspectiveDimmer(maxOffset);
+}
+
+// ── Texture Layer Helpers (ported from Henry Jeff's MonitorScreen) ─────────────
+
+function _getVideoTexture(videoId: string): void {
+    const video = document.getElementById(videoId);
+    if (!video) {
+        setTimeout(() => _getVideoTexture(videoId), 100);
+    } else {
+        _videoTextures[videoId] = new VideoTexture(video as HTMLVideoElement);
+    }
+}
+
+function _offsetPosition(position: Vector3, offset: Vector3): Vector3 {
+    const p = new Vector3();
+    p.copy(position);
+    // Offset is in CSS-pixel space — scale to world units
+    p.x += offset.x * SCALE_X;
+    p.y += offset.y * SCALE_Y;
+    p.z += offset.z * SCALE_X;  // Z uses same scale as X for uniform depth
+    return p;
+}
+
+function _addTextureLayer(
+    texture: Texture,
+    blendingMode: Blending,
+    opacity: number,
+    offset: number,
+): void {
+    if (!occluderScene) return;
+    const material = new MeshBasicMaterial({
+        map: texture,
+        blending: blendingMode,
+        side: DoubleSide,
+        opacity,
+        transparent: true,
+    });
+    const geometry = new PlaneGeometry(IFRAME_WIDTH, IFRAME_HEIGHT);
+    const mesh = new Mesh(geometry, material);
+    mesh.position.copy(
+        _offsetPosition(_monitorPos, new Vector3(0, 0, offset))
+    );
+    mesh.rotation.copy(_monitorRot);
+    mesh.scale.set(SCALE_X, SCALE_Y, 1);
+    occluderScene.add(mesh);
+}
+
+function _createTextureLayers(): number {
+    const loader = new TextureLoader();
+    const smudgeTexture = loader.load('/textures/monitor/layers/smudges.jpg');
+    const shadowTexture = loader.load('/textures/monitor/layers/shadow.png');
+
+    _getVideoTexture('video-1');
+    _getVideoTexture('video-2');
+
+    const scaleFactor = 4;
+    const layers: { texture: Texture; blending: Blending; opacity: number; offset: number }[] = [
+        { texture: shadowTexture,   blending: NormalBlending,   opacity: 1,    offset: 5 },
+        { texture: smudgeTexture,   blending: AdditiveBlending, opacity: 0.12, offset: 24 },
+    ];
+
+    // Video layers — added once the VideoTexture is ready (may be async via retry)
+    setTimeout(() => {
+        if (_videoTextures['video-1']) {
+            _addTextureLayer(_videoTextures['video-1'], AdditiveBlending, 0.5, 10 * scaleFactor);
+        }
+        if (_videoTextures['video-2']) {
+            _addTextureLayer(_videoTextures['video-2'], AdditiveBlending, 0.1, 15 * scaleFactor);
+        }
+    }, 500);
+
+    let maxOffset = -1;
+    for (const layer of layers) {
+        const offset = layer.offset * scaleFactor;
+        _addTextureLayer(layer.texture, layer.blending, layer.opacity, offset);
+        if (offset > maxOffset) maxOffset = offset;
+    }
+
+    return maxOffset;
+}
+
+type EnclosingPlane = {
+    size: Vector2;
+    position: Vector3;
+    rotation: Euler;
+};
+
+function _createEnclosingPlane(plane: EnclosingPlane): void {
+    if (!occluderScene) return;
+    const material = new MeshBasicMaterial({
+        side: DoubleSide,
+        color: 0x48493f,
+    });
+    const geometry = new PlaneGeometry(plane.size.x, plane.size.y);
+    const mesh = new Mesh(geometry, material);
+    mesh.position.copy(plane.position);
+    mesh.rotation.copy(plane.rotation);
+    mesh.scale.set(SCALE_X, SCALE_Y, 1);
+    occluderScene.add(mesh);
+}
+
+function _createEnclosingPlanes(maxOffset: number): void {
+    const sw = IFRAME_WIDTH;
+    const sh = IFRAME_HEIGHT;
+    const DEG = Math.PI / 180;
+
+    const planes: EnclosingPlane[] = [
+        { // left
+            size: new Vector2(maxOffset, sh),
+            position: _offsetPosition(_monitorPos, new Vector3(-sw / 2, 0, maxOffset / 2)),
+            rotation: new Euler(0, 90 * DEG, 0),
+        },
+        { // right
+            size: new Vector2(maxOffset, sh),
+            position: _offsetPosition(_monitorPos, new Vector3(sw / 2, 0, maxOffset / 2)),
+            rotation: new Euler(0, 90 * DEG, 0),
+        },
+        { // top
+            size: new Vector2(sw, maxOffset),
+            position: _offsetPosition(_monitorPos, new Vector3(0, sh / 2, maxOffset / 2)),
+            rotation: new Euler(90 * DEG, 0, 0),
+        },
+        { // bottom
+            size: new Vector2(sw, maxOffset),
+            position: _offsetPosition(_monitorPos, new Vector3(0, -sh / 2, maxOffset / 2)),
+            rotation: new Euler(90 * DEG, 0, 0),
+        },
+    ];
+
+    for (const plane of planes) {
+        _createEnclosingPlane(plane);
+    }
+}
+
+function _createPerspectiveDimmer(maxOffset: number): void {
+    if (!occluderScene) return;
+    const material = new MeshBasicMaterial({
+        side: DoubleSide,
+        color: 0x000000,
+        transparent: true,
+        blending: AdditiveBlending,
+    });
+    const geometry = new PlaneGeometry(IFRAME_WIDTH, IFRAME_HEIGHT);
+    const mesh = new Mesh(geometry, material);
+    mesh.position.copy(
+        _offsetPosition(_monitorPos, new Vector3(0, 0, maxOffset - 5))
+    );
+    mesh.rotation.copy(_monitorRot);
+    mesh.scale.set(SCALE_X, SCALE_Y, 1);
+    _dimmingPlane = mesh;
+    occluderScene.add(mesh);
 }
 
 /**
@@ -289,6 +462,27 @@ export function preRender(cam: PerspectiveCamera): void {
         // matrixWorld. Without this call, Raycaster always tests against the identity
         // matrix (origin) instead of the actual world position (POS_X, POS_Y, POS_Z).
         hoverPlane.updateMatrixWorld(true);
+    }
+
+    // ── Perspective dimmer update (from Henry's MonitorScreen.update()) ───────
+    if (_dimmingPlane && cam) {
+        const planeNormal = new Vector3(0, 0, 1);
+        const viewVector = new Vector3();
+        viewVector.copy(cam.position);
+        viewVector.sub(_monitorPos);
+        viewVector.normalize();
+        const dot = viewVector.dot(planeNormal);
+        const dimPos = _dimmingPlane.position;
+        const camPos = cam.position;
+        const distance = Math.sqrt(
+            (camPos.x - dimPos.x) ** 2 +
+            (camPos.y - dimPos.y) ** 2 +
+            (camPos.z - dimPos.z) ** 2
+        );
+        const opacity = 1 / (distance / 10000);
+        const DIM_FACTOR = 0.7;
+        (_dimmingPlane.material as MeshBasicMaterial).opacity =
+            (1 - opacity) * DIM_FACTOR + (1 - dot) * DIM_FACTOR;
     }
 }
 
