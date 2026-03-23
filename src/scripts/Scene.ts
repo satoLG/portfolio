@@ -209,6 +209,12 @@ export function Start(): void
     cssRenderer.setSize(getViewportWidth(), getViewportHeight());
     cssRenderer.domElement.style.position = 'absolute';
     cssRenderer.domElement.style.top      = '0px';
+    // iOS Safari fix: stock CSS3DRenderer sets overflow:hidden on its domElement.
+    // On WebKit, overflow:hidden on an ancestor of a preserve-3d element flattens
+    // the 3D rendering to a 2D layer while hit-testing still uses the 3D transform.
+    // Result: visual position is wrong but clicks register at the correct position.
+    // Removing overflow:hidden restores correct visual rendering on iOS.
+    cssRenderer.domElement.style.overflow = 'visible';
     cssContainer.appendChild(cssRenderer.domElement);
 
     // Both screens share the single renderer + scene
