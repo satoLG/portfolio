@@ -82,6 +82,10 @@ const cssRenderer = new CSS3DRenderer();
 cssRenderer.setSize(vpW(), vpH());
 cssRenderer.domElement.style.position = 'absolute';
 cssRenderer.domElement.style.top      = '0px';
+// iOS Safari fix: stock CSS3DRenderer sets overflow:hidden on its domElement.
+// On WebKit, overflow:hidden on a preserve-3d ancestor flattens 3D rendering to
+// a 2D layer while hit-testing still uses the real 3D transform → visual offset.
+cssRenderer.domElement.style.overflow = 'visible';
 cssContainer.appendChild(cssRenderer.domElement);
 
 // ── Scenes ────────────────────────────────────────────────────────────────────
@@ -95,10 +99,10 @@ const cssScene     = new Scene();   // CSS3D layer
 const occluderScene = new Scene();
 
 // ── Camera ────────────────────────────────────────────────────────────────────
-// FOV=35 matches Henry's portfolio camera.
-// At z=1.5, tan(17.5°)=0.315 → visible height = 2*1.5*0.315 = 0.945 world units.
-// SCREEN_HEIGHT = 1.0 * (1024/1280) = 0.8 → fills ~85% of viewport height.
-const camera = new PerspectiveCamera(35, vpW() / vpH(), 0.1, 1000);
+// FOV=50.5 matches the main scene (CameraConfig.ts defaultFov).
+// The CSS3D perspective value is derived from projectionMatrix.elements[5] * heightHalf,
+// so this must match the real scene or the test won't be representative.
+const camera = new PerspectiveCamera(50.5, vpW() / vpH(), 0.1, 1000);
 camera.position.set(POS.x, POS.y, POS.z + 1.5);
 camera.lookAt(POS.x, POS.y, POS.z);
 
