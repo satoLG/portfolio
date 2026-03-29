@@ -1,9 +1,14 @@
 import { defineConfig } from 'vite'
 import glsl from 'vite-plugin-glsl'
+import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 
 export default defineConfig({
   plugins: [
+    react({
+      // Only apply React transform to henryjeff files
+      include: '**/henryjeff/**/*.{tsx,jsx}',
+    }),
     glsl({
       include: [
         '**/*.glsl',
@@ -33,6 +38,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         test: resolve(__dirname, 'test/index.html'),
+        henryjeff: resolve(__dirname, 'henryjeff/index.html'),
       },
     },
   },
