@@ -8,7 +8,7 @@
     DoubleSide,
 } from 'three';
 import { isBreezeActive } from '../scripts/Audio';
-import { UNDERWATER_Y_THRESHOLD } from './Underwater';
+import { UNDERWATER_Y_THRESHOLD } from './PostProcess';
 import { islandPosition } from '../scene/IslandConfig';
 import * as WLC from '../scene/WindLinesConfig';
 

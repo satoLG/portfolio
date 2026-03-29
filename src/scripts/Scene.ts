@@ -10,7 +10,7 @@ import * as Fish from "../scene/Fish.ts";
 import * as Audio from "./Audio.ts";
 import * as UI from "./UI.ts";
 import * as MediaPlayer from "./MediaPlayer.ts";
-import * as Underwater from "../effects/Underwater.ts";
+import * as PostProcess from "../effects/PostProcess.ts";
 import * as OceanReflection from "../effects/OceanReflection.ts";
 import * as Bubbles from "../effects/Bubbles.ts";
 import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
@@ -20,7 +20,6 @@ import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
 import * as PhoneScreen from './PhoneScreen';
-import * as MonitorScreen from './MonitorScreen';
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { reflectionTextureUniform } from "../materials/OceanMaterial";
 
@@ -71,7 +70,7 @@ export const cssScene = new Scene();
 // CSS3D operates at a much larger coordinate space to avoid tiny matrix3d scale
 // values that cause iOS WebKit precision issues (downward displacement).
 // CSS_SCALE = IFRAME_WIDTH / SCREEN_WIDTH = 1280 / 0.25 = 5120
-// At this scale MonitorScreen’s CSS3DObject has scale (1,1,1) — matching henryjeff.
+// At this scale CSS3DObjects have scale (1,1,1) — matching henryjeff.
 export const CSS_SCALE = 5120;
 export const cssCamera = new PerspectiveCamera();
 
@@ -114,7 +113,7 @@ export function SetAntialias(value: boolean): void
 export function SetPixelSize(value: number): void
 {
     pixelSizeValue = value;
-    Underwater.setPixelSize(value);
+    PostProcess.setPixelSize(value);
     localStorage.setItem('portfolio-pixel-size', value.toString());
     applyPixelBodyClass(value);
     PhoneScreen.applyPhonePixelSize(value);
@@ -216,10 +215,8 @@ export function Start(): void
     // Keep CSS3DRenderer's default overflow:hidden — henryjeff works with it.
     cssContainer.appendChild(cssRenderer.domElement);
 
-    // Both screens share the single renderer + scene
+    // Phone screen shares the single CSS renderer + scene
     PhoneScreen.initRenderer(renderer.domElement, cssRenderer, cssScene);
-    MonitorScreen.initRenderer(renderer.domElement, cssRenderer, cssScene);
-    MonitorScreen.init(scene);
     
     camera.fov = fov;
     camera.aspect = getViewportWidth() / getViewportHeight();
@@ -252,7 +249,7 @@ export function Start(): void
         // Underwater needs the actual pixel-buffer dimensions, not CSS dimensions
         const buf = new Vector2();
         renderer.getDrawingBufferSize(buf);
-        Underwater.onResize(buf.x, buf.y);
+        PostProcess.onResize(buf.x, buf.y);
         cssRenderer.setSize(w, h);
     }
 
@@ -338,12 +335,12 @@ export function Start(): void
     scene.add(Fire.fireShadowLight);
     scene.add(Fire.fireShadowLight.target);
 
-    // Initialize underwater distortion
-    Underwater.Start(renderer);
+    // Initialize post-processing (underwater distortion + pixelation)
+    PostProcess.Start(renderer);
     
     // Apply saved pixel size
     if (pixelSizeValue > 0) {
-        Underwater.setPixelSize(pixelSizeValue);
+        PostProcess.setPixelSize(pixelSizeValue);
         applyPixelBodyClass(pixelSizeValue);
     }
 
@@ -396,7 +393,7 @@ export function Update(): void
     Audio.Update();
     UI.Update();
     MediaPlayer.Update();
-    Underwater.Update(camera.position.y);
+    PostProcess.updateUnderwaterAmount(camera.position.y);
     Bubbles.Update(camera.position.y);
     UnderwaterParticles.Update(camera.position.y);
 
@@ -429,8 +426,7 @@ export function Update(): void
     ambientLight.intensity = 0.3 + sunVisible * lightIntensity * 0.9;  // TWEAK: Higher base = brighter scene
 
     // Sync occluder transforms BEFORE the render (so NoBlending holes are correct)
-    MonitorScreen.preRender(camera);
-    PhoneScreen.preRender(Island.phone);
+    PhoneScreen.preRender(Island.phone, camera);
 
     // Update projection matrix every frame (matches Henry's Renderer.update())
     camera.updateProjectionMatrix();
@@ -446,7 +442,9 @@ export function Update(): void
 
     // Main WebGL render — single-pass: scene includes occluders (MeshBasicMaterial
     // with NoBlending punches transparent holes), matching henryjeff's architecture.
-    renderer.render(scene, camera);
+    // PostProcess.renderScene wraps renderer.render() with post-processing
+    // (pixelation + underwater distortion).
+    PostProcess.renderScene(renderer, scene, camera);
 
     // Debug axes
     renderer.autoClearColor = false;
@@ -455,7 +453,6 @@ export function Update(): void
 
     // Pointer-events + CSS3D update
     PhoneScreen.render(camera);
-    MonitorScreen.render(camera);
 
     // Single CSS3D render using the scaled CSS camera
     cssRenderer.render(cssScene, cssCamera);

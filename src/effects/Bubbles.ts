@@ -9,7 +9,7 @@ import {
 } from "three";
 import { camera, scene } from "../scripts/Scene";
 import { deltaTime, time } from "../scripts/Time";
-import { UNDERWATER_Y_THRESHOLD } from "./Underwater";
+import { UNDERWATER_Y_THRESHOLD } from "./PostProcess";
 import { playDiveSound } from "../scripts/Audio";
 
 // ============================================

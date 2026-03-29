@@ -1,3 +1,15 @@
+/**
+ * PostProcess.ts — Full-screen post-processing pass.
+ *
+ * Combines two independent effects into a single shader pass:
+ *   1. Underwater distortion — multi-frequency wave displacement (camera below water)
+ *   2. Pixelation — grid-snapping for a retro look (user setting)
+ *
+ * renderScene() wraps the main renderer.render() call: it renders the scene
+ * normally, then (if any effect is active) copies the framebuffer and draws
+ * it back through the post-process shader.
+ */
+
 import { 
     Mesh, 
     PlaneGeometry, 
@@ -14,15 +26,13 @@ import {
 import { time } from "../scripts/Time";
 import { distortionStrength, distortionSpeed, distortionScale } from '../scene/OceanConfig';
 
-// ============================================
-// DISTORTION SETTINGS
-// ============================================
+// ── Underwater constants ─────────────────────────────────────────────────────
 export const UNDERWATER_Y_THRESHOLD = 0.0;
-export const DISTORTION_STRENGTH = distortionStrength;
-export const DISTORTION_SPEED    = distortionSpeed;
-export const DISTORTION_SCALE    = distortionScale;
-// ============================================
+const DISTORTION_STRENGTH = distortionStrength;
+const DISTORTION_SPEED    = distortionSpeed;
+const DISTORTION_SCALE    = distortionScale;
 
+// ── Internals ────────────────────────────────────────────────────────────────
 const orthoCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const quadScene = new ThreeScene();
 
@@ -34,8 +44,9 @@ let initialized = false;
 let width = 1;
 let height = 1;
 
-// Reuse a static Vector2 for copyFramebufferToTexture offset (avoids per-frame allocation)
 const _copyOffset = new Vector2(0, 0);
+
+// ── Shaders ──────────────────────────────────────────────────────────────────
 
 const vertexShader = /* glsl */`
     varying vec2 vUv;
@@ -60,10 +71,9 @@ const fragmentShader = /* glsl */`
     void main() {
         vec2 uv = vUv;
         
-        // Multi-frequency underwater distortion.
-        // Three waves per axis at irrational frequency/phase ratios so their
-        // zero-crossings never align — this eliminates the static seam line
-        // that a single sin/cos wave produces where its amplitude is exactly 0.
+        // ── Underwater distortion ────────────────────────────────────────
+        // Multi-frequency waves per axis at irrational frequency/phase ratios
+        // so zero-crossings never align — eliminates static seam lines.
         float t = uTime * uSpeed;
         float dx = (sin(uv.y * uScale          + t)           * 0.60
                   + sin(uv.y * uScale * 1.7    + t * 1.3 + 1.9) * 0.25
@@ -76,11 +86,10 @@ const fragmentShader = /* glsl */`
         uv.x += dx;
         uv.y += dy;
 
-        // Guard against UVs escaping [0,1] — clamping to a tiny inset avoids
-        // the edge-smear that appears when the sampler clamps to the border.
+        // Clamp to tiny inset to avoid edge-smear from sampler clamping.
         uv = clamp(uv, vec2(0.001), vec2(0.999));
 
-        // Pixelation effect
+        // ── Pixelation ───────────────────────────────────────────────────
         if (uPixelSize > 0.5) {
             vec2 pixelCount = uResolution / uPixelSize;
             uv = floor(uv * pixelCount) / pixelCount;
@@ -90,14 +99,14 @@ const fragmentShader = /* glsl */`
     }
 `;
 
+// ── Public API ───────────────────────────────────────────────────────────────
+
 export function Start(renderer: WebGLRenderer): void {
-    // Use drawing-buffer size (actual pixel dimensions) for framebuffer operations
     const size = new Vector2();
     renderer.getDrawingBufferSize(size);
     width = size.x;
     height = size.y;
 
-    // FramebufferTexture copies directly from the framebuffer - no color conversion
     framebufferTexture = new FramebufferTexture(width, height, RGBAFormat);
     framebufferTexture.minFilter = LinearFilter;
     framebufferTexture.magFilter = LinearFilter;
@@ -139,7 +148,8 @@ export function onResize(w: number, h: number): void {
     }
 }
 
-export function Update(cameraY: number): void {
+/** Update underwater distortion amount based on camera depth. */
+export function updateUnderwaterAmount(cameraY: number): void {
     if (!material) return;
     const depth = UNDERWATER_Y_THRESHOLD - cameraY;
     underwaterAmount = Math.max(0, Math.min(1, depth / 0.5));
@@ -147,35 +157,37 @@ export function Update(cameraY: number): void {
     material.uniforms.uAmount.value = underwaterAmount;
 }
 
+/**
+ * Render the scene with post-processing.
+ * Renders normally first, then applies post-process pass if any effect is active.
+ */
 export function renderScene(renderer: WebGLRenderer, scene: ThreeScene, camera: Camera): void {
-    // Always render scene first
     renderer.render(scene, camera);
     
-    // Run post-process pass if underwater OR pixelation is active
     const needsPostProcess = (underwaterAmount > 0 || pixelSize > 0);
     if (!needsPostProcess || !initialized || !framebufferTexture || !material) {
         return;
     }
     
-    // Copy the framebuffer (already has correct colors) to texture
-    // Reuse static Vector2 to avoid allocation every frame
     renderer.copyFramebufferToTexture(_copyOffset, framebufferTexture);
-    
-    // Render post-processed version on top
     renderer.render(quadScene, orthoCamera);
 }
+
+// ── Underwater distortion setters ────────────────────────────────────────────
 
 export function setDistortion(v: number): void {
     if (material) material.uniforms.uDistortion.value = v;
 }
 
-export function setSpeed(v: number): void {
+export function setDistortionSpeed(v: number): void {
     if (material) material.uniforms.uSpeed.value = v;
 }
 
-export function setScale(v: number): void {
+export function setDistortionScale(v: number): void {
     if (material) material.uniforms.uScale.value = v;
 }
+
+// ── Pixelation setter ────────────────────────────────────────────────────────
 
 export function setPixelSize(v: number): void {
     pixelSize = v;

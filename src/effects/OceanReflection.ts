@@ -10,7 +10,7 @@ import {
     Scene,
     Mesh,
 } from "three";
-import { UNDERWATER_Y_THRESHOLD } from "./Underwater";
+import { UNDERWATER_Y_THRESHOLD } from "./PostProcess";
 import { reflectionRTSize } from '../scene/OceanConfig';
 import { skybox } from '../scene/Skybox';
 import { reflectionStrengthUniform } from '../materials/OceanMaterial';
