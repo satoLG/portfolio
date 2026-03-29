@@ -38,6 +38,7 @@ import {
     Texture,
 } from 'three';
 import { zoomToMonitor, zoomOutFromMonitor, isPhoneZoomActive } from './Control';
+import { CSS_SCALE } from './Scene';
 
 // ── Screen constants ───────────────────────────────────────────────────────────
 // Iframe CSS pixel resolution — matches henryjeff MonitorScreen reference
@@ -237,8 +238,10 @@ export function init(glScene: ThreeScene): void {
 
     // ── CSS3DObject ───────────────────────────────────────────────────────────
     cssObject = new CSS3DObject(containerEl);
-    cssObject.position.set(POS_X, POS_Y, POS_Z);
-    cssObject.scale.set(SCALE_X, SCALE_Y, 1);
+    // Position in CSS-pixel coordinate space (scaled up from world units).
+    // Scale stays (1,1,1) — matching henryjeff — to avoid iOS WebKit precision
+    // issues with tiny matrix3d values that cause downward displacement.
+    cssObject.position.set(POS_X * CSS_SCALE, POS_Y * CSS_SCALE, POS_Z * CSS_SCALE);
     cssScene.add(cssObject);
 
     // ── Occluding plane ───────────────────────────────────────────────────────
@@ -438,18 +441,15 @@ export function preRender(cam: PerspectiveCamera): void {
     _currentCamera = cam;
     if (!_initialized || !cssObject || !occludingPlane) return;
 
-    // Sync occluding plane transform with the CSS3DObject every frame
-    occludingPlane.position.copy(cssObject.position);
+    // Occluder + hover plane stay at WebGL world coordinates (not CSS_SCALE).
+    // They don't follow cssObject anymore since cssObject is in CSS-pixel space.
+    occludingPlane.position.set(POS_X, POS_Y, POS_Z);
     occludingPlane.quaternion.copy(cssObject.quaternion);
-    occludingPlane.scale.copy(cssObject.scale);
+    occludingPlane.scale.set(SCALE_X, SCALE_Y, 1);
 
-    // Sync hover plane position/rotation (geometry is in world units; no scale copy)
     if (hoverPlane) {
-        hoverPlane.position.copy(cssObject.position);
+        hoverPlane.position.set(POS_X, POS_Y, POS_Z);
         hoverPlane.quaternion.copy(cssObject.quaternion);
-        // CRITICAL: hoverPlane is not in any scene so Three.js never auto-updates its
-        // matrixWorld. Without this call, Raycaster always tests against the identity
-        // matrix (origin) instead of the actual world position (POS_X, POS_Y, POS_Z).
         hoverPlane.updateMatrixWorld(true);
     }
 

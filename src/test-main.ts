@@ -1,11 +1,9 @@
 /**
  * test-main.ts — Isolated CSS3D monitor screen test
  *
- * A minimal Three.js scene containing only the monitor screen implementation:
- *   - WebGL scene with occluder + texture layers (single-pass render)
- *   - CSS3DRenderer with iframe centred in the viewport
- *   - MeshBasicMaterial NoBlending occluder (ignores lights, outputs (0,0,0,0))
- *   - Full texture layers (smudge, shadow, video static)
+ * Operates at CSS-pixel coordinate space (1280×1024) with scale (1,1,1)
+ * on the CSS3DObject — matching henryjeff's architecture to avoid iOS WebKit
+ * precision issues with tiny CSS matrix3d scale values.
  *
  * No dependency on Scene.ts, Control.ts, or any other main-app module.
  */
@@ -30,24 +28,19 @@ import {
 } from 'three';
 import { CSS3DRenderer, CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer';
 
-// ── Monitor constants (identical to MonitorScreen.ts) ─────────────────────────
+// ── Monitor constants ─────────────────────────────────────────────────────────
 const IFRAME_WIDTH   = 1280;
 const IFRAME_HEIGHT  = 1024;
 const IFRAME_PADDING = 32;
 
-// World-unit size of the screen — 1.0 wide fills ~85% of viewport at z=1.5
-const SCREEN_WIDTH  = 1.0;
-const SCREEN_HEIGHT = SCREEN_WIDTH * (IFRAME_HEIGHT / IFRAME_WIDTH);
-
-// Scale: world units per CSS pixel
-const SCALE_X = SCREEN_WIDTH  / IFRAME_WIDTH;
-const SCALE_Y = SCREEN_HEIGHT / IFRAME_HEIGHT;
-
 const IFRAME_SRC = 'https://projects-hub-one.vercel.app/';
 
-// Monitor sits at world origin
+// Everything operates at CSS-pixel scale (1280×1024) — no tiny scale values.
+// Camera distance compensates so the on-screen angular size is identical.
 const POS = new Vector3(0, 0, 0);
 const ROT = new Euler(0, 0, 0);
+// Camera at z=1920 gives the same angular coverage as z=1.5 with SCREEN_WIDTH=1.0
+const CAM_Z = 1920;
 
 // ── Viewport helpers (matches henryjeff Sizes.ts) ────────────────────────────
 function vpW(): number { return window.innerWidth;  }
@@ -86,11 +79,8 @@ const scene    = new Scene();   // main scene — occluder + texture layers live
 const cssScene = new Scene();   // CSS3D layer
 
 // ── Camera ────────────────────────────────────────────────────────────────────
-// FOV=50.5 matches the main scene (CameraConfig.ts defaultFov).
-// The CSS3D perspective value is derived from projectionMatrix.elements[5] * heightHalf,
-// so this must match the real scene or the test won't be representative.
-const camera = new PerspectiveCamera(50.5, vpW() / vpH(), 0.1, 1000);
-camera.position.set(POS.x, POS.y, POS.z + 1.5);
+const camera = new PerspectiveCamera(50.5, vpW() / vpH(), 1, 100000);
+camera.position.set(POS.x, POS.y, POS.z + CAM_Z);
 camera.lookAt(POS.x, POS.y, POS.z);
 
 // ── iframe container ──────────────────────────────────────────────────────────
@@ -111,11 +101,11 @@ iframeEl.className       = 'jitter';
 iframeEl.frameBorder     = '0';
 containerEl.appendChild(iframeEl);
 
-// ── CSS3D object ──────────────────────────────────────────────────────────────
+// ── CSS3D object — scale (1,1,1), matching henryjeff ─────────────────────────
 const cssObject = new CSS3DObject(containerEl);
 cssObject.position.copy(POS);
 cssObject.rotation.copy(ROT);
-cssObject.scale.set(SCALE_X, SCALE_Y, 1);
+// NO .scale.set() — stays at (1,1,1) to avoid iOS WebKit precision issues
 cssScene.add(cssObject);
 
 // ── Occluder plane ────────────────────────────────────────────────────────────
@@ -130,16 +120,14 @@ const occMat = new MeshBasicMaterial({
 const occluder = new Mesh(new PlaneGeometry(IFRAME_WIDTH, IFRAME_HEIGHT), occMat);
 occluder.position.copy(POS);
 occluder.rotation.copy(ROT);
-occluder.scale.set(SCALE_X, SCALE_Y, 1);
 scene.add(occluder);
 
 // ── Texture layers (same as MonitorScreen._addTextureLayer) ───────────────────
 function addTextureLayer(texture: Texture, blending: Blending, opacity: number, offsetZ: number): void {
     const mat = new MeshBasicMaterial({ map: texture, blending, side: DoubleSide, opacity, transparent: true });
     const mesh = new Mesh(new PlaneGeometry(IFRAME_WIDTH, IFRAME_HEIGHT), mat);
-    mesh.position.set(POS.x, POS.y, POS.z + offsetZ * SCALE_X);
+    mesh.position.set(POS.x, POS.y, POS.z + offsetZ);
     mesh.rotation.copy(ROT);
-    mesh.scale.set(SCALE_X, SCALE_Y, 1);
     scene.add(mesh);
 }
 

@@ -31,6 +31,7 @@ import {
     Vector2,
 } from 'three';
 import { isPhoneZoomActive, zoomOutFromPhone, isMonitorZoomActive } from './Control';
+import { CSS_SCALE } from './Scene';
 import {
     phoneScreenWidth, phoneScreenHeight,
     phoneScreenOffsetX, phoneScreenOffsetY, phoneScreenOffsetZ,
@@ -176,13 +177,14 @@ export function init(glScene: ThreeScene): void {
 
     // ── CSS3DObject ──────────────────────────────────────────────────────────
     cssObject = new CSS3DObject(containerEl);
-    // Scale: world-unit size  /  CSS-pixel size
+    // Scale uses CSS_SCALE to keep values large enough for iOS WebKit.
+    // screenWidth * CSS_SCALE / iframeWidth ≈ 0.512 (vs original ~0.0001)
     cssObject.scale.set(
-        cfg.screenWidth  / cfg.iframeWidth,
-        cfg.screenHeight / cfg.iframeHeight,
+        cfg.screenWidth  * CSS_SCALE / cfg.iframeWidth,
+        cfg.screenHeight * CSS_SCALE / cfg.iframeHeight,
         1,
     );
-    cssObject.visible = true;   // always visible once phone is spawned — browser loads iframe immediately
+    cssObject.visible = true;
     cssScene.add(cssObject);
 
     // ── Occluding plane (NoBlending — valid premultiplied alpha) ─────────────────────
@@ -287,17 +289,18 @@ export function preRender(phoneGroup: Group): void {
 
     const cfg = phoneScreenConfig;
 
+    // CSS3DObject positioned in CSS-pixel coordinate space (scaled up)
     cssObject!.position.set(
-        _worldPos.x + cfg.offsetX,
-        _worldPos.y + cfg.offsetY,
-        _worldPos.z + cfg.offsetZ,
+        (_worldPos.x + cfg.offsetX) * CSS_SCALE,
+        (_worldPos.y + cfg.offsetY) * CSS_SCALE,
+        (_worldPos.z + cfg.offsetZ) * CSS_SCALE,
     );
     cssObject!.quaternion.copy(_worldQuat);
 
     // Live-update scale in case config changed via debug GUI
     cssObject!.scale.set(
-        cfg.screenWidth  / cfg.iframeWidth,
-        cfg.screenHeight / cfg.iframeHeight,
+        cfg.screenWidth  * CSS_SCALE / cfg.iframeWidth,
+        cfg.screenHeight * CSS_SCALE / cfg.iframeHeight,
         1,
     );
 
@@ -306,12 +309,19 @@ export function preRender(phoneGroup: Group): void {
     const visible = !_pixelActive || zoomed;
     if (containerEl) containerEl.style.opacity = visible ? '1' : '0';
 
-    // Occluding plane — mirror the CSS3DObject's full transform every frame.
-    // Suppress the alpha hole when the CSS3D plane is invisible (pixel mode + zoomed out).
+    // Occluding plane stays at WebGL world coordinates (decoupled from CSS_SCALE).
     if (occludingPlane) {
-        occludingPlane.position.copy(cssObject!.position);
-        occludingPlane.quaternion.copy(cssObject!.quaternion);
-        occludingPlane.scale.copy(cssObject!.scale);
+        occludingPlane.position.set(
+            _worldPos.x + cfg.offsetX,
+            _worldPos.y + cfg.offsetY,
+            _worldPos.z + cfg.offsetZ,
+        );
+        occludingPlane.quaternion.copy(_worldQuat);
+        occludingPlane.scale.set(
+            cfg.screenWidth  / cfg.iframeWidth,
+            cfg.screenHeight / cfg.iframeHeight,
+            1,
+        );
         occludingPlane.visible = visible;
     }
 }
