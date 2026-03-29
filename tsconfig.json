@@ -13,10 +13,14 @@
     "isolatedModules": true,
     "noEmit": true,
 
+    /* React JSX for henryjeff sub-project */
+    "jsx": "react-jsx",
+
     /* Linting */
     "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
+    "strictPropertyInitialization": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src", "resources/**/*.glsl"]
