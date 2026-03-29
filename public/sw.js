@@ -1,4 +1,4 @@
-const CACHE_NAME = 'leosato-portfolio-v1';
+const CACHE_NAME = 'leosato-portfolio-v2';
 
 // Assets to cache on install
 const STATIC_ASSETS = [

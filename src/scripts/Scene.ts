@@ -68,6 +68,13 @@ export const staticCamera = new PerspectiveCamera();
 export const cssRenderer = new CSS3DRenderer();
 export const cssScene = new Scene();
 
+// CSS3D operates at a much larger coordinate space to avoid tiny matrix3d scale
+// values that cause iOS WebKit precision issues (downward displacement).
+// CSS_SCALE = IFRAME_WIDTH / SCREEN_WIDTH = 1280 / 0.25 = 5120
+// At this scale MonitorScreen’s CSS3DObject has scale (1,1,1) — matching henryjeff.
+export const CSS_SCALE = 5120;
+export const cssCamera = new PerspectiveCamera();
+
 export const cameraRight = new Vector3();
 export const cameraUp = new Vector3();
 export const cameraForward = new Vector3();
@@ -428,6 +435,15 @@ export function Update(): void
     // Update projection matrix every frame (matches Henry's Renderer.update())
     camera.updateProjectionMatrix();
 
+    // Sync CSS camera — same orientation/FOV but position scaled to CSS-pixel space
+    cssCamera.position.copy(camera.position).multiplyScalar(CSS_SCALE);
+    cssCamera.quaternion.copy(camera.quaternion);
+    cssCamera.fov = camera.fov;
+    cssCamera.aspect = camera.aspect;
+    cssCamera.near = camera.near * CSS_SCALE;
+    cssCamera.far = camera.far * CSS_SCALE;
+    cssCamera.updateProjectionMatrix();
+
     // Main WebGL render — single-pass: scene includes occluders (MeshBasicMaterial
     // with NoBlending punches transparent holes), matching henryjeff's architecture.
     renderer.render(scene, camera);
@@ -441,8 +457,8 @@ export function Update(): void
     PhoneScreen.render(camera);
     MonitorScreen.render(camera);
 
-    // Single CSS3D render — one preserve-3d container (matches Henry)
-    cssRenderer.render(cssScene, camera);
+    // Single CSS3D render using the scaled CSS camera
+    cssRenderer.render(cssScene, cssCamera);
 
     // Wind lines 3D update — moves ribbon meshes and updates vertex positions
     WindLines.Update(deltaTime, camera.position.x, camera.position.y, camera.position.z, camera.fov);
