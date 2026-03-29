@@ -13,8 +13,13 @@
     "isolatedModules": true,
     "noEmit": true,
 
-    /* React JSX for henryjeff sub-project */
-    "jsx": "react-jsx",
+    /* Redirect three.js example sub-path imports to @types/three declarations.
+       With moduleResolution:"bundler", the three package exports map resolves
+       ./examples/jsm/* to .js files (no .d.ts), so TypeScript cannot auto-find
+       @types/three for deep imports. This paths mapping fixes that. */
+    "paths": {
+      "three/examples/jsm/*": ["./node_modules/@types/three/examples/jsm/*"]
+    },
 
     /* Linting */
     "strict": true,

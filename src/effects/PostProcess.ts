@@ -20,8 +20,7 @@ import {
     Vector2,
     Camera,
     FramebufferTexture,
-    LinearFilter,
-    RGBAFormat
+    LinearFilter
 } from "three";
 import { time } from "../scripts/Time";
 import { distortionStrength, distortionSpeed, distortionScale } from '../scene/OceanConfig';
@@ -107,7 +106,7 @@ export function Start(renderer: WebGLRenderer): void {
     width = size.x;
     height = size.y;
 
-    framebufferTexture = new FramebufferTexture(width, height, RGBAFormat);
+    framebufferTexture = new FramebufferTexture(width, height);
     framebufferTexture.minFilter = LinearFilter;
     framebufferTexture.magFilter = LinearFilter;
     
@@ -138,7 +137,7 @@ export function onResize(w: number, h: number): void {
     height = h;
     if (framebufferTexture) {
         framebufferTexture.dispose();
-        framebufferTexture = new FramebufferTexture(width, height, RGBAFormat);
+        framebufferTexture = new FramebufferTexture(width, height);
         framebufferTexture.minFilter = LinearFilter;
         framebufferTexture.magFilter = LinearFilter;
         if (material) {
@@ -169,7 +168,7 @@ export function renderScene(renderer: WebGLRenderer, scene: ThreeScene, camera: 
         return;
     }
     
-    renderer.copyFramebufferToTexture(_copyOffset, framebufferTexture);
+    renderer.copyFramebufferToTexture(framebufferTexture, _copyOffset);
     renderer.render(quadScene, orthoCamera);
 }
 
