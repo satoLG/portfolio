@@ -181,15 +181,12 @@ export function Start(): void
     const dpr = Math.min(window.devicePixelRatio, 2);  // cap DPR to limit GPU memory
     
     // ── Viewport helpers ─────────────────────────────────────────────────────
-    // iOS Safari: window.innerHeight lags behind the actual visible area when
-    // the dynamic URL bar shows/hides.  window.visualViewport gives the real
-    // dimensions and fires its own resize event.  Fall back to window.inner*
-    // on desktop where visualViewport is always identical.
+    // Use window.innerWidth/Height — matches henryjeff's Sizes.ts approach.
     function getViewportWidth(): number {
-        return window.visualViewport?.width ?? window.innerWidth;
+        return window.innerWidth;
     }
     function getViewportHeight(): number {
-        return window.visualViewport?.height ?? window.innerHeight;
+        return window.innerHeight;
     }
 
     renderer.setPixelRatio(dpr);
@@ -209,12 +206,7 @@ export function Start(): void
     cssRenderer.setSize(getViewportWidth(), getViewportHeight());
     cssRenderer.domElement.style.position = 'absolute';
     cssRenderer.domElement.style.top      = '0px';
-    // iOS Safari fix: stock CSS3DRenderer sets overflow:hidden on its domElement.
-    // On WebKit, overflow:hidden on an ancestor of a preserve-3d element flattens
-    // the 3D rendering to a 2D layer while hit-testing still uses the 3D transform.
-    // Result: visual position is wrong but clicks register at the correct position.
-    // Removing overflow:hidden restores correct visual rendering on iOS.
-    cssRenderer.domElement.style.overflow = 'visible';
+    // Keep CSS3DRenderer's default overflow:hidden — henryjeff works with it.
     cssContainer.appendChild(cssRenderer.domElement);
 
     // Both screens share the single renderer + scene
@@ -258,13 +250,6 @@ export function Start(): void
     }
 
     window.onresize = onViewportResize;
-
-    // iOS Safari: visualViewport fires resize when the URL bar shows/hides,
-    // but window.resize does NOT.  Without this, the CSS3DRenderer stays at
-    // the initial (wrong) height and CSS3D content is displaced.
-    if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', onViewportResize);
-    }
 
     Skybox.Start();
     scene.add(Skybox.skybox);
@@ -443,22 +428,11 @@ export function Update(): void
     // Update projection matrix every frame (matches Henry's Renderer.update())
     camera.updateProjectionMatrix();
 
-    // Main WebGL render — clears to transparent black (setClearColor ensures alpha=0),
-    // then renders full scene.  Depth buffer is intact after this call.
+    // Main WebGL render — single-pass: scene includes occluders (MeshBasicMaterial
+    // with NoBlending punches transparent holes), matching henryjeff's architecture.
     renderer.render(scene, camera);
 
-    // Occluder renders — MUST run after main render while depth buffer is intact,
-    // and before CSS3D render so transparent holes are in place.
-    // occluderScene has NO lights → Lambert outputs (0,0,0,0) → valid premultiplied
-    // transparent that iOS Safari and Chrome both handle correctly.
-    renderer.autoClearColor = false;
-    renderer.autoClearDepth = false;
-    MonitorScreen.renderOccluder(renderer, camera);
-    if (PhoneScreen.isVisible()) PhoneScreen.renderOccluder(renderer, camera);
-    renderer.autoClearColor = true;
-    renderer.autoClearDepth = true;
-
-    // Debug axes — rendered after occluder (depth state doesn't matter here)
+    // Debug axes
     renderer.autoClearColor = false;
     renderer.render(axes, staticCamera);
     renderer.autoClearColor = true;

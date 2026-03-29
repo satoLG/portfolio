@@ -2,11 +2,10 @@
  * test-main.ts — Isolated CSS3D monitor screen test
  *
  * A minimal Three.js scene containing only the monitor screen implementation:
- *   - Empty WebGL scene (solid body background)
+ *   - WebGL scene with occluder + texture layers (single-pass render)
  *   - CSS3DRenderer with iframe centred in the viewport
- *   - NoBlending occluder in a light-free scene (valid premultiplied alpha)
+ *   - MeshBasicMaterial NoBlending occluder (ignores lights, outputs (0,0,0,0))
  *   - Full texture layers (smudge, shadow, video static)
- *   - visualViewport resize handling for iOS Safari
  *
  * No dependency on Scene.ts, Control.ts, or any other main-app module.
  */
@@ -17,7 +16,6 @@ import {
     WebGLRenderer,
     Mesh,
     PlaneGeometry,
-    MeshLambertMaterial,
     MeshBasicMaterial,
     NoBlending,
     DoubleSide,
@@ -51,11 +49,9 @@ const IFRAME_SRC = 'https://projects-hub-one.vercel.app/';
 const POS = new Vector3(0, 0, 0);
 const ROT = new Euler(0, 0, 0);
 
-// ── iOS-safe viewport helpers ─────────────────────────────────────────────────
-// window.innerHeight lags on iOS when the URL bar shows/hides.
-// window.visualViewport gives the real current dimensions.
-function vpW(): number { return window.visualViewport?.width  ?? window.innerWidth;  }
-function vpH(): number { return window.visualViewport?.height ?? window.innerHeight; }
+// ── Viewport helpers (matches henryjeff Sizes.ts) ────────────────────────────
+function vpW(): number { return window.innerWidth;  }
+function vpH(): number { return window.innerHeight; }
 
 // ── DOM containers ────────────────────────────────────────────────────────────
 const cssContainer   = document.querySelector('#css')   as HTMLDivElement;
@@ -82,21 +78,12 @@ const cssRenderer = new CSS3DRenderer();
 cssRenderer.setSize(vpW(), vpH());
 cssRenderer.domElement.style.position = 'absolute';
 cssRenderer.domElement.style.top      = '0px';
-// iOS Safari fix: stock CSS3DRenderer sets overflow:hidden on its domElement.
-// On WebKit, overflow:hidden on a preserve-3d ancestor flattens 3D rendering to
-// a 2D layer while hit-testing still uses the real 3D transform → visual offset.
-cssRenderer.domElement.style.overflow = 'visible';
+// Keep CSS3DRenderer's default overflow:hidden — henryjeff works with it.
 cssContainer.appendChild(cssRenderer.domElement);
 
 // ── Scenes ────────────────────────────────────────────────────────────────────
-const scene        = new Scene();   // empty main scene — only used for clear pass
-const cssScene     = new Scene();   // CSS3D layer
-// CRITICAL: occluderScene has NO lights.
-// MeshLambertMaterial with no lights computes outgoingLight=(0,0,0).
-// With opacity:0 + NoBlending the fragment writes (0,0,0,0) — valid
-// premultiplied-alpha transparent.  Adding lights would give (r,g,b,0)
-// which iOS Safari treats as opaque and Chrome bleeds as white.
-const occluderScene = new Scene();
+const scene    = new Scene();   // main scene — occluder + texture layers live here
+const cssScene = new Scene();   // CSS3D layer
 
 // ── Camera ────────────────────────────────────────────────────────────────────
 // FOV=50.5 matches the main scene (CameraConfig.ts defaultFov).
@@ -120,6 +107,7 @@ iframeEl.style.height    = IFRAME_HEIGHT + 'px';
 iframeEl.style.padding   = IFRAME_PADDING + 'px';
 iframeEl.style.boxSizing = 'border-box';
 iframeEl.style.opacity   = '1';
+iframeEl.className       = 'jitter';
 iframeEl.frameBorder     = '0';
 containerEl.appendChild(iframeEl);
 
@@ -131,17 +119,19 @@ cssObject.scale.set(SCALE_X, SCALE_Y, 1);
 cssScene.add(cssObject);
 
 // ── Occluder plane ────────────────────────────────────────────────────────────
-const occMat = new MeshLambertMaterial();
-occMat.side        = DoubleSide;
-occMat.opacity     = 0;
-occMat.transparent = true;
-occMat.blending    = NoBlending;
+const occMat = new MeshBasicMaterial({
+    color: 0x000000,
+    side: DoubleSide,
+    opacity: 0,
+    transparent: true,
+    blending: NoBlending,
+});
 
 const occluder = new Mesh(new PlaneGeometry(IFRAME_WIDTH, IFRAME_HEIGHT), occMat);
 occluder.position.copy(POS);
 occluder.rotation.copy(ROT);
 occluder.scale.set(SCALE_X, SCALE_Y, 1);
-occluderScene.add(occluder);
+scene.add(occluder);
 
 // ── Texture layers (same as MonitorScreen._addTextureLayer) ───────────────────
 function addTextureLayer(texture: Texture, blending: Blending, opacity: number, offsetZ: number): void {
@@ -150,7 +140,7 @@ function addTextureLayer(texture: Texture, blending: Blending, opacity: number, 
     mesh.position.set(POS.x, POS.y, POS.z + offsetZ * SCALE_X);
     mesh.rotation.copy(ROT);
     mesh.scale.set(SCALE_X, SCALE_Y, 1);
-    occluderScene.add(mesh);
+    scene.add(mesh);
 }
 
 const loader = new TextureLoader();
@@ -175,26 +165,16 @@ function onResize(): void {
     camera.updateProjectionMatrix();
 }
 window.onresize = onResize;
-if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', onResize);
-}
 
 // ── Render loop ───────────────────────────────────────────────────────────────
 function animate(): void {
     requestAnimationFrame(animate);
     camera.updateProjectionMatrix();
 
-    // 1. Clear + empty main scene
+    // Single-pass: scene contains occluder + texture layers
     renderer.render(scene, camera);
 
-    // 2. Occluder pass — punch (0,0,0,0) hole without clearing what's already drawn
-    renderer.autoClearColor = false;
-    renderer.autoClearDepth = false;
-    renderer.render(occluderScene, camera);
-    renderer.autoClearColor = true;
-    renderer.autoClearDepth = true;
-
-    // 3. CSS3D — iframe shows through the transparent hole
+    // CSS3D — iframe shows through the transparent hole
     cssRenderer.render(cssScene, camera);
 }
 animate();
