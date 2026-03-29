@@ -24,7 +24,6 @@ import {
     Mesh,
     PlaneGeometry,
     MeshBasicMaterial,
-    MeshLambertMaterial,
     NoBlending,
     DoubleSide,
     AdditiveBlending,
@@ -68,7 +67,7 @@ const IFRAME_SRC = 'https://projects-hub-one.vercel.app/';
 let cssRenderer:    CSS3DRenderer      | null = null;   // shared — set by initRenderer()
 let cssScene:       ThreeScene         | null = null;   // shared — set by initRenderer()
 let cssObject:      CSS3DObject        | null = null;
-let occluderScene:  ThreeScene         | null = null;   // separate light-free scene — Lambert outputs (0,0,0,0)
+let _glScene:       ThreeScene         | null = null;   // main WebGL scene — occluder + layers live here
 let occludingPlane: Mesh               | null = null;
 /** Invisible plane used only for mouse-hover raycasting */
 let hoverPlane:     Mesh               | null = null;
@@ -174,7 +173,7 @@ export function initRenderer(canvasEl: HTMLCanvasElement, sharedRenderer: CSS3DR
  * Build the iframe container, CSS3DObject, and occluding plane.
  * Call once from Scene.Start() after initRenderer().
  */
-export function init(_glScene?: ThreeScene): void {
+export function init(glScene: ThreeScene): void {
     if (!cssRenderer || !cssScene) {
         console.warn('[MonitorScreen] initRenderer() must be called first');
         return;
@@ -182,12 +181,9 @@ export function init(_glScene?: ThreeScene): void {
     if (_initialized) return;
     _initialized = true;
 
-    // Separate light-free occluder scene.  MeshLambertMaterial with no lights
-    // computes outgoingLight=(0,0,0), so with opacity:0 the fragment outputs
-    // (0,0,0,0) — valid premultiplied transparent that iOS Safari composites
-    // correctly as a hole.  Adding lights here would give (r,g,b,0) which
-    // iOS treats as opaque and Chrome leaks as white.
-    occluderScene = new ThreeScene();
+    // Store reference to the main WebGL scene — occluder + texture layers
+    // live here (single-pass render, matching henryjeff's architecture).
+    _glScene = glScene;
 
     // ── Container div ─────────────────────────────────────────────────────────
     containerEl = document.createElement('div');
@@ -246,21 +242,22 @@ export function init(_glScene?: ThreeScene): void {
     cssScene.add(cssObject);
 
     // ── Occluding plane ───────────────────────────────────────────────────────
-    // NoBlending: disables GL blending entirely so the fragment output (rgba 0,0,0,0
-    // from opacity:0) is written directly to the framebuffer, punching a fully-zero
-    // transparent hole.  CustomBlending preserved RGB + zeroed only alpha, producing
-    // invalid premultiplied-alpha values (non-zero RGB, alpha=0) that iOS WebKit's
-    // GPU compositor treats as opaque.  NoBlending matches Henry Jeff's exact approach.
-    const occMat = new MeshLambertMaterial();
-    occMat.side = DoubleSide;
-    occMat.opacity = 0;
-    occMat.transparent = true;
-    occMat.blending = NoBlending;
+    // MeshBasicMaterial ignores scene lights — always outputs (0,0,0,0) with
+    // opacity:0 + NoBlending, punching a valid premultiplied-alpha transparent hole.
+    // This lets the occluder live in the main scene (matching henryjeff's architecture)
+    // instead of a separate light-free scene with multi-pass rendering.
+    const occMat = new MeshBasicMaterial({
+        color: 0x000000,
+        side: DoubleSide,
+        opacity: 0,
+        transparent: true,
+        blending: NoBlending,
+    });
     const occGeo = new PlaneGeometry(IFRAME_WIDTH, IFRAME_HEIGHT);
     occludingPlane = new Mesh(occGeo, occMat);
     occludingPlane.position.set(POS_X, POS_Y, POS_Z);
     occludingPlane.scale.set(SCALE_X, SCALE_Y, 1);
-    occluderScene.add(occludingPlane);
+    _glScene.add(occludingPlane);
 
     // ── Hover hit-test plane ─────────────────────────────────────────────────
     // Invisible plane in world units — used only for pointer-events raycasting.
@@ -308,7 +305,7 @@ function _addTextureLayer(
     opacity: number,
     offset: number,
 ): void {
-    if (!occluderScene) return;
+    if (!_glScene) return;
     const material = new MeshBasicMaterial({
         map: texture,
         blending: blendingMode,
@@ -323,7 +320,7 @@ function _addTextureLayer(
     );
     mesh.rotation.copy(_monitorRot);
     mesh.scale.set(SCALE_X, SCALE_Y, 1);
-    occluderScene.add(mesh);
+    _glScene.add(mesh);
 }
 
 function _createTextureLayers(): number {
@@ -367,7 +364,7 @@ type EnclosingPlane = {
 };
 
 function _createEnclosingPlane(plane: EnclosingPlane): void {
-    if (!occluderScene) return;
+    if (!_glScene) return;
     const material = new MeshBasicMaterial({
         side: DoubleSide,
         color: 0x48493f,
@@ -377,7 +374,7 @@ function _createEnclosingPlane(plane: EnclosingPlane): void {
     mesh.position.copy(plane.position);
     mesh.rotation.copy(plane.rotation);
     mesh.scale.set(SCALE_X, SCALE_Y, 1);
-    occluderScene.add(mesh);
+    _glScene.add(mesh);
 }
 
 function _createEnclosingPlanes(maxOffset: number): void {
@@ -414,7 +411,7 @@ function _createEnclosingPlanes(maxOffset: number): void {
 }
 
 function _createPerspectiveDimmer(maxOffset: number): void {
-    if (!occluderScene) return;
+    if (!_glScene) return;
     const material = new MeshBasicMaterial({
         side: DoubleSide,
         color: 0x000000,
@@ -429,7 +426,7 @@ function _createPerspectiveDimmer(maxOffset: number): void {
     mesh.rotation.copy(_monitorRot);
     mesh.scale.set(SCALE_X, SCALE_Y, 1);
     _dimmingPlane = mesh;
-    occluderScene.add(mesh);
+    _glScene.add(mesh);
 }
 
 /**
@@ -479,17 +476,12 @@ export function preRender(cam: PerspectiveCamera): void {
 }
 
 /**
- * Render the occluder scene that punches an alpha=0 hole through the canvas.
- * The occluderScene has NO lights \u2014 Lambert computes outgoingLight=(0,0,0),
- * so with opacity:0 the fragment outputs (0,0,0,0): valid premultiplied
- * transparent on iOS Safari and all browsers.
- *
- * Call AFTER renderer.render(scene, camera) with autoClearColor=false and
- * autoClearDepth=false so the main scene color and depth are preserved.
+ * renderOccluder is no longer needed — occluder lives in the main scene and
+ * is rendered as part of the single renderer.render(scene, camera) call.
+ * Kept as a no-op for API compatibility.
  */
-export function renderOccluder(wr: WebGLRenderer, cam: PerspectiveCamera): void {
-    if (!occluderScene || !_initialized) return;
-    wr.render(occluderScene, cam);
+export function renderOccluder(_wr: WebGLRenderer, _cam: PerspectiveCamera): void {
+    // no-op — occluder is in the main scene now
 }
 
 /**

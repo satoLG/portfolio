@@ -24,7 +24,7 @@ import {
     Quaternion,
     Mesh,
     PlaneGeometry,
-    MeshLambertMaterial,
+    MeshBasicMaterial,
     NoBlending,
     DoubleSide,
     Raycaster,
@@ -66,7 +66,7 @@ export const phoneScreenConfig = {
 let cssRenderer: CSS3DRenderer | null = null;   // shared — set by initRenderer()
 let cssScene: ThreeScene | null = null;               // shared — set by initRenderer()
 let cssObject: CSS3DObject | null = null;
-let occluderScene: ThreeScene | null = null;   // separate light-free scene — Lambert outputs (0,0,0,0)
+let _glScene: ThreeScene | null = null;   // main WebGL scene — occluder lives here
 let occludingPlane: Mesh | null = null;
 let containerEl: HTMLDivElement | null = null;
 let overlayEl: HTMLDivElement | null = null;
@@ -127,13 +127,17 @@ export function initRenderer(canvasEl: HTMLCanvasElement, sharedRenderer: CSS3DR
  *
  * @param glScene  The main WebGL scene (for the occluding plane).
  */
-export function init(): void {
+export function init(glScene: ThreeScene): void {
     if (!cssRenderer || !cssScene) {
         console.warn('[PhoneScreen] initRenderer() must be called first');
         return;
     }
     if (_initialized) return;
     _initialized = true;
+
+    // Store reference to the main WebGL scene — occluder lives here
+    // (single-pass render, matching henryjeff's architecture).
+    _glScene = glScene;
 
     const cfg = phoneScreenConfig;
 
@@ -182,23 +186,20 @@ export function init(): void {
     cssScene.add(cssObject);
 
     // ── Occluding plane (NoBlending — valid premultiplied alpha) ─────────────────────
-    // Lives in its own scene so it can be rendered AFTER Underwater post-
-    // processing (which would otherwise overwrite the transparent pixels).
-    //
-    // NoBlending disables GL blending; fragment rgba(0,0,0,0) from opacity:0
-    // is written directly — valid premultiplied transparent, which iOS WebKit
-    // composites correctly.  CustomBlending preserved RGB+zeroed alpha, producing
-    // invalid premultiplied values that WebKit treats as opaque.
-    const occMat = new MeshLambertMaterial();
-    occMat.side = DoubleSide;
-    occMat.opacity = 0;
-    occMat.transparent = true;
-    occMat.blending = NoBlending;
+    // MeshBasicMaterial ignores scene lights — always outputs (0,0,0,0) with
+    // opacity:0 + NoBlending, punching a valid premultiplied-alpha transparent hole.
+    // Lives in the main scene (matching henryjeff's single-pass architecture).
+    const occMat = new MeshBasicMaterial({
+        color: 0x000000,
+        side: DoubleSide,
+        opacity: 0,
+        transparent: true,
+        blending: NoBlending,
+    });
     const occGeo = new PlaneGeometry(cfg.iframeWidth, cfg.iframeHeight);
     occludingPlane = new Mesh(occGeo, occMat);
     occludingPlane.visible = false;
-    occluderScene = new ThreeScene();
-    occluderScene.add(occludingPlane);
+    _glScene.add(occludingPlane);
 
     // Apply any effects that were requested before init() ran
     applyPhoneColorFilter(_pendingColorFilter);
@@ -305,30 +306,23 @@ export function preRender(phoneGroup: Group): void {
     const visible = !_pixelActive || zoomed;
     if (containerEl) containerEl.style.opacity = visible ? '1' : '0';
 
-    // Occluding plane — mirror the CSS3DObject's full transform every frame
+    // Occluding plane — mirror the CSS3DObject's full transform every frame.
+    // Suppress the alpha hole when the CSS3D plane is invisible (pixel mode + zoomed out).
     if (occludingPlane) {
         occludingPlane.position.copy(cssObject!.position);
         occludingPlane.quaternion.copy(cssObject!.quaternion);
         occludingPlane.scale.copy(cssObject!.scale);
-        occludingPlane.visible = true;
+        occludingPlane.visible = visible;
     }
 }
 
 /**
- * Render the occluder scene that punches an alpha=0 hole through the canvas.
- * The occluderScene has NO lights — Lambert computes outgoingLight=(0,0,0),
- * so with opacity:0 the fragment outputs (0,0,0,0): valid premultiplied
- * transparent on iOS Safari and all browsers.
- *
- * Call AFTER renderer.render(scene, camera) with autoClearColor=false and
- * autoClearDepth=false so main scene color and depth are preserved.
+ * renderOccluder is no longer needed — occluder lives in the main scene and
+ * is rendered as part of the single renderer.render(scene, camera) call.
+ * Visibility is managed in preRender().
  */
-export function renderOccluder(wr: WebGLRenderer, cam: PerspectiveCamera): void {
-    if (!occluderScene || !occludingPlane || !_initialized || !_visible) return;
-    // Suppress the alpha hole when the CSS3D plane is invisible.
-    if (_pixelActive && !isPhoneZoomActive()) return;
-    occludingPlane.visible = true;
-    wr.render(occluderScene, cam);
+export function renderOccluder(_wr: WebGLRenderer, _cam: PerspectiveCamera): void {
+    // no-op — occluder is in the main scene now
 }
 
 /**

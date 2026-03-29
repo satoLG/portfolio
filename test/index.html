@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Monitor Screen Test</title>
     <style>
       * { margin: 0; padding: 0; }
@@ -10,6 +10,23 @@
       #webgl { pointer-events: none; }
       #css   { cursor: default; }
       canvas { pointer-events: unset !important; }
+      /* WebKit compositing workaround — forces GPU layer promotion for iframes in preserve-3d */
+      .jitter {
+        animation: jittery 0.3s ease-in-out infinite forwards;
+        z-index: -10;
+      }
+      @keyframes jittery {
+        10%  { transform: translate(-0.1px, -0.15px) scale(1, 1); }
+        20%  { transform: translate(0.15px,  0.1px)  scale(1, 1); }
+        30%  { transform: translate(-0.2px, -0.25px) scale(1, 1); }
+        40%  { transform: translate(0.05px,  0.1px)  scale(1, 1); }
+        50%  { transform: translate(-0.025px,-0.05px) scale(1, 1); }
+        60%  { transform: translate(0px,     0.075px) scale(1, 1); }
+        70%  { transform: translate(-0.075px,-0.1px)  scale(1, 1); }
+        80%  { transform: translate(0.075px, 0.125px) scale(1, 1); }
+        90%  { transform: translate(-0.125px,-0.075px) scale(1, 1); }
+        100% { transform: translate(0.075px, 0.025px) scale(1, 1); }
+      }
     </style>
   </head>
   <body>

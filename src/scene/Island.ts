@@ -1155,7 +1155,7 @@ export function Start(): void {
             threeScene.add(phone);
             // Phone is always visible — no cutscene gate
             phone.visible = true;
-            PhoneScreen.init();
+            PhoneScreen.init(threeScene);
             PhoneScreen.setVisible(true);
             console.log('Phone loaded (always visible on little rocks)');
         },
