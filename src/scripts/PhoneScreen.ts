@@ -21,16 +21,23 @@ import {
     WebGLRenderer,
     Group,
     Vector3,
+    Euler,
     Quaternion,
     Mesh,
     PlaneGeometry,
     MeshBasicMaterial,
     NoBlending,
     DoubleSide,
+    AdditiveBlending,
+    NormalBlending,
     Raycaster,
     Vector2,
+    TextureLoader,
+    VideoTexture,
+    Blending,
+    Texture,
 } from 'three';
-import { isPhoneZoomActive, zoomOutFromPhone, isMonitorZoomActive } from './Control';
+import { isPhoneZoomActive, zoomOutFromPhone } from './Control';
 import { CSS_SCALE } from './Scene';
 import {
     phoneScreenWidth, phoneScreenHeight,
@@ -89,6 +96,13 @@ const _worldPos  = new Vector3();
 const _worldQuat = new Quaternion();
 const _raycaster = new Raycaster();
 const _mouse     = new Vector2();
+
+/** Meshes created by the texture-layer system — repositioned every frame */
+const _layerMeshes: Mesh[] = [];
+/** Perspective dimmer plane */
+let _dimmingPlane: Mesh | null = null;
+/** Video textures created from hidden <video> elements */
+const _videoTextures: { [key: string]: VideoTexture } = {};
 
 // ─── PUBLIC API ───────────────────────────────────────────────────────────────
 
@@ -159,7 +173,6 @@ export function init(glScene: ThreeScene): void {
     iframeEl.src = 'https://projects-hub-one.vercel.app/';
     iframeEl.style.width   = cfg.iframeWidth + 'px';
     iframeEl.style.height  = cfg.iframeHeight + 'px';
-    iframeEl.style.padding = '32px';
     iframeEl.style.boxSizing = 'border-box';
     iframeEl.style.opacity = '1';
     iframeEl.className = 'jitter';
@@ -203,8 +216,141 @@ export function init(glScene: ThreeScene): void {
     occludingPlane.visible = false;
     _glScene.add(occludingPlane);
 
+    // ── Texture layers — smudge / shadow / dimmer ─────────────────────────────
+    // Phone uses scaleFactor=1 (flat glass, not a deep CRT) and no enclosing planes.
+    const maxOffset = _createTextureLayers();
+    _createPerspectiveDimmer(maxOffset);
+
     // Apply any effects that were requested before init() ran
     applyPhoneColorFilter(_pendingColorFilter);
+}
+
+// ── Texture Layer Helpers ─────────────────────────────────────────────────────
+
+function _getVideoTexture(videoId: string): void {
+    const video = document.getElementById(videoId);
+    if (!video) {
+        setTimeout(() => _getVideoTexture(videoId), 100);
+    } else {
+        _videoTextures[videoId] = new VideoTexture(video as HTMLVideoElement);
+    }
+}
+
+function _addTextureLayer(
+    texture: Texture,
+    blendingMode: Blending,
+    opacity: number,
+    offset: number,
+): void {
+    if (!_glScene) return;
+    const cfg = phoneScreenConfig;
+    const scaleX = cfg.screenWidth  / cfg.iframeWidth;
+    const scaleY = cfg.screenHeight / cfg.iframeHeight;
+
+    const material = new MeshBasicMaterial({
+        map: texture,
+        blending: blendingMode,
+        side: DoubleSide,
+        opacity,
+        transparent: true,
+    });
+    const geometry = new PlaneGeometry(cfg.iframeWidth, cfg.iframeHeight);
+    const mesh = new Mesh(geometry, material);
+    // Position is set each frame in _syncLayerTransforms()
+    mesh.scale.set(scaleX, scaleY, 1);
+    mesh.visible = false;
+    _glScene.add(mesh);
+    _layerMeshes.push(mesh);
+    // Store the local Z offset (world units) as userData for preRender sync
+    mesh.userData.localOffsetZ = offset * scaleX;
+}
+
+function _createTextureLayers(): number {
+    const cfg = phoneScreenConfig;
+    const scaleX = cfg.screenWidth / cfg.iframeWidth;
+    const loader = new TextureLoader();
+    const smudgeTexture = loader.load('/textures/monitor/layers/smudges.jpg');
+    const shadowTexture = loader.load('/textures/monitor/layers/shadow.png');
+
+    _getVideoTexture('video-1');
+    _getVideoTexture('video-2');
+
+    // scaleFactor=1 keeps layers skin-tight to the flat phone glass
+    const scaleFactor = 1;
+    const layers: { texture: Texture; blending: Blending; opacity: number; offset: number }[] = [
+        { texture: shadowTexture,   blending: NormalBlending,   opacity: 0.3,  offset: 2 },
+        { texture: smudgeTexture,   blending: AdditiveBlending, opacity: 0.12, offset: 6 },
+    ];
+
+    // Video layers — added once the VideoTexture is ready (may be async via retry)
+    setTimeout(() => {
+        if (_videoTextures['video-1']) {
+            _addTextureLayer(_videoTextures['video-1'], AdditiveBlending, 0.5, 3 * scaleFactor);
+        }
+        if (_videoTextures['video-2']) {
+            _addTextureLayer(_videoTextures['video-2'], AdditiveBlending, 0.1, 5 * scaleFactor);
+        }
+    }, 500);
+
+    let maxOffset = -1;
+    for (const layer of layers) {
+        const offset = layer.offset * scaleFactor;
+        _addTextureLayer(layer.texture, layer.blending, layer.opacity, offset);
+        if (offset > maxOffset) maxOffset = offset;
+    }
+
+    return maxOffset;
+}
+
+function _createPerspectiveDimmer(maxOffset: number): void {
+    if (!_glScene) return;
+    const cfg = phoneScreenConfig;
+    const scaleX = cfg.screenWidth  / cfg.iframeWidth;
+    const scaleY = cfg.screenHeight / cfg.iframeHeight;
+
+    const material = new MeshBasicMaterial({
+        side: DoubleSide,
+        color: 0x000000,
+        transparent: true,
+        blending: AdditiveBlending,
+    });
+    const geometry = new PlaneGeometry(cfg.iframeWidth, cfg.iframeHeight);
+    const mesh = new Mesh(geometry, material);
+    mesh.scale.set(scaleX, scaleY, 1);
+    mesh.visible = false;
+    mesh.userData.localOffsetZ = (maxOffset - 5) * scaleX;
+    _glScene.add(mesh);
+    _dimmingPlane = mesh;
+}
+
+/**
+ * Reposition all texture-layer, enclosing, and dimmer meshes to follow the phone.
+ * Called from preRender() every frame.
+ */
+function _syncLayerTransforms(basePos: Vector3, baseQuat: Quaternion, visible: boolean): void {
+    const cfg = phoneScreenConfig;
+    const _offsetVec = new Vector3();
+
+    // Texture layers — offset along local Z only
+    for (const mesh of _layerMeshes) {
+        mesh.visible = visible;
+        if (!visible) continue;
+        _offsetVec.set(0, 0, mesh.userData.localOffsetZ);
+        _offsetVec.applyQuaternion(baseQuat);
+        mesh.position.copy(basePos).add(_offsetVec);
+        mesh.quaternion.copy(baseQuat);
+    }
+
+    // Dimmer
+    if (_dimmingPlane) {
+        _dimmingPlane.visible = visible;
+        if (visible) {
+            _offsetVec.set(0, 0, _dimmingPlane.userData.localOffsetZ);
+            _offsetVec.applyQuaternion(baseQuat);
+            _dimmingPlane.position.copy(basePos).add(_offsetVec);
+            _dimmingPlane.quaternion.copy(baseQuat);
+        }
+    }
 }
 
 /**
@@ -214,6 +360,10 @@ export function init(glScene: ThreeScene): void {
  */
 export function applyPhonePixelSize(value: number): void {
     _pixelActive = value > 0;
+    // If pixelation just activated while zoomed into the phone, zoom out immediately
+    if (_pixelActive && isPhoneZoomActive()) {
+        zoomOutFromPhone();
+    }
 }
 
 /**
@@ -264,15 +414,16 @@ export function setVisible(v: boolean): void {
 /**
  * Per-frame update — PART 1.
  *
- * Must be called BEFORE the WebGL scene render (before Underwater.renderScene).
+ * Must be called BEFORE the WebGL scene render (before PostProcess.renderScene).
  * Sets occluding plane + CSS3DObject visibility and syncs their world
  * transforms so the NoBlending hole is present when the scene is drawn.
  */
-export function preRender(phoneGroup: Group): void {
+export function preRender(phoneGroup: Group, cam?: PerspectiveCamera): void {
     if (!_initialized || !_visible) {
         if (occludingPlane) occludingPlane.visible = false;
         if (cssObject) cssObject.visible = false;
         if (_canvasEl) _canvasEl.style.pointerEvents = 'auto';
+        _syncLayerTransforms(_worldPos, _worldQuat, false);
         return;
     }
 
@@ -304,9 +455,9 @@ export function preRender(phoneGroup: Group): void {
         1,
     );
 
-    // ── Hide CSS3D plane when pixelated + zoomed out ─────────────────────
+    // ── Hide CSS3D planes entirely when pixelation is active ─────────
     const zoomed = isPhoneZoomActive();
-    const visible = !_pixelActive || zoomed;
+    const visible = !_pixelActive;
     if (containerEl) containerEl.style.opacity = visible ? '1' : '0';
 
     // Occluding plane stays at WebGL world coordinates (decoupled from CSS_SCALE).
@@ -323,6 +474,26 @@ export function preRender(phoneGroup: Group): void {
             1,
         );
         occludingPlane.visible = visible;
+    }
+
+    // ── Sync texture layers / enclosing planes / dimmer with phone position ──
+    const layerBase = new Vector3(
+        _worldPos.x + cfg.offsetX,
+        _worldPos.y + cfg.offsetY,
+        _worldPos.z + cfg.offsetZ,
+    );
+    _syncLayerTransforms(layerBase, _worldQuat, visible);
+
+    // ── Perspective dimmer update ────────────────────────────────────────
+    if (_dimmingPlane && _dimmingPlane.visible && cam) {
+        const planeNormal = new Vector3(0, 0, 1).applyQuaternion(_worldQuat);
+        const viewVector = new Vector3().copy(cam.position).sub(layerBase).normalize();
+        const dot = viewVector.dot(planeNormal);
+        const distance = cam.position.distanceTo(_dimmingPlane.position);
+        const opacity = 1 / (distance / 10000);
+        const DIM_FACTOR = 0.7;
+        (_dimmingPlane.material as MeshBasicMaterial).opacity =
+            (1 - opacity) * DIM_FACTOR + (1 - dot) * DIM_FACTOR;
     }
 }
 
@@ -350,8 +521,7 @@ export function render(cam: PerspectiveCamera): void {
     if (zoomed) {
         if (_canvasEl) _canvasEl.style.pointerEvents = 'none';
     } else {
-        // Don't release canvas if another screen (monitor) has locked it.
-        if (_canvasEl && !isMonitorZoomActive()) _canvasEl.style.pointerEvents = 'auto';
+        if (_canvasEl) _canvasEl.style.pointerEvents = 'auto';
     }
 
     _camera = cam;  // store for click-handler raycasting

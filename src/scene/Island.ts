@@ -11,7 +11,7 @@ import { isBreezeActive, playPugSnoreOnce, stopPugSnore } from "../scripts/Audio
 import { camera, renderer, scene as threeScene } from "../scripts/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
 import * as PhoneScreen from '../scripts/PhoneScreen';
-import { UNDERWATER_Y_THRESHOLD } from "../effects/Underwater";
+import { UNDERWATER_Y_THRESHOLD } from "../effects/PostProcess";
 import {
     islandPosition, firecampOffset, palmtreeOffset, radioOffset, swordOffset,
     pugOffset, tentOffset, dogBedOffset, littleRocksOffset, phoneOffset,

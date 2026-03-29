@@ -76,12 +76,11 @@ export function enableScroll(): void {
 }
 
 // ============================================
-// ZOOM MODE (radio, pug, phone and monitor)
+// ZOOM MODE (radio, pug and phone)
 // ============================================
 let radioZoomActive = false;
 let pugZoomActive = false;
 let phoneZoomActive = false;
-let monitorZoomActive = false;
 
 // Saved camera state before zoom
 let savedCameraX = 0;
@@ -95,9 +94,6 @@ let currentZoomY = 0;
 let currentZoomZ = 0;
 
 const ZOOM_SMOOTH      = 5;
-const MONITOR_ZOOM_Z   = -1.3;  // Camera Z: 0.7 world-units in front of monitor at Z=-2.0
-const MONITOR_ZOOM_Y   = 0.45;  // Camera Y: matches POS_Y in MonitorScreen.ts — centres on screen
-const MONITOR_ZOOM_FOV = 20;    // Narrower FOV while zoomed into monitor
 
 // Radio zoom target — computed from IslandConfig so camera sits on the radio's front face normal
 const RADIO_ZOOM_SMOOTH  = ZOOM_SMOOTH;
@@ -229,24 +225,6 @@ export function zoomOutFromPhone(): void {
     targetY = savedTargetY;
 }
 
-// Zoom camera toward the floating monitor screen
-export function zoomToMonitor(): void {
-    if (monitorZoomActive || radioZoomActive || pugZoomActive || phoneZoomActive || isUnderwater) return;
-    saveAndStartZoom();
-    monitorZoomActive = true;
-}
-
-// Return camera to previous position from monitor zoom
-export function zoomOutFromMonitor(): void {
-    if (!monitorZoomActive) return;
-    monitorZoomActive = false;
-    targetY = savedTargetY;
-}
-
-export function isMonitorZoomActive(): boolean {
-    return monitorZoomActive;
-}
-
 // Get saved camera position (for calculating where radio will be after zoomout)
 export function getSavedCameraPosition(): { x: number, y: number, z: number } {
     return {
@@ -287,7 +265,7 @@ export function toggleCameraMode(): boolean {
 
 export function handleScroll(deltaY: number): void {
     if (!scrollEnabled) return;  // Block scroll during intro
-    if (radioZoomActive || pugZoomActive || phoneZoomActive || monitorZoomActive) return;  // Block scroll during zoom
+    if (radioZoomActive || pugZoomActive || phoneZoomActive) return;  // Block scroll during zoom
     if (webPageMode) {
         // Free scroll across the full range
         targetY = MathUtils.clamp(targetY - deltaY * scrollSpeed, underwaterBottomY, aboveWaterTopY);
@@ -535,7 +513,7 @@ export function Update(): void
 
     // Web page mode: override camera position with smooth scroll/zoom
     if (webPageMode) {
-        if (radioZoomActive || pugZoomActive || phoneZoomActive || monitorZoomActive) {
+        if (radioZoomActive || pugZoomActive || phoneZoomActive) {
             // ZOOM MODE: Smoothly move camera to target position
             let zoomTargetX: number, zoomTargetY: number, zoomTargetZ: number;
             if (phoneZoomActive) {
@@ -546,10 +524,6 @@ export function Update(): void
                 zoomTargetX = PUG_FINAL_X + _pugCamOffsetX;
                 zoomTargetY = PUG_ZOOM_TARGET_Y;
                 zoomTargetZ = PUG_FINAL_Z + _pugCamOffsetZ;
-            } else if (monitorZoomActive) {
-                zoomTargetX = 0;
-                zoomTargetY = MONITOR_ZOOM_Y;
-                zoomTargetZ = MONITOR_ZOOM_Z;
             } else {
                 zoomTargetX = RADIO_ZOOM_TARGET_X;
                 zoomTargetY = RADIO_ZOOM_TARGET_Y;
@@ -577,9 +551,6 @@ export function Update(): void
                 zoomTetha = MathUtils.damp(zoomTetha, phoneZoomConfig.pitch, ZOOM_SMOOTH, deltaTime);
                 // Narrow FOV for telephoto phone zoom
                 currentFov = MathUtils.damp(currentFov, phoneZoomConfig.fov, ZOOM_SMOOTH, deltaTime);
-            } else if (monitorZoomActive) {
-                // Narrow FOV while zoomed into monitor (camera already faces -Z, no phi/tetha change)
-                currentFov = MathUtils.damp(currentFov, MONITOR_ZOOM_FOV, ZOOM_SMOOTH, deltaTime);
             }
         } else {
             // NORMAL MODE: Smooth Y scrolling, fixed X and Z

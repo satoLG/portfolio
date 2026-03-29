@@ -62,12 +62,14 @@ import * as Clouds from '../effects/Clouds';
 import * as SeaFloorDecor from '../scene/SeaFloorDecor';
 import {
     setDistortion as setUnderwaterDistortion,
-    setSpeed as setUnderwaterSpeed,
-    setScale as setUnderwaterScale,
-    DISTORTION_STRENGTH,
-    DISTORTION_SPEED,
-    DISTORTION_SCALE,
-} from '../effects/Underwater';
+    setDistortionSpeed as setUnderwaterSpeed,
+    setDistortionScale as setUnderwaterScale,
+} from '../effects/PostProcess';
+import {
+    distortionStrength as DISTORTION_STRENGTH,
+    distortionSpeed as DISTORTION_SPEED,
+    distortionScale as DISTORTION_SCALE,
+} from '../scene/OceanConfig';
 import { Object3D } from 'three';
 import { phoneZoomConfig, mainCameraConfig } from '../scripts/Control';
 import { SetFOV } from '../scripts/Scene';

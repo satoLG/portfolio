@@ -7,7 +7,7 @@ import {
 } from "three";
 import { camera, scene } from "../scripts/Scene";
 import { deltaTime } from "../scripts/Time";
-import { UNDERWATER_Y_THRESHOLD } from "./Underwater";
+import { UNDERWATER_Y_THRESHOLD } from "./PostProcess";
 
 // ============================================
 // UNDERWATER PARTICLE SETTINGS (tweak these!)
