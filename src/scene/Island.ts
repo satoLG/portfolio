@@ -1537,7 +1537,13 @@ async function _startPhoneDropSequence(): Promise<void> {
     }
     pug.rotation.y = savedRotY;
     phoneDropped = true;
-    _restorePugNightState();
+    // Restore correct idle — respect music state, same logic as _onPugDialogComplete
+    if (_pugMusicWasPlaying) {
+        pugDefaultAnimIndex = PUG_ANIM_BARK;
+        setPugAnimation(PUG_ANIM_BARK);
+    } else {
+        _restorePugNightState();
+    }
 }
 
 // ============================================
@@ -1966,9 +1972,9 @@ export function Update(): void {
         }
     }
     
-    // Update pug animation mixer
+    // Update pug animation mixer — clamp delta to avoid fast-forward on frame-skips
     if (pugMixer) {
-        pugMixer.update(deltaTime);
+        pugMixer.update(Math.min(deltaTime, 0.1));
     }
 
     // ── Pug music-playing state: suppress sleep when music is on
