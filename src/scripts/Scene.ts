@@ -23,10 +23,9 @@ import * as PhoneScreen from './PhoneScreen';
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { reflectionTextureUniform } from "../materials/OceanMaterial";
 
-// Scene-ready flag — false during the loading screen.
-// While false, Update() returns early to save full GPU frame cost
-// (ocean shader, reflection RT, cloud march, fish, etc.) during loading.
-let _sceneReady = false;
+// Scene-ready flag — scene renders from the very first frame so the sky is
+// visible behind the loading button.  Kept as a no-op export for clarity.
+let _sceneReady = true;
 export function setSceneReady(): void { _sceneReady = true; }
 
 // DOM containers — matching Henry's #css / #webgl structure

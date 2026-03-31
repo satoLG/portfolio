@@ -58,6 +58,11 @@ const introEndY = aboveWaterTopY;  // Camera ends at normal top position
 const introSmooth = 1.2;       // Cinematic descent speed after start click (lower = slower)
 let introActive = false;       // Kept false during loading — camera parked. True only during post-click descent.
 let scrollEnabled = false;     // Prevent scrolling until descent completes
+// Camera tilts up during loading so the viewport shows only sky (horizon below frame).
+// Must exceed the half-vertical-FOV (~25°) to guarantee no ocean is visible.
+// Damped back to 0 once the user clicks Start, giving a cinematic sky→scene swoop.
+const INTRO_TETHA_START = 0.55;   // radians (~31.5° upward tilt — positive = look up in Three.js)
+let introTetha = INTRO_TETHA_START;
 
 // Set intro loading progress (called from UI.ts for the loading bar animation).
 // Camera no longer follows loading progress — it stays parked at introStartY
@@ -132,7 +137,7 @@ const _pugWorldX = cfgIslandPos.x + cfgPugOffset.x;
 const _pugWorldY = cfgIslandPos.y + cfgPugOffset.y;
 const _pugWorldZ = cfgIslandPos.z + cfgPugOffset.z;
 const PUG_ZOOM_TARGET_X = _pugWorldX + PUG_ZOOM_DIST * Math.sin(cfgPugRotY);
-const PUG_ZOOM_TARGET_Y = _pugWorldY + 0.55;
+const PUG_ZOOM_TARGET_Y = _pugWorldY + 0.25;
 const PUG_ZOOM_TARGET_Z = _pugWorldZ + PUG_ZOOM_DIST * Math.cos(cfgPugRotY);
 // phi = 2π − rotY makes camera look along −frontNormal (same derivation as radio)
 const PUG_ZOOM_PHI = Math.PI * 2 - cfgPugRotY;
@@ -613,6 +618,14 @@ export function Update(): void
                 introActive = false;
                 scrollEnabled = true;
             }
+
+            // Damp the sky-tilt back to horizontal once the user has clicked Start.
+            // Before click: introTetha stays fixed so only sky is visible.
+            // After click: smoothly levels off as camera descends.
+            if (introActive && introTetha !== 0) {
+                introTetha = MathUtils.damp(introTetha, 0, introSmooth * 2, deltaTime);
+                if (Math.abs(introTetha) < 0.001) introTetha = 0;
+            }
         }
     }
 
@@ -624,7 +637,7 @@ export function Update(): void
 
     // In web-page mode, zoomPhi drives camera yaw (smoothly rotates to face radio front on zoom)
     _scratchQx.setFromAxisAngle(_scratchV3a.set(0, -1, 0), webPageMode ? zoomPhi : phi);
-    _scratchQy.setFromAxisAngle(_scratchV3b.set(1, 0, 0), webPageMode ? (tetha + zoomTetha) : tetha);
+    _scratchQy.setFromAxisAngle(_scratchV3b.set(1, 0, 0), webPageMode ? (tetha + zoomTetha + introTetha) : tetha);
 
     _scratchQ.copy(_scratchQx);
     _scratchQ.multiply(_scratchQy);

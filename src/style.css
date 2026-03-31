@@ -2369,6 +2369,14 @@ a:visited
    DIALOG SPEECH BUBBLE
    ============================================ */
 
+/* iOS Safari: SVG filter + border-radius creates visible corner gaps due to
+   a compositing difference in WebKit. Suppress the wobble filter on iOS
+   (detected via JS which adds the class to <body>). */
+body.no-svg-filter .dialog-bubble,
+body.no-svg-filter .dialog-reply-bubble {
+    filter: none;
+}
+
 .dialog-bubble {
     position: fixed;
     z-index: 1200;

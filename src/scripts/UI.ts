@@ -1,4 +1,4 @@
-﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setSceneReady } from "./Scene";
+﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter } from "./Scene";
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
 import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, preloadUISounds, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
@@ -124,12 +124,8 @@ export function Start(): void {
         // Start audio (must happen synchronously in click handler for iOS)
         startAudio();
 
-        // Mark the scene as ready — this unblocks the WebGL render loop.
-        // Must happen BEFORE enableScroll() so the first rendered frame
-        // is the start of the cinematic camera descent, not a blank frame.
-        setSceneReady();
-        
         // Enable scrolling / trigger cinematic camera descent
+        // (scene already rendering from frame 1 — camera descends from sky intro position)
         enableScroll();
         
         // Mark as started

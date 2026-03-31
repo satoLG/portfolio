@@ -11,6 +11,15 @@
 import { getAudioContext, getCharacterDestination } from './Audio';
 import { t, onLanguageChange } from './i18n';
 
+// ─── iOS detection (run once at module load) ──────────────────────────────────
+// iOS Safari has a compositing bug where filter:url(#svg)+border-radius creates
+// visible gaps at the rounded corners. Marking the body suppresses the filter.
+{
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (ios) document.body.classList.add('no-svg-filter');
+}
+
 // ─── Public types ─────────────────────────────────────────────────────────────
 
 /** A clickable reply option shown inside the reply speech bubble. */
@@ -174,18 +183,32 @@ function _startTyping(text: string): void {
     _textEl.textContent = '';
     _promptEl.classList.remove('dialog-prompt--visible');
 
-    const interval = Math.round(1000 / CHARS_PER_SEC);
-    _state.typeTimer = setInterval(() => {
-        if (!_state || !_textEl) return;
-        _state.typeIndex++;
-        _textEl.textContent = text.slice(0, _state.typeIndex);
+    // Use rAF + timestamps instead of setInterval — setInterval is unreliable
+    // on iOS Safari (throttled/coalesced) causing all text to appear instantly.
+    const msPerChar = 1000 / CHARS_PER_SEC;
+    let lastTime = performance.now();
+    let accumulated = 0;
+
+    const tick = (now: number): void => {
+        if (!_state || !_state.isTyping) return;
+        accumulated += now - lastTime;
+        lastTime = now;
+        const add = Math.floor(accumulated / msPerChar);
+        if (add > 0) {
+            accumulated -= add * msPerChar;
+            _state.typeIndex = Math.min(_state.typeIndex + add, text.length);
+            if (_textEl) _textEl.textContent = text.slice(0, _state.typeIndex);
+        }
         if (_state.typeIndex >= text.length) {
-            clearInterval(_state.typeTimer!);
             _state.typeTimer = null;
             _state.isTyping  = false;
             _onLineDoneTyping();
+        } else {
+            _state.typeTimer = requestAnimationFrame(tick) as unknown as ReturnType<typeof setInterval>;
         }
-    }, interval);
+    };
+
+    _state.typeTimer = requestAnimationFrame(tick) as unknown as ReturnType<typeof setInterval>;
 }
 
 /** Called whenever a line finishes typing (naturally or via skip). */
@@ -201,7 +224,10 @@ function _onLineDoneTyping(): void {
 
 function _completeTyping(): void {
     if (!_state || !_state.isTyping || !_textEl || !_promptEl) return;
-    if (_state.typeTimer) { clearInterval(_state.typeTimer); _state.typeTimer = null; }
+    if (_state.typeTimer) {
+        cancelAnimationFrame(_state.typeTimer as unknown as number);
+        _state.typeTimer = null;
+    }
     _state.isTyping = false;
     _textEl.textContent = t(_state.lines[_state.lineIdx].textKey);
     _onLineDoneTyping();
@@ -220,13 +246,19 @@ function _positionReplyBubble(): void {
     const mainLeft  = parseInt(_bubbleEl.style.left || '0', 10);
     const mainTop   = parseInt(_bubbleEl.style.top  || '0', 10);
     const mainW     = _bubbleEl.offsetWidth  || 240;
+    const mainH     = _bubbleEl.offsetHeight || 60;
     const replyW    = _replyBubbleEl.offsetWidth  || 200;
     const replyH    = _replyBubbleEl.offsetHeight || 60;
     const ww        = window.innerWidth;
     const wh        = window.innerHeight;
 
     const left = Math.max(8, Math.min(ww - replyW - 8, mainLeft + mainW + REPLY_OFFSET_X));
-    const top  = Math.max(8, Math.min(wh - replyH - 8, mainTop  + REPLY_OFFSET_Y));
+
+    // Always position BELOW the main bubble (bottom edge + tail + gap) so they
+    // cannot overlap regardless of how tall the main bubble grows.
+    const minTop    = mainTop + mainH + TAIL_HEIGHT + 8;
+    const idealTop  = mainTop + REPLY_OFFSET_Y;
+    const top = Math.max(minTop, Math.min(wh - replyH - 8, idealTop));
 
     _replyBubbleEl.style.left = `${left}px`;
     _replyBubbleEl.style.top  = `${top}px`;
@@ -395,7 +427,9 @@ export function isDialogActive(): boolean {
 
 function _clearState(): void {
     if (!_state) return;
-    if (_state.typeTimer) clearInterval(_state.typeTimer);
+    if (_state.typeTimer) {
+        cancelAnimationFrame(_state.typeTimer as unknown as number);
+    }
     cancelAnimationFrame(_state.rafId);
     _state = null;
 }

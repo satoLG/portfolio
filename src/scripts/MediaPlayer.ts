@@ -89,6 +89,24 @@ let playlist: SongData[] = [
         artist: 'Moavii',
         cover: 'images/music/umbrella.webp'
     },
+    {
+        file: 'audio/music/Aetheric - After the Storm (freetouse.com).mp3',
+        name: 'After the Storm',
+        artist: 'Aetheric',
+        cover: 'images/music/after_storm.webp'
+    },
+    {
+        file: 'audio/music/Aetheric - Echoes of the Fields (freetouse.com).mp3',
+        name: 'Echoes of the Fields',
+        artist: 'Aetheric',
+        cover: 'images/music/echoes_of_fields.webp'
+    },
+    {
+        file: 'audio/music/Aetheric - The Sea (freetouse.com).mp3',
+        name: 'The Sea',
+        artist: 'Aetheric',
+        cover: 'images/music/the_sea.webp'
+    },
 ];
 
 // Default values
