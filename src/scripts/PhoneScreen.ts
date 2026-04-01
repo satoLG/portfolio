@@ -171,10 +171,12 @@ export function init(glScene: ThreeScene): void {
     // ── Iframe ───────────────────────────────────────────────────────────────
     iframeEl = document.createElement('iframe');
     iframeEl.src = 'https://projects-hub-one.vercel.app/';
-    iframeEl.style.width   = cfg.iframeWidth + 'px';
-    iframeEl.style.height  = cfg.iframeHeight + 'px';
-    iframeEl.style.boxSizing = 'border-box';
-    iframeEl.style.opacity = '1';
+    iframeEl.style.width        = cfg.iframeWidth + 'px';
+    iframeEl.style.height       = cfg.iframeHeight + 'px';
+    iframeEl.style.boxSizing    = 'border-box';
+    iframeEl.style.opacity      = '1';
+    // Brightness boost — makes it look like a lit device screen
+    // iframeEl.style.filter       = 'brightness(1.35)';
     iframeEl.className = 'jitter';
     iframeEl.frameBorder = '0';
     containerEl.appendChild(iframeEl);
@@ -272,25 +274,33 @@ function _createTextureLayers(): number {
     const smudgeTexture = loader.load('/textures/monitor/layers/smudges.jpg');
     const shadowTexture = loader.load('/textures/monitor/layers/shadow.png');
 
-    _getVideoTexture('video-1');
-    _getVideoTexture('video-2');
+    // Video texture layers — skipped on iOS: WebGL VideoTexture from muted video
+    // is blocked on iOS Safari, and the <video> element becomes a tappable media
+    // control regardless of pointer-events settings on ancestors.
+    const _isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (!_isIOS) {
+        _getVideoTexture('video-1');
+        _getVideoTexture('video-2');
+    }
 
     // scaleFactor=1 keeps layers skin-tight to the flat phone glass
     const scaleFactor = 1;
     const layers: { texture: Texture; blending: Blending; opacity: number; offset: number }[] = [
         { texture: shadowTexture,   blending: NormalBlending,   opacity: 0.3,  offset: 2 },
-        { texture: smudgeTexture,   blending: AdditiveBlending, opacity: 0.12, offset: 6 },
+        { texture: smudgeTexture,   blending: AdditiveBlending, opacity: 0.03, offset: 6 },
     ];
 
     // Video layers — added once the VideoTexture is ready (may be async via retry)
-    setTimeout(() => {
-        if (_videoTextures['video-1']) {
-            _addTextureLayer(_videoTextures['video-1'], AdditiveBlending, 0.5, 3 * scaleFactor);
-        }
-        if (_videoTextures['video-2']) {
-            _addTextureLayer(_videoTextures['video-2'], AdditiveBlending, 0.1, 5 * scaleFactor);
-        }
-    }, 500);
+    if (!_isIOS) {
+        setTimeout(() => {
+            if (_videoTextures['video-1']) {
+                _addTextureLayer(_videoTextures['video-1'], AdditiveBlending, 0.5, 3 * scaleFactor);
+            }
+            if (_videoTextures['video-2']) {
+                _addTextureLayer(_videoTextures['video-2'], AdditiveBlending, 0.1, 5 * scaleFactor);
+            }
+        }, 500);
+    }
 
     let maxOffset = -1;
     for (const layer of layers) {
