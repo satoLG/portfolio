@@ -5,6 +5,7 @@ import { KeyCodes, PointerPhase, PointerType, keysJustPressed, keysPressed, last
 import { spotLightDistance, spotLightDistanceUniform } from "../materials/OceanMaterial";
 import { islandPosition as cfgIslandPos, radioOffset as cfgRadioOffset, radioRotY as cfgRadioRotY, pugOffset as cfgPugOffset, pugRotY as cfgPugRotY, phoneOffset as cfgPhoneOffset } from '../scene/IslandConfig';
 import { phoneZoomHeight, phoneZoomTilt, phoneZoomPitch, phoneZoomFov, defaultCameraZ, defaultFov } from '../scene/CameraConfig';
+import { config as sfDecorConfig } from '../scene/SeaFloorDecor';
 
 const baseMoveSpeed = 10;
 const shiftMoveSpeed = baseMoveSpeed * 5;
@@ -86,6 +87,7 @@ export function enableScroll(): void {
 let radioZoomActive = false;
 let pugZoomActive = false;
 let phoneZoomActive = false;
+let chestZoomActive = false;
 
 // Saved camera state before zoom
 let savedCameraX = 0;
@@ -165,6 +167,9 @@ const _phoneWorldZ = cfgIslandPos.z + cfgPhoneOffset.z;
 const PHONE_ZOOM_PHI = Math.PI * 2;
 // Camera pitch for top-down view (handled via tetha override in Update)
 
+// Chest zoom — target is read live each frame from sfDecorConfig for debug-GUI responsiveness
+const CHEST_ZOOM_PHI = Math.PI * 2; // look straight ahead (-Z)
+
 export function isRadioZoomActive(): boolean {
     return radioZoomActive;
 }
@@ -175,6 +180,10 @@ export function isPugZoomActive(): boolean {
 
 export function isPhoneZoomActive(): boolean {
     return phoneZoomActive;
+}
+
+export function isChestZoomActive(): boolean {
+    return chestZoomActive;
 }
 
 function saveAndStartZoom(): void {
@@ -189,7 +198,7 @@ function saveAndStartZoom(): void {
 
 // Zoom camera to focus on radio (called when expanding media player above water)
 export function zoomToRadio(): void {
-    if (radioZoomActive || pugZoomActive || phoneZoomActive || isUnderwater) return;
+    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || isUnderwater) return;
     saveAndStartZoom();
     radioZoomActive = true;
 }
@@ -203,7 +212,7 @@ export function zoomOutFromRadio(): void {
 
 // Zoom camera to focus on pug
 export function zoomToPug(): void {
-    if (pugZoomActive || radioZoomActive || phoneZoomActive || isUnderwater) return;
+    if (pugZoomActive || radioZoomActive || phoneZoomActive || chestZoomActive || isUnderwater) return;
     saveAndStartZoom();
     pugZoomActive = true;
 }
@@ -217,7 +226,7 @@ export function zoomOutFromPug(): void {
 
 // Zoom camera to focus on phone (top-down view)
 export function zoomToPhone(): void {
-    if (phoneZoomActive || radioZoomActive || pugZoomActive || isUnderwater) return;
+    if (phoneZoomActive || radioZoomActive || pugZoomActive || chestZoomActive || isUnderwater) return;
     saveAndStartZoom();
     phoneZoomActive = true;
 }
@@ -227,6 +236,20 @@ export function zoomOutFromPhone(): void {
     if (!phoneZoomActive) return;
     phoneZoomActive = false;
     // Don't snap zoomTetha — let the normal-mode damp smoothly return it to 0
+    targetY = savedTargetY;
+}
+
+// Zoom camera to focus on chest (underwater)
+export function zoomToChest(): void {
+    if (chestZoomActive || radioZoomActive || pugZoomActive || phoneZoomActive || !isUnderwater) return;
+    saveAndStartZoom();
+    chestZoomActive = true;
+}
+
+// Zoom out from chest
+export function zoomOutFromChest(): void {
+    if (!chestZoomActive) return;
+    chestZoomActive = false;
     targetY = savedTargetY;
 }
 
@@ -270,7 +293,7 @@ export function toggleCameraMode(): boolean {
 
 export function handleScroll(deltaY: number): void {
     if (!scrollEnabled) return;  // Block scroll during intro
-    if (radioZoomActive || pugZoomActive || phoneZoomActive) return;  // Block scroll during zoom
+    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive) return;  // Block scroll during zoom
     if (webPageMode) {
         // Free scroll across the full range
         targetY = MathUtils.clamp(targetY - deltaY * scrollSpeed, underwaterBottomY, aboveWaterTopY);
@@ -518,7 +541,7 @@ export function Update(): void
 
     // Web page mode: override camera position with smooth scroll/zoom
     if (webPageMode) {
-        if (radioZoomActive || pugZoomActive || phoneZoomActive) {
+        if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive) {
             // ZOOM MODE: Smoothly move camera to target position
             let zoomTargetX: number, zoomTargetY: number, zoomTargetZ: number;
             if (phoneZoomActive) {
@@ -529,6 +552,10 @@ export function Update(): void
                 zoomTargetX = PUG_FINAL_X + _pugCamOffsetX;
                 zoomTargetY = PUG_ZOOM_TARGET_Y;
                 zoomTargetZ = PUG_FINAL_Z + _pugCamOffsetZ;
+            } else if (chestZoomActive) {
+                zoomTargetX = sfDecorConfig.chest.x;
+                zoomTargetY = sfDecorConfig.chest.y + sfDecorConfig.chestZoomHeight;
+                zoomTargetZ = sfDecorConfig.chest.z + sfDecorConfig.chestZoomDist;
             } else {
                 zoomTargetX = RADIO_ZOOM_TARGET_X;
                 zoomTargetY = RADIO_ZOOM_TARGET_Y;
@@ -556,6 +583,10 @@ export function Update(): void
                 zoomTetha = MathUtils.damp(zoomTetha, phoneZoomConfig.pitch, ZOOM_SMOOTH, deltaTime);
                 // Narrow FOV for telephoto phone zoom
                 currentFov = MathUtils.damp(currentFov, phoneZoomConfig.fov, ZOOM_SMOOTH, deltaTime);
+            } else if (chestZoomActive) {
+                zoomPhi = MathUtils.damp(zoomPhi, CHEST_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
+                // Narrow FOV for underwater chest zoom
+                currentFov = MathUtils.damp(currentFov, sfDecorConfig.chestZoomFov, ZOOM_SMOOTH, deltaTime);
             }
         } else {
             // NORMAL MODE: Smooth Y scrolling, fixed X and Z
