@@ -312,6 +312,7 @@ export function Start(): void
     scene.add(Island.pug);
     scene.add(Island.tent);
     scene.add(Island.dogBed);
+    scene.add(Island.chest);
     // Grass and clover patches are added dynamically as they load
     const addedPatches = new Set<any>();
     const grassInterval = setInterval(() => {

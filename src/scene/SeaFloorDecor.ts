@@ -6,11 +6,15 @@
  * Call Update(dt) every frame.
  * Add decorGroup to the Three.js scene from Scene.ts.
  */
-import { Group, Mesh, Uniform } from "three";
+import { Group, Mesh, Uniform, Raycaster, Vector2, Vector3 } from "three";
 import { GLTFLoader }           from "three/examples/jsm/loaders/GLTFLoader";
 import { oceanAbsorptionUniform, underwaterFogDistUniform, waveVelocity1Uniform, waveVelocity2Uniform } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { timeUniform }          from "../scripts/Time";
+import { camera, renderer }     from "../scripts/Scene";
+import { getAudioContext, getMasterDestination } from "../scripts/Audio";
+import { spawnBubble }          from "../effects/Bubbles";
+import { UNDERWATER_Y_THRESHOLD } from "../effects/PostProcess";
 import * as C                   from "./SeaFloorConfig";
 
 // ── Live config ────────────────────────────────────────────────────────────────
@@ -28,6 +32,10 @@ export const config = {
     kelpSwayStrength:  C.kelpSwayStrength,
     kelpSwaySpeed:     C.kelpSwaySpeed,
     kelpSwayFrequency: C.kelpSwayFrequency,
+    chest:           { ...C.chest },
+    chestZoomDist:   C.chestZoomDist,
+    chestZoomHeight: C.chestZoomHeight,
+    chestZoomFov:    C.chestZoomFov,
 };
 
 // ── Scene group ────────────────────────────────────────────────────────────────
@@ -294,6 +302,7 @@ function spawnAll(): void {
             _kelps[i] = kelp;
         }
     }
+    _initCoralStates();
 }
 
 // ── GLTF loading ───────────────────────────────────────────────────────────────
@@ -354,6 +363,7 @@ export function updateKelpTransform(idx: 0 | 1 | 2): void {
 
 export function Start(): void {
     loadModels();
+    _setupCoralInteraction();
 }
 
 export function Update(dt: number): void {
@@ -361,6 +371,7 @@ export function Update(dt: number): void {
     kelpSwayUniform.value  = config.kelpSwayStrength;
     kelpFreqUniform.value  = config.kelpSwayFrequency;
     kelpTopYUniform.value  = config.kelpTopY;
+    updateCoralInteraction(dt);
 }
 
 /** Clear all decorations and re-spawn every model using current config values. */
@@ -372,3 +383,269 @@ export function respawn(): void {
     spawnAll();
 }
 
+// ╔═══════════════════════════════════════════════════════════════════════════════
+// ║  CORAL INTERACTION — hover scale, click sound + colour shift + bubbles
+// ╚═══════════════════════════════════════════════════════════════════════════════
+
+// Audio file mapping — one sound per coral (consistent)
+const CORAL_SOUNDS = [
+    'audio/nature/underwater/321802__lloydevans09__pvc_pipe_hit_4.wav',
+    'audio/nature/underwater/321805__lloydevans09__pvc_pipe_hit_1.wav',
+    'audio/nature/underwater/321808__lloydevans09__pvc_pipe_hit_3.wav',
+];
+
+// Cached decoded buffers (loaded lazily on first click)
+const _coralBuffers: (AudioBuffer | null)[] = [null, null, null];
+
+async function _loadCoralBuffer(idx: number): Promise<AudioBuffer | null> {
+    const ctx = getAudioContext();
+    if (!ctx) return null;
+    if (_coralBuffers[idx]) return _coralBuffers[idx];
+    try {
+        const resp = await fetch(CORAL_SOUNDS[idx]);
+        const arr = await resp.arrayBuffer();
+        _coralBuffers[idx] = await ctx.decodeAudioData(arr);
+        return _coralBuffers[idx];
+    } catch (e) {
+        console.warn(`[SeaFloorDecor] Failed to load coral sound ${idx}:`, e);
+        return null;
+    }
+}
+
+// Per-coral playback rate: coral 0 → lower (grave), coral 2 → higher (agudo)
+const CORAL_PITCH = [0.8, 1.0, 1.3];
+
+function _playCoralSound(idx: number): void {
+    const ctx = getAudioContext();
+    const dest = getMasterDestination();
+    if (!ctx || !dest || !_coralBuffers[idx]) return;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 600;
+    filter.Q.value = 0.7;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.65;
+    const source = ctx.createBufferSource();
+    source.buffer = _coralBuffers[idx]!;
+    source.playbackRate.value = CORAL_PITCH[idx];
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(dest);
+    source.start();
+}
+
+// ── Colour palette ───────────────────────────────────────────────────────────
+// Each coral cycles through these, then wraps back to its original colour.
+// Palette is soft and warm — musical, not garish.
+const COLOUR_PALETTE: Array<{ r: number; g: number; b: number }> = [
+    { r: 1.00, g: 0.15, b: 0.55 },  // hot pink
+    { r: 0.20, g: 0.45, b: 1.00 },  // vivid blue
+    { r: 1.00, g: 0.75, b: 0.05 },  // bright amber
+    { r: 0.05, g: 1.00, b: 0.55 },  // electric green
+    { r: 0.70, g: 0.20, b: 1.00 },  // strong violet
+];
+
+// Per-coral state
+interface CoralInteractionState {
+    originalColor: { r: number; g: number; b: number };
+    colourIndex: number;       // next palette index to tween toward
+    tweenProgress: number;     // 0…1 (1 = done)
+    tweenFrom: { r: number; g: number; b: number };
+    tweenTo:   { r: number; g: number; b: number };
+    isTweening: boolean;
+    baseScale: number;         // from config
+    scaleTarget: number;       // 1.0 (idle) or 1.15 (hovered)
+    currentScale: number;      // smoothed
+    // Bounce animation on click
+    bounceTime: number;        // time into bounce (0 = no bounce)
+}
+
+const _coralStates: CoralInteractionState[] = [];
+
+function _initCoralStates(): void {
+    const cfgs = [config.coral1, config.coral2, config.coral3];
+    _coralStates.length = 0;
+    for (const c of cfgs) {
+        _coralStates.push({
+            originalColor: { r: c.r, g: c.g, b: c.b },
+            colourIndex: 0,
+            tweenProgress: 1,
+            tweenFrom: { r: c.r, g: c.g, b: c.b },
+            tweenTo:   { r: c.r, g: c.g, b: c.b },
+            isTweening: false,
+            baseScale: c.scale,
+            scaleTarget: 1.0,
+            currentScale: 1.0,
+            bounceTime: 0,
+        });
+    }
+}
+
+// ── Hover / click raycasting ─────────────────────────────────────────────────
+const _coralRay = new Raycaster();
+const _coralMouse = new Vector2();
+let _hoveredCoralIdx = -1;
+let _interactionSetUp = false;
+
+function _setupCoralInteraction(): void {
+    if (_interactionSetUp) return;
+    _interactionSetUp = true;
+    const canvas = renderer.domElement;
+
+    // Hover
+    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+        if (camera.position.y >= UNDERWATER_Y_THRESHOLD) {
+            if (_hoveredCoralIdx >= 0) { _hoveredCoralIdx = -1; canvas.style.cursor = ''; _resetHoverScales(); }
+            return;
+        }
+        _coralMouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        _coralMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        _coralRay.setFromCamera(_coralMouse, camera);
+        let hitIdx = -1;
+        for (let i = 0; i < 3; i++) {
+            const g = _corals[i];
+            if (!g) continue;
+            if (_coralRay.intersectObjects(g.children, true).length > 0) { hitIdx = i; break; }
+        }
+        if (hitIdx !== _hoveredCoralIdx) {
+            _hoveredCoralIdx = hitIdx;
+            canvas.style.cursor = hitIdx >= 0 ? 'pointer' : '';
+            _resetHoverScales();
+            if (hitIdx >= 0 && _coralStates[hitIdx]) _coralStates[hitIdx].scaleTarget = 1.15;
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (_hoveredCoralIdx >= 0) { _hoveredCoralIdx = -1; renderer.domElement.style.cursor = ''; _resetHoverScales(); }
+    });
+
+    // Click
+    const onClick = (clientX: number, clientY: number) => {
+        if (camera.position.y >= UNDERWATER_Y_THRESHOLD) return;
+        _coralMouse.x = (clientX / window.innerWidth) * 2 - 1;
+        _coralMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+        _coralRay.setFromCamera(_coralMouse, camera);
+        for (let i = 0; i < 3; i++) {
+            const g = _corals[i];
+            if (!g) continue;
+            if (_coralRay.intersectObjects(g.children, true).length > 0) {
+                _onCoralClicked(i as 0 | 1 | 2);
+                break;
+            }
+        }
+    };
+
+    canvas.addEventListener('click', (e: MouseEvent) => onClick(e.clientX, e.clientY));
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (e.changedTouches.length > 0) {
+            const t = e.changedTouches[0];
+            onClick(t.clientX, t.clientY);
+        }
+    });
+}
+
+function _resetHoverScales(): void {
+    for (const s of _coralStates) s.scaleTarget = 1.0;
+}
+
+// ── Click handler ────────────────────────────────────────────────────────────
+const _bubblePos = new Vector3();
+const CORAL_BUBBLE_COUNT = 5;
+
+function _onCoralClicked(idx: 0 | 1 | 2): void {
+    const st = _coralStates[idx];
+    if (!st) return;
+
+    // Sound
+    _loadCoralBuffer(idx).then(() => _playCoralSound(idx));
+
+    // Colour shift — pick next colour (palette, then wrap back to original)
+    const totalSteps = COLOUR_PALETTE.length + 1; // palette + original
+    const currentR = _getCurrentCoralColor(idx);
+    st.tweenFrom = { ...currentR };
+
+    st.colourIndex = (st.colourIndex + 1) % totalSteps;
+    if (st.colourIndex === COLOUR_PALETTE.length) {
+        // Loop back to original
+        st.tweenTo = { ...st.originalColor };
+    } else {
+        st.tweenTo = { ...COLOUR_PALETTE[st.colourIndex] };
+    }
+    st.tweenProgress = 0;
+    st.isTweening = true;
+
+    // Bounce
+    st.bounceTime = 0.001; // trigger bounce animation
+
+    // Bubbles — emit a small burst from the coral's world position
+    const g = _corals[idx];
+    if (g) {
+        g.getWorldPosition(_bubblePos);
+        _bubblePos.y += 0.15; // slightly above center
+        for (let b = 0; b < CORAL_BUBBLE_COUNT; b++) {
+            const offset = new Vector3(
+                (Math.random() - 0.5) * 0.12,
+                Math.random() * 0.08,
+                (Math.random() - 0.5) * 0.12
+            );
+            spawnBubble(_bubblePos.clone().add(offset));
+        }
+    }
+}
+
+function _getCurrentCoralColor(idx: number): { r: number; g: number; b: number } {
+    const st = _coralStates[idx];
+    if (!st) return { r: 1, g: 1, b: 1 };
+    if (st.isTweening) {
+        const t = st.tweenProgress;
+        return {
+            r: st.tweenFrom.r + (st.tweenTo.r - st.tweenFrom.r) * t,
+            g: st.tweenFrom.g + (st.tweenTo.g - st.tweenFrom.g) * t,
+            b: st.tweenFrom.b + (st.tweenTo.b - st.tweenFrom.b) * t,
+        };
+    }
+    return { ...st.tweenTo };
+}
+
+// ── Per-frame update for tweens + scale ──────────────────────────────────────
+const COLOUR_TWEEN_SPEED = 2.5;   // full transition in ~0.4s — snappy but visible
+const SCALE_LERP_SPEED   = 8.0;   // responsive hover feel
+const BOUNCE_DURATION    = 0.30;   // seconds
+const BOUNCE_AMPLITUDE   = 0.12;  // extra scale multiplier at peak
+
+export function updateCoralInteraction(dt: number): void {
+    for (let i = 0; i < 3; i++) {
+        const st = _coralStates[i];
+        const g = _corals[i];
+        if (!st || !g) continue;
+
+        // Colour tween
+        if (st.isTweening) {
+            st.tweenProgress = Math.min(1, st.tweenProgress + dt * COLOUR_TWEEN_SPEED);
+            // Smooth ease-out
+            const t = 1 - Math.pow(1 - st.tweenProgress, 3);
+            const r = st.tweenFrom.r + (st.tweenTo.r - st.tweenFrom.r) * t;
+            const gC = st.tweenFrom.g + (st.tweenTo.g - st.tweenFrom.g) * t;
+            const b = st.tweenFrom.b + (st.tweenTo.b - st.tweenFrom.b) * t;
+            applyCoralColor(g, r, gC, b);
+            if (st.tweenProgress >= 1) st.isTweening = false;
+        }
+
+        // Bounce animation
+        let bounceMult = 1.0;
+        if (st.bounceTime > 0) {
+            st.bounceTime += dt;
+            if (st.bounceTime >= BOUNCE_DURATION) {
+                st.bounceTime = 0;
+            } else {
+                // Single smooth bump — sine half-wave
+                const p = st.bounceTime / BOUNCE_DURATION;
+                bounceMult = 1 + Math.sin(p * Math.PI) * BOUNCE_AMPLITUDE;
+            }
+        }
+
+        // Scale smoothing (hover + bounce)
+        st.currentScale += (st.scaleTarget - st.currentScale) * Math.min(1, dt * SCALE_LERP_SPEED);
+        g.scale.setScalar(st.baseScale * st.currentScale * bounceMult);
+    }
+}

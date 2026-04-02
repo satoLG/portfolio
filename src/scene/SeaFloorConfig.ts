@@ -22,3 +22,11 @@ export const kelpTopY          = 0.5000;
 export const kelpSwayStrength  = 0.1350;
 export const kelpSwaySpeed     = 0.9200;
 export const kelpSwayFrequency = 5.2000;
+
+// -- Chest ---------------------------------------------------------------------
+export const chest = { x: -0.1000, y: -10.0000, z: -3.1800, scale: 0.4000, rx: 0.0000, ry: 0.2800, rz: 0.0000 };
+
+// -- Chest Zoom ----------------------------------------------------------------
+export const chestZoomDist   = 1.1000;
+export const chestZoomHeight = 0.3000;
+export const chestZoomFov    = 27.0000;

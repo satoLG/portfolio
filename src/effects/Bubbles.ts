@@ -169,7 +169,7 @@ export function setBubblesEnabled(enabled: boolean): void {
     }
 }
 
-function spawnBubble(position: Vector3): void {
+export function spawnBubble(position: Vector3): void {
     if (!_bubblesEnabled) return;
     // Find inactive bubble
     for (const bubble of bubbles) {

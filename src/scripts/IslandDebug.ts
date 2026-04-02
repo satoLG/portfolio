@@ -920,6 +920,14 @@ function buildGUI(): void {
                 `export const kelpSwayStrength  = ${f(sf.kelpSwayStrength)};`,
                 `export const kelpSwaySpeed     = ${f(sf.kelpSwaySpeed)};`,
                 `export const kelpSwayFrequency = ${f(sf.kelpSwayFrequency)};`,
+                ``,
+                `// -- Chest ---------------------------------------------------------------------`,
+                `export const chest = { x: ${f(sf.chest.x)}, y: ${f(sf.chest.y)}, z: ${f(sf.chest.z)}, scale: ${f(sf.chest.scale)}, rx: ${f(sf.chest.rx)}, ry: ${f(sf.chest.ry)}, rz: ${f(sf.chest.rz)} };`,
+                ``,
+                `// -- Chest Zoom ----------------------------------------------------------------`,
+                `export const chestZoomDist   = ${f(sf.chestZoomDist)};`,
+                `export const chestZoomHeight = ${f(sf.chestZoomHeight)};`,
+                `export const chestZoomFov    = ${f(sf.chestZoomFov)};`,
             ].join('\n');
             navigator.clipboard.writeText(content).then(() => {
                 console.log('[IslandDebug] SeaFloorConfig.ts content copied to clipboard!');
@@ -1000,6 +1008,21 @@ function buildGUI(): void {
     makePlacementFolder(sfKelpFolder, 'Kelp 2', () => sf.kelp2, () => SeaFloorDecor.updateKelpTransform(1));
     makePlacementFolder(sfKelpFolder, 'Kelp 3', () => sf.kelp3, () => SeaFloorDecor.updateKelpTransform(2));
     sfKelpFolder.close();
+
+    // ── Chest ────────────────────────────────────────────────────────────────────
+    const sfChestFolder = sfFolder.addFolder('Chest');
+    makePlacementFolder(sfChestFolder, 'Placement', () => sf.chest, () => Island.updateChestTransform());
+    const chestZoomFolder = sfChestFolder.addFolder('Zoom');
+    const chestZoomProxy = {
+        get dist()   { return sf.chestZoomDist;   }, set dist(v: number)   { sf.chestZoomDist   = v; },
+        get height() { return sf.chestZoomHeight; }, set height(v: number) { sf.chestZoomHeight = v; },
+        get fov()    { return sf.chestZoomFov;    }, set fov(v: number)    { sf.chestZoomFov    = v; },
+    };
+    chestZoomFolder.add(chestZoomProxy, 'dist',    0.5, 10,  0.05).name('Zoom Dist').listen();
+    chestZoomFolder.add(chestZoomProxy, 'height', -2.0,  5,  0.05).name('Zoom Height').listen();
+    chestZoomFolder.add(chestZoomProxy, 'fov',      5,  80,  0.5 ).name('Zoom FOV').listen();
+    chestZoomFolder.close();
+    sfChestFolder.close();
 
     sfFolder.close();
 

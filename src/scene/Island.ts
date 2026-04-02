@@ -1,13 +1,14 @@
-import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, MeshDepthMaterial, RGBADepthPacking } from "three";
+import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+import { config as sfDecorConfig } from './SeaFloorDecor';
 import { oceanAbsorptionUniform, underwaterFogDistUniform, setFoamMask } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../scripts/Time";
 import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../scripts/MediaPlayer";
-import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive } from "../scripts/Control";
+import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive } from "../scripts/Control";
 import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../scripts/Dialog";
 import type { DialogLine, ReplyOption } from "../scripts/Dialog";
-import { isBreezeActive, playPugSnoreOnce, stopPugSnore } from "../scripts/Audio";
+import { isBreezeActive, playPugSnoreOnce, stopPugSnore, getAudioContext, getMasterDestination } from "../scripts/Audio";
 import { camera, renderer, scene as threeScene } from "../scripts/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
 import * as PhoneScreen from '../scripts/PhoneScreen';
@@ -35,6 +36,7 @@ export const tent = new Group();
 export const dogBed = new Group();
 export const littleRocks = new Group();
 export const phone = new Group();
+export const chest = new Group();
 
 let phoneDropped = false;  // True after the cutscene sequence (runtime only, no localStorage)
 export const grassPatches: Group[] = [];
@@ -90,6 +92,18 @@ export let pugAnimClips: AnimationClip[] = [];
 export let pugCurrentAnimIndex = 3;
 /** The animation index the pug returns to when idle (changes at night). */
 export let pugDefaultAnimIndex = 3;
+
+// Chest animation state
+let chestMixer: AnimationMixer | null = null;
+let chestOpenAction: AnimationAction | null = null;
+let chestCloseAction: AnimationAction | null = null;
+let chestIsOpen = false;
+
+export function updateChestTransform(): void {
+    chest.position.set(sfDecorConfig.chest.x, sfDecorConfig.chest.y, sfDecorConfig.chest.z);
+    chest.scale.setScalar(sfDecorConfig.chest.scale);
+    chest.rotation.set(sfDecorConfig.chest.rx, sfDecorConfig.chest.ry, sfDecorConfig.chest.rz);
+}
 
 /** Duration (seconds) for crossfade blending between pug animations. */
 const ANIM_CROSSFADE_DURATION = 0.35;
@@ -1163,6 +1177,50 @@ export function Start(): void {
         (error) => { console.error('Error loading phone:', error); }
     );
 
+    // Load treasure chest model (underwater, among coral rocks)
+    loader.load(
+        'models/overall/chest.glb',
+        (gltf) => {
+            applyOceanLightingToModel(gltf.scene);
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    (child as any).receiveShadow = true;
+                }
+            });
+            chest.add(gltf.scene);
+            chest.position.set(
+                sfDecorConfig.chest.x,
+                sfDecorConfig.chest.y,
+                sfDecorConfig.chest.z
+            );
+            chest.scale.setScalar(sfDecorConfig.chest.scale);
+            chest.rotation.set(sfDecorConfig.chest.rx, sfDecorConfig.chest.ry, sfDecorConfig.chest.rz);
+
+            // Setup animations: [0] = open, [1] = close  (both LoopOnce, clamp at end)
+            if (gltf.animations.length > 0) {
+                chestMixer = new AnimationMixer(gltf.scene);
+                if (gltf.animations.length >= 1) {
+                    chestOpenAction = chestMixer.clipAction(gltf.animations[0]);
+                    chestOpenAction.setLoop(LoopOnce, 1);
+                    chestOpenAction.clampWhenFinished = true;
+                    chestOpenAction.timeScale = 0.5;   // half-speed for a slower, weighty open
+                }
+                if (gltf.animations.length >= 2) {
+                    chestCloseAction = chestMixer.clipAction(gltf.animations[1]);
+                    chestCloseAction.setLoop(LoopOnce, 1);
+                    chestCloseAction.clampWhenFinished = true;
+                }
+            }
+
+            console.log('Chest loaded with ocean lighting (' + gltf.animations.length + ' animations)');
+            // Pre-fetch audio so it's ready before first click
+            _loadChestBuffer();
+        },
+        undefined,
+        (error) => { console.error('Error loading chest:', error); }
+    );
+
     // Setup mouse/touch event listeners for grass interaction
     setupGrassInteraction();
 
@@ -1177,6 +1235,9 @@ export function Start(): void {
 
     // Setup phone click/hover interaction
     setupPhoneInteraction();
+
+    // Setup chest click/hover interaction (underwater)
+    setupChestInteraction();
 }
 
 // ── Multi-touch gesture tracker ─────────────────────────────────────────────
@@ -1627,6 +1688,148 @@ function setupPhoneInteraction(): void {
     });
 }
 
+// ── Chest interaction (underwater) ──────────────────────────────────────────
+const chestRaycaster = new Raycaster();
+const chestMouse = new Vector2();
+let isChestHovered = false;
+
+// ── Chest audio ───────────────────────────────────────────────────────────────
+let _chestAudioBuffer: AudioBuffer | null = null;
+
+async function _loadChestBuffer(): Promise<AudioBuffer | null> {
+    const ctx = getAudioContext();
+    if (!ctx) return null;
+    if (_chestAudioBuffer) return _chestAudioBuffer;
+    try {
+        const resp = await fetch('audio/overall/771164__steprock__treasure-chest-open.mp3');
+        const arrayBuf = await resp.arrayBuffer();
+        _chestAudioBuffer = await ctx.decodeAudioData(arrayBuf);
+        return _chestAudioBuffer;
+    } catch (e) {
+        console.warn('[Chest] Failed to load chest audio:', e);
+        return null;
+    }
+}
+
+function _reverseBuffer(src: AudioBuffer, ctx: AudioContext): AudioBuffer {
+    const reversed = ctx.createBuffer(src.numberOfChannels, src.length, src.sampleRate);
+    for (let ch = 0; ch < src.numberOfChannels; ch++) {
+        const srcData = src.getChannelData(ch);
+        const dstData = reversed.getChannelData(ch);
+        for (let i = 0; i < src.length; i++) {
+            dstData[i] = srcData[src.length - 1 - i];
+        }
+    }
+    return reversed;
+}
+
+function _playChestSound(reverse: boolean): void {
+    const ctx = getAudioContext();
+    const dest = getMasterDestination();
+    if (!ctx || !dest || !_chestAudioBuffer) return;
+    const buf = reverse ? _reverseBuffer(_chestAudioBuffer, ctx) : _chestAudioBuffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 500;
+    filter.Q.value = 0.5;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.8;
+    const source = ctx.createBufferSource();
+    source.buffer = buf;
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(dest);
+    source.start();
+}
+
+function openChest(): void {
+    if (chestIsOpen || !chestOpenAction) return;
+    chestIsOpen = true;
+    if (chestCloseAction) { chestCloseAction.stop(); }
+    chestOpenAction.reset();
+    chestOpenAction.play();
+    _loadChestBuffer().then(() => _playChestSound(false));
+}
+
+function closeChest(): void {
+    if (!chestIsOpen || !chestCloseAction) return;
+    chestIsOpen = false;
+    if (chestOpenAction) { chestOpenAction.stop(); }
+    chestCloseAction.reset();
+    chestCloseAction.play();
+    _loadChestBuffer().then(() => _playChestSound(true));
+}
+
+function setupChestInteraction(): void {
+    const canvas = renderer.domElement;
+    if (!canvas) return;
+
+    const onChestClick = (clientX: number, clientY: number) => {
+        if (chest.children.length === 0) return;
+        // Only interact when underwater
+        if (camera.position.y >= UNDERWATER_Y_THRESHOLD) return;
+        // Ignore if another zoom is active (radio, pug, phone)
+        if (isRadioZoomActive() || isPugZoomActive() || isPhoneZoomActive()) return;
+
+        // If already zoomed into chest, click outside → close + zoom out
+        if (isChestZoomActive()) {
+            chestMouse.x = (clientX / window.innerWidth) * 2 - 1;
+            chestMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+            chestRaycaster.setFromCamera(chestMouse, camera);
+            const hits = chestRaycaster.intersectObjects(chest.children, true);
+            if (hits.length > 0) return; // clicked on chest — stay zoomed
+            closeChest();
+            zoomOutFromChest();
+            return;
+        }
+
+        // Not zoomed — check if click hit the chest
+        chestMouse.x = (clientX / window.innerWidth) * 2 - 1;
+        chestMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+        chestRaycaster.setFromCamera(chestMouse, camera);
+        const intersects = chestRaycaster.intersectObjects(chest.children, true);
+        if (intersects.length > 0) {
+            isChestHovered = false;
+            canvas.style.cursor = '';
+            openChest();
+            zoomToChest();
+        }
+    };
+
+    canvas.addEventListener('click', (e: MouseEvent) => {
+        onChestClick(e.clientX, e.clientY);
+    });
+
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (_touchWasMulti) return;
+        if (e.changedTouches.length > 0) {
+            const touch = e.changedTouches[0];
+            onChestClick(touch.clientX, touch.clientY);
+        }
+    });
+
+    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+        if (chest.children.length === 0
+            || isChestZoomActive() || camera.position.y >= UNDERWATER_Y_THRESHOLD) {
+            if (isChestHovered) { isChestHovered = false; canvas.style.cursor = ''; }
+            return;
+        }
+        chestMouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        chestMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        chestRaycaster.setFromCamera(chestMouse, camera);
+        const intersects = chestRaycaster.intersectObjects(chest.children, true);
+        if (intersects.length > 0) {
+            if (!isChestHovered) { isChestHovered = true; canvas.style.cursor = 'pointer'; }
+        } else {
+            if (isChestHovered) { isChestHovered = false; canvas.style.cursor = ''; }
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (isChestHovered) { isChestHovered = false; canvas.style.cursor = ''; }
+    });
+}
+
 function _unregisterSleepLoopListener(): void {
     if (!pugMixer || !_pugSleepLoopListener) return;
     pugMixer.removeEventListener('loop', _pugSleepLoopListener);
@@ -1975,6 +2178,11 @@ export function Update(): void {
     // Update pug animation mixer — clamp delta to avoid fast-forward on frame-skips
     if (pugMixer) {
         pugMixer.update(Math.min(deltaTime, 0.1));
+    }
+
+    // Update chest animation mixer
+    if (chestMixer) {
+        chestMixer.update(Math.min(deltaTime, 0.1));
     }
 
     // ── Pug music-playing state: suppress sleep when music is on

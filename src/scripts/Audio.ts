@@ -29,12 +29,12 @@ const AUDIO_CHECK_INTERVAL = 2000;
 const FADE_IN_DURATION = 2.0;  // seconds — all audio fades in over this after start
 
 const AUDIO_PATHS = {
-    water: 'audio/ocean.wav',
-    breeze: 'audio/breeze.wav',
-    fireplace: 'audio/fireplace.wav',
-    underwaterAmb: 'audio/366159__dcsfx__underwater-loop-amb.wav',
-    underwaterBubbles: 'audio/96742__robinhood76__01650-underwater-bubbles.wav',
-    waterSplash: 'audio/274060__junggle__water-splash-11.wav',
+    water: 'audio/nature/surface/ocean.wav',
+    breeze: 'audio/nature/surface/breeze.wav',
+    fireplace: 'audio/nature/surface/fireplace.wav',
+    underwaterAmb: 'audio/nature/underwater/366159__dcsfx__underwater-loop-amb.wav',
+    underwaterBubbles: 'audio/nature/underwater/96742__robinhood76__01650-underwater-bubbles.wav',
+    waterSplash: 'audio/nature/surface/274060__junggle__water-splash-11.wav',
     uiSwitchDay: '/audio/ui/dragon-studio-light-switch-on-382714.mp3',
     uiSwitchNight: '/audio/ui/dragon-studio-light-switch-382712.mp3',
     uiButton: '/audio/ui/soundreality-button-202966.mp3',
