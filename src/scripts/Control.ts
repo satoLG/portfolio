@@ -31,7 +31,7 @@ const _scratchV2   = new Vector2();  // for pointerPosNormalized
 let webPageMode = true;  // Start in web page mode
 
 // ABOVE WATER zone (ocean surface is at Y=0)
-const aboveWaterTopY = 1.8;       // Top camera position above water
+const aboveWaterTopY = 1.4;       // Top camera position above water
 const aboveWaterBottomY = 1; // Bottom limit above water (avoid looking at surface)
 
 // UNDERWATER zone
@@ -56,7 +56,7 @@ let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
 // ============================================
 const introStartY = 5;         // Camera starts high above scene (can't see island)
 const introEndY = aboveWaterTopY;  // Camera ends at normal top position
-const introSmooth = 1.2;       // Cinematic descent speed after start click (lower = slower)
+const introSmooth = 2.5;       // Cinematic descent speed after start click (lower = slower)
 let introActive = false;       // Kept false during loading — camera parked. True only during post-click descent.
 let scrollEnabled = false;     // Prevent scrolling until descent completes
 // Camera tilts up during loading so the viewport shows only sky (horizon below frame).
@@ -585,6 +585,8 @@ export function Update(): void
                 currentFov = MathUtils.damp(currentFov, phoneZoomConfig.fov, ZOOM_SMOOTH, deltaTime);
             } else if (chestZoomActive) {
                 zoomPhi = MathUtils.damp(zoomPhi, CHEST_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
+                // Tilt camera down to look at chest from above
+                zoomTetha = MathUtils.damp(zoomTetha, sfDecorConfig.chestZoomPitch, ZOOM_SMOOTH, deltaTime);
                 // Narrow FOV for underwater chest zoom
                 currentFov = MathUtils.damp(currentFov, sfDecorConfig.chestZoomFov, ZOOM_SMOOTH, deltaTime);
             }
@@ -645,7 +647,7 @@ export function Update(): void
             // Once the post-click intro descent is within a hair of the target,
             // unlock scroll. No hard snap — let damp finish the last tiny delta
             // so there is no visible position jump or sudden speed change.
-            if (introActive && Math.abs(currentY - introEndY) < 0.003) {
+            if (introActive && Math.abs(currentY - introEndY) < 0.12) {
                 introActive = false;
                 scrollEnabled = true;
             }

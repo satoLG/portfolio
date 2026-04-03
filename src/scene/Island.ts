@@ -1,4 +1,4 @@
-import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking } from "three";
+import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, DoubleSide, MeshBasicMaterial } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { config as sfDecorConfig } from './SeaFloorDecor';
 import { oceanAbsorptionUniform, underwaterFogDistUniform, setFoamMask } from "../materials/OceanMaterial";
@@ -24,6 +24,7 @@ import {
     GRASS_COUNT_PALM as GRASS_COUNT_PALM_CFG,
     CLOVER_COUNT as CLOVER_COUNT_CFG,
     SURFACE_EDGE_PADDING,
+    EXCL_R_BONFIRE, EXCL_R_TENT, EXCL_R_PALM, EXCL_R_PUG, EXCL_R_RADIO, EXCL_R_ROCKS,
 } from './IslandConfig';
 
 export const island = new Group();
@@ -98,11 +99,55 @@ let chestMixer: AnimationMixer | null = null;
 let chestOpenAction: AnimationAction | null = null;
 let chestCloseAction: AnimationAction | null = null;
 let chestIsOpen = false;
+// Chest glow light (animates on open/close)
+let chestGlowLight: PointLight | null = null;
+let _chestGlowTarget = 0;
+// Chest Zelda-style ray beams
+let _chestRayGroup: Group | null = null;
+const _chestRayMats: MeshBasicMaterial[] = [];
+// Coins stored for live debug-GUI transforms
+const _chestCoins: Group[] = [];
+// Coin spring animation state (parallel arrays, one entry per coin)
+const _coinCurrentScales: number[] = [];
+const _coinVelocities:    number[] = [];
+const _coinTargetScales:  number[] = []; // 0 = hidden, cfg.scale = revealed
+const _coinRevealTimers:  number[] = []; // seconds remaining before reveal; -1 = idle
 
 export function updateChestTransform(): void {
     chest.position.set(sfDecorConfig.chest.x, sfDecorConfig.chest.y, sfDecorConfig.chest.z);
     chest.scale.setScalar(sfDecorConfig.chest.scale);
     chest.rotation.set(sfDecorConfig.chest.rx, sfDecorConfig.chest.ry, sfDecorConfig.chest.rz);
+}
+
+export function updateChestCoinTransforms(): void {
+    const cfgs = [sfDecorConfig.chestCoin1, sfDecorConfig.chestCoin2, sfDecorConfig.chestCoin3];
+    for (let i = 0; i < _chestCoins.length; i++) {
+        const c = cfgs[i];
+        _chestCoins[i].position.set(c.x, c.y, c.z);
+        _chestCoins[i].rotation.set(c.rx, c.ry, c.rz);
+        // Update target scale so the spring rides the new config value when revealed
+        if (i < _coinTargetScales.length && _coinTargetScales[i] > 0) {
+            _coinTargetScales[i] = c.scale;
+        }
+    }
+}
+
+export function updateChestGlowTransform(): void {
+    if (!chestGlowLight) return;
+    chestGlowLight.position.set(sfDecorConfig.chestGlowX, sfDecorConfig.chestGlowY, sfDecorConfig.chestGlowZ);
+    chestGlowLight.distance = sfDecorConfig.chestGlowDistance;
+}
+
+export function rebuildChestRays(): void {
+    if (_chestRayGroup) {
+        chest.remove(_chestRayGroup);
+        _chestRayGroup = null;
+    }
+    _chestRayMats.length = 0;
+    _buildChestRays();
+    // Restore opacity to whatever state the chest is currently in
+    const op = chestIsOpen ? sfDecorConfig.chestRayMaxOpacity * 0.8 : 0;
+    for (const m of _chestRayMats) m.opacity = op;
 }
 
 /** Duration (seconds) for crossfade blending between pug animations. */
@@ -335,12 +380,12 @@ const CLOVER_Y  = islandPosition.y + 0.98;  // World Y for clover placement
 // Radii are intentionally generous so footprints are fully clear.
 interface ExclusionZone { x: number; z: number; r: number; }
 const SPAWN_EXCLUSION_ZONES: ExclusionZone[] = [
-    { x:  0.00,  z: -2.90, r: 0.42 },  // Bonfire + sword + campfire footprint
-    { x:  0.48,  z: -3.70, r: 0.42 },  // Tent + dog bed + dog bowl
-    { x: -0.35,  z: -3.60, r: 0.14 },  // Palm trunk (small — palm-cluster grass grows around it)
-    { x:  0.65,  z: -2.30, r: 0.34 },  // Pug
-    { x: -0.65,  z: -3.10, r: 0.26 },  // Radio
-    { x:  0.32,  z: -2.60, r: 0.20 },  // Little rocks + phone
+    { x:  0.00,  z: -2.90, r: EXCL_R_BONFIRE },  // Bonfire + sword + campfire footprint
+    { x:  0.48,  z: -3.65, r: EXCL_R_TENT    },  // Custom tent
+    { x: -0.35,  z: -3.60, r: EXCL_R_PALM    },  // Palm trunk (small — palm-cluster grass grows around it)
+    { x:  0.65,  z: -2.30, r: EXCL_R_PUG     },  // Pug
+    { x: -0.65,  z: -3.10, r: EXCL_R_RADIO   },  // Radio
+    { x:  0.32,  z: -2.60, r: EXCL_R_ROCKS   },  // Little rocks + phone
 ];
 const PATCH_MIN_SPACING  = 0.055;  // Min world-space gap between any two patches
 const SPAWN_MAX_ATTEMPTS = 40;     // Retries per patch before giving up
@@ -1071,9 +1116,9 @@ export function Start(): void {
         }
     );
 
-    // Load tent to the right of the palm tree
+    // Load custom tent to the right of the palm tree
     loader.load(
-        'models/surface/tent.glb',
+        'models/surface/custom_tent.glb',
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
             gltf.scene.traverse((child) => {
@@ -1094,31 +1139,6 @@ export function Start(): void {
         },
         undefined,
         (error) => { console.error('Error loading tent:', error); }
-    );
-
-    // Load dog bed inside the tent
-    loader.load(
-        'models/surface/dog_bed.glb',
-        (gltf) => {
-            applyOceanLightingToModel(gltf.scene);
-            gltf.scene.traverse((child) => {
-                if ((child as any).isMesh) {
-                    child.castShadow = true;
-                    (child as any).receiveShadow = true;
-                }
-            });
-            dogBed.add(gltf.scene);
-            dogBed.position.set(
-                islandPosition.x + dogBedOffset.x,
-                islandPosition.y + dogBedOffset.y,
-                islandPosition.z + dogBedOffset.z
-            );
-            dogBed.scale.setScalar(dogBedScale);
-            dogBed.rotation.y = dogBedRotY;
-            console.log('Dog bed loaded');
-        },
-        undefined,
-        (error) => { console.error('Error loading dog bed:', error); }
     );
 
     // Load little rocks (between pug and firecamp — phone leans on them)
@@ -1179,7 +1199,7 @@ export function Start(): void {
 
     // Load treasure chest model (underwater, among coral rocks)
     loader.load(
-        'models/overall/chest.glb',
+        'models/overall/gold_chest.glb',
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
             gltf.scene.traverse((child) => {
@@ -1197,25 +1217,83 @@ export function Start(): void {
             chest.scale.setScalar(sfDecorConfig.chest.scale);
             chest.rotation.set(sfDecorConfig.chest.rx, sfDecorConfig.chest.ry, sfDecorConfig.chest.rz);
 
-            // Setup animations: [0] = open, [1] = close  (both LoopOnce, clamp at end)
+            // Setup animations: gold_chest [1] = open, [0] = close  (both LoopOnce, clamp at end)
             if (gltf.animations.length > 0) {
                 chestMixer = new AnimationMixer(gltf.scene);
-                if (gltf.animations.length >= 1) {
-                    chestOpenAction = chestMixer.clipAction(gltf.animations[0]);
+                if (gltf.animations.length >= 2) {
+                    chestOpenAction = chestMixer.clipAction(gltf.animations[1]);
                     chestOpenAction.setLoop(LoopOnce, 1);
                     chestOpenAction.clampWhenFinished = true;
                     chestOpenAction.timeScale = 0.5;   // half-speed for a slower, weighty open
                 }
-                if (gltf.animations.length >= 2) {
-                    chestCloseAction = chestMixer.clipAction(gltf.animations[1]);
+                if (gltf.animations.length >= 1) {
+                    chestCloseAction = chestMixer.clipAction(gltf.animations[0]);
                     chestCloseAction.setLoop(LoopOnce, 1);
                     chestCloseAction.clampWhenFinished = true;
                 }
             }
 
+            // Interior glow light — smoothly animates to target intensity on open/close
+            chestGlowLight = new PointLight(0xFFCC33, 0, sfDecorConfig.chestGlowDistance);
+            chestGlowLight.position.set(
+                sfDecorConfig.chestGlowX,
+                sfDecorConfig.chestGlowY,
+                sfDecorConfig.chestGlowZ
+            );
+            chest.add(chestGlowLight);
+            _buildChestRays();
+
             console.log('Chest loaded with ocean lighting (' + gltf.animations.length + ' animations)');
             // Pre-fetch audio so it's ready before first click
             _loadChestBuffer();
+
+            // Load extra coins (blue, black, white) placed inside the chest
+            const coinColors: Array<{ r: number; g: number; b: number }> = [
+                { r: 0.30, g: 0.55, b: 1.00 },  // blue
+                { r: 0.08, g: 0.08, b: 0.10 },  // black
+                { r: 0.90, g: 0.92, b: 0.95 },  // white
+            ];
+            const coinCfgs = [
+                sfDecorConfig.chestCoin1,
+                sfDecorConfig.chestCoin2,
+                sfDecorConfig.chestCoin3,
+            ];
+            loader.load(
+                'models/overall/coin.glb',
+                (coinGltf) => {
+                    for (let ci = 0; ci < 3; ci++) {
+                        const coinScene = coinGltf.scene.clone(true);
+                        const col = coinColors[ci];
+                        const cfg = coinCfgs[ci];
+                        coinScene.traverse((child) => {
+                            if ((child as any).isMesh && (child as any).material) {
+                                const mats = Array.isArray((child as any).material)
+                                    ? (child as any).material
+                                    : [(child as any).material];
+                                mats.forEach((mat: any) => {
+                                    mat = mat.clone();
+                                    (child as any).material = mat;
+                                    mat.color = new Color(col.r, col.g, col.b);
+                                    mat.emissive = new Color(col.r * 0.15, col.g * 0.15, col.b * 0.15);
+                                    mat.needsUpdate = true;
+                                });
+                            }
+                        });
+                        applyOceanLightingToModel(coinScene as Group);
+                        coinScene.position.set(cfg.x, cfg.y, cfg.z);
+                        coinScene.scale.setScalar(0);  // start hidden; spring reveals on open
+                        coinScene.rotation.set(cfg.rx, cfg.ry, cfg.rz);
+                        chest.add(coinScene);
+                        _chestCoins.push(coinScene as Group);
+                        _coinCurrentScales.push(0);
+                        _coinVelocities.push(0);
+                        _coinTargetScales.push(0);
+                        _coinRevealTimers.push(-1);
+                    }
+                },
+                undefined,
+                (err) => console.warn('[Chest] Failed to load coin.glb:', err)
+            );
         },
         undefined,
         (error) => { console.error('Error loading chest:', error); }
@@ -1413,7 +1491,7 @@ function _buildSecondLevelReplies(): ReplyOption[] {
                 showDialog([
                     {
                         textKey: 'pug.reply.response.youtalk',
-                        sound: '/audio/character/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
+                        sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
                         onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
                     },
                 ], _getPugScreenPos, _onPugDialogComplete);
@@ -1432,12 +1510,12 @@ function _buildSecondLevelReplies(): ReplyOption[] {
 const PUG_DIALOG_LINES: DialogLine[] = [
     {
         textKey: 'pug.dialog.0',
-        sound: '/audio/character/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
+        sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
         onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
     },
     {
         textKey: 'pug.dialog.1',
-        sound: '/audio/character/freesound_community-pug-woof-2-103762_SEGUNDA.wav',
+        sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_SEGUNDA.wav',
         onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
         replies: [
             {
@@ -1447,7 +1525,7 @@ const PUG_DIALOG_LINES: DialogLine[] = [
                     showDialog([
                         {
                             textKey: 'pug.reply.response.hi.day',
-                            sound: '/audio/character/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
+                            sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
                             onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
                         },
                         {
@@ -1688,10 +1766,83 @@ function setupPhoneInteraction(): void {
     });
 }
 
+// ── Chest ray beam helpers (Zelda-style glow rays) ────────────────────────────
+function _makeRayTexture(): CanvasTexture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 32;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+    // Top of canvas (y=0) → UV v=1 → TOP of plane = transparent
+    // Bottom of canvas (y=127) → UV v=0 → BOTTOM of plane = bright gold
+    const grad = ctx.createLinearGradient(0, 0, 0, 128);
+    grad.addColorStop(0,    'rgba(255, 215, 30, 0)');
+    grad.addColorStop(0.45, 'rgba(255, 210, 20, 0.45)');
+    grad.addColorStop(1,    'rgba(255, 235, 70, 0.9)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 32, 128);
+    // Horizontal taper: fade left/right edges to transparent
+    const imageData = ctx.getImageData(0, 0, 32, 128);
+    const data = imageData.data;
+    for (let y = 0; y < 128; y++) {
+        for (let x = 0; x < 32; x++) {
+            const t = x / 31;
+            const dist = Math.abs(t - 0.5) * 2; // 0 at center, 1 at edges
+            const mask = 1.0 - dist * dist; // smooth falloff
+            const idx = (y * 32 + x) * 4;
+            data[idx + 3] = Math.round(data[idx + 3] * mask);
+        }
+    }
+    ctx.putImageData(imageData, 0, 0);
+    return new CanvasTexture(canvas);
+}
+
+function _buildChestRays(): void {
+    const group = new Group();
+    _chestRayGroup = group;
+    const tex = _makeRayTexture();
+    const COUNT  = 8;
+    const RAY_W  = 0.30;   // narrow beam width
+    const RAY_H  = 3.5;    // beam height
+    const RING_R = sfDecorConfig.chestRayRadius;  // configurable XZ offset
+    const baseY  = 0.2;    // start just above chest floor
+    const centerY = baseY + RAY_H * 0.5;
+    for (let i = 0; i < COUNT; i++) {
+        const mat = new MeshBasicMaterial({
+            map: tex,
+            transparent: true,
+            blending: AdditiveBlending,
+            depthWrite: false,
+            side: DoubleSide,
+            opacity: 0,
+        });
+        _chestRayMats.push(mat);
+        const plane = new Mesh(new PlaneGeometry(RAY_W, RAY_H), mat);
+        const angle = (i / COUNT) * Math.PI * 2;
+        plane.position.set(
+            Math.sin(angle) * RING_R,
+            centerY,
+            Math.cos(angle) * RING_R
+        );
+        // Tilt each plane outward ~12° so they lean away from center
+        plane.rotation.y = angle;
+        plane.rotation.x = -0.21;  // slight backward lean for a 'cone' effect
+        group.add(plane);
+    }
+    chest.add(group);
+}
+
 // ── Chest interaction (underwater) ──────────────────────────────────────────
 const chestRaycaster = new Raycaster();
 const chestMouse = new Vector2();
 let isChestHovered = false;
+
+function _chestRayHit2(clientX: number, clientY: number): boolean {
+    if (chest.children.length === 0) return false;
+    chestMouse.x = (clientX / window.innerWidth) * 2 - 1;
+    chestMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+    chestRaycaster.setFromCamera(chestMouse, camera);
+    return chestRaycaster.intersectObjects(chest.children, true).length > 0;
+}
 
 // ── Chest audio ───────────────────────────────────────────────────────────────
 let _chestAudioBuffer: AudioBuffer | null = null;
@@ -1733,7 +1884,7 @@ function _playChestSound(reverse: boolean): void {
     filter.frequency.value = 500;
     filter.Q.value = 0.5;
     const gain = ctx.createGain();
-    gain.gain.value = 0.8;
+    gain.gain.value = 2.0;
     const source = ctx.createBufferSource();
     source.buffer = buf;
     source.connect(filter);
@@ -1745,6 +1896,18 @@ function _playChestSound(reverse: boolean): void {
 function openChest(): void {
     if (chestIsOpen || !chestOpenAction) return;
     chestIsOpen = true;
+    _chestGlowTarget = sfDecorConfig.chestGlowIntensity;
+    // Collapse any coins that may still be visible (e.g. re-open after partial close)
+    for (let i = 0; i < _coinRevealTimers.length; i++) _coinRevealTimers[i] = -1;
+    // Start revealing coins partway through the lid animation (not waiting for full finish)
+    const COIN_REVEAL_DELAY_MS = 800;
+    const STAGGER = 0.12; // seconds between each coin pop
+    setTimeout(() => {
+        if (!chestIsOpen) return; // chest was closed before timer fired
+        for (let i = 0; i < _chestCoins.length; i++) {
+            _coinRevealTimers[i] = i * STAGGER;
+        }
+    }, COIN_REVEAL_DELAY_MS);
     if (chestCloseAction) { chestCloseAction.stop(); }
     chestOpenAction.reset();
     chestOpenAction.play();
@@ -1754,6 +1917,12 @@ function openChest(): void {
 function closeChest(): void {
     if (!chestIsOpen || !chestCloseAction) return;
     chestIsOpen = false;
+    _chestGlowTarget = 0;
+    // Cancel pending reveals and collapse all coins
+    for (let i = 0; i < _coinTargetScales.length; i++) {
+        _coinRevealTimers[i] = -1;
+        _coinTargetScales[i] = 0;
+    }
     if (chestOpenAction) { chestOpenAction.stop(); }
     chestCloseAction.reset();
     chestCloseAction.play();
@@ -1773,26 +1942,18 @@ function setupChestInteraction(): void {
 
         // If already zoomed into chest, click outside → close + zoom out
         if (isChestZoomActive()) {
-            chestMouse.x = (clientX / window.innerWidth) * 2 - 1;
-            chestMouse.y = -(clientY / window.innerHeight) * 2 + 1;
-            chestRaycaster.setFromCamera(chestMouse, camera);
-            const hits = chestRaycaster.intersectObjects(chest.children, true);
-            if (hits.length > 0) return; // clicked on chest — stay zoomed
+            if (_chestRayHit2(clientX, clientY)) return; // clicked on chest — stay zoomed
             closeChest();
             zoomOutFromChest();
             return;
         }
 
         // Not zoomed — check if click hit the chest
-        chestMouse.x = (clientX / window.innerWidth) * 2 - 1;
-        chestMouse.y = -(clientY / window.innerHeight) * 2 + 1;
-        chestRaycaster.setFromCamera(chestMouse, camera);
-        const intersects = chestRaycaster.intersectObjects(chest.children, true);
-        if (intersects.length > 0) {
+        if (_chestRayHit2(clientX, clientY)) {
             isChestHovered = false;
             canvas.style.cursor = '';
             openChest();
-            zoomToChest();
+            setTimeout(() => zoomToChest(), 350); // slight delay so zoom starts after the lid begins to lift
         }
     };
 
@@ -1814,11 +1975,8 @@ function setupChestInteraction(): void {
             if (isChestHovered) { isChestHovered = false; canvas.style.cursor = ''; }
             return;
         }
-        chestMouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-        chestMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-        chestRaycaster.setFromCamera(chestMouse, camera);
-        const intersects = chestRaycaster.intersectObjects(chest.children, true);
-        if (intersects.length > 0) {
+        const hit = _chestRayHit2(e.clientX, e.clientY);
+        if (hit) {
             if (!isChestHovered) { isChestHovered = true; canvas.style.cursor = 'pointer'; }
         } else {
             if (isChestHovered) { isChestHovered = false; canvas.style.cursor = ''; }
@@ -2183,6 +2341,55 @@ export function Update(): void {
     // Update chest animation mixer
     if (chestMixer) {
         chestMixer.update(Math.min(deltaTime, 0.1));
+    }
+    // Animate chest glow light
+    if (chestGlowLight) {
+        // Keep target in sync with live config (so debug slider works)
+        if (chestIsOpen) _chestGlowTarget = sfDecorConfig.chestGlowIntensity;
+        const dt = Math.min(deltaTime, 0.1);
+        chestGlowLight.intensity = MathUtils.damp(chestGlowLight.intensity, _chestGlowTarget, 4, dt);
+    }
+    // Animate Zelda-style ray beams using configurable max opacity
+    if (_chestRayMats.length > 0) {
+        const maxOp = sfDecorConfig.chestRayMaxOpacity;
+        if (chestIsOpen) {
+            const op = maxOp * (0.6 + 0.4 * Math.sin(time * 1.8));
+            for (const m of _chestRayMats) m.opacity = op;
+        } else {
+            const dt = Math.min(deltaTime, 0.1);
+            for (const m of _chestRayMats) {
+                m.opacity = m.opacity > 0.002 ? MathUtils.damp(m.opacity, 0, 4, dt) : 0;
+            }
+        }
+    }
+    // Tick coin reveal timers and spring-animate coin scales
+    if (_chestCoins.length > 0) {
+        const dt = Math.min(deltaTime, 0.05);
+        const SPRING_K = 160;
+        const SPRING_D = 13;
+        const coinCfgs = [sfDecorConfig.chestCoin1, sfDecorConfig.chestCoin2, sfDecorConfig.chestCoin3];
+        for (let i = 0; i < _chestCoins.length; i++) {
+            // Count down per-coin reveal timer
+            if (_coinRevealTimers[i] >= 0) {
+                _coinRevealTimers[i] -= deltaTime;
+                if (_coinRevealTimers[i] < 0) {
+                    // Timer expired — reveal this coin
+                    _coinTargetScales[i] = coinCfgs[i].scale;
+                }
+            }
+            // Spring integration
+            const target = _coinTargetScales[i];
+            const err    = target - _coinCurrentScales[i];
+            const force  = SPRING_K * err - SPRING_D * _coinVelocities[i];
+            _coinVelocities[i]    += force * dt;
+            _coinCurrentScales[i] += _coinVelocities[i] * dt;
+            // Snap to rest when near zero to avoid float accumulation
+            if (target === 0 && Math.abs(_coinCurrentScales[i]) < 0.001 && Math.abs(_coinVelocities[i]) < 0.001) {
+                _coinCurrentScales[i] = 0;
+                _coinVelocities[i]    = 0;
+            }
+            _chestCoins[i].scale.setScalar(Math.max(0, _coinCurrentScales[i]));
+        }
     }
 
     // ── Pug music-playing state: suppress sleep when music is on

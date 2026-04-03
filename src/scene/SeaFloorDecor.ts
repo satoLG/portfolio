@@ -6,7 +6,7 @@
  * Call Update(dt) every frame.
  * Add decorGroup to the Three.js scene from Scene.ts.
  */
-import { Group, Mesh, Uniform, Raycaster, Vector2, Vector3 } from "three";
+import { Group, Mesh, Uniform, Vector2, Vector3, Box3, Sphere } from "three";
 import { GLTFLoader }           from "three/examples/jsm/loaders/GLTFLoader";
 import { oceanAbsorptionUniform, underwaterFogDistUniform, waveVelocity1Uniform, waveVelocity2Uniform } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
@@ -32,10 +32,21 @@ export const config = {
     kelpSwayStrength:  C.kelpSwayStrength,
     kelpSwaySpeed:     C.kelpSwaySpeed,
     kelpSwayFrequency: C.kelpSwayFrequency,
-    chest:           { ...C.chest },
-    chestZoomDist:   C.chestZoomDist,
-    chestZoomHeight: C.chestZoomHeight,
-    chestZoomFov:    C.chestZoomFov,
+    chest:            { ...C.chest },
+    chestZoomDist:    C.chestZoomDist,
+    chestZoomHeight:  C.chestZoomHeight,
+    chestZoomFov:     C.chestZoomFov,
+    chestZoomPitch:   C.chestZoomPitch,
+    chestGlowX:         C.chestGlowX,
+    chestGlowY:         C.chestGlowY,
+    chestGlowZ:         C.chestGlowZ,
+    chestGlowIntensity: C.chestGlowIntensity,
+    chestGlowDistance:  C.chestGlowDistance,
+    chestRayRadius:     C.chestRayRadius,
+    chestRayMaxOpacity: C.chestRayMaxOpacity,
+    chestCoin1:         { ...C.chestCoin1 },
+    chestCoin2:       { ...C.chestCoin2 },
+    chestCoin3:       { ...C.chestCoin3 },
 };
 
 // ── Scene group ────────────────────────────────────────────────────────────────
@@ -479,13 +490,35 @@ function _initCoralStates(): void {
             bounceTime: 0,
         });
     }
+    _updateCoralBoundingSpheres();
 }
-
-// ── Hover / click raycasting ─────────────────────────────────────────────────
-const _coralRay = new Raycaster();
 const _coralMouse = new Vector2();
 let _hoveredCoralIdx = -1;
 let _interactionSetUp = false;
+
+// Bounding spheres used for world-space center only (radius unused).
+const _coralSpheres: Sphere[] = [new Sphere(), new Sphere(), new Sphere()];
+const _box3Scratch = new Box3();
+const _coralScreenPos = new Vector3();
+// Screen-space hit rectangle (NDC units, -1..1): narrow horizontal, taller vertical
+const CORAL_HIT_HALF_W = 0.06;
+const CORAL_HIT_HALF_H = 0.20;
+
+function _updateCoralBoundingSpheres(): void {
+    for (let i = 0; i < 3; i++) {
+        const g = _corals[i];
+        if (!g) continue;
+        _box3Scratch.setFromObject(g);
+        _box3Scratch.getBoundingSphere(_coralSpheres[i]);
+    }
+}
+
+function _coralHit(i: number, mouseNDCX: number, mouseNDCY: number): boolean {
+    if (_coralSpheres[i].radius <= 0) return false;
+    _coralScreenPos.copy(_coralSpheres[i].center).project(camera);
+    return Math.abs(mouseNDCX - _coralScreenPos.x) < CORAL_HIT_HALF_W
+        && Math.abs(mouseNDCY - _coralScreenPos.y) < CORAL_HIT_HALF_H;
+}
 
 function _setupCoralInteraction(): void {
     if (_interactionSetUp) return;
@@ -500,12 +533,11 @@ function _setupCoralInteraction(): void {
         }
         _coralMouse.x = (e.clientX / window.innerWidth) * 2 - 1;
         _coralMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-        _coralRay.setFromCamera(_coralMouse, camera);
         let hitIdx = -1;
         for (let i = 0; i < 3; i++) {
             const g = _corals[i];
             if (!g) continue;
-            if (_coralRay.intersectObjects(g.children, true).length > 0) { hitIdx = i; break; }
+            if (_coralHit(i, _coralMouse.x, _coralMouse.y)) { hitIdx = i; break; }
         }
         if (hitIdx !== _hoveredCoralIdx) {
             _hoveredCoralIdx = hitIdx;
@@ -524,11 +556,10 @@ function _setupCoralInteraction(): void {
         if (camera.position.y >= UNDERWATER_Y_THRESHOLD) return;
         _coralMouse.x = (clientX / window.innerWidth) * 2 - 1;
         _coralMouse.y = -(clientY / window.innerHeight) * 2 + 1;
-        _coralRay.setFromCamera(_coralMouse, camera);
         for (let i = 0; i < 3; i++) {
             const g = _corals[i];
             if (!g) continue;
-            if (_coralRay.intersectObjects(g.children, true).length > 0) {
+            if (_coralHit(i, _coralMouse.x, _coralMouse.y)) {
                 _onCoralClicked(i as 0 | 1 | 2);
                 break;
             }

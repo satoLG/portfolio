@@ -928,6 +928,24 @@ function buildGUI(): void {
                 `export const chestZoomDist   = ${f(sf.chestZoomDist)};`,
                 `export const chestZoomHeight = ${f(sf.chestZoomHeight)};`,
                 `export const chestZoomFov    = ${f(sf.chestZoomFov)};`,
+                `export const chestZoomPitch  = ${f(sf.chestZoomPitch)};`,
+                `// Camera pitch while zoomed (radians, negative = look down)`,
+                ``,
+                `// -- Chest Glow ---------------------------------------------------------------`,
+                `export const chestGlowX         = ${f(sf.chestGlowX)};`,
+                `export const chestGlowY         = ${f(sf.chestGlowY)};`,
+                `export const chestGlowZ         = ${f(sf.chestGlowZ)};`,
+                `export const chestGlowIntensity = ${f(sf.chestGlowIntensity)};`,
+                `export const chestGlowDistance  = ${f(sf.chestGlowDistance)};`,
+                ``,
+                `// -- Chest Rays ---------------------------------------------------------------`,
+                `export const chestRayRadius     = ${f(sf.chestRayRadius)};`,
+                `export const chestRayMaxOpacity = ${f(sf.chestRayMaxOpacity)};`,
+                ``,
+                `// -- Chest Coins (placed inside chest, in chest-group local space) -------------`,
+                `export const chestCoin1 = { x: ${f(sf.chestCoin1.x)}, y: ${f(sf.chestCoin1.y)}, z: ${f(sf.chestCoin1.z)}, scale: ${f(sf.chestCoin1.scale)}, rx: ${f(sf.chestCoin1.rx)}, ry: ${f(sf.chestCoin1.ry)}, rz: ${f(sf.chestCoin1.rz)} };`,
+                `export const chestCoin2 = { x: ${f(sf.chestCoin2.x)}, y: ${f(sf.chestCoin2.y)}, z: ${f(sf.chestCoin2.z)}, scale: ${f(sf.chestCoin2.scale)}, rx: ${f(sf.chestCoin2.rx)}, ry: ${f(sf.chestCoin2.ry)}, rz: ${f(sf.chestCoin2.rz)} };`,
+                `export const chestCoin3 = { x: ${f(sf.chestCoin3.x)}, y: ${f(sf.chestCoin3.y)}, z: ${f(sf.chestCoin3.z)}, scale: ${f(sf.chestCoin3.scale)}, rx: ${f(sf.chestCoin3.rx)}, ry: ${f(sf.chestCoin3.ry)}, rz: ${f(sf.chestCoin3.rz)} };`,
             ].join('\n');
             navigator.clipboard.writeText(content).then(() => {
                 console.log('[IslandDebug] SeaFloorConfig.ts content copied to clipboard!');
@@ -942,6 +960,7 @@ function buildGUI(): void {
         label: string,
         getCfg: () => { x: number; y: number; z: number; scale: number; rx: number; ry: number; rz: number },
         onTransform: () => void,
+        yRange?: [number, number],
     ): void {
         const folder = parent.addFolder(label);
         const proxy = {
@@ -953,8 +972,10 @@ function buildGUI(): void {
             get ry()    { return getCfg().ry;    }, set ry(v)    { getCfg().ry    = v; onTransform(); },
             get rz()    { return getCfg().rz;    }, set rz(v)    { getCfg().rz    = v; onTransform(); },
         };
+        const yMin = yRange ? yRange[0] : -20;
+        const yMax = yRange ? yRange[1] :   0;
         folder.add(proxy, 'x',     -30, 30,   0.05).name('X').listen();
-        folder.add(proxy, 'y',     -20,  0,   0.05).name('Y').listen();
+        folder.add(proxy, 'y',  yMin, yMax,   0.05).name('Y').listen();
         folder.add(proxy, 'z',     -30, 30,   0.05).name('Z').listen();
         folder.add(proxy, 'scale',   0,  5,   0.01).name('Scale').listen();
         folder.add(proxy, 'rx', -3.14, 3.14,  0.01).name('Rot X').listen();
@@ -1014,14 +1035,46 @@ function buildGUI(): void {
     makePlacementFolder(sfChestFolder, 'Placement', () => sf.chest, () => Island.updateChestTransform());
     const chestZoomFolder = sfChestFolder.addFolder('Zoom');
     const chestZoomProxy = {
-        get dist()   { return sf.chestZoomDist;   }, set dist(v: number)   { sf.chestZoomDist   = v; },
-        get height() { return sf.chestZoomHeight; }, set height(v: number) { sf.chestZoomHeight = v; },
-        get fov()    { return sf.chestZoomFov;    }, set fov(v: number)    { sf.chestZoomFov    = v; },
+        get dist()  { return sf.chestZoomDist;  }, set dist(v: number)  { sf.chestZoomDist  = v; },
+        get height(){ return sf.chestZoomHeight;}, set height(v: number){ sf.chestZoomHeight = v; },
+        get fov()   { return sf.chestZoomFov;   }, set fov(v: number)   { sf.chestZoomFov   = v; },
+        get pitch() { return sf.chestZoomPitch; }, set pitch(v: number) { sf.chestZoomPitch = v; },
     };
-    chestZoomFolder.add(chestZoomProxy, 'dist',    0.5, 10,  0.05).name('Zoom Dist').listen();
-    chestZoomFolder.add(chestZoomProxy, 'height', -2.0,  5,  0.05).name('Zoom Height').listen();
-    chestZoomFolder.add(chestZoomProxy, 'fov',      5,  80,  0.5 ).name('Zoom FOV').listen();
+    chestZoomFolder.add(chestZoomProxy, 'dist',    0.5,  10,  0.05).name('Zoom Dist').listen();
+    chestZoomFolder.add(chestZoomProxy, 'height', -2.0,   5,  0.05).name('Zoom Height').listen();
+    chestZoomFolder.add(chestZoomProxy, 'fov',      5,   80,  0.5 ).name('Zoom FOV').listen();
+    chestZoomFolder.add(chestZoomProxy, 'pitch', -Math.PI / 2, Math.PI / 2, 0.01).name('Zoom Pitch').listen();
     chestZoomFolder.close();
+    // Glow light: position + intensity + distance
+    const chestGlowFolder = sfChestFolder.addFolder('Glow Light');
+    const chestGlowProxy = {
+        get x()         { return sf.chestGlowX;         }, set x(v: number)         { sf.chestGlowX         = v; Island.updateChestGlowTransform(); },
+        get y()         { return sf.chestGlowY;         }, set y(v: number)         { sf.chestGlowY         = v; Island.updateChestGlowTransform(); },
+        get z()         { return sf.chestGlowZ;         }, set z(v: number)         { sf.chestGlowZ         = v; Island.updateChestGlowTransform(); },
+        get intensity() { return sf.chestGlowIntensity; }, set intensity(v: number) { sf.chestGlowIntensity = v; },
+        get distance()  { return sf.chestGlowDistance;  }, set distance(v: number)  { sf.chestGlowDistance  = v; Island.updateChestGlowTransform(); },
+    };
+    chestGlowFolder.add(chestGlowProxy, 'x',        -3,  3, 0.05).name('X').listen();
+    chestGlowFolder.add(chestGlowProxy, 'y',        -1,  8, 0.05).name('Y').listen();
+    chestGlowFolder.add(chestGlowProxy, 'z',        -3,  3, 0.05).name('Z').listen();
+    chestGlowFolder.add(chestGlowProxy, 'intensity', 0, 20, 0.1 ).name('Intensity').listen();
+    chestGlowFolder.add(chestGlowProxy, 'distance',  0, 10, 0.1 ).name('Distance').listen();
+    chestGlowFolder.close();
+    // Rays: ring radius + max opacity
+    const chestRaysFolder = sfChestFolder.addFolder('Rays');
+    const chestRaysProxy = {
+        get radius()     { return sf.chestRayRadius;     }, set radius(v: number)     { sf.chestRayRadius     = v; Island.rebuildChestRays(); },
+        get maxOpacity() { return sf.chestRayMaxOpacity; }, set maxOpacity(v: number) { sf.chestRayMaxOpacity = v; },
+    };
+    chestRaysFolder.add(chestRaysProxy, 'radius',     0, 2, 0.01).name('Ring Radius').listen();
+    chestRaysFolder.add(chestRaysProxy, 'maxOpacity', 0, 1, 0.01).name('Max Opacity').listen();
+    chestRaysFolder.close();
+    // Coins
+    const chestCoinsFolder = sfChestFolder.addFolder('Coins');
+    makePlacementFolder(chestCoinsFolder, 'Coin 1 (Blue)',  () => sf.chestCoin1, () => Island.updateChestCoinTransforms(), [-3, 8]);
+    makePlacementFolder(chestCoinsFolder, 'Coin 2 (Black)', () => sf.chestCoin2, () => Island.updateChestCoinTransforms(), [-3, 8]);
+    makePlacementFolder(chestCoinsFolder, 'Coin 3 (White)', () => sf.chestCoin3, () => Island.updateChestCoinTransforms(), [-3, 8]);
+    chestCoinsFolder.close();
     sfChestFolder.close();
 
     sfFolder.close();
