@@ -41,7 +41,7 @@ const AUDIO_PATHS = {
     uiBubbleExpand: '/audio/ui/universfield-bubble-pop-293342.mp3',
     uiBubbleCollapse: '/audio/ui/universfield-bubble-pop-06-351337.mp3',
     uiSpin: '/audio/ui/712916__greyfeather__spinning-a-crank-fast.wav',
-    pugSnore: '/audio/character/freesound_community-pug-roncando-95042.mp3',
+    pugSnore: '/audio/character/pug/freesound_community-pug-roncando-95042.mp3',
 };
 
 // ============================================

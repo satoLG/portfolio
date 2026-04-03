@@ -10,7 +10,7 @@ export const radioOffset    = { x: -0.7470, y: 1.0000, z: 0.0960 };
 export const swordOffset    = { x: 0.1550, y: 1.3270, z: 0.1570 };
 export const pugOffset      = { x: 0.6500, y: 1.0000, z: 1.0000 };
 export const tentOffset     = { x: 0.4800, y: 0.9700, z: -0.3500 };
-export const dogBedOffset      = { x: 0.4450, y: 0.9580, z: -0.3100 };
+export const dogBedOffset      = { x: 0.0000, y: 0.8000, z: 3.3000 };
 export const littleRocksOffset = { x: 0.3200, y: 0.9850, z: 0.7000 };
 export const phoneOffset       = { x: 0.3300, y: 1.0540, z: 0.7720 };
 
@@ -21,8 +21,8 @@ export const palmtreeScale    = 0.4330;
 export const radioScale       = 0.2200;
 export const swordScale       = 0.2500;
 export const pugScale         = 0.4500;
-export const tentScale        = 1.8000;
-export const dogBedScale      = 0.3000;
+export const tentScale        = 0.0750;
+export const dogBedScale      = 1.0000;
 export const littleRocksScale = 0.7440;
 export const phoneScale       = 0.1500;
 
@@ -32,18 +32,26 @@ export const radioRotY      = 0.4954;
 export const swordRot       = { x: 2.6364, y: 0.0834, z: 0.1664 };
 export const pugRotY        = -0.4536;
 export const tentRotY       = -0.4000;
-export const dogBedRotY     = -1.9556;
+export const dogBedRotY     = 0.0000;
 export const littleRocksRot = { x: 0.0000, y: -3.1416, z: 0.0000 };
 export const phoneRot       = { x: -0.3166, y: -0.0306, z: -0.0096 };
 
 // ── Foliage clusters ──────────────────────────────────────────────────────────
-export const CLUSTER_MAIN = { wx: -0.0120, wz: -2.4380, minR: 1.0520, maxR: 1.9830 };
+export const CLUSTER_MAIN = { wx: -0.0120, wz: -3.0090, minR: 1.2380, maxR: 1.8370 };
 export const CLUSTER_PALM = { wx: -0.0040, wz: -3.1590, minR: 0.1500, maxR: 0.5850 };
 
 // ── Foliage counts ────────────────────────────────────────────────────────────
-export const GRASS_COUNT      = 200;
+export const GRASS_COUNT      = 75;
 export const GRASS_COUNT_PALM = 90;
 export const CLOVER_COUNT     = 69;
 
 // ── Spawn edge padding ────────────────────────────────────────────────────────
 export const SURFACE_EDGE_PADDING = 0.1;
+
+// ── Exclusion zone radii (grass spawn clearance around each surface object) ───
+export const EXCL_R_BONFIRE = 0.42;
+export const EXCL_R_TENT    = 0.62;   // custom tent — increase to push grass further out
+export const EXCL_R_PALM    = 0.14;
+export const EXCL_R_PUG     = 0.34;
+export const EXCL_R_RADIO   = 0.26;
+export const EXCL_R_ROCKS   = 0.20;
