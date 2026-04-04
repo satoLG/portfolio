@@ -4,7 +4,7 @@ import { camera, cameraRight, cameraForward, UpdateCameraRotation, renderer, sta
 import { KeyCodes, PointerPhase, PointerType, keysJustPressed, keysPressed, lastPointerLockChange, mouseMovement, pointers } from "./Input";
 import { spotLightDistance, spotLightDistanceUniform } from "../materials/OceanMaterial";
 import { islandPosition as cfgIslandPos, radioOffset as cfgRadioOffset, radioRotY as cfgRadioRotY, pugOffset as cfgPugOffset, pugRotY as cfgPugRotY, phoneOffset as cfgPhoneOffset } from '../scene/IslandConfig';
-import { phoneZoomHeight, phoneZoomTilt, phoneZoomPitch, phoneZoomFov, defaultCameraZ, defaultFov } from '../scene/CameraConfig';
+import { phoneZoomHeight, phoneZoomTilt, phoneZoomPitch, phoneZoomFov, defaultCameraX, defaultCameraZ, defaultFov, mobileFov, mobileBreakpointWidth } from '../scene/CameraConfig';
 import { config as sfDecorConfig } from '../scene/SeaFloorDecor';
 
 const baseMoveSpeed = 10;
@@ -96,7 +96,7 @@ let savedCameraZ = 0;
 let savedTargetY = 0;
 
 // Current interpolated camera position for zoom
-let currentZoomX = 0;
+let currentZoomX = defaultCameraX;
 let currentZoomY = 0;
 let currentZoomZ = 0;
 
@@ -116,12 +116,27 @@ const RADIO_ZOOM_TARGET_Z = _radioWorldZ + RADIO_ZOOM_DIST * Math.cos(cfgRadioRo
 const RADIO_ZOOM_PHI = Math.PI * 2 - cfgRadioRotY;
 let zoomPhi = Math.PI * 2;  // Smoothly interpolated camera yaw, only active in webPageMode
 let zoomTetha = 0;           // Smoothly interpolated camera pitch, for phone top-down view
+/** Effective startup FOV — larger on narrow (mobile) viewports. */
+/** Returns the desktop or mobile FOV value based on the current viewport width. */
+function _getResponsiveFov(desktop: number, mobile: number): number {
+    return window.innerWidth <= mobileBreakpointWidth ? mobile : desktop;
+}
+const _startupFov = _getResponsiveFov(defaultFov, mobileFov);
 /** Mutable config for the main (non-zoom) camera — tweak live from the debug GUI. */
 export const mainCameraConfig = {
-    z:   defaultCameraZ,  // World-space Z at rest
-    fov: defaultFov,      // Default FOV in degrees
+    x:          defaultCameraX,  // World-space X offset at rest
+    z:          defaultCameraZ,  // World-space Z at rest
+    desktopFov: defaultFov,      // FOV on viewport wider than mobileBreakpointWidth
+    mobileFov:  mobileFov,       // FOV on viewport at or below mobileBreakpointWidth
+    fov:        _startupFov,     // Current target FOV (set by resize, smoothed each frame)
 };
-let currentFov = defaultFov;  // Smoothly interpolated FOV — narrows during phone zoom
+let currentFov = _startupFov;  // Smoothly interpolated FOV — narrows during phone zoom
+
+// On resize: pick the correct FOV from the live mutable values (not frozen import constants).
+// The chest-zoom FOV is already evaluated per-frame in the update loop via _getResponsiveFov.
+window.addEventListener('resize', () => {
+    mainCameraConfig.fov = _getResponsiveFov(mainCameraConfig.desktopFov, mainCameraConfig.mobileFov);
+});
 
 // Camera follow offset applied on top of the pug zoom target during cutscenes.
 // Set each frame by Island.ts while the pug is moving, reset to 0 when done.
@@ -587,8 +602,10 @@ export function Update(): void
                 zoomPhi = MathUtils.damp(zoomPhi, CHEST_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
                 // Tilt camera down to look at chest from above
                 zoomTetha = MathUtils.damp(zoomTetha, sfDecorConfig.chestZoomPitch, ZOOM_SMOOTH, deltaTime);
-                // Narrow FOV for underwater chest zoom
-                currentFov = MathUtils.damp(currentFov, sfDecorConfig.chestZoomFov, ZOOM_SMOOTH, deltaTime);
+                // Narrow FOV for underwater chest zoom (responsive)
+                currentFov = MathUtils.damp(currentFov,
+                    _getResponsiveFov(sfDecorConfig.chestZoomFov, sfDecorConfig.chestZoomMobileFov),
+                    ZOOM_SMOOTH, deltaTime);
             }
         } else {
             // NORMAL MODE: Smooth Y scrolling, fixed X and Z
@@ -609,19 +626,19 @@ export function Update(): void
             isUnderwater = currentY < deadZoneMidpoint;
             
             // When exiting zoom, also smoothly return X and Z to default
-            if (currentZoomX !== 0 || currentZoomZ !== mainCameraConfig.z) {
-                currentZoomX = MathUtils.damp(currentZoomX, 0, RADIO_ZOOM_SMOOTH, deltaTime);
+            if (currentZoomX !== mainCameraConfig.x || currentZoomZ !== mainCameraConfig.z) {
+                currentZoomX = MathUtils.damp(currentZoomX, mainCameraConfig.x, RADIO_ZOOM_SMOOTH, deltaTime);
                 currentZoomZ = MathUtils.damp(currentZoomZ, mainCameraConfig.z, RADIO_ZOOM_SMOOTH, deltaTime);
                 camera.position.x = currentZoomX;
                 camera.position.z = currentZoomZ;
                 
                 // Snap when close enough
-                if (Math.abs(currentZoomX) < 0.01 && Math.abs(currentZoomZ - mainCameraConfig.z) < 0.01) {
-                    currentZoomX = 0;
+                if (Math.abs(currentZoomX - mainCameraConfig.x) < 0.01 && Math.abs(currentZoomZ - mainCameraConfig.z) < 0.01) {
+                    currentZoomX = mainCameraConfig.x;
                     currentZoomZ = mainCameraConfig.z;
                 }
             } else {
-                camera.position.x = 0;
+                camera.position.x = mainCameraConfig.x;
                 camera.position.z = mainCameraConfig.z;
             }
 

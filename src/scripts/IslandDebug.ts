@@ -27,6 +27,8 @@ import {
     setGrassCount,
     setGrassPalmCount,
     setCloverCount,
+    exclRadii,
+    setExclRadius,
     type FoliageCluster,
 } from '../scene/Island';
 import * as Island from '../scene/Island';
@@ -72,6 +74,7 @@ import {
 } from '../scene/OceanConfig';
 import { Object3D } from 'three';
 import { phoneZoomConfig, mainCameraConfig } from '../scripts/Control';
+import { mobileFov, mobileBreakpointWidth } from '../scene/CameraConfig';
 import { SetFOV } from '../scripts/Scene';
 import { phoneScreenConfig, updateOverlayStyle } from './PhoneScreen';
 
@@ -246,8 +249,225 @@ export function Start(): void {
     });
 }
 
+function injectLevaCSS(): void {
+    if (document.getElementById('leva-style-override')) return;
+    const style = document.createElement('style');
+    style.id = 'leva-style-override';
+    style.textContent = `
+/* ════════════════════════════════════════════════════════════════════════════
+   Leva-inspired theme for lil-gui
+   Colors & metrics lifted from pmndrs/leva default theme (stitches.config)
+   ════════════════════════════════════════════════════════════════════════════ */
+
+.lil-gui {
+  /* ── Leva palette ── */
+  --background-color: #181c20;
+  --text-color: #fefefe;
+  --title-background-color: #292d39;
+  --title-text-color: #fefefe;
+  --widget-color: #373c4b;
+  --hover-color: #424856;
+  --focus-color: #4d5568;
+  --number-color: #3c93ff;
+  --string-color: #a2db3c;
+
+  /* ── Typography ── */
+  --font-size: 11px;
+  --input-font-size: 11px;
+  --font-family: system-ui, sans-serif;
+  --font-family-mono: ui-monospace, SFMono-Regular, Menlo, 'Roboto Mono', monospace;
+
+  /* ── Geometry ── */
+  --padding: 6px;
+  --spacing: 2px;
+  --widget-height: 24px;
+  --title-height: 28px;
+  --name-width: 40%;
+  --slider-knob-width: 2px;
+  --slider-input-width: 27%;
+  --widget-border-radius: 4px;
+  --folder-indent: 8px;
+  --checkbox-size: 16px;
+  --scrollbar-width: 5px;
+}
+
+/* ── Root panel ── */
+.lil-gui.lil-root {
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 0 12px 0 #00000066;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  max-height: calc(100vh - 16px);
+}
+
+/* ── Title bar ── */
+.lil-gui.lil-root > .lil-title {
+  background: #292d39;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  height: 36px;
+  line-height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid #373c4b;
+}
+
+/* ── Top-level folder titles ── */
+.lil-gui.lil-root > .lil-children > .lil-gui > .lil-title {
+  background: #212630;
+  border-color: #2a3040;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: #8c92a4;
+  height: 28px;
+  line-height: 28px;
+  padding: 0 10px;
+}
+
+@media (hover: hover) {
+  body:not(.lil-dragging) .lil-gui.lil-root > .lil-children > .lil-gui > .lil-title:hover {
+    background: #262c38;
+    color: #b8bdd0;
+  }
+}
+
+/* ── Nested folder titles ── */
+.lil-gui .lil-gui .lil-gui > .lil-title {
+  font-weight: 500;
+  font-size: 11px;
+  color: #8c92a4;
+  padding-left: 4px;
+}
+
+/* ── Nested folder left border ── */
+.lil-gui .lil-gui .lil-gui > .lil-children {
+  border-left-color: #373c4b;
+}
+
+/* ── Scrollbar ── */
+.lil-gui.lil-root > .lil-children::-webkit-scrollbar-thumb {
+  background: #535760;
+  border-radius: 4px;
+}
+
+/* ── Controller rows ── */
+.lil-controller {
+  padding: 0 8px;
+  margin: 1px 0;
+  min-height: 26px;
+}
+.lil-controller > .lil-name {
+  color: #8c92a4;
+  font-size: 10.5px;
+}
+
+/* ── Slider track ── */
+.lil-controller.lil-number .lil-slider {
+  border-radius: 4px;
+  height: 22px;
+  background: #373c4b;
+}
+
+/* ── Slider fill — Leva accent gradient ── */
+.lil-controller.lil-number .lil-fill {
+  background: linear-gradient(90deg, #0066dc, #007bff);
+  border-right-color: #3c93ff;
+  border-radius: 4px 0 0 4px;
+}
+
+@media (hover: hover) {
+  .lil-controller.lil-number .lil-slider:hover {
+    background: #424856;
+  }
+}
+
+/* ── Number inputs ── */
+.lil-gui input[type=text],
+.lil-gui input[type=number] {
+  background: #373c4b;
+  border-radius: 4px;
+  color: #fefefe;
+  height: 22px;
+}
+.lil-gui input[type=text]:focus,
+.lil-gui input[type=number]:focus {
+  background: #4d5568;
+  box-shadow: 0 0 0 1px #007bff;
+}
+
+/* ── Checkbox ── */
+.lil-gui input[type=checkbox] {
+  border-radius: 4px;
+  background: #373c4b;
+}
+.lil-gui input[type=checkbox]:checked {
+  background: #007bff;
+}
+
+/* ── Select / option display ── */
+.lil-controller.lil-option .lil-display {
+  border-radius: 4px;
+  background: #373c4b;
+  height: 22px;
+  line-height: 22px;
+  font-size: 10.5px;
+}
+@media (hover: hover) {
+  .lil-controller.lil-option .lil-widget:hover .lil-display {
+    background: #424856;
+  }
+}
+
+/* ── Buttons (e.g. Copy Config) ── */
+.lil-gui .lil-controller button {
+  background: #007bff;
+  color: #fff;
+  border-radius: 5px;
+  height: 26px;
+  font-weight: 600;
+  font-size: 10.5px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+@media (hover: hover) {
+  .lil-gui .lil-controller button:hover {
+    background: #3c93ff;
+  }
+  .lil-gui .lil-controller button:focus {
+    box-shadow: 0 0 0 2px #0066dc88;
+  }
+}
+.lil-gui .lil-controller button:active {
+  background: #0066dc;
+  transform: scale(0.97);
+}
+
+/* ── Color display ── */
+.lil-controller.lil-color .lil-display {
+  border-radius: 4px;
+  height: 22px;
+}
+
+/* ── Transition for folder open/close ── */
+.lil-gui.lil-transition > .lil-children {
+  transition-duration: 250ms;
+}
+
+/* ── Panel close animation (tweak) ── */
+.lil-gui.lil-closed > .lil-children {
+  transform: translateY(-5px);
+}
+`;
+    document.head.appendChild(style);
+}
+
 function buildGUI(): void {
-    gui = new GUI({ title: 'Island Debug  [H]', width: 310 });
+    injectLevaCSS();
+    gui = new GUI({ title: 'Island Debug  [H]', width: 300 });
     gui.domElement.style.position = 'fixed';
     gui.domElement.style.top = '8px';
     gui.domElement.style.right = '8px';
@@ -322,6 +542,14 @@ function buildGUI(): void {
                 ``,
                 `// ── Spawn edge padding ────────────────────────────────────────────────────────`,
                 `export const SURFACE_EDGE_PADDING = ${SURFACE_EDGE_PADDING};`,
+                ``,
+                `// ── Exclusion zone radii (grass spawn clearance around each surface object) ───`,
+                `export const EXCL_R_BONFIRE = ${exclRadii.bonfire.toFixed(2)};`,
+                `export const EXCL_R_TENT    = ${exclRadii.tent.toFixed(2)};   // custom tent — increase to push grass further out`,
+                `export const EXCL_R_PALM    = ${exclRadii.palm.toFixed(2)};`,
+                `export const EXCL_R_PUG     = ${exclRadii.pug.toFixed(2)};`,
+                `export const EXCL_R_RADIO   = ${exclRadii.radio.toFixed(2)};`,
+                `export const EXCL_R_ROCKS   = ${exclRadii.rocks.toFixed(2)};`,
             ].join('\n');
             navigator.clipboard.writeText(content).then(() => {
                 console.log('[IslandDebug] IslandConfig.ts content copied to clipboard!');
@@ -481,6 +709,21 @@ function buildGUI(): void {
     addClusterFolder(surfaceFolder, 'Grass – Main Cluster', 'grass-main', CLUSTER_MAIN, 'GRASS_COUNT',      setGrassCount);
     addClusterFolder(surfaceFolder, 'Grass – Palm Cluster', 'grass-palm', CLUSTER_PALM, 'GRASS_COUNT_PALM', setGrassPalmCount);
     addClusterFolder(surfaceFolder, 'Clover',               'clover',     CLUSTER_MAIN, 'CLOVER_COUNT',     setCloverCount);
+
+    // ── Exclusion radii ──
+    const exclFolder = surfaceFolder.addFolder('Exclusion Radii');
+    exclFolder.close();
+    const _exclRespawn = () => {
+        respawnFoliage('grass-main');
+        respawnFoliage('grass-palm');
+        respawnFoliage('clover');
+    };
+    (['bonfire', 'tent', 'palm', 'pug', 'radio', 'rocks'] as const).forEach(key => {
+        exclFolder.add(exclRadii, key, 0, 1.5, 0.01)
+            .name(key.charAt(0).toUpperCase() + key.slice(1))
+            .listen()
+            .onChange((v: number) => { setExclRadius(key, v); _exclRespawn(); });
+    });
 
     // ── Ocean Reflection ──────────────────────────────────────────
     const reflFolder = oceanFolder.addFolder('Reflection');
@@ -925,10 +1168,11 @@ function buildGUI(): void {
                 `export const chest = { x: ${f(sf.chest.x)}, y: ${f(sf.chest.y)}, z: ${f(sf.chest.z)}, scale: ${f(sf.chest.scale)}, rx: ${f(sf.chest.rx)}, ry: ${f(sf.chest.ry)}, rz: ${f(sf.chest.rz)} };`,
                 ``,
                 `// -- Chest Zoom ----------------------------------------------------------------`,
-                `export const chestZoomDist   = ${f(sf.chestZoomDist)};`,
-                `export const chestZoomHeight = ${f(sf.chestZoomHeight)};`,
-                `export const chestZoomFov    = ${f(sf.chestZoomFov)};`,
-                `export const chestZoomPitch  = ${f(sf.chestZoomPitch)};`,
+                `export const chestZoomDist       = ${f(sf.chestZoomDist)};`,
+                `export const chestZoomHeight     = ${f(sf.chestZoomHeight)};`,
+                `export const chestZoomFov        = ${f(sf.chestZoomFov)};`,
+                `export const chestZoomMobileFov  = ${f(sf.chestZoomMobileFov)};`,
+                `export const chestZoomPitch      = ${f(sf.chestZoomPitch)};`,
                 `// Camera pitch while zoomed (radians, negative = look down)`,
                 ``,
                 `// -- Chest Glow ---------------------------------------------------------------`,
@@ -946,6 +1190,11 @@ function buildGUI(): void {
                 `export const chestCoin1 = { x: ${f(sf.chestCoin1.x)}, y: ${f(sf.chestCoin1.y)}, z: ${f(sf.chestCoin1.z)}, scale: ${f(sf.chestCoin1.scale)}, rx: ${f(sf.chestCoin1.rx)}, ry: ${f(sf.chestCoin1.ry)}, rz: ${f(sf.chestCoin1.rz)} };`,
                 `export const chestCoin2 = { x: ${f(sf.chestCoin2.x)}, y: ${f(sf.chestCoin2.y)}, z: ${f(sf.chestCoin2.z)}, scale: ${f(sf.chestCoin2.scale)}, rx: ${f(sf.chestCoin2.rx)}, ry: ${f(sf.chestCoin2.ry)}, rz: ${f(sf.chestCoin2.rz)} };`,
                 `export const chestCoin3 = { x: ${f(sf.chestCoin3.x)}, y: ${f(sf.chestCoin3.y)}, z: ${f(sf.chestCoin3.z)}, scale: ${f(sf.chestCoin3.scale)}, rx: ${f(sf.chestCoin3.rx)}, ry: ${f(sf.chestCoin3.ry)}, rz: ${f(sf.chestCoin3.rz)} };`,
+                ``,
+                `// -- Chest Coin Colors (bodyR/G/B = ring+star, circleR/G/B = inner disc) ------`,
+                `export const chestCoin1Color = { bodyR: ${f(sf.chestCoin1Color.bodyR)}, bodyG: ${f(sf.chestCoin1Color.bodyG)}, bodyB: ${f(sf.chestCoin1Color.bodyB)}, circleR: ${f(sf.chestCoin1Color.circleR)}, circleG: ${f(sf.chestCoin1Color.circleG)}, circleB: ${f(sf.chestCoin1Color.circleB)} };`,
+                `export const chestCoin2Color = { bodyR: ${f(sf.chestCoin2Color.bodyR)}, bodyG: ${f(sf.chestCoin2Color.bodyG)}, bodyB: ${f(sf.chestCoin2Color.bodyB)}, circleR: ${f(sf.chestCoin2Color.circleR)}, circleG: ${f(sf.chestCoin2Color.circleG)}, circleB: ${f(sf.chestCoin2Color.circleB)} };`,
+                `export const chestCoin3Color = { bodyR: ${f(sf.chestCoin3Color.bodyR)}, bodyG: ${f(sf.chestCoin3Color.bodyG)}, bodyB: ${f(sf.chestCoin3Color.bodyB)}, circleR: ${f(sf.chestCoin3Color.circleR)}, circleG: ${f(sf.chestCoin3Color.circleG)}, circleB: ${f(sf.chestCoin3Color.circleB)} };`,
             ].join('\n');
             navigator.clipboard.writeText(content).then(() => {
                 console.log('[IslandDebug] SeaFloorConfig.ts content copied to clipboard!');
@@ -1035,14 +1284,16 @@ function buildGUI(): void {
     makePlacementFolder(sfChestFolder, 'Placement', () => sf.chest, () => Island.updateChestTransform());
     const chestZoomFolder = sfChestFolder.addFolder('Zoom');
     const chestZoomProxy = {
-        get dist()  { return sf.chestZoomDist;  }, set dist(v: number)  { sf.chestZoomDist  = v; },
-        get height(){ return sf.chestZoomHeight;}, set height(v: number){ sf.chestZoomHeight = v; },
-        get fov()   { return sf.chestZoomFov;   }, set fov(v: number)   { sf.chestZoomFov   = v; },
-        get pitch() { return sf.chestZoomPitch; }, set pitch(v: number) { sf.chestZoomPitch = v; },
+        get dist()       { return sf.chestZoomDist;       }, set dist(v: number)       { sf.chestZoomDist       = v; },
+        get height()     { return sf.chestZoomHeight;     }, set height(v: number)     { sf.chestZoomHeight     = v; },
+        get fov()        { return sf.chestZoomFov;        }, set fov(v: number)        { sf.chestZoomFov        = v; },
+        get mobileFov()  { return sf.chestZoomMobileFov;  }, set mobileFov(v: number)  { sf.chestZoomMobileFov  = v; },
+        get pitch()      { return sf.chestZoomPitch;      }, set pitch(v: number)      { sf.chestZoomPitch      = v; },
     };
-    chestZoomFolder.add(chestZoomProxy, 'dist',    0.5,  10,  0.05).name('Zoom Dist').listen();
-    chestZoomFolder.add(chestZoomProxy, 'height', -2.0,   5,  0.05).name('Zoom Height').listen();
-    chestZoomFolder.add(chestZoomProxy, 'fov',      5,   80,  0.5 ).name('Zoom FOV').listen();
+    chestZoomFolder.add(chestZoomProxy, 'dist',       0.5,  10,  0.05).name('Zoom Dist').listen();
+    chestZoomFolder.add(chestZoomProxy, 'height',    -2.0,   5,  0.05).name('Zoom Height').listen();
+    chestZoomFolder.add(chestZoomProxy, 'fov',         5,   80,  0.5 ).name('Zoom FOV (desktop)').listen();
+    chestZoomFolder.add(chestZoomProxy, 'mobileFov',   5,   80,  0.5 ).name('Zoom FOV (mobile)').listen();
     chestZoomFolder.add(chestZoomProxy, 'pitch', -Math.PI / 2, Math.PI / 2, 0.01).name('Zoom Pitch').listen();
     chestZoomFolder.close();
     // Glow light: position + intensity + distance
@@ -1071,28 +1322,60 @@ function buildGUI(): void {
     chestRaysFolder.close();
     // Coins
     const chestCoinsFolder = sfChestFolder.addFolder('Coins');
-    makePlacementFolder(chestCoinsFolder, 'Coin 1 (Blue)',  () => sf.chestCoin1, () => Island.updateChestCoinTransforms(), [-3, 8]);
-    makePlacementFolder(chestCoinsFolder, 'Coin 2 (Black)', () => sf.chestCoin2, () => Island.updateChestCoinTransforms(), [-3, 8]);
-    makePlacementFolder(chestCoinsFolder, 'Coin 3 (White)', () => sf.chestCoin3, () => Island.updateChestCoinTransforms(), [-3, 8]);
+    const coinDefs = [
+        { label: 'Coin 1 (Blue)',  cfgKey: 'chestCoin1' as const, colorKey: 'chestCoin1Color' as const },
+        { label: 'Coin 2 (Black)', cfgKey: 'chestCoin2' as const, colorKey: 'chestCoin2Color' as const },
+        { label: 'Coin 3 (White)', cfgKey: 'chestCoin3' as const, colorKey: 'chestCoin3Color' as const },
+    ];
+    coinDefs.forEach((def, ci) => {
+        const coinFolder = chestCoinsFolder.addFolder(def.label);
+        // -- Placement --
+        const placement = coinFolder.addFolder('Placement');
+        const p = {
+            get x()     { return sf[def.cfgKey].x;     }, set x(v)     { sf[def.cfgKey].x     = v; Island.updateChestCoinTransforms(); },
+            get y()     { return sf[def.cfgKey].y;     }, set y(v)     { sf[def.cfgKey].y     = v; Island.updateChestCoinTransforms(); },
+            get z()     { return sf[def.cfgKey].z;     }, set z(v)     { sf[def.cfgKey].z     = v; Island.updateChestCoinTransforms(); },
+            get scale() { return sf[def.cfgKey].scale; }, set scale(v) { sf[def.cfgKey].scale = v; Island.updateChestCoinTransforms(); },
+            get rx()    { return sf[def.cfgKey].rx;    }, set rx(v)    { sf[def.cfgKey].rx    = v; Island.updateChestCoinTransforms(); },
+            get ry()    { return sf[def.cfgKey].ry;    }, set ry(v)    { sf[def.cfgKey].ry    = v; Island.updateChestCoinTransforms(); },
+            get rz()    { return sf[def.cfgKey].rz;    }, set rz(v)    { sf[def.cfgKey].rz    = v; Island.updateChestCoinTransforms(); },
+        };
+        placement.add(p, 'x',     -30, 30,   0.05).name('X').listen();
+        placement.add(p, 'y',      -3,  8,   0.05).name('Y').listen();
+        placement.add(p, 'z',     -30, 30,   0.05).name('Z').listen();
+        placement.add(p, 'scale',   0,  5,   0.01).name('Scale').listen();
+        placement.add(p, 'rx', -3.14, 3.14,  0.01).name('Rot X').listen();
+        placement.add(p, 'ry', -3.14, 3.14,  0.01).name('Rot Y').listen();
+        placement.add(p, 'rz', -3.14, 3.14,  0.01).name('Rot Z').listen();
+        placement.close();
+        // -- Body color (ring + star) --
+        const bodyFolder = coinFolder.addFolder('Body (ring + star)');
+        const bc = {
+            get r() { return sf[def.colorKey].bodyR; }, set r(v) { sf[def.colorKey].bodyR = v; Island.updateChestCoinColors(); },
+            get g() { return sf[def.colorKey].bodyG; }, set g(v) { sf[def.colorKey].bodyG = v; Island.updateChestCoinColors(); },
+            get b() { return sf[def.colorKey].bodyB; }, set b(v) { sf[def.colorKey].bodyB = v; Island.updateChestCoinColors(); },
+        };
+        bodyFolder.add(bc, 'r', 0, 1, 0.01).name('R').listen();
+        bodyFolder.add(bc, 'g', 0, 1, 0.01).name('G').listen();
+        bodyFolder.add(bc, 'b', 0, 1, 0.01).name('B').listen();
+        bodyFolder.close();
+        // -- Circle color (inner disc) --
+        const circleFolder = coinFolder.addFolder('Circle (inner disc)');
+        const cc = {
+            get r() { return sf[def.colorKey].circleR; }, set r(v) { sf[def.colorKey].circleR = v; Island.updateChestCoinColors(); },
+            get g() { return sf[def.colorKey].circleG; }, set g(v) { sf[def.colorKey].circleG = v; Island.updateChestCoinColors(); },
+            get b() { return sf[def.colorKey].circleB; }, set b(v) { sf[def.colorKey].circleB = v; Island.updateChestCoinColors(); },
+        };
+        circleFolder.add(cc, 'r', 0, 1, 0.01).name('R').listen();
+        circleFolder.add(cc, 'g', 0, 1, 0.01).name('G').listen();
+        circleFolder.add(cc, 'b', 0, 1, 0.01).name('B').listen();
+        circleFolder.close();
+        coinFolder.close();
+    });
     chestCoinsFolder.close();
     sfChestFolder.close();
 
     sfFolder.close();
-
-    // ── Camera: Main Camera live tweaks ────────────────────────────────────────
-    const mainCamFolder = cameraFolder.addFolder('Main Camera');
-    const mainCamProxy = {
-        get z()   { return mainCameraConfig.z; },
-        set z(v)  { mainCameraConfig.z = v; },
-        get fov() { return mainCameraConfig.fov; },
-        set fov(v) {
-            mainCameraConfig.fov = v;
-            SetFOV(v);  // apply immediately to base camera
-        },
-    };
-    mainCamFolder.add(mainCamProxy, 'z',   0.1, 5.0, 0.01).name('Camera Z (depth)').listen();
-    mainCamFolder.add(mainCamProxy, 'fov', 10,  120, 0.5 ).name('Field of View (°)').listen();
-    mainCamFolder.close();
 
     // ── Camera: Copy CameraConfig.ts ────────────────────────────────────────────
     const cameraConfigActions = {
@@ -1108,8 +1391,11 @@ function buildGUI(): void {
                 `// Paste this entire file to replace src/scene/CameraConfig.ts`,
                 ``,
                 `// ── Main Camera ─────────────────────────────────────────────────────────────────`,
-                `export const defaultCameraZ = ${f(mcc.z)};   // World-space Z position of the camera at rest`,
-                `export const defaultFov     = ${fi(mcc.fov)};    // Default camera Field-of-View in degrees`,
+                `export const defaultCameraX        = ${f(mcc.x)};   // World-space X offset of the camera at rest`,
+                `export const defaultCameraZ        = ${f(mcc.z)};   // World-space Z position of the camera at rest`,
+                `export const defaultFov            = ${fi(mcc.desktopFov)};     // Default camera Field-of-View in degrees (desktop)`,
+                `export const mobileFov             = ${fi(mcc.mobileFov)};       // FOV used when viewport width ≤ mobileBreakpointWidth`,
+                `export const mobileBreakpointWidth = ${fi(mobileBreakpointWidth)};      // px — widths at or below this are treated as mobile`,
                 ``,
                 `// ── Phone Zoom ────────────────────────────────────────────────────────────────`,
                 `export const phoneZoomHeight = ${f(pzc.height)};    // World-units above phone surface`,
@@ -1138,6 +1424,32 @@ function buildGUI(): void {
         },
     };
     cameraFolder.add(cameraConfigActions, 'copyConfig').name('Copy CameraConfig.ts');
+
+    // ── Camera: Main Camera live tweaks ────────────────────────────────────────
+    const mainCamFolder = cameraFolder.addFolder('Main Camera');
+    const mainCamProxy = {
+        get x()          { return mainCameraConfig.x; },
+        set x(v)         { mainCameraConfig.x = v; },
+        get z()          { return mainCameraConfig.z; },
+        set z(v)         { mainCameraConfig.z = v; },
+        get desktopFov() { return mainCameraConfig.desktopFov; },
+        set desktopFov(v) {
+            mainCameraConfig.desktopFov = v;
+            mainCameraConfig.fov = window.innerWidth > mobileBreakpointWidth ? v : mainCameraConfig.mobileFov;
+            SetFOV(mainCameraConfig.fov);
+        },
+        get mobileFov()  { return mainCameraConfig.mobileFov; },
+        set mobileFov(v) {
+            mainCameraConfig.mobileFov = v;
+            mainCameraConfig.fov = window.innerWidth <= mobileBreakpointWidth ? v : mainCameraConfig.desktopFov;
+            SetFOV(mainCameraConfig.fov);
+        },
+    };
+    mainCamFolder.add(mainCamProxy, 'x',          -10, 10,  0.05).name('Camera X (offset)').listen();
+    mainCamFolder.add(mainCamProxy, 'z',           0.1, 5.0, 0.01).name('Camera Z (depth)').listen();
+    mainCamFolder.add(mainCamProxy, 'desktopFov',  10,  120, 0.5 ).name('FOV (desktop)').listen();
+    mainCamFolder.add(mainCamProxy, 'mobileFov',   10,  120, 0.5 ).name('FOV (mobile)').listen();
+    mainCamFolder.close();
 
     // ── Camera: Phone Zoom ──────────────────────────────────────────
     //   Active only while phone zoom is active, but sliders affect it instantly.

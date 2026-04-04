@@ -3,8 +3,11 @@
 // Paste this entire file to replace src/scene/CameraConfig.ts
 
 // ── Main Camera ─────────────────────────────────────────────────────────────────
-export const defaultCameraZ = 1.7800;   // World-space Z position of the camera at rest
-export const defaultFov     = 50.5;    // Default camera Field-of-View in degrees
+export const defaultCameraX        = -0.1000;   // World-space X offset of the camera at rest
+export const defaultCameraZ        = 1.7800;   // World-space Z position of the camera at rest
+export const defaultFov            = 50.5;     // Default camera Field-of-View in degrees (desktop)
+export const mobileFov             = 65;       // FOV used when viewport width ≤ mobileBreakpointWidth
+export const mobileBreakpointWidth = 768;      // px — widths at or below this are treated as mobile
 
 // ── Phone Zoom ────────────────────────────────────────────────────────────────
 export const phoneZoomHeight = 0.0500;    // World-units above phone surface
@@ -20,9 +23,9 @@ export const phoneScreenOffsetY = 0.0020;
 export const phoneScreenOffsetZ = 0.0110;
 
 // ── Phone Screen Overlay ──────────────────────────────────────────────────────
-export const phoneOverlayOpacity      = 0.0800;
+export const phoneOverlayOpacity      = 0.3970;
 export const phoneOverlayTintR        = 180;
 export const phoneOverlayTintG        = 200;
 export const phoneOverlayTintB        = 255;
-export const phoneOverlayGlareOpacity = 0.0600;
-export const phoneOverlayGlareAngle   = 135;
+export const phoneOverlayGlareOpacity = 0.3100;
+export const phoneOverlayGlareAngle   = 237;
