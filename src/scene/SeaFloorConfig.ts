@@ -27,18 +27,19 @@ export const kelpSwayFrequency = 5.2000;
 export const chest = { x: -0.2000, y: -10.0000, z: -3.2000, scale: 0.3100, rx: 0.0000, ry: 0.2800, rz: 0.0000 };
 
 // -- Chest Zoom ----------------------------------------------------------------
-export const chestZoomDist   = 1.5500;
-export const chestZoomHeight = 1.2500;
-export const chestZoomFov    = 24.5000;
-export const chestZoomPitch  = -0.5308;
+export const chestZoomDist       = 1.5500;
+export const chestZoomHeight     = 1.2500;
+export const chestZoomFov        = 27.0000;
+export const chestZoomMobileFov  = 38.0000;
+export const chestZoomPitch      = -0.5308;
 // Camera pitch while zoomed (radians, negative = look down)
 
 // -- Chest Glow ---------------------------------------------------------------
-export const chestGlowX         = 0.0000;
-export const chestGlowY         = 2.0500;
-export const chestGlowZ         = 0.0000;
-export const chestGlowIntensity = 5.1000;
-export const chestGlowDistance  = 0.7000;
+export const chestGlowX         = 1.0500;
+export const chestGlowY         = 3.1000;
+export const chestGlowZ         = 0.4500;
+export const chestGlowIntensity = 10.8000;
+export const chestGlowDistance  = 4.2000;
 
 // -- Chest Rays ---------------------------------------------------------------
 export const chestRayRadius     = 1.2900;
@@ -48,3 +49,8 @@ export const chestRayMaxOpacity = 0.0000;
 export const chestCoin1 = { x: -0.5000, y: 1.1000, z: -0.5000, scale: 0.7000, rx: 0.0000, ry: 0.1300, rz: -0.3000 };
 export const chestCoin2 = { x: -0.6000, y: 1.0500, z: 0.4500, scale: 0.6500, rx: -0.6700, ry: 0.0100, rz: -0.1800 };
 export const chestCoin3 = { x: 0.5000, y: 1.2000, z: 0.6500, scale: 0.6000, rx: -0.6900, ry: -0.3000, rz: -0.4800 };
+
+// -- Chest Coin Colors (bodyR/G/B = ring+star, circleR/G/B = inner disc) ------
+export const chestCoin1Color = { bodyR: 0.0000, bodyG: 0.1500, bodyB: 1.0000, circleR: 1.0000, circleG: 1.0000, circleB: 1.0000 };
+export const chestCoin2Color = { bodyR: 0.0800, bodyG: 0.0800, bodyB: 0.1000, circleR: 1.0000, circleG: 1.0000, circleB: 1.0000 };
+export const chestCoin3Color = { bodyR: 0.9000, bodyG: 0.9200, bodyB: 0.9500, circleR: 0.8500, circleG: 0.0500, circleB: 0.0500 };

@@ -35,7 +35,8 @@ export const config = {
     chest:            { ...C.chest },
     chestZoomDist:    C.chestZoomDist,
     chestZoomHeight:  C.chestZoomHeight,
-    chestZoomFov:     C.chestZoomFov,
+    chestZoomFov:        C.chestZoomFov,
+    chestZoomMobileFov:  C.chestZoomMobileFov,
     chestZoomPitch:   C.chestZoomPitch,
     chestGlowX:         C.chestGlowX,
     chestGlowY:         C.chestGlowY,
@@ -47,6 +48,9 @@ export const config = {
     chestCoin1:         { ...C.chestCoin1 },
     chestCoin2:       { ...C.chestCoin2 },
     chestCoin3:       { ...C.chestCoin3 },
+    chestCoin1Color:  { ...C.chestCoin1Color },
+    chestCoin2Color:  { ...C.chestCoin2Color },
+    chestCoin3Color:  { ...C.chestCoin3Color },
 };
 
 // ── Scene group ────────────────────────────────────────────────────────────────

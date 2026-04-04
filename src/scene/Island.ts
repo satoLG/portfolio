@@ -7,6 +7,7 @@ import { deltaTime, time } from "../scripts/Time";
 import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../scripts/MediaPlayer";
 import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive } from "../scripts/Control";
 import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../scripts/Dialog";
+import * as CoinTooltip from '../scripts/CoinTooltip';
 import type { DialogLine, ReplyOption } from "../scripts/Dialog";
 import { isBreezeActive, playPugSnoreOnce, stopPugSnore, getAudioContext, getMasterDestination } from "../scripts/Audio";
 import { camera, renderer, scene as threeScene } from "../scripts/Scene";
@@ -112,6 +113,12 @@ const _coinCurrentScales: number[] = [];
 const _coinVelocities:    number[] = [];
 const _coinTargetScales:  number[] = []; // 0 = hidden, cfg.scale = revealed
 const _coinRevealTimers:  number[] = []; // seconds remaining before reveal; -1 = idle
+// Hover interaction (desktop scale + tooltip)
+const _coinHoverScales:   number[] = [1, 1, 1]; // smooth 0→1 hover multiplier per coin
+let   _hoveredCoinIdx:    number   = -1;          // which coin is under cursor (-1 = none)
+const _coinRaycaster = new Raycaster();
+const _coinMouse     = new Vector2();
+const _coinScreenVec = new Vector3();
 
 export function updateChestTransform(): void {
     chest.position.set(sfDecorConfig.chest.x, sfDecorConfig.chest.y, sfDecorConfig.chest.z);
@@ -130,6 +137,46 @@ export function updateChestCoinTransforms(): void {
             _coinTargetScales[i] = c.scale;
         }
     }
+}
+
+/** Re-apply body/circle colours from sfDecorConfig to the already-loaded coin groups. */
+function _applyChestCoinColor(group: Group, coinIdx: number): void {
+    const colorCfgs = [sfDecorConfig.chestCoin1Color, sfDecorConfig.chestCoin2Color, sfDecorConfig.chestCoin3Color];
+    const cc = colorCfgs[coinIdx];
+    group.traverse((child) => {
+        if (!(child as any).isMesh || !(child as any).material) return;
+        const mesh = child as any;
+        const wasArray = Array.isArray(mesh.material);
+        const mats: any[] = wasArray ? mesh.material : [mesh.material];
+        const updated = mats.map((mat: any) => {
+            const m = mat.clone ? mat.clone() : mat;
+            const isCircle = (m.name as string) === 'DarkYellow';
+            const r = isCircle ? cc.circleR : cc.bodyR;
+            const g = isCircle ? cc.circleG : cc.bodyG;
+            const b = isCircle ? cc.circleB : cc.bodyB;
+            m.color    = new Color(r, g, b);
+            m.emissive = new Color(r * 0.15, g * 0.15, b * 0.15);
+            m.needsUpdate = true;
+            return m;
+        });
+        mesh.material = wasArray ? updated : updated[0];
+    });
+}
+
+export function updateChestCoinColors(): void {
+    for (let i = 0; i < _chestCoins.length; i++) {
+        _applyChestCoinColor(_chestCoins[i], i);
+    }
+}
+
+function _getCoinScreenPos(i: number): { x: number; y: number } | null {
+    if (!_chestCoins[i]) return null;
+    _coinScreenVec.setFromMatrixPosition(_chestCoins[i].matrixWorld);
+    _coinScreenVec.project(camera);
+    return {
+        x: (_coinScreenVec.x *  0.5 + 0.5) * window.innerWidth,
+        y: (_coinScreenVec.y * -0.5 + 0.5) * window.innerHeight,
+    };
 }
 
 export function updateChestGlowTransform(): void {
@@ -387,6 +434,25 @@ const SPAWN_EXCLUSION_ZONES: ExclusionZone[] = [
     { x: -0.65,  z: -3.10, r: EXCL_R_RADIO   },  // Radio
     { x:  0.32,  z: -2.60, r: EXCL_R_ROCKS   },  // Little rocks + phone
 ];
+
+/** Mutable live exclusion radii — mutated by the debug GUI, read by isValidSpawnPos() */
+export const exclRadii = {
+    bonfire: EXCL_R_BONFIRE,
+    tent:    EXCL_R_TENT,
+    palm:    EXCL_R_PALM,
+    pug:     EXCL_R_PUG,
+    radio:   EXCL_R_RADIO,
+    rocks:   EXCL_R_ROCKS,
+};
+
+/** Update both the live object and the corresponding zone entry, then respawn all foliage. */
+export function setExclRadius(key: keyof typeof exclRadii, v: number): void {
+    exclRadii[key] = v;
+    const IDX: Record<keyof typeof exclRadii, number> = {
+        bonfire: 0, tent: 1, palm: 2, pug: 3, radio: 4, rocks: 5,
+    };
+    SPAWN_EXCLUSION_ZONES[IDX[key]].r = v;
+}
 const PATCH_MIN_SPACING  = 0.055;  // Min world-space gap between any two patches
 const SPAWN_MAX_ATTEMPTS = 40;     // Retries per patch before giving up
 
@@ -1247,12 +1313,10 @@ export function Start(): void {
             // Pre-fetch audio so it's ready before first click
             _loadChestBuffer();
 
-            // Load extra coins (blue, black, white) placed inside the chest
-            const coinColors: Array<{ r: number; g: number; b: number }> = [
-                { r: 0.30, g: 0.55, b: 1.00 },  // blue
-                { r: 0.08, g: 0.08, b: 0.10 },  // black
-                { r: 0.90, g: 0.92, b: 0.95 },  // white
-            ];
+            // Load extra coins (blue, black, white) placed inside the chest.
+            // coin.glb has two material primitives:
+            //   "Yellow"     = outer ring + raised star (one combined mesh)
+            //   "DarkYellow" = flat inner circle disc
             const coinCfgs = [
                 sfDecorConfig.chestCoin1,
                 sfDecorConfig.chestCoin2,
@@ -1263,22 +1327,8 @@ export function Start(): void {
                 (coinGltf) => {
                     for (let ci = 0; ci < 3; ci++) {
                         const coinScene = coinGltf.scene.clone(true);
-                        const col = coinColors[ci];
                         const cfg = coinCfgs[ci];
-                        coinScene.traverse((child) => {
-                            if ((child as any).isMesh && (child as any).material) {
-                                const mats = Array.isArray((child as any).material)
-                                    ? (child as any).material
-                                    : [(child as any).material];
-                                mats.forEach((mat: any) => {
-                                    mat = mat.clone();
-                                    (child as any).material = mat;
-                                    mat.color = new Color(col.r, col.g, col.b);
-                                    mat.emissive = new Color(col.r * 0.15, col.g * 0.15, col.b * 0.15);
-                                    mat.needsUpdate = true;
-                                });
-                            }
-                        });
+                        _applyChestCoinColor(coinScene as Group, ci);
                         applyOceanLightingToModel(coinScene as Group);
                         coinScene.position.set(cfg.x, cfg.y, cfg.z);
                         coinScene.scale.setScalar(0);  // start hidden; spring reveals on open
@@ -1316,6 +1366,9 @@ export function Start(): void {
 
     // Setup chest click/hover interaction (underwater)
     setupChestInteraction();
+
+    // Setup coin hover/tap tooltips
+    setupCoinInteraction();
 }
 
 // ── Multi-touch gesture tracker ─────────────────────────────────────────────
@@ -1988,6 +2041,101 @@ function setupChestInteraction(): void {
     });
 }
 
+// ── Coin hover / tap interaction ─────────────────────────────────────────────
+
+function setupCoinInteraction(): void {
+    const canvas = renderer.domElement;
+    if (!canvas) return;
+
+    let _mobileJustOpened = false;
+
+    // ── Desktop: mousemove → raycast → show/hide tooltip ──────────────────
+    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+        if (CoinTooltip.IS_TOUCH_DEVICE) return;
+        if (_chestCoins.length === 0) return;
+
+        _coinMouse.x =  (e.clientX / window.innerWidth)  * 2 - 1;
+        _coinMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        _coinRaycaster.setFromCamera(_coinMouse, camera);
+
+        let hit = -1;
+        for (let i = 0; i < _chestCoins.length; i++) {
+            if (_coinCurrentScales[i] < 0.05) continue;
+            if (_coinRaycaster.intersectObjects(_chestCoins[i].children, true).length > 0) {
+                hit = i;
+                break;
+            }
+        }
+
+        if (hit !== _hoveredCoinIdx) {
+            _hoveredCoinIdx = hit;
+            if (hit >= 0) {
+                canvas.style.cursor = 'pointer';
+                const pos = _getCoinScreenPos(hit);
+                if (pos) CoinTooltip.showCoinTooltip(hit, pos.x, pos.y);
+            } else {
+                canvas.style.cursor = '';
+                CoinTooltip.hideCoinTooltip();
+            }
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (!CoinTooltip.IS_TOUCH_DEVICE && _hoveredCoinIdx >= 0) {
+            _hoveredCoinIdx = -1;
+            canvas.style.cursor = '';
+            CoinTooltip.hideCoinTooltip();
+        }
+    });
+
+    // ── Desktop: click on coin → open link directly ────────────────────────
+    canvas.addEventListener('click', (e: MouseEvent) => {
+        if (CoinTooltip.IS_TOUCH_DEVICE) return;
+        if (_hoveredCoinIdx >= 0) {
+            CoinTooltip.openCoinLink(_hoveredCoinIdx);
+        }
+    });
+
+    // ── Mobile: touchend on coin → show tooltip ────────────────────────────
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (!CoinTooltip.IS_TOUCH_DEVICE) return;
+        if (_touchWasMulti) return;
+        if (_chestCoins.length === 0) return;
+        if (e.changedTouches.length === 0) return;
+
+        const touch = e.changedTouches[0];
+        _coinMouse.x =  (touch.clientX / window.innerWidth)  * 2 - 1;
+        _coinMouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
+        _coinRaycaster.setFromCamera(_coinMouse, camera);
+
+        let hit = -1;
+        for (let i = 0; i < _chestCoins.length; i++) {
+            if (_coinCurrentScales[i] < 0.05) continue;
+            if (_coinRaycaster.intersectObjects(_chestCoins[i].children, true).length > 0) {
+                hit = i;
+                break;
+            }
+        }
+
+        if (hit >= 0) {
+            e.preventDefault();
+            const pos = _getCoinScreenPos(hit);
+            if (pos) {
+                _mobileJustOpened = true;
+                CoinTooltip.showCoinTooltip(hit, pos.x, pos.y);
+                setTimeout(() => { _mobileJustOpened = false; }, 60);
+            }
+        }
+    }, { passive: false });
+
+    // ── Mobile: tap outside tooltip → close ───────────────────────────────
+    document.addEventListener('touchend', () => {
+        if (!CoinTooltip.IS_TOUCH_DEVICE) return;
+        if (_mobileJustOpened) return;
+        if (CoinTooltip.isCoinTooltipVisible()) CoinTooltip.hideCoinTooltip();
+    }, { capture: true });
+}
+
 function _unregisterSleepLoopListener(): void {
     if (!pugMixer || !_pugSleepLoopListener) return;
     pugMixer.removeEventListener('loop', _pugSleepLoopListener);
@@ -2388,7 +2536,23 @@ export function Update(): void {
                 _coinCurrentScales[i] = 0;
                 _coinVelocities[i]    = 0;
             }
-            _chestCoins[i].scale.setScalar(Math.max(0, _coinCurrentScales[i]));
+            const _hoverTarget = (_hoveredCoinIdx === i) ? 1.12 : 1.0;
+            _coinHoverScales[i] += (_hoverTarget - _coinHoverScales[i]) * Math.min(1, deltaTime * 12);
+            _chestCoins[i].scale.setScalar(Math.max(0, _coinCurrentScales[i]) * _coinHoverScales[i]);
+        }
+    }
+
+    // ── Coin tooltip: reposition each frame + auto-hide when not in chest zoom
+    if (CoinTooltip.isCoinTooltipVisible()) {
+        if (!isChestZoomActive()) {
+            _hoveredCoinIdx = -1;
+            CoinTooltip.hideCoinTooltip();
+        } else {
+            const ttIdx = CoinTooltip.getCoinTooltipIdx();
+            if (ttIdx >= 0) {
+                const pos = _getCoinScreenPos(ttIdx);
+                if (pos) CoinTooltip.repositionCoinTooltip(pos.x, pos.y);
+            }
         }
     }
 
