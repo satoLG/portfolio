@@ -14,34 +14,34 @@ export const foamWobbleFreq   = 4.2000; // spatial frequency of the wobble
 export const foamWobbleSpeed  = 0.9700; // how fast the wobble animates
 
 // ── Ocean Waves (normal-map scroll) ──────────────────────────────────────────
-export const normalMapScale    = 0.1500;
-export const normalMapStrength = 0.0900;
-export const waveVelocity1     = { x: 0.0650, y: 0.0000 };
-export const waveVelocity2     = { x: 0.0000, y: 0.0650 };
+export const normalMapScale    = 0.1160;
+export const normalMapStrength = 0.0400;
+export const waveVelocity1     = { x: 0.0500, y: -0.0010 };
+export const waveVelocity2     = { x: -0.0440, y: -0.0100 };
 export const edgeFadeDistance  = 0.5400;
 
 // ── Ocean Surface ─────────────────────────────────────────────────────────────
-export const surfaceColor   = { r: 0.0000, g: 0.3500, b: 0.7700 }; // RGB tint (1,1,1 = no tint)
+export const surfaceColor   = { r: 0.0000, g: 1.5400, b: 1.6100 }; // RGB tint (1,1,1 = no tint)
 export const surfaceOpacity = 0.6100;
 
 // ── Reflection ────────────────────────────────────────────────────────────────
-export const reflectionStrength     = 0.4300; // 0 = skybox only, 1 = RT only
+export const reflectionStrength     = 0.0000; // 0 = skybox only, 1 = RT only
 export const reflectionFresnelPower = 0.4000; // lower = visible at more angles
 export const reflectionFloor        = 0.2200; // minimum reflectivity at any angle
 export const skyReflectionBrightness = 1.0000; // scales the analytical skybox reflection (0 = none, 1 = full)
 export const skyReflFalloff         = 6.5000; // sharpens near→far gradient: 1 = linear, 2 = squared, 4 = very steep
-export const reflectionRTSize       = 256 as 256 | 512; // render target resolution — 256 saves 4× fill vs 512
+export const reflectionRTSize       = 256 as 256 | 512; // render target resolution
 
 // ── Underwater ────────────────────────────────────────────────────────────────
 export const oceanAbsorption    = { r: 0.1290, g: 0.0440, b: 0.0350 }; // per-channel fog depth
-export const underwaterFogDist  = 80.0;                                  // far distance — objects beyond this are fully fogged
+export const underwaterFogDist  = 80.0000;                                  // far distance — objects beyond this are fully fogged
 export const distortionStrength = 0.0115;
 export const distortionSpeed    = 0.6200;
 export const distortionScale    = 8.5000;
 
 // ── Click Ripple Effect ───────────────────────────────────────────────────────
 export const rippleSpeed           = 0.7;    // World-units/sec the ring expands (max radius = speed × lifetime)
-export const rippleLifetime        = 1.0;    // Seconds before the wave fully fades out
+export const rippleLifetime        = 1;    // Seconds before the wave fully fades out
 export const rippleWidth           = 0.12;   // Width of the wave band in world units
 export const rippleNormalStrength  = 1.2;    // Normal-perturbation amplitude — keep in line with wave normals
-export const rippleMaxClickDistance = 70.0;  // Max XZ distance (world units) from camera for the effect to trigger
+export const rippleMaxClickDistance = 70;  // Max XZ distance (world units) from camera for the effect to trigger

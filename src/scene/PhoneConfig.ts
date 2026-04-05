@@ -1,0 +1,23 @@
+// src/scene/PhoneConfig.ts
+// Phone interaction configuration — tweakable from IslandDebug (Surface → Phone).
+
+// ── Phone Zoom ────────────────────────────────────────────────────────────────
+export const phoneZoomHeight = 0.0500;    // World-units above phone surface
+export const phoneZoomTilt   = 0.4300;    // Z forward offset for slight viewing angle
+export const phoneZoomPitch  = -0.1000;   // Camera pitch in radians (~-83° = nearly straight down)
+export const phoneZoomFov    = 20;        // Camera FOV during phone zoom (telephoto)
+
+// ── Phone Screen ──────────────────────────────────────────────────────────────
+export const phoneScreenWidth   = 0.0550;  // world units
+export const phoneScreenHeight  = 0.1020;  // world units
+export const phoneScreenOffsetX = 0.0000;
+export const phoneScreenOffsetY = 0.0020;
+export const phoneScreenOffsetZ = 0.0110;
+
+// ── Phone Screen Overlay ──────────────────────────────────────────────────────
+export const phoneOverlayOpacity      = 0.3970;
+export const phoneOverlayTintR        = 180;
+export const phoneOverlayTintG        = 200;
+export const phoneOverlayTintB        = 255;
+export const phoneOverlayGlareOpacity = 0.3100;
+export const phoneOverlayGlareAngle   = 237;

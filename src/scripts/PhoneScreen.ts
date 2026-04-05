@@ -38,7 +38,7 @@ import {
     phoneScreenOffsetX, phoneScreenOffsetY, phoneScreenOffsetZ,
     phoneOverlayOpacity, phoneOverlayTintR, phoneOverlayTintG, phoneOverlayTintB,
     phoneOverlayGlareOpacity, phoneOverlayGlareAngle,
-} from '../scene/CameraConfig';
+} from '../scene/PhoneConfig';
 
 // ─── CONFIG — all tweakable from the debug GUI (Camera → Phone Screen) ────────
 export const phoneScreenConfig = {

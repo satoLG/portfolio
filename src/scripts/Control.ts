@@ -4,7 +4,8 @@ import { camera, cameraRight, cameraForward, UpdateCameraRotation, renderer, sta
 import { KeyCodes, PointerPhase, PointerType, keysJustPressed, keysPressed, lastPointerLockChange, mouseMovement, pointers } from "./Input";
 import { spotLightDistance, spotLightDistanceUniform } from "../materials/OceanMaterial";
 import { islandPosition as cfgIslandPos, radioOffset as cfgRadioOffset, radioRotY as cfgRadioRotY, pugOffset as cfgPugOffset, pugRotY as cfgPugRotY, phoneOffset as cfgPhoneOffset } from '../scene/IslandConfig';
-import { phoneZoomHeight, phoneZoomTilt, phoneZoomPitch, phoneZoomFov, defaultCameraX, defaultCameraZ, defaultFov, mobileFov, mobileBreakpointWidth } from '../scene/CameraConfig';
+import { defaultCameraX, defaultCameraZ, defaultFov, mobileFov, mobileBreakpointWidth, aboveWaterBottomY as cfgAboveWaterBottomY, aboveWaterBottomYMobile as cfgAboveWaterBottomYMobile, underwaterTopY as cfgUnderwaterTopY, underwaterTopYMobile as cfgUnderwaterTopYMobile } from '../scene/CameraConfig';
+import { phoneZoomHeight, phoneZoomTilt, phoneZoomPitch, phoneZoomFov } from '../scene/PhoneConfig';
 import { config as sfDecorConfig } from '../scene/SeaFloorDecor';
 
 const baseMoveSpeed = 10;
@@ -32,10 +33,10 @@ let webPageMode = true;  // Start in web page mode
 
 // ABOVE WATER zone (ocean surface is at Y=0)
 const aboveWaterTopY = 1.4;       // Top camera position above water
-const aboveWaterBottomY = 1; // Bottom limit above water (avoid looking at surface)
+const aboveWaterBottomY = window.innerWidth <= mobileBreakpointWidth ? cfgAboveWaterBottomYMobile : cfgAboveWaterBottomY; // Bottom limit above water (avoid looking at surface)
 
 // UNDERWATER zone
-const underwaterTopY = -1;   // Top limit underwater (avoid looking at surface from below)
+const underwaterTopY = window.innerWidth <= mobileBreakpointWidth ? cfgUnderwaterTopYMobile : cfgUnderwaterTopY;   // Top limit underwater (avoid looking at surface from below)
 const underwaterBottomY = -8;   // Bottom camera position (near sea floor)
 
 // Dead zone: camera must not rest between aboveWaterBottomY and underwaterTopY
