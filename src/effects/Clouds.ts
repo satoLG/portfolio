@@ -10,7 +10,7 @@
     BackSide,
     GLSL3,
 } from 'three';
-import * as CC from '../scene/CloudsConfig';
+import * as CC from '../scene/SkyConfig';
 
 // ── Device quality tier ───────────────────────────────────────────────────────
 // Inline detection (avoids circular dep with Scene.ts which imports Clouds).
