@@ -7,6 +7,10 @@ import { deltaTime } from "../scripts/Time";
 import { camera, renderer } from "../scripts/Scene";
 import { isDayTime } from "./Skybox";
 
+// Local mobile check — avoids circular-dependency TDZ crash when importing
+// isMobile from Scene.ts (Scene imports Fish at module scope).
+const _isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+
 // Clown & Dori fish settings (circling the island)
 const CIRCLE_FISH_SCALE = 0.03;
 const CIRCLE_RADIUS = 1.6;       // increased from 1.2
@@ -79,7 +83,7 @@ const JELLY_Y_MAX = -2.5;                // max spawn height (higher than fish)
 const JELLY_Z_MIN = -4.0;               // farthest Z
 const JELLY_Z_MAX = 0.0;                // closest Z
 const JELLY_SPEED_SPREAD = 0.02;         // speed variation
-const JELLY_POOL_SIZE = 10;              // fewer simultaneous jellyfish
+const JELLY_POOL_SIZE = _isMobile ? 4 : 10;              // fewer simultaneous jellyfish
 
 // Jellyfish bioluminescence settings
 const JELLY_EMISSIVE_INTENSITY = 2.0;    // how bright the glow is
@@ -94,7 +98,7 @@ const MAX_TILT_ANGLE = 0.8;              // max rotation.z tilt in radians (~34�
 const TILT_SMOOTHING = 8.0;              // how fast the tilt follows velocity
 
 // Object pool settings
-const POOL_SIZE = 25;                    // max simultaneous fish — prevents unbounded memory growth
+const POOL_SIZE = _isMobile ? 10 : 25;                    // max simultaneous fish — prevents unbounded memory growth
 
 // Fish color tint variants (multiplied on top of base texture)
 const FISH_COLOR_TINTS: Color[] = [
@@ -536,4 +540,11 @@ export function Update(): void {
             deactivateFish(i);  // return to pool instead of leaking
         }
     }
+}
+
+/** Toggle visibility of all fish groups (GPU-side culling for surface/underwater gating). */
+export function setVisible(visible: boolean): void {
+    clownFish.visible = visible;
+    doriFish.visible = visible;
+    genericFishContainer.visible = visible;
 }

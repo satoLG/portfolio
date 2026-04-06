@@ -259,9 +259,9 @@ export function Start(): void {
 
     // Clamp default march steps to a device-appropriate ceiling.
     // CC.marchSteps (64) is the high-quality target; real visitors rarely have
-    // the GPU headroom for it.  Desktop gets 36 steps (visually indistinguishable
-    // thanks to jitter + alpha early-exit), mobile gets 20 steps.
-    const stepCeil = _isMobile ? 20 : 36;
+    // the GPU headroom for it.  Desktop gets 24 steps, mobile gets 12 steps.
+    // Jitter + alpha early-exit make these visually close to higher counts.
+    const stepCeil = _isMobile ? 12 : 24;
     config.marchSteps = Math.min(CC.marchSteps, stepCeil);
 
     _material = new RawShaderMaterial({

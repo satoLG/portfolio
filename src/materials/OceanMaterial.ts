@@ -10,10 +10,10 @@ export const volume = new ShaderMaterial();
 export const object = new ShaderMaterial();
 export const triplanar = new ShaderMaterial();
 
-const normalMap1 = new Uniform(new TextureLoader().load("images/waterNormal1.png"));
+const normalMap1 = new Uniform(new TextureLoader().load("images/waterNormal1.webp"));
 normalMap1.value.wrapS = RepeatWrapping;
 normalMap1.value.wrapT = RepeatWrapping;
-const normalMap2 = new Uniform(new TextureLoader().load("images/waterNormal2.png"));
+const normalMap2 = new Uniform(new TextureLoader().load("images/waterNormal2.webp"));
 normalMap2.value.wrapS = RepeatWrapping;
 normalMap2.value.wrapT = RepeatWrapping;
 
@@ -26,7 +26,7 @@ const objectTexture = new TextureLoader().load("images/basicChecker.png");
 objectTexture.wrapS = RepeatWrapping;
 objectTexture.wrapT = RepeatWrapping;
 
-const landTexture = new TextureLoader().load("images/sand.png");
+const landTexture = new TextureLoader().load("images/sand.webp");
 landTexture.wrapS = RepeatWrapping;
 landTexture.wrapT = RepeatWrapping;
 
@@ -63,9 +63,7 @@ export function setFoamQuality(quality: 1 | 2 | 3): void {
     foamQualityUniform.value = quality;
 }
 
-// Planar reflection — render target texture set by OceanReflection.ts each frame
-export const reflectionTextureUniform = new Uniform(null as Texture | null);
-export const reflectionStrengthUniform          = new Uniform(OceanConfig.reflectionStrength);
+// Sky reflection parameters (analytical skybox sample, no render target)
 export const reflectionFresnelPowerUniform      = new Uniform(OceanConfig.reflectionFresnelPower);
 export const reflectionFloorUniform             = new Uniform(OceanConfig.reflectionFloor);
 export const skyReflectionBrightnessUniform = new Uniform(OceanConfig.skyReflectionBrightness);
@@ -187,8 +185,6 @@ export function Start(): void
         _RippleLifetime: rippleLifetimeUniform,
         _RippleWidth: rippleWidthUniform,
         _RippleNormalStrength: rippleNormalStrengthUniform,
-        _ReflectionTexture: reflectionTextureUniform,
-        _ReflectionStrength: reflectionStrengthUniform,
         _ReflectionFresnelPower: reflectionFresnelPowerUniform,
         _ReflectionFloor: reflectionFloorUniform,
         _SkyReflBrightness: skyReflectionBrightnessUniform,

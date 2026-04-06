@@ -24,13 +24,11 @@ export const edgeFadeDistance  = 0.5400;
 export const surfaceColor   = { r: 0.0000, g: 1.5400, b: 1.6100 }; // RGB tint (1,1,1 = no tint)
 export const surfaceOpacity = 0.6100;
 
-// ── Reflection ────────────────────────────────────────────────────────────────
-export const reflectionStrength     = 0.0000; // 0 = skybox only, 1 = RT only
+// ── Reflection (sky-only, no render target) ───────────────────────────────────
 export const reflectionFresnelPower = 0.4000; // lower = visible at more angles
 export const reflectionFloor        = 0.2200; // minimum reflectivity at any angle
 export const skyReflectionBrightness = 1.0000; // scales the analytical skybox reflection (0 = none, 1 = full)
 export const skyReflFalloff         = 6.5000; // sharpens near→far gradient: 1 = linear, 2 = squared, 4 = very steep
-export const reflectionRTSize       = 256 as 256 | 512; // render target resolution
 
 // ── Underwater ────────────────────────────────────────────────────────────────
 export const oceanAbsorption    = { r: 0.1290, g: 0.0440, b: 0.0350 }; // per-channel fog depth

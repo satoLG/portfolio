@@ -1,11 +1,12 @@
 import {
-    Mesh,
     SphereGeometry,
     ShaderMaterial,
     Vector3,
-    Group,
     AdditiveBlending,
-    FrontSide
+    FrontSide,
+    InstancedMesh,
+    InstancedBufferAttribute,
+    Object3D
 } from "three";
 import { camera, scene } from "../scripts/Scene";
 import { deltaTime, time } from "../scripts/Time";
@@ -33,36 +34,49 @@ export const ENTRY_BUBBLE_COUNT = 60;          // Total bubbles to spawn when en
 const ENTRY_BUBBLE_PER_FRAME = 12;                // Bubbles to spawn per frame (stagger the burst)
 // ============================================
 
+// Per-bubble CPU-side state (no Three.js objects — just numbers)
 interface Bubble {
-    mesh: Mesh;
-    velocity: Vector3;
+    x: number; y: number; z: number;
+    vx: number; vy: number; vz: number;
+    scale: number;
     life: number;
     maxLife: number;
 }
 
 const bubbles: Bubble[] = [];
-const bubbleGroup = new Group();
-const sphereGeo = new SphereGeometry(1, 16, 12);  // Smoother for Fresnel rim
+
+// ── InstancedMesh (replaces 200 individual Mesh draw calls with 1) ───────────
+let _instMesh: InstancedMesh | null = null;
+const _opacities = new Float32Array(BUBBLE_COUNT);
+let _opacityAttr: InstancedBufferAttribute;
+const _dummy = new Object3D();
 
 // ============================================
-// BUBBLE SHADER — Fresnel rim + transparent center
+// BUBBLE SHADER — Fresnel rim + transparent center (instanced)
+// instanceMatrix is injected by Three.js for InstancedMesh + ShaderMaterial
 // ============================================
 const bubbleVertexShader = /* glsl */`
+    attribute float aOpacity;
     varying vec3 vNormal;
     varying vec3 vViewDir;
+    varying float vOpacity;
 
     void main() {
+        vOpacity = aOpacity;
+        // normalMatrix is from the base mesh — correct for uniform-scale instances
+        // (uniform scale cancels out after normalization)
         vNormal = normalize(normalMatrix * normal);
-        vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+        // instanceMatrix applies per-instance position + scale
+        vec4 mvPos = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
         vViewDir = normalize(-mvPos.xyz);
         gl_Position = projectionMatrix * mvPos;
     }
 `;
 
 const bubbleFragmentShader = /* glsl */`
-    uniform float uOpacity;
     varying vec3 vNormal;
     varying vec3 vViewDir;
+    varying float vOpacity;
 
     void main() {
         float fresnel = 1.0 - abs(dot(vNormal, vViewDir));
@@ -78,7 +92,7 @@ const bubbleFragmentShader = /* glsl */`
         vec3 color = mix(iriColor, rimColor, rim);
 
         // More visible: higher base alpha, stronger rim
-        float alpha = mix(0.12, 0.7, rim) * uOpacity;
+        float alpha = mix(0.12, 0.7, rim) * vOpacity;
 
         gl_FragColor = vec4(color, alpha);
     }
@@ -104,36 +118,46 @@ const lastMousePosition = { x: 0, y: 0 };
 let mouseInitialized = false;
 
 export function Start(): void {
-    // Pre-create bubble meshes (pooling)
+    const geo = new SphereGeometry(1, 16, 12);  // Smoother for Fresnel rim
+
+    // Per-instance opacity passed as a vertex attribute
+    _opacityAttr = new InstancedBufferAttribute(_opacities, 1);
+    geo.setAttribute('aOpacity', _opacityAttr);
+
+    const material = new ShaderMaterial({
+        vertexShader: bubbleVertexShader,
+        fragmentShader: bubbleFragmentShader,
+        transparent: true,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        side: FrontSide
+    });
+
+    _instMesh = new InstancedMesh(geo, material, BUBBLE_COUNT);
+    _instMesh.frustumCulled = false;
+    _instMesh.raycast = () => {};  // purely visual — must not intercept raycasts (ocean ripple, etc.)
+
+    // Initialise all instances as hidden (scale 0, far below scene)
     for (let i = 0; i < BUBBLE_COUNT; i++) {
-        const size = BUBBLE_SIZE_MIN + Math.random() * (BUBBLE_SIZE_MAX - BUBBLE_SIZE_MIN);
-        const material = new ShaderMaterial({
-            vertexShader: bubbleVertexShader,
-            fragmentShader: bubbleFragmentShader,
-            uniforms: {
-                uOpacity: { value: 0 }
-            },
-            transparent: true,
-            blending: AdditiveBlending,
-            depthWrite: false,
-            side: FrontSide
-        });
-        const mesh = new Mesh(sphereGeo, material);
-        mesh.scale.setScalar(size);
-        mesh.visible = false;
-        mesh.raycast = () => {};  // purely visual — must not intercept raycasts (ocean ripple, etc.)
-        bubbleGroup.add(mesh);
-        
+        _dummy.position.set(0, -1000, 0);
+        _dummy.scale.setScalar(0);
+        _dummy.updateMatrix();
+        _instMesh.setMatrixAt(i, _dummy.matrix);
+        _opacities[i] = 0;
+
         bubbles.push({
-            mesh,
-            velocity: new Vector3(),
+            x: 0, y: -1000, z: 0,
+            vx: 0, vy: 0, vz: 0,
+            scale: BUBBLE_SIZE_MIN + Math.random() * (BUBBLE_SIZE_MAX - BUBBLE_SIZE_MIN),
             life: 0,
             maxLife: BUBBLE_LIFETIME
         });
     }
-    
-    scene.add(bubbleGroup);
-    
+
+    _instMesh.instanceMatrix.needsUpdate = true;
+    _opacityAttr.needsUpdate = true;
+    scene.add(_instMesh);
+
     // Track mouse
     document.addEventListener('mousemove', (e) => {
         if (!mouseInitialized) {
@@ -144,7 +168,7 @@ export function Start(): void {
         mousePosition.x = e.clientX;
         mousePosition.y = e.clientY;
     });
-    
+
     document.addEventListener('touchmove', (e) => {
         if (e.touches.length > 0) {
             if (!mouseInitialized) {
@@ -156,15 +180,21 @@ export function Start(): void {
             mousePosition.y = e.touches[0].clientY;
         }
     });
-    
+
     initialized = true;
 }
 
 export function setBubblesEnabled(enabled: boolean): void {
     _bubblesEnabled = enabled;
     if (!enabled) {
-        for (const bubble of bubbles) {
-            if (bubble.life > 0) { bubble.life = 0; bubble.mesh.visible = false; }
+        for (let i = 0; i < bubbles.length; i++) {
+            if (bubbles[i].life > 0) {
+                bubbles[i].life = 0;
+                _opacities[i] = 0;
+            }
+        }
+        if (_instMesh) {
+            _opacityAttr.needsUpdate = true;
         }
     }
 }
@@ -172,25 +202,21 @@ export function setBubblesEnabled(enabled: boolean): void {
 export function spawnBubble(position: Vector3): void {
     if (!_bubblesEnabled) return;
     // Find inactive bubble
-    for (const bubble of bubbles) {
-        if (bubble.life <= 0) {
-            bubble.mesh.position.copy(position);
-            bubble.mesh.visible = true;
-            bubble.life = BUBBLE_LIFETIME * (0.7 + Math.random() * 0.6);
-            bubble.maxLife = bubble.life;
-            bubble.velocity.set(
-                (Math.random() - 0.5) * BUBBLE_WOBBLE,
-                BUBBLE_RISE_SPEED * (0.8 + Math.random() * 0.4),
-                (Math.random() - 0.5) * BUBBLE_WOBBLE
-            );
-            
+    for (let i = 0; i < bubbles.length; i++) {
+        const b = bubbles[i];
+        if (b.life <= 0) {
+            b.x = position.x;
+            b.y = position.y;
+            b.z = position.z;
+            b.life = BUBBLE_LIFETIME * (0.7 + Math.random() * 0.6);
+            b.maxLife = b.life;
+            b.vx = (Math.random() - 0.5) * BUBBLE_WOBBLE;
+            b.vy = BUBBLE_RISE_SPEED * (0.8 + Math.random() * 0.4);
+            b.vz = (Math.random() - 0.5) * BUBBLE_WOBBLE;
+
             // Randomize size
-            const size = BUBBLE_SIZE_MIN + Math.random() * (BUBBLE_SIZE_MAX - BUBBLE_SIZE_MIN);
-            bubble.mesh.scale.setScalar(size);
-            
-            const mat = bubble.mesh.material as ShaderMaterial;
-            mat.uniforms.uOpacity.value = 0.6;
-            
+            b.scale = BUBBLE_SIZE_MIN + Math.random() * (BUBBLE_SIZE_MAX - BUBBLE_SIZE_MIN);
+            _opacities[i] = 0.6;
             return;
         }
     }
@@ -207,23 +233,23 @@ function getSpawnPositionAtNDC(ndcX: number, ndcY: number): Vector3 {
     _forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
     _right.set(1, 0, 0).applyQuaternion(camera.quaternion);
     _up.set(0, 1, 0).applyQuaternion(camera.quaternion);
-    
+
     const fovRad = (camera.fov * Math.PI) / 180;
     const halfHeight = Math.tan(fovRad / 2) * BUBBLE_SPAWN_DISTANCE;
     const halfWidth = halfHeight * camera.aspect;
-    
+
     const offsetX = ndcX * halfWidth;
     const offsetY = ndcY * halfHeight;
-    
+
     _spawnPos.copy(camera.position)
         .addScaledVector(_forward, BUBBLE_SPAWN_DISTANCE)
         .addScaledVector(_right, offsetX)
         .addScaledVector(_up, offsetY);
-    
+
     _spawnPos.x += (Math.random() - 0.5) * BUBBLE_SPREAD;
     _spawnPos.y += (Math.random() - 0.5) * BUBBLE_SPREAD;
     _spawnPos.z += (Math.random() - 0.5) * BUBBLE_SPREAD;
-    
+
     return _spawnPos;
 }
 
@@ -232,13 +258,13 @@ function spawnAmbientBubbleGroup(): void {
     // Random position on screen (avoid edges)
     const ndcX = (Math.random() - 0.5) * 1.4;
     const ndcY = (Math.random() - 0.5) * 1.4;
-    
+
     // Spawn bubbles close together using the constant
     for (let i = 0; i < AMBIENT_BUBBLE_GROUP_SIZE; i++) {
         const offsetX = ndcX + (Math.random() - 0.5) * 0.2;
         const offsetY = ndcY + (Math.random() - 0.5) * 0.2;
         const pos = getSpawnPositionAtNDC(offsetX, offsetY);
-        
+
         if (pos.y < UNDERWATER_Y_THRESHOLD) {
             spawnBubble(pos);
         }
@@ -247,77 +273,99 @@ function spawnAmbientBubbleGroup(): void {
 
 function getSpawnPosition(): Vector3 | null {
     if (!mouseInitialized) return null;
-    
+
     // Reuse scratch vectors
     _forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
     _right.set(1, 0, 0).applyQuaternion(camera.quaternion);
     _up.set(0, 1, 0).applyQuaternion(camera.quaternion);
-    
+
     // Convert mouse to NDC (-1 to 1)
     const ndcX = (mousePosition.x / window.innerWidth) * 2 - 1;
     const ndcY = -((mousePosition.y / window.innerHeight) * 2 - 1);
-    
+
     // Calculate offset based on FOV and aspect ratio
     const fovRad = (camera.fov * Math.PI) / 180;
     const halfHeight = Math.tan(fovRad / 2) * BUBBLE_SPAWN_DISTANCE;
     const halfWidth = halfHeight * camera.aspect;
-    
+
     // Calculate world offset from center of screen
     const offsetX = ndcX * halfWidth;
     const offsetY = ndcY * halfHeight;
-    
+
     // Spawn at distance from camera, offset by mouse position
     _spawnPos.copy(camera.position)
         .addScaledVector(_forward, BUBBLE_SPAWN_DISTANCE)
         .addScaledVector(_right, offsetX)
         .addScaledVector(_up, offsetY);
-    
+
     // Add small random spread
     _spawnPos.x += (Math.random() - 0.5) * BUBBLE_SPREAD;
     _spawnPos.y += (Math.random() - 0.5) * BUBBLE_SPREAD;
     _spawnPos.z += (Math.random() - 0.5) * BUBBLE_SPREAD;
-    
+
     return _spawnPos;
 }
 
 export function Update(cameraY: number): void {
-    if (!initialized) return;
-    
+    if (!initialized || !_instMesh) return;
+
     isUnderwater = cameraY < UNDERWATER_Y_THRESHOLD;
-    
-    // Update existing bubbles
-    for (const bubble of bubbles) {
-        if (bubble.life <= 0) continue;
-        
-        // Wobble
-        bubble.velocity.x += (Math.random() - 0.5) * BUBBLE_WOBBLE * deltaTime * 2;
-        bubble.velocity.z += (Math.random() - 0.5) * BUBBLE_WOBBLE * deltaTime * 2;
-        bubble.velocity.x *= 0.98;
-        bubble.velocity.z *= 0.98;
-        
-        // Move
-        bubble.mesh.position.x += bubble.velocity.x * deltaTime;
-        bubble.mesh.position.y += bubble.velocity.y * deltaTime;
-        bubble.mesh.position.z += bubble.velocity.z * deltaTime;
-        
-        // Age
-        bubble.life -= deltaTime;
-        
-        // Fade out and pop at surface
-        const lifeRatio = bubble.life / bubble.maxLife;
-        const mat = bubble.mesh.material as ShaderMaterial;
-        mat.uniforms.uOpacity.value = Math.min(0.6, lifeRatio * 1.5);
-        
-        // Pop at surface
-        if (bubble.mesh.position.y > UNDERWATER_Y_THRESHOLD - 0.05) {
-            bubble.life = 0;
+
+    // Update existing bubbles (physics + opacity)
+    for (let i = 0; i < bubbles.length; i++) {
+        const b = bubbles[i];
+        if (b.life <= 0) {
+            // Ensure dead bubbles are invisible
+            if (_opacities[i] !== 0) _opacities[i] = 0;
+            continue;
         }
-        
-        if (bubble.life <= 0) {
-            bubble.mesh.visible = false;
+
+        // Wobble
+        b.vx += (Math.random() - 0.5) * BUBBLE_WOBBLE * deltaTime * 2;
+        b.vz += (Math.random() - 0.5) * BUBBLE_WOBBLE * deltaTime * 2;
+        b.vx *= 0.98;
+        b.vz *= 0.98;
+
+        // Move
+        b.x += b.vx * deltaTime;
+        b.y += b.vy * deltaTime;
+        b.z += b.vz * deltaTime;
+
+        // Age
+        b.life -= deltaTime;
+
+        // Fade out
+        const lifeRatio = b.life / b.maxLife;
+        _opacities[i] = Math.min(0.6, lifeRatio * 1.5);
+
+        // Pop at surface
+        if (b.y > UNDERWATER_Y_THRESHOLD - 0.05) {
+            b.life = 0;
+        }
+
+        if (b.life <= 0) {
+            _opacities[i] = 0;
         }
     }
-    
+
+    // Batch-update instance matrices (position + uniform scale)
+    for (let i = 0; i < bubbles.length; i++) {
+        const b = bubbles[i];
+        if (b.life > 0) {
+            _dummy.position.set(b.x, b.y, b.z);
+            _dummy.scale.setScalar(b.scale);
+        } else {
+            // Dead: degenerate scale → rasterizer culls immediately
+            _dummy.position.set(0, -1000, 0);
+            _dummy.scale.setScalar(0);
+        }
+        _dummy.updateMatrix();
+        _instMesh.setMatrixAt(i, _dummy.matrix);
+    }
+
+    _instMesh.instanceMatrix.needsUpdate = true;
+    _opacityAttr.needsUpdate = true;
+
     // Detect entering underwater - stagger bubble burst across frames
     if (isUnderwater && !wasUnderwater && _bubblesEnabled) {
         entryBubblesRemaining = ENTRY_BUBBLE_COUNT;
@@ -325,7 +373,7 @@ export function Update(cameraY: number): void {
         lastAmbientSoundTime = time;
     }
     wasUnderwater = isUnderwater;
-    
+
     // Stagger entry bubble spawning across multiple frames
     if (entryBubblesRemaining > 0) {
         const toSpawn = Math.min(entryBubblesRemaining, ENTRY_BUBBLE_PER_FRAME);
@@ -339,13 +387,13 @@ export function Update(cameraY: number): void {
         }
         entryBubblesRemaining -= toSpawn;
     }
-    
+
     // Spawn new bubbles when moving underwater
     if (isUnderwater && mouseInitialized) {
         const dx = mousePosition.x - lastMousePosition.x;
         const dy = mousePosition.y - lastMousePosition.y;
         const mouseDelta = Math.sqrt(dx * dx + dy * dy);
-        
+
         if (mouseDelta > 3 && time - lastSpawnTime > BUBBLE_SPAWN_RATE) {
             const pos = getSpawnPosition();
             if (pos && pos.y < UNDERWATER_Y_THRESHOLD) {
@@ -353,16 +401,16 @@ export function Update(cameraY: number): void {
                 lastSpawnTime = time;
             }
         }
-        
+
         lastMousePosition.x = mousePosition.x;
         lastMousePosition.y = mousePosition.y;
-        
+
         // Ambient bubble groups every few seconds
         if (time - lastAmbientBubbleTime > AMBIENT_BUBBLE_INTERVAL) {
             spawnAmbientBubbleGroup();
             lastAmbientBubbleTime = time;
         }
-        
+
         // Play bubble sound periodically
         if (time - lastAmbientSoundTime > AMBIENT_SOUND_INTERVAL) {
             playDiveSound();

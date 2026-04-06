@@ -11,7 +11,6 @@ import * as Audio from "./Audio.ts";
 import * as UI from "./UI.ts";
 import * as MediaPlayer from "./MediaPlayer.ts";
 import * as PostProcess from "../effects/PostProcess.ts";
-import * as OceanReflection from "../effects/OceanReflection.ts";
 import * as Bubbles from "../effects/Bubbles.ts";
 import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
 import * as WindLines from "../effects/WindLines.ts";
@@ -21,7 +20,6 @@ import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
 import * as PhoneScreen from './PhoneScreen';
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
-import { reflectionTextureUniform } from "../materials/OceanMaterial";
 
 // Scene-ready flag — scene renders from the very first frame so the sky is
 // visible behind the loading button.  Kept as a no-op export for clarity.
@@ -183,7 +181,7 @@ export function setShadowsEnabled(value: boolean): void
 
 export function Start(): void
 {
-    const dpr = Math.min(window.devicePixelRatio, 2);  // cap DPR to limit GPU memory
+    const dpr = Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2);  // cap DPR to limit GPU memory
     
     // ── Viewport helpers ─────────────────────────────────────────────────────
     // Use window.innerWidth/Height — matches henryjeff's Sizes.ts approach.
@@ -199,6 +197,10 @@ export function Start(): void
     renderer.setClearColor(0x000000, 0.0);
     renderer.shadowMap.enabled = shadowsEnabled;
     renderer.shadowMap.type = VSMShadowMap;  // Variance shadows — real Gaussian blur
+
+    // Disable automatic per-frame sorting — CPU savings for 250+ objects.
+    // Use explicit renderOrder on key meshes instead.
+    renderer.sortObjects = false;
 
     // Canvas styling — matches Henry's Renderer.ts
     renderer.domElement.style.position = 'absolute';
@@ -265,8 +267,9 @@ export function Start(): void
     // Position light behind island so shadows go forward towards camera
     directionalLight.position.set(1, 4, -6);  // Behind island at z=-3.3
     directionalLight.castShadow = true;
-    directionalLight.shadow.mapSize.width = 1024;
-    directionalLight.shadow.mapSize.height = 1024;
+    const shadowRes = isMobile ? 512 : 1024;
+    directionalLight.shadow.mapSize.width = shadowRes;
+    directionalLight.shadow.mapSize.height = shadowRes;
     directionalLight.shadow.camera.near = 0.5;
     directionalLight.shadow.camera.far = 12;
     directionalLight.shadow.camera.left = -2;
@@ -287,10 +290,6 @@ export function Start(): void
 
     Ocean.Start();
     scene.add(Ocean.surface);
-
-    // Wire the reflection render-target texture into the ocean surface shader once.
-    // The RT texture object is stable; its contents are updated each frame by OceanReflection.update().
-    reflectionTextureUniform.value = OceanReflection.renderTarget.texture;
 
     SeaFloor.Start();
     for (let i = 0; i < SeaFloor.tiles.length; i++)
@@ -382,24 +381,65 @@ export function Update(): void
     // This frees the GPU entirely for model downloads and decoding.
     if (!_sceneReady) return;
 
+    const isUnderwater = getIsUnderwater();
+
     Skybox.Update();
     Ocean.Update();
-    SeaFloor.Update();
-    SeaFloorDecor.Update(deltaTime);
-    Island.Update();
-    Fish.Update();
-    Fire.Update();
     Audio.Update();
     UI.Update();
     MediaPlayer.Update();
     PostProcess.updateUnderwaterAmount(camera.position.y);
-    Bubbles.Update(camera.position.y);
-    UnderwaterParticles.Update(camera.position.y);
 
-    // Reflection pre-pass — renders scene from mirror camera into RT before the main render.
-    // Skip when underwater: the mirrored surface is invisible from below.
-    if (!getIsUnderwater()) {
-        OceanReflection.update(camera, renderer, scene, Ocean.surface);
+    // ── Visibility gating ─────────────────────────────────────────────────────
+    // Only update systems relevant to the current view (surface vs underwater).
+    // This halves per-frame CPU+GPU work in either mode.
+    // Also toggle mesh visibility so the GPU skips hidden geometry entirely.
+
+    // The island extends below the waterline, so keep it visible until the
+    // camera is well below the surface.  Clouds/wind are pure sky effects —
+    // hide them as soon as we cross the waterline.
+    const ISLAND_HIDE_DEPTH = -7;          // Y below which island meshes are culled
+    const deepUnderwater = camera.position.y < ISLAND_HIDE_DEPTH;
+
+    if (isUnderwater) {
+        // Show underwater, hide surface-only
+        SeaFloor.setVisible(true);
+        SeaFloorDecor.decorGroup.visible = true;
+        Fish.setVisible(true);
+        Clouds.cloudsGroup.visible = false;
+        WindLines.windLinesGroup.visible = false;
+        // Island stays visible near the surface so the submerged portion renders
+        Island.island.visible = !deepUnderwater;
+        Island.firecamp.visible = !deepUnderwater;
+        Island.palmtree.visible = !deepUnderwater;
+        Fire.fire.visible = !deepUnderwater;
+
+        SeaFloor.Update();
+        SeaFloorDecor.Update(deltaTime);
+        Fish.Update();
+        Bubbles.Update(camera.position.y);
+        UnderwaterParticles.Update(camera.position.y);
+        // Always tick Island.Update underwater — chest open/close animations,
+        // glow fade-out, coin springs, and pug all depend on it.  Wind, radio,
+        // pug, and music-note work is skipped when isUnderwater=true.
+        Island.Update(true);
+        Fire.Update();
+    } else {
+        // Show surface, hide underwater
+        SeaFloor.setVisible(false);
+        SeaFloorDecor.decorGroup.visible = false;
+        Fish.setVisible(false);
+        Clouds.cloudsGroup.visible = true;
+        WindLines.windLinesGroup.visible = true;
+        Island.island.visible = true;
+        Island.firecamp.visible = true;
+        Island.palmtree.visible = true;
+        Fire.fire.visible = true;
+
+        Island.Update(false);
+        Fire.Update();
+        Bubbles.Update(camera.position.y);
+        UnderwaterParticles.Update(camera.position.y);
     }
 
     // Sync lights with skybox sun position and intensity
@@ -504,4 +544,31 @@ export function setShadowRadius(radius: number): void {
 
 export function getShadowLight(): DirectionalLight {
     return directionalLight;
+}
+
+export function setDPR(maxDpr: number): void {
+    const dpr = Math.min(window.devicePixelRatio, maxDpr);
+    renderer.setPixelRatio(dpr);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    // Keep PostProcess framebuffer in sync with the new drawing-buffer size
+    const buf = new Vector2();
+    renderer.getDrawingBufferSize(buf);
+    PostProcess.onResize(buf.x, buf.y);
+
+    // Camera aspect shouldn't change (CSS size is the same), but projection
+    // matrix must be current so the first frame after the switch is correct.
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+}
+
+export function setShadowResolution(res: number): void {
+    if (!directionalLight) return;
+    directionalLight.shadow.mapSize.width = res;
+    directionalLight.shadow.mapSize.height = res;
+    if (directionalLight.shadow.map) {
+        directionalLight.shadow.map.dispose();
+        (directionalLight.shadow as any).map = null;
+    }
+    renderer.shadowMap.needsUpdate = true;
 }

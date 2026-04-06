@@ -17,7 +17,6 @@ export const surfaceVertex =
         _uv = _worldPos * _NormalMapScale;
         _elevation = elevation;
         gl_Position = projectionMatrix * viewMatrix * worldPos;
-        vReflCoord = gl_Position;
     }
 `;
 
@@ -48,10 +47,8 @@ export const surfaceFragment =
     uniform float _RippleWidth;
     uniform float _RippleNormalStrength;  // normal perturbation amplitude
 
-    uniform sampler2D _ReflectionTexture;
-    uniform float _ReflectionStrength;
-    uniform float _ReflectionFresnelPower;  // lower = visible at steeper angles (try 0.5–2.0)
-    uniform float _ReflectionFloor;         // minimum reflectivity regardless of angle (try 0.0–0.5)
+    uniform float _ReflectionFresnelPower;  // Fresnel exponent — lower = reflective at more angles
+    uniform float _ReflectionFloor;         // minimum reflectivity at any view angle
     uniform float _SkyReflBrightness;       // scales the analytical skybox reflection (0–1)
     uniform float _SkyReflFalloff;          // exponent on fresnelBase for sky only — sharpens near→far gradient
     uniform vec3  _SurfaceColor;            // RGB tint (1,1,1 = no tint)
@@ -60,7 +57,6 @@ export const surfaceFragment =
     varying vec2 _worldPos;
     varying vec2 _uv;
     varying float _elevation;
-    varying vec4 vReflCoord;
 
     float calcEdgeFade(vec2 pos) {
         float distFromNearEdge = -pos.y;
@@ -227,28 +223,14 @@ export const surfaceFragment =
 
         if (cameraPosition.y > _elevation)
         {
-            // fresnelBase: raw Fresnel curve, no floor — approaches 0 directly overhead.
+            // fresnelBase: raw Fresnel curve — approaches 0 directly overhead.
             // reflectivity: floored version used for body-color blending only.
             float fresnelBase = pow(1.0 - max(0.0, dot(-viewDir, normal)), _ReflectionFresnelPower);
             float reflectivity = max(fresnelBase, _ReflectionFloor);
 
-            // Planar reflection: sample the render-target texture using projected UVs,
-            // distorted by the water normal for a natural ripple shimmer.
-            vec2 reflUV = (vReflCoord.xy / vReflCoord.w) * 0.5 + 0.5;
-            reflUV += normal.xz * 0.035;  // normal-map distortion
-            reflUV = clamp(reflUV, 0.001, 0.999);
-            vec4 reflectionRTSample = texture2D(_ReflectionTexture, reflUV);
-            // Use RT alpha as a model mask: 0 = no model (sky), 1 = model reflected.
-            // Where there's no model the RT is transparent (cleared before render),
-            // so fall back entirely to the analytical skybox sample.
+            // Sky-only reflection: analytical skybox sample via reflected view direction
             vec3 skyRefl = sampleSkybox(reflect(viewDir, normal)) * _SkyReflBrightness;
-            vec3 reflectionRT = mix(skyRefl, reflectionRTSample.rgb, reflectionRTSample.a);
-            vec3 reflection = mix(skyRefl, reflectionRT, _ReflectionStrength);
-            // fresnelBase (no floor) drives reflection weight.
-            // _SkyReflFalloff raises it to a power, sharpening the near→far gradient:
-            //   1.0 = same as fresnelBase (gentle), 2.0 = squared (more contrast), 4.0 = very steep.
-            // reflectivity (floored) drives body color blend only.
-            vec3 surface = pow(fresnelBase, _SkyReflFalloff) * reflection;
+            vec3 surface = pow(fresnelBase, _SkyReflFalloff) * skyRefl;
             surface += (1.0 - reflectivity) * _SurfaceColor;
 
             float fog = clamp(viewLen / FOG_DISTANCE + dither, 0.0, 1.0);

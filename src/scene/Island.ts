@@ -1937,7 +1937,7 @@ function _playChestSound(reverse: boolean): void {
     filter.frequency.value = 500;
     filter.Q.value = 0.5;
     const gain = ctx.createGain();
-    gain.gain.value = 2.0;
+    gain.gain.value = 4.0;
     const source = ctx.createBufferSource();
     source.buffer = buf;
     source.connect(filter);
@@ -2371,7 +2371,8 @@ function setupRadioInteraction(): void {
     });
 }
 
-export function Update(): void {
+export function Update(isUnderwater = false): void {
+  if (!isUnderwater) {
     // Update palm tree wind shader time
     palmWindTimeUniform.value = time * PALM_WIND_SPEED;
     
@@ -2402,11 +2403,13 @@ export function Update(): void {
         patch.rotation.z = patchWind * BREEZE_GRASS_STRENGTH;
         patch.rotation.x = patchWind * BREEZE_GRASS_STRENGTH * 0.3;
     });
+  }
     
     // Palm tree wind is handled entirely by the vertex shader (applyPalmWindShader)
     // which uses smoothstep(uLeafStartY, uLeafFullY, position.y) to only move leaves,
     // not the trunk. No JS rotation needed here.
     
+  if (!isUnderwater) {
     // Radio vibration when music is playing
     if (radio.children.length > 0) {
         // Smooth hover scale
@@ -2485,6 +2488,7 @@ export function Update(): void {
     if (pugMixer) {
         pugMixer.update(Math.min(deltaTime, 0.1));
     }
+  } // end !isUnderwater gate (wind, radio, pug mixer)
 
     // Update chest animation mixer
     if (chestMixer) {
@@ -2556,6 +2560,7 @@ export function Update(): void {
         }
     }
 
+  if (!isUnderwater) {
     // ── Pug music-playing state: suppress sleep when music is on
     const _musicNowPlaying = getIsPlaying();
     if (_musicNowPlaying && !_pugMusicWasPlaying) {
@@ -2586,6 +2591,7 @@ export function Update(): void {
 
     // Update music note particles
     updateMusicNotes();
+  } // end !isUnderwater gate (pug state, music notes)
 }
 
 // Spawn a music note particle along an invisible arch above the radio

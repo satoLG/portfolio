@@ -1,6 +1,7 @@
 import { BufferAttribute, BufferGeometry, MathUtils, Mesh, Vector2 } from "three";
 import * as oceanMaterials from "../materials/OceanMaterial";
 import { Random } from "../scripts/Random";
+import { camera } from "../scripts/Scene";
 
 const tilesPerAxis = 13;
 const tileSize = 32;
@@ -219,18 +220,41 @@ export function Start(): void
             mesh.visible = false;
 
             tiles[tileZ * tilesPerAxis + tileX] = mesh;
+
+            // Pre-compute tile centre for distance culling
+            const centerX = ((tileX * tileSize + tileSize * 0.5) - halfSize) * scale + floorOffsetX;
+            const centerZ = ((tileZ * tileSize + tileSize * 0.5) - halfSize) * scale + floorOffsetZ;
+            tileCenters[tileZ * tilesPerAxis + tileX] = { x: centerX, z: centerZ };
         }
     }
 }
+
+// Pre-computed tile centres for distance culling
+const tileCenters: { x: number; z: number }[] = [];
+const CULL_DISTANCE_SQ = 150 * 150; // tiles beyond 150 units from camera are hidden
 
 const lastTilesIndices = new Array<number>();
 
 export function Update(): void
 {
-    if (lastTilesIndices.length === 0) {
-        for (let i = 0; i < tiles.length; i++) {
-            tiles[i].visible = true;
-            lastTilesIndices.push(i);
-        }
+    // Distance-based tile culling — only show tiles near the camera
+    const cx = camera.position.x;
+    const cz = camera.position.z;
+    lastTilesIndices.length = 0;
+    for (let i = 0; i < tiles.length; i++) {
+        const tc = tileCenters[i];
+        const dx = tc.x - cx;
+        const dz = tc.z - cz;
+        const distSq = dx * dx + dz * dz;
+        const vis = distSq < CULL_DISTANCE_SQ;
+        tiles[i].visible = vis;
+        if (vis) lastTilesIndices.push(i);
+    }
+}
+
+/** Toggle visibility of all sea floor tiles (GPU-side culling for surface/underwater gating). */
+export function setVisible(visible: boolean): void {
+    for (let i = 0; i < tiles.length; i++) {
+        tiles[i].visible = visible;
     }
 }
