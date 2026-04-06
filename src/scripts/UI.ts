@@ -332,27 +332,36 @@ export function Start(): void {
         quality:    loadQ('quality',    _isMobileQ ? 'low' : 'medium'),
     };
 
-    // Apply saved settings to APIs immediately (DOM not yet created at this point)
-    setShadowsEnabled(curGfx.shadows === 'true');
+    // Shadows are now driven by the quality preset (low=off, medium/high=on).
+    // The user can still override via the toggle after the preset is applied.
 
     function applyQualityPreset(preset: string): void {
         switch (preset) {
             case 'low':
                 setDPR(1);
+                setShadowsEnabled(false);
                 setShadowResolution(256);
                 setMarchSteps(8);
                 break;
             case 'medium':
                 setDPR(isMobile ? 1.5 : 2);
+                setShadowsEnabled(true);
                 setShadowResolution(isMobile ? 512 : 1024);
                 setMarchSteps(isMobile ? 12 : 16);
                 break;
             case 'high':
                 setDPR(2);
+                setShadowsEnabled(true);
                 setShadowResolution(1024);
                 setMarchSteps(24);
                 break;
         }
+        // Sync shadow toggle UI + persisted state with the preset's value
+        const shadowsOn = preset !== 'low';
+        curGfx.shadows = shadowsOn.toString();
+        saveQ('shadows', curGfx.shadows);
+        const toggle = settingsPanel.querySelector('.shadows-toggle') as HTMLButtonElement | null;
+        if (toggle) toggle.dataset.active = curGfx.shadows;
     }
     applyQualityPreset(curGfx.quality);
 

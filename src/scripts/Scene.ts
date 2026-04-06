@@ -550,6 +550,16 @@ export function setDPR(maxDpr: number): void {
     const dpr = Math.min(window.devicePixelRatio, maxDpr);
     renderer.setPixelRatio(dpr);
     renderer.setSize(window.innerWidth, window.innerHeight);
+
+    // Keep PostProcess framebuffer in sync with the new drawing-buffer size
+    const buf = new Vector2();
+    renderer.getDrawingBufferSize(buf);
+    PostProcess.onResize(buf.x, buf.y);
+
+    // Camera aspect shouldn't change (CSS size is the same), but projection
+    // matrix must be current so the first frame after the switch is correct.
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
 }
 
 export function setShadowResolution(res: number): void {
