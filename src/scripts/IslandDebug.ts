@@ -42,7 +42,6 @@ import {
     edgeFadeDistanceUniform,
     surfaceColorUniform,
     surfaceOpacityUniform,
-    reflectionStrengthUniform,
     reflectionFresnelPowerUniform,
     reflectionFloorUniform,
     skyReflectionBrightnessUniform,
@@ -58,7 +57,6 @@ import {
     foamWobbleSpeedUniform,
     underwaterFogDistUniform,
 } from '../materials/OceanMaterial';
-import * as OceanReflection from '../effects/OceanReflection';
 import * as WindLines from '../effects/WindLines';
 import * as Clouds from '../effects/Clouds';
 import * as SeaFloorDecor from '../scene/SeaFloorDecor';
@@ -598,12 +596,10 @@ function buildGUI(): void {
                 `export const surfaceOpacity = ${f(surfaceOpacityUniform.value as number)};`,
                 ``,
                 `// ── Reflection ────────────────────────────────────────────────────────────────`,
-                `export const reflectionStrength     = ${f(reflectionStrengthUniform.value as number)}; // 0 = skybox only, 1 = RT only`,
                 `export const reflectionFresnelPower = ${f(reflectionFresnelPowerUniform.value as number)}; // lower = visible at more angles`,
                 `export const reflectionFloor        = ${f(reflectionFloorUniform.value as number)}; // minimum reflectivity at any angle`,
                 `export const skyReflectionBrightness = ${f(skyReflectionBrightnessUniform.value as number)}; // scales the analytical skybox reflection (0 = none, 1 = full)`,
                 `export const skyReflFalloff         = ${f(skyReflFalloffUniform.value as number)}; // sharpens near→far gradient: 1 = linear, 2 = squared, 4 = very steep`,
-                `export const reflectionRTSize       = ${OceanReflection.currentResolution} as 256 | 512; // render target resolution`,
                 ``,
                 `// ── Underwater ────────────────────────────────────────────────────────────────`,
                 `export const oceanAbsorption    = { r: ${f(abs.x)}, g: ${f(abs.y)}, b: ${f(abs.z)} }; // per-channel fog depth`,
@@ -776,12 +772,10 @@ function buildGUI(): void {
             .onChange((v: number) => { setExclRadius(key, v); _exclRespawn(); });
     });
 
-    // ── Ocean Reflection ──────────────────────────────────────────
+    // ── Ocean Reflection (removed — sky-only reflection now) ─────────
     const reflFolder = oceanFolder.addFolder('Reflection');
 
     const reflProxy = {
-        get strength()     { return reflectionStrengthUniform.value as number; },
-        set strength(v)    { reflectionStrengthUniform.value = v; },
         get fresnelPower() { return reflectionFresnelPowerUniform.value as number; },
         set fresnelPower(v){ reflectionFresnelPowerUniform.value = v; },
         get floor()        { return reflectionFloorUniform.value as number; },
@@ -790,14 +784,7 @@ function buildGUI(): void {
         set skyBrightness(v){ skyReflectionBrightnessUniform.value = v; },
         get skyFalloff()   { return skyReflFalloffUniform.value as number; },
         set skyFalloff(v)  { skyReflFalloffUniform.value = v; },
-        get resolution()   { return OceanReflection.currentResolution; },
-        set resolution(v)  { OceanReflection.setResolution(v as 256 | 512); },
     };
-
-    reflFolder.add(reflProxy, 'strength', 0, 1, 0.01)
-        .name('RT vs Skybox  (0–100%)')
-        .listen()
-        .onChange((v: number) => { reflectionStrengthUniform.value = v; });
 
     reflFolder.add(reflProxy, 'fresnelPower', 0.2, 4.0, 0.05)
         .name('Fresnel Power  (angle range)')
@@ -818,11 +805,6 @@ function buildGUI(): void {
         .name('Sky Refl Falloff  (near→far)')
         .listen()
         .onChange((v: number) => { skyReflFalloffUniform.value = v; });
-
-    reflFolder.add(reflProxy, 'resolution', { '256 (quarter-res)': 256, '512 (half-res)': 512 })
-        .name('RT Resolution')
-        .listen()
-        .onChange((v: number) => { OceanReflection.setResolution(v as 256 | 512); });
 
     reflFolder.close();
 

@@ -104,7 +104,7 @@ function Vector3ToStarMap(dir: Vector3, value: number[]): void
 
 export function Start(): void
 {
-    dither.value = new TextureLoader().load("images/bluenoise.png", function(texture)
+    dither.value = new TextureLoader().load("images/bluenoise.webp", function(texture)
     {
         ditherSize.value.x = texture.image.width;
         ditherSize.value.y = texture.image.height;

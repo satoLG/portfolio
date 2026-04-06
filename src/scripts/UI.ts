@@ -1,11 +1,11 @@
-﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter } from "./Scene";
+﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setDPR, setShadowResolution, isMobile } from "./Scene";
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
 import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, preloadUISounds, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
 import { getCameraY, setIntroProgress, enableScroll, toggleCameraMode, isWebPageMode } from "./Control";
 import { setLoadingCallback } from "../scene/Island";
+import { setMarchSteps } from "../effects/Clouds";
 import { t, setLanguage, type Language } from "./i18n";
-import { setReflectionEnabled, setResolution } from "../effects/OceanReflection";
 
 const THEME_STORAGE_KEY = 'portfolio-theme-mode';
 
@@ -329,17 +329,32 @@ export function Start(): void {
     const _isMobileQ = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.innerWidth < 768;
     const curGfx = {
         shadows:    loadQ('shadows',    _isMobileQ ? 'false' : 'true'),
-        reflection: loadQ('reflection', 'off'),
+        quality:    loadQ('quality',    _isMobileQ ? 'low' : 'medium'),
     };
-
-    function applyReflection(val: string): void {
-        if (val === 'off') { setReflectionEnabled(false); }
-        else { setReflectionEnabled(true); setResolution(val === '512' ? 512 : 256); }
-    }
 
     // Apply saved settings to APIs immediately (DOM not yet created at this point)
     setShadowsEnabled(curGfx.shadows === 'true');
-    applyReflection(curGfx.reflection);
+
+    function applyQualityPreset(preset: string): void {
+        switch (preset) {
+            case 'low':
+                setDPR(1);
+                setShadowResolution(256);
+                setMarchSteps(8);
+                break;
+            case 'medium':
+                setDPR(isMobile ? 1.5 : 2);
+                setShadowResolution(isMobile ? 512 : 1024);
+                setMarchSteps(isMobile ? 12 : 16);
+                break;
+            case 'high':
+                setDPR(2);
+                setShadowResolution(1024);
+                setMarchSteps(24);
+                break;
+        }
+    }
+    applyQualityPreset(curGfx.quality);
 
     const currentLanguage = localStorage.getItem('portfolio-language') || 'en-us';
     const natureVol = Math.round(getNatureVolume() * 100);
@@ -386,20 +401,19 @@ export function Start(): void {
                 ${tabArrowSvg}
             </button>
             <div class="settings-tab-content">
+                <div class="settings-row" style="padding-bottom:2px">
+                    <span class="settings-label" data-i18n="settings.quality">${t('settings.quality')}</span>
+                </div>
+                <div class="settings-row" style="padding-top:2px">
+                    <div class="settings-mode-switch quality-switch">
+                        <button class="mode-option${curGfx.quality === 'low' ? ' active' : ''}" data-value="low" data-i18n="settings.low">${t('settings.low')}</button>
+                        <button class="mode-option${curGfx.quality === 'medium' ? ' active' : ''}" data-value="medium" data-i18n="settings.medium">${t('settings.medium')}</button>
+                        <button class="mode-option${curGfx.quality === 'high' ? ' active' : ''}" data-value="high" data-i18n="settings.high">${t('settings.high')}</button>
+                    </div>
+                </div>
                 <div class="settings-row">
                     <span class="settings-label" data-i18n="settings.shadows">${t('settings.shadows')}</span>
                     <button class="settings-toggle shadows-toggle" data-active="${curGfx.shadows}">${toggleOnSvg}${toggleOffSvg}</button>
-                </div>
-                <div class="settings-row" style="padding-bottom:2px">
-                    <span class="settings-label" data-i18n="settings.reflection">${t('settings.reflection')}</span>
-                    <span class="settings-warning" data-i18n-title="tooltip.reflectionWarning" title="${t('tooltip.reflectionWarning')}">&#9888;</span>
-                </div>
-                <div class="settings-row" style="padding-top:2px">
-                    <div class="settings-mode-switch reflection-switch">
-                        <button class="mode-option${curGfx.reflection === 'off' ? ' active' : ''}" data-value="off" data-i18n="settings.off">${t('settings.off')}</button>
-                        <button class="mode-option${curGfx.reflection === '256' ? ' active' : ''}" data-value="256">256px</button>
-                        <button class="mode-option${curGfx.reflection === '512' ? ' active' : ''}" data-value="512">512px</button>
-                    </div>
                 </div>
             </div>
         </div>
@@ -681,8 +695,20 @@ export function Start(): void {
     });
     
     // ---- Graphics Controls ----
+    const qualitySwitch = settingsPanel.querySelector('.quality-switch') as HTMLElement;
+    qualitySwitch.querySelectorAll('.mode-option').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const value = (btn as HTMLElement).dataset.value || 'medium';
+            qualitySwitch.querySelectorAll('.mode-option').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            curGfx.quality = value;
+            saveQ('quality', value);
+            applyQualityPreset(value);
+        });
+    });
+
     const shadowsToggle   = settingsPanel.querySelector('.shadows-toggle')   as HTMLButtonElement;
-    const reflectionSwitch = settingsPanel.querySelector('.reflection-switch') as HTMLElement;
 
     // Shadows toggle
     shadowsToggle.addEventListener('click', (e) => {
@@ -693,18 +719,6 @@ export function Start(): void {
         setShadowsEnabled(!isActive);
         curGfx.shadows = newVal;
         saveQ('shadows', newVal);
-    });
-
-    // Ocean reflection
-    reflectionSwitch.querySelectorAll('.mode-option').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const val = (btn as HTMLElement).dataset.value || 'off';
-            reflectionSwitch.querySelectorAll('.mode-option').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            curGfx.reflection = val; saveQ('reflection', val);
-            applyReflection(val);
-        });
     });
 
     // ---- Misc Controls: Pixelation Mode Switch ----
