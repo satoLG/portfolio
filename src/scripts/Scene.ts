@@ -1,4 +1,4 @@
-import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap } from "three";
+import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap, Object3D, Quaternion } from "three";
 import { getIsUnderwater } from "./Control";
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
@@ -372,6 +372,68 @@ export function Start(): void
     // Volumetric clouds
     Clouds.Start();
     scene.add(Clouds.cloudsGroup);
+
+    // Register GPU prewarm to run after all models finish loading.
+    // This compiles every shader program during the loading screen so the
+    // first scroll and first underwater transition are stutter-free.
+    Island.setOnLoadCallback(prewarmGPU);
+}
+
+// ── GPU Prewarming ───────────────────────────────────────────────────────────
+// Compiles all shader programs and uploads geometry/textures to the GPU while
+// the loading overlay is still visible.  Trades a brief loading-screen pause
+// for zero runtime stutter on first interaction.
+
+async function prewarmGPU(): Promise<void> {
+    // Wait for SeaFloorDecor models (loaded via a separate GLTFLoader,
+    // not tracked by Island's LoadingManager).
+    await waitForModels();
+
+    // 1. Save visibility & camera state
+    const savedVis: Array<{ obj: Object3D; vis: boolean }> = [];
+    scene.traverse(obj => {
+        savedVis.push({ obj, vis: obj.visible });
+        obj.visible = true;
+    });
+    const savedPos = camera.position.clone();
+    const savedQuat = camera.quaternion.clone();
+
+    // 2. Compile every material in the scene graph (triggers onBeforeCompile
+    //    hooks on SeaFloorDecor ocean lighting, kelp sway, Island wind, etc.)
+    renderer.compile(scene, camera);
+
+    // Compile the post-process quad (underwater distortion + pixelation)
+    PostProcess.prewarm(renderer);
+
+    // 3. Warm render — forces geometry VBO uploads and texture GPU transfers.
+    //    Two passes: surface + underwater so both frustum regions are covered.
+    //    Renders go to the canvas behind the opaque loading overlay.
+    camera.position.set(0, 2, 4);
+    camera.lookAt(0, 0, -3);
+    camera.updateProjectionMatrix();
+    renderer.render(scene, camera);
+
+    camera.position.set(0, -3, 4);
+    camera.lookAt(0, -5, -3);
+    camera.updateProjectionMatrix();
+    renderer.render(scene, camera);
+
+    // 4. Restore camera
+    camera.position.copy(savedPos);
+    camera.quaternion.copy(savedQuat);
+    camera.updateProjectionMatrix();
+
+    // 5. Restore visibility
+    for (const { obj, vis } of savedVis) obj.visible = vis;
+}
+
+function waitForModels(): Promise<void> {
+    return new Promise<void>(resolve => {
+        (function check() {
+            if (SeaFloorDecor.isLoaded()) resolve();
+            else setTimeout(check, 50);
+        })();
+    });
 }
 
 export function Update(): void

@@ -15,16 +15,16 @@ export const foamWobbleSpeed  = 0.9700; // how fast the wobble animates
 
 // ── Ocean Waves (normal-map scroll) ──────────────────────────────────────────
 export const normalMapScale    = 0.1160;
-export const normalMapStrength = 0.0400;
-export const waveVelocity1     = { x: 0.0500, y: -0.0010 };
-export const waveVelocity2     = { x: -0.0440, y: -0.0100 };
+export const normalMapStrength = 0.1400;
+export const waveVelocity1     = { x: 0.0330, y: -0.0100 };
+export const waveVelocity2     = { x: -0.0270, y: -0.0180 };
 export const edgeFadeDistance  = 0.5400;
 
 // ── Ocean Surface ─────────────────────────────────────────────────────────────
 export const surfaceColor   = { r: 0.0000, g: 1.5400, b: 1.6100 }; // RGB tint (1,1,1 = no tint)
 export const surfaceOpacity = 0.6100;
 
-// ── Reflection (sky-only, no render target) ───────────────────────────────────
+// ── Reflection ────────────────────────────────────────────────────────────────
 export const reflectionFresnelPower = 0.4000; // lower = visible at more angles
 export const reflectionFloor        = 0.2200; // minimum reflectivity at any angle
 export const skyReflectionBrightness = 1.0000; // scales the analytical skybox reflection (0 = none, 1 = full)

@@ -362,15 +362,30 @@ const loadingManager = new LoadingManager();
 let loadingProgress = 0;
 let onLoadingProgress: ((progress: number) => void) | null = null;
 
+// Optional async callback that runs AFTER all models load but BEFORE
+// reporting 100% (used by Scene.ts to pre-compile shaders on the GPU).
+let _onLoadCallback: (() => Promise<void>) | null = null;
+
+/** Register an async callback to run after all models load (e.g. GPU prewarm). */
+export function setOnLoadCallback(cb: () => Promise<void>): void {
+    _onLoadCallback = cb;
+}
+
 loadingManager.onProgress = (_url, loaded, total) => {
-    // Update progress based on items loaded
-    loadingProgress = loaded / total;
+    // Reserve the last 10% of the progress bar for the GPU prewarm pass.
+    loadingProgress = (loaded / total) * 0.9;
     if (onLoadingProgress) {
         onLoadingProgress(loadingProgress);
     }
 };
 
-loadingManager.onLoad = () => {
+loadingManager.onLoad = async () => {
+    // All Island models downloaded.  Run the prewarm callback (if registered)
+    // before signalling 100% — this compiles shaders + uploads geometry while
+    // the loading overlay is still visible.
+    if (_onLoadCallback) {
+        await _onLoadCallback();
+    }
     loadingProgress = 1;
     if (onLoadingProgress) {
         onLoadingProgress(1);
