@@ -6,7 +6,7 @@
 export const islandPosition = { x: 0.0000, y: -0.8000, z: -3.3000 };
 export const firecampOffset = { x: 0.0080, y: 1.0000, z: 0.4000 };
 export const palmtreeOffset = { x: -0.4500, y: 1.0000, z: -0.3000 };
-export const radioOffset    = { x: -0.7470, y: 1.0000, z: 0.0960 };
+export const radioOffset    = { x: -0.8470, y: 1.0000, z: 0.0960 };
 export const swordOffset    = { x: 0.1550, y: 1.3270, z: 0.1570 };
 export const pugOffset      = { x: 0.6500, y: 1.0000, z: 1.0000 };
 export const tentOffset     = { x: 0.4800, y: 0.9800, z: -0.3500 };

@@ -186,6 +186,14 @@ export function setDistortionScale(v: number): void {
     if (material) material.uniforms.uScale.value = v;
 }
 
+// ── GPU prewarm ──────────────────────────────────────────────────────────────
+
+/** Pre-compile the post-process quad shader so the first underwater frame is stutter-free. */
+export function prewarm(r: WebGLRenderer): void {
+    if (!initialized) return;
+    r.compile(quadScene, orthoCamera);
+}
+
 // ── Pixelation setter ────────────────────────────────────────────────────────
 
 export function setPixelSize(v: number): void {

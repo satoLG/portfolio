@@ -74,6 +74,9 @@ let kelpTemplate:  Group | null     = null;
 let loadedCount = 0;
 const TOTAL_MODELS = 5;
 
+/** True once all 5 underwater decoration GLTFs have finished loading. */
+export function isLoaded(): boolean { return loadedCount >= TOTAL_MODELS; }
+
 // ── GLSL snippets (identical to Island.ts) ────────────────────────────────────
 const oceanLightingPars = /*glsl*/`
     uniform vec3  uLight;
