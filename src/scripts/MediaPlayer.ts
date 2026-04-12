@@ -269,6 +269,16 @@ function loadRetroWorklet(): Promise<void> {
 // Preloading system for faster song transitions
 let preloadedAudios: Map<number, HTMLAudioElement> = new Map();
 
+/** Preload all playlist tracks into browser cache via fetch() */
+export function preloadAllTracks(): void {
+    for (let i = 0; i < playlist.length; i++) {
+        if (preloadedAudios.has(i)) continue;
+        fetch(playlist[i].file).then(() => {
+            preloadedAudios.set(i, true as any);
+        }).catch(() => {});
+    }
+}
+
 export function Start(): void {
     createPlayerUI();
     createAudioElement();
@@ -846,13 +856,6 @@ function preloadAdjacentSongs(): void {
             }).catch(() => {});
         }
     });
-    
-    // Clean old entries
-    for (const [index] of preloadedAudios.entries()) {
-        if (index !== nextIndex && index !== prevIndex) {
-            preloadedAudios.delete(index);
-        }
-    }
 }
 
 function initWavesurfer(): void {
@@ -908,6 +911,12 @@ function initWavesurfer(): void {
     analyserCanvas.addEventListener('pointerup', (e) => {
         seekDragging = false;
         analyserCanvas!.releasePointerCapture(e.pointerId);
+    });
+    analyserCanvas.addEventListener('pointerleave', () => {
+        if (seekDragging) seekDragging = false;
+    });
+    analyserCanvas.addEventListener('lostpointercapture', () => {
+        seekDragging = false;
     });
     
     // Update time display

@@ -116,6 +116,10 @@ const _coinRevealTimers:  number[] = []; // seconds remaining before reveal; -1 
 // Hover interaction (desktop scale + tooltip)
 const _coinHoverScales:   number[] = [1, 1, 1]; // smooth 0→1 hover multiplier per coin
 let   _hoveredCoinIdx:    number   = -1;          // which coin is under cursor (-1 = none)
+// Mobile bounce interaction
+let   _selectedCoinIdx:   number   = -1;          // which coin is bounce-selected (-1 = none)
+const _coinBounceScales:  number[] = [1, 1, 1];   // spring-driven bounce multiplier per coin
+const _coinBounceVels:    number[] = [0, 0, 0];   // bounce spring velocity
 const _coinRaycaster = new Raycaster();
 const _coinMouse     = new Vector2();
 const _coinScreenVec = new Vector3();
@@ -1912,6 +1916,18 @@ function _chestRayHit2(clientX: number, clientY: number): boolean {
     return chestRaycaster.intersectObjects(chest.children, true).length > 0;
 }
 
+function _hitAnyCoin(clientX: number, clientY: number): boolean {
+    if (_chestCoins.length === 0) return false;
+    _coinMouse.x =  (clientX / window.innerWidth)  * 2 - 1;
+    _coinMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+    _coinRaycaster.setFromCamera(_coinMouse, camera);
+    for (let i = 0; i < _chestCoins.length; i++) {
+        if (_coinCurrentScales[i] < 0.05) continue;
+        if (_coinRaycaster.intersectObjects(_chestCoins[i].children, true).length > 0) return true;
+    }
+    return false;
+}
+
 // ── Chest audio ───────────────────────────────────────────────────────────────
 let _chestAudioBuffer: AudioBuffer | null = null;
 
@@ -1986,6 +2002,7 @@ function closeChest(): void {
     if (!chestIsOpen || !chestCloseAction) return;
     chestIsOpen = false;
     _chestGlowTarget = 0;
+    _selectedCoinIdx = -1;
     // Cancel pending reveals and collapse all coins
     for (let i = 0; i < _coinTargetScales.length; i++) {
         _coinRevealTimers[i] = -1;
@@ -2008,9 +2025,10 @@ function setupChestInteraction(): void {
         // Ignore if another zoom is active (radio, pug, phone)
         if (isRadioZoomActive() || isPugZoomActive() || isPhoneZoomActive()) return;
 
-        // If already zoomed into chest, click outside → close + zoom out
+        // If already zoomed into chest, click outside a coin → close + zoom out
         if (isChestZoomActive()) {
-            if (_chestRayHit2(clientX, clientY)) return; // clicked on chest — stay zoomed
+            // Check if a coin was tapped — if so, let the coin handler deal with it
+            if (_hitAnyCoin(clientX, clientY)) return;
             closeChest();
             zoomOutFromChest();
             return;
@@ -2134,6 +2152,14 @@ function setupCoinInteraction(): void {
 
         if (hit >= 0) {
             e.preventDefault();
+            // Trigger bounce on newly selected coin, deselect previous
+            if (_selectedCoinIdx !== hit) {
+                if (_selectedCoinIdx >= 0) {
+                    _coinBounceVels[_selectedCoinIdx] = 0; // stop old bounce
+                }
+                _selectedCoinIdx = hit;
+                _coinBounceVels[hit] = 6; // kick the spring upward
+            }
             const pos = _getCoinScreenPos(hit);
             if (pos) {
                 _mobileJustOpened = true;
@@ -2557,7 +2583,21 @@ export function Update(isUnderwater = false): void {
             }
             const _hoverTarget = (_hoveredCoinIdx === i) ? 1.12 : 1.0;
             _coinHoverScales[i] += (_hoverTarget - _coinHoverScales[i]) * Math.min(1, deltaTime * 12);
-            _chestCoins[i].scale.setScalar(Math.max(0, _coinCurrentScales[i]) * _coinHoverScales[i]);
+
+            // Mobile bounce spring (selected coin pops up then settles)
+            const BOUNCE_K = 120;
+            const BOUNCE_D = 8;
+            const bounceTarget = (_selectedCoinIdx === i) ? 1.18 : 1.0;
+            const bounceErr  = bounceTarget - _coinBounceScales[i];
+            const bounceF    = BOUNCE_K * bounceErr - BOUNCE_D * _coinBounceVels[i];
+            _coinBounceVels[i]   += bounceF * dt;
+            _coinBounceScales[i] += _coinBounceVels[i] * dt;
+            if (Math.abs(bounceErr) < 0.001 && Math.abs(_coinBounceVels[i]) < 0.001) {
+                _coinBounceScales[i] = bounceTarget;
+                _coinBounceVels[i]   = 0;
+            }
+
+            _chestCoins[i].scale.setScalar(Math.max(0, _coinCurrentScales[i]) * _coinHoverScales[i] * _coinBounceScales[i]);
         }
     }
 
@@ -2565,6 +2605,7 @@ export function Update(isUnderwater = false): void {
     if (CoinTooltip.isCoinTooltipVisible()) {
         if (!isChestZoomActive()) {
             _hoveredCoinIdx = -1;
+            _selectedCoinIdx = -1;
             CoinTooltip.hideCoinTooltip();
         } else {
             const ttIdx = CoinTooltip.getCoinTooltipIdx();

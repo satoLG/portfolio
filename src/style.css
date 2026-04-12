@@ -1,4 +1,6 @@
-﻿html,
+﻿@import url('https://fonts.cdnfonts.com/css/wotfard');
+
+html,
 body {
     overflow: hidden;
 }
@@ -34,7 +36,7 @@ body {
 /* ============================================
    WOTFARD FONT IMPORT
    ============================================ */
-@import url('https://fonts.cdnfonts.com/css/wotfard');
+/* (import moved to top of file) */
 
 /* Global font enforcement */
 *, *::before, *::after {

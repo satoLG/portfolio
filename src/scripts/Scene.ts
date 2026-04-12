@@ -340,6 +340,7 @@ export function Start(): void
     if (pixelSizeValue > 0) {
         PostProcess.setPixelSize(pixelSizeValue);
         applyPixelBodyClass(pixelSizeValue);
+        PhoneScreen.applyPhonePixelSize(pixelSizeValue);
     }
 
     // Apply saved color filter
@@ -425,6 +426,9 @@ async function prewarmGPU(): Promise<void> {
 
     // 5. Restore visibility
     for (const { obj, vis } of savedVis) obj.visible = vis;
+
+    // 6. Preload all music tracks into browser cache (non-blocking)
+    MediaPlayer.preloadAllTracks();
 }
 
 function waitForModels(): Promise<void> {

@@ -325,6 +325,7 @@ export function Start(): void {
     // Register pointer tracking
     renderer.domElement.addEventListener('pointermove', onPointerMove);
     renderer.domElement.addEventListener('pointerleave', onPointerLeave);
+    renderer.domElement.addEventListener('pointerup', onPointerLeave);
 
     // Load clown fish
     loader.load(

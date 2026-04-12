@@ -90,6 +90,9 @@ let pugZoomActive = false;
 let phoneZoomActive = false;
 let chestZoomActive = false;
 
+// Counter for scroll attempts during zoom (stuck-zoom safety valve)
+let _zoomScrollAttempts = 0;
+
 // Saved camera state before zoom
 let savedCameraX = 0;
 let savedCameraY = 0;
@@ -269,6 +272,15 @@ export function zoomOutFromChest(): void {
     targetY = savedTargetY;
 }
 
+// Force-clear all zoom flags (safety valve for stuck zooms on mobile)
+function forceExitZoom(): void {
+    _zoomScrollAttempts = 0;
+    if (radioZoomActive) { radioZoomActive = false; targetY = savedTargetY; }
+    if (pugZoomActive)   { pugZoomActive = false;   targetY = savedTargetY; }
+    if (phoneZoomActive) { phoneZoomActive = false;  targetY = savedTargetY; }
+    if (chestZoomActive) { chestZoomActive = false;  targetY = savedTargetY; }
+}
+
 // Get saved camera position (for calculating where radio will be after zoomout)
 export function getSavedCameraPosition(): { x: number, y: number, z: number } {
     return {
@@ -309,7 +321,16 @@ export function toggleCameraMode(): boolean {
 
 export function handleScroll(deltaY: number): void {
     if (!scrollEnabled) return;  // Block scroll during intro
-    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive) return;  // Block scroll during zoom
+    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive) {
+        // Safety: user is trying to scroll while a zoom flag is active.
+        // Increment a counter — if they keep scrolling, force-clear the stuck zoom.
+        _zoomScrollAttempts++;
+        if (_zoomScrollAttempts > 3) {
+            forceExitZoom();
+        }
+        return;  // Block scroll during zoom
+    }
+    _zoomScrollAttempts = 0;
     if (webPageMode) {
         // Free scroll across the full range
         targetY = MathUtils.clamp(targetY - deltaY * scrollSpeed, underwaterBottomY, aboveWaterTopY);
