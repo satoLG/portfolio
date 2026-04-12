@@ -3,9 +3,9 @@ import { deltaTime, time } from "./Time";
 import { camera, cameraRight, cameraForward, UpdateCameraRotation, renderer, staticCamera } from "./Scene.ts"; //body,
 import { KeyCodes, PointerPhase, PointerType, keysJustPressed, keysPressed, lastPointerLockChange, mouseMovement, pointers } from "./Input";
 import { spotLightDistance, spotLightDistanceUniform } from "../materials/OceanMaterial";
-import { islandPosition as cfgIslandPos, radioOffset as cfgRadioOffset, radioRotY as cfgRadioRotY, pugOffset as cfgPugOffset, pugRotY as cfgPugRotY, phoneOffset as cfgPhoneOffset } from '../scene/IslandConfig';
-import { defaultCameraX, defaultCameraZ, defaultFov, mobileFov, mobileBreakpointWidth, aboveWaterBottomY as cfgAboveWaterBottomY, aboveWaterBottomYMobile as cfgAboveWaterBottomYMobile, underwaterTopY as cfgUnderwaterTopY, underwaterTopYMobile as cfgUnderwaterTopYMobile } from '../scene/CameraConfig';
-import { phoneZoomHeight, phoneZoomTilt, phoneZoomPitch, phoneZoomFov } from '../scene/PhoneConfig';
+import { islandPosition as cfgIslandPos, radioOffset as cfgRadioOffset, radioRotY as cfgRadioRotY, pugOffset as cfgPugOffset, pugRotY as cfgPugRotY, phoneOffset as cfgPhoneOffset } from '../scene/config/IslandConfig';
+import { defaultCameraX, defaultCameraZ, defaultFov, mobileFov, mobileBreakpointWidth, aboveWaterBottomY as cfgAboveWaterBottomY, aboveWaterBottomYMobile as cfgAboveWaterBottomYMobile, underwaterTopY as cfgUnderwaterTopY, underwaterTopYMobile as cfgUnderwaterTopYMobile } from '../scene/config/CameraConfig';
+import { phoneZoomHeight, phoneZoomTilt, phoneZoomPitch, phoneZoomFov } from '../scene/config/PhoneConfig';
 import { config as sfDecorConfig } from '../scene/SeaFloorDecor';
 
 const baseMoveSpeed = 10;
@@ -89,6 +89,9 @@ let radioZoomActive = false;
 let pugZoomActive = false;
 let phoneZoomActive = false;
 let chestZoomActive = false;
+
+// Counter for scroll attempts during zoom (stuck-zoom safety valve)
+let _zoomScrollAttempts = 0;
 
 // Saved camera state before zoom
 let savedCameraX = 0;
@@ -269,6 +272,15 @@ export function zoomOutFromChest(): void {
     targetY = savedTargetY;
 }
 
+// Force-clear all zoom flags (safety valve for stuck zooms on mobile)
+function forceExitZoom(): void {
+    _zoomScrollAttempts = 0;
+    if (radioZoomActive) { radioZoomActive = false; targetY = savedTargetY; }
+    if (pugZoomActive)   { pugZoomActive = false;   targetY = savedTargetY; }
+    if (phoneZoomActive) { phoneZoomActive = false;  targetY = savedTargetY; }
+    if (chestZoomActive) { chestZoomActive = false;  targetY = savedTargetY; }
+}
+
 // Get saved camera position (for calculating where radio will be after zoomout)
 export function getSavedCameraPosition(): { x: number, y: number, z: number } {
     return {
@@ -309,7 +321,16 @@ export function toggleCameraMode(): boolean {
 
 export function handleScroll(deltaY: number): void {
     if (!scrollEnabled) return;  // Block scroll during intro
-    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive) return;  // Block scroll during zoom
+    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive) {
+        // Safety: user is trying to scroll while a zoom flag is active.
+        // Increment a counter — if they keep scrolling, force-clear the stuck zoom.
+        _zoomScrollAttempts++;
+        if (_zoomScrollAttempts > 3) {
+            forceExitZoom();
+        }
+        return;  // Block scroll during zoom
+    }
+    _zoomScrollAttempts = 0;
     if (webPageMode) {
         // Free scroll across the full range
         targetY = MathUtils.clamp(targetY - deltaY * scrollSpeed, underwaterBottomY, aboveWaterTopY);

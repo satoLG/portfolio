@@ -90,7 +90,7 @@ export function UpdateCameraRotation(): void
     cameraForward.copy(_basisZ.set(0, 0, -1).applyQuaternion(camera.quaternion));
 }
 
-import { defaultFov } from '../scene/CameraConfig';
+import { defaultFov } from '../scene/config/CameraConfig';
 export let fov = defaultFov;
 export function SetFOV(value: number): void
 {
@@ -154,17 +154,27 @@ export function setShadowsEnabled(value: boolean): void
     renderer.shadowMap.needsUpdate = true;
     
     // Dispose shadow map textures so Three.js recreates them fresh
+    // VSM uses two render targets: shadow.map (main) and shadow.mapPass (blur pass).
+    // Both must be cleared — leaving mapPass causes size mismatch and shadows disappear.
     scene.traverse((obj) => {
         const light = obj as any;
         if (light.shadow?.map) {
             light.shadow.map.dispose();
             light.shadow.map = null;
         }
+        if (light.shadow?.mapPass) {
+            light.shadow.mapPass.dispose();
+            light.shadow.mapPass = null;
+        }
     });
     // Also check the directional light directly (may not be in scene yet during init)
     if (directionalLight?.shadow?.map) {
         directionalLight.shadow.map.dispose();
         (directionalLight.shadow as any).map = null;
+    }
+    if ((directionalLight?.shadow as any)?.mapPass) {
+        (directionalLight.shadow as any).mapPass.dispose();
+        (directionalLight.shadow as any).mapPass = null;
     }
     
     // Force all materials to recompile with updated shadow defines
@@ -340,6 +350,7 @@ export function Start(): void
     if (pixelSizeValue > 0) {
         PostProcess.setPixelSize(pixelSizeValue);
         applyPixelBodyClass(pixelSizeValue);
+        PhoneScreen.applyPhonePixelSize(pixelSizeValue);
     }
 
     // Apply saved color filter
@@ -425,6 +436,9 @@ async function prewarmGPU(): Promise<void> {
 
     // 5. Restore visibility
     for (const { obj, vis } of savedVis) obj.visible = vis;
+
+    // 6. Preload all music tracks into browser cache (non-blocking)
+    MediaPlayer.preloadAllTracks();
 }
 
 function waitForModels(): Promise<void> {
@@ -631,6 +645,10 @@ export function setShadowResolution(res: number): void {
     if (directionalLight.shadow.map) {
         directionalLight.shadow.map.dispose();
         (directionalLight.shadow as any).map = null;
+    }
+    if ((directionalLight.shadow as any).mapPass) {
+        (directionalLight.shadow as any).mapPass.dispose();
+        (directionalLight.shadow as any).mapPass = null;
     }
     renderer.shadowMap.needsUpdate = true;
 }

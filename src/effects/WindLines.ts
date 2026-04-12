@@ -9,8 +9,8 @@
 } from 'three';
 import { isBreezeActive } from '../scripts/Audio';
 import { UNDERWATER_Y_THRESHOLD } from './PostProcess';
-import { islandPosition } from '../scene/IslandConfig';
-import * as WLC from '../scene/SkyConfig';
+import { islandPosition } from '../scene/config/IslandConfig';
+import * as WLC from '../scene/config/SkyConfig';
 
 // Scale factor: converts pixel-based config values to Three.js world units.
 // At FOV=70 degrees, camera distance ~4.2u from island: 1px approx 0.006 world units.

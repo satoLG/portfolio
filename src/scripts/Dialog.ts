@@ -139,9 +139,12 @@ function ensureBubble(): void {
 
 const TAIL_HEIGHT     = 22;  // px — height of the SVG tail below the bubble
 const BUBBLE_ABOVE    = 10;  // px — extra clearance between tail tip and anchor point
-// The SVG tail tip overhangs TAIL_TIP_OVERHANG px to the LEFT of bubble.left.
-// Setting rawLeft = anchor.x + TAIL_TIP_OVERHANG aligns the tip with the character.
-const TAIL_TIP_OVERHANG = 8;  // px
+const TAIL_TIP_OVERHANG = 8;  // px — SVG tail tip overhangs this far left of bubble.left
+
+/** The SVG <svg> tail element inside the character bubble */
+function _getTailSvg(): SVGSVGElement | null {
+    return _bubbleEl?.querySelector('.dialog-tail') as SVGSVGElement | null;
+}
 
 function _updatePosition(): void {
     if (!_state || !_bubbleEl) return;
@@ -154,7 +157,6 @@ function _updatePosition(): void {
     const wh = window.innerHeight;
 
     // Bubble sits to the RIGHT of the character — tail at bottom-left points back at them.
-    // tail tip x  =  left − TAIL_TIP_OVERHANG  ⇒  left = anchor.x + TAIL_TIP_OVERHANG
     const rawLeft = anchor.x + TAIL_TIP_OVERHANG;
     const left = Math.max(8, Math.min(ww - bw - 8, rawLeft));
 
@@ -163,6 +165,20 @@ function _updatePosition(): void {
 
     _bubbleEl.style.left = `${left}px`;
     _bubbleEl.style.top  = `${top}px`;
+
+    // ── Dynamic tail: keep the SVG tip aligned with the 3D character ──────
+    const tailSvg = _getTailSvg();
+    if (tailSvg) {
+        // The SVG tip sits at (tail.left − TAIL_TIP_OVERHANG) in px from the
+        // bubble's left edge.  We want: left + tailLeft − TAIL_TIP_OVERHANG = anchor.x
+        // → tailLeft = anchor.x − left + TAIL_TIP_OVERHANG
+        const idealTailLeft = anchor.x - left + TAIL_TIP_OVERHANG;
+        // Clamp so the tail stays inside the bubble with some margin
+        const minTail = 12;
+        const maxTail = bw - 28;
+        const clampedTail = Math.max(minTail, Math.min(maxTail, idealTailLeft));
+        tailSvg.style.left = `${clampedTail}px`;
+    }
 }
 
 function _trackLoop(): void {
@@ -175,6 +191,9 @@ function _trackLoop(): void {
 // ─── Typewriter ───────────────────────────────────────────────────────────────
 
 const CHARS_PER_SEC = 22;
+/** Max characters added in a single frame — prevents a throttled mobile rAF
+ *  from dumping an entire sentence at once after a long gap between frames. */
+const MAX_CHARS_PER_FRAME = 3;
 
 function _startTyping(text: string): void {
     if (!_state || !_textEl || !_promptEl) return;
@@ -183,19 +202,30 @@ function _startTyping(text: string): void {
     _textEl.textContent = '';
     _promptEl.classList.remove('dialog-prompt--visible');
 
-    // Use rAF + timestamps instead of setInterval — setInterval is unreliable
-    // on iOS Safari (throttled/coalesced) causing all text to appear instantly.
     const msPerChar = 1000 / CHARS_PER_SEC;
-    let lastTime = performance.now();
+    let lastTime = -1;          // −1 signals "first frame"
     let accumulated = 0;
 
     const tick = (now: number): void => {
         if (!_state || !_state.isTyping) return;
-        accumulated += now - lastTime;
+
+        // First frame: just record the timestamp, don't add chars yet.
+        // Prevents dumping a huge batch if rAF fires late after setup.
+        if (lastTime < 0) {
+            lastTime = now;
+            _state.typeTimer = requestAnimationFrame(tick) as unknown as ReturnType<typeof setInterval>;
+            return;
+        }
+
+        // Clamp delta to avoid large jumps when mobile browser throttles rAF
+        const delta = Math.min(now - lastTime, 120);   // max ~120 ms gap
         lastTime = now;
-        const add = Math.floor(accumulated / msPerChar);
+        accumulated += delta;
+
+        let add = Math.floor(accumulated / msPerChar);
         if (add > 0) {
-            accumulated -= add * msPerChar;
+            add = Math.min(add, MAX_CHARS_PER_FRAME);
+            accumulated = Math.min(accumulated - add * msPerChar, msPerChar);
             _state.typeIndex = Math.min(_state.typeIndex + add, text.length);
             if (_textEl) _textEl.textContent = text.slice(0, _state.typeIndex);
         }
@@ -237,31 +267,23 @@ function _completeTyping(): void {
 
 /** px — reply bubble left edge sits this far right of the main bubble's right edge */
 const REPLY_OFFSET_X = 24;
-/** px — reply bubble top sits this far below the main bubble's top edge */
-const REPLY_OFFSET_Y = 90;
+/** px — gap between reply bubble bottom and viewport bottom */
+const REPLY_BOTTOM_MARGIN = 24;
 
 function _positionReplyBubble(): void {
-    if (!_replyBubbleEl || !_bubbleEl) return;
+    if (!_replyBubbleEl) return;
 
-    const mainLeft  = parseInt(_bubbleEl.style.left || '0', 10);
-    const mainTop   = parseInt(_bubbleEl.style.top  || '0', 10);
-    const mainW     = _bubbleEl.offsetWidth  || 240;
-    const mainH     = _bubbleEl.offsetHeight || 60;
-    const replyW    = _replyBubbleEl.offsetWidth  || 200;
-    const replyH    = _replyBubbleEl.offsetHeight || 60;
-    const ww        = window.innerWidth;
-    const wh        = window.innerHeight;
+    const replyW = _replyBubbleEl.offsetWidth  || 200;
+    const replyH = _replyBubbleEl.offsetHeight || 60;
+    const ww     = window.innerWidth;
+    const wh     = window.innerHeight;
 
-    const left = Math.max(8, Math.min(ww - replyW - 8, mainLeft + mainW + REPLY_OFFSET_X));
-
-    // Always position BELOW the main bubble (bottom edge + tail + gap) so they
-    // cannot overlap regardless of how tall the main bubble grows.
-    const minTop    = mainTop + mainH + TAIL_HEIGHT + 8;
-    const idealTop  = mainTop + REPLY_OFFSET_Y;
-    const top = Math.max(minTop, Math.min(wh - replyH - 8, idealTop));
+    // Center horizontally, pinned to the bottom of the viewport
+    const left = Math.max(8, Math.min(ww - replyW - 8, (ww - replyW) / 2));
+    const top  = wh - replyH - REPLY_BOTTOM_MARGIN;
 
     _replyBubbleEl.style.left = `${left}px`;
-    _replyBubbleEl.style.top  = `${top}px`;
+    _replyBubbleEl.style.top  = `${Math.max(8, top)}px`;
 }
 
 function _showReplyBubble(replies: ReplyOption[]): void {

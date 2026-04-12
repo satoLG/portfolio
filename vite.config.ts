@@ -29,9 +29,17 @@ export default defineConfig({
     target: 'esnext',
     minify: 'esbuild',
     sourcemap: true,
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
+      },
+      output: {
+        manualChunks: {
+          'three': ['three'],
+          'wavesurfer': ['wavesurfer.js'],
+          'vendor': ['lil-gui', 'bezier-easing'],
+        },
       },
     },
   },

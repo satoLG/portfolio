@@ -1,4 +1,6 @@
-﻿html,
+﻿@import url('https://fonts.cdnfonts.com/css/wotfard');
+
+html,
 body {
     overflow: hidden;
 }
@@ -34,7 +36,7 @@ body {
 /* ============================================
    WOTFARD FONT IMPORT
    ============================================ */
-@import url('https://fonts.cdnfonts.com/css/wotfard');
+/* (import moved to top of file) */
 
 /* Global font enforcement */
 *, *::before, *::after {
@@ -204,9 +206,6 @@ body.day-mode {
     height: 100%;
     pointer-events: none;
     z-index: 5;
-    backdrop-filter: blur(50px);
-    -webkit-backdrop-filter: blur(50px);
-    background: rgba(10, 22, 40, 0.3);
     opacity: 1;
     transition: opacity 2s ease-in-out;
     will-change: opacity;
@@ -217,10 +216,6 @@ body.day-mode {
     isolation: isolate;
     transform: translateZ(0);
     -webkit-transform: translateZ(0);
-}
-
-body.day-mode #blur-overlay {
-    background: rgba(26, 90, 138, 0.3);
 }
 
 #blur-overlay.fade-out {
@@ -1377,6 +1372,8 @@ body.day-mode .settings-panel {
     justify-content: space-between;
     gap: 8px;
     padding: 6px 0;
+    min-height: 48px;
+    box-sizing: border-box;
 }
 
 .settings-row:not(:last-child) {
@@ -1564,6 +1561,8 @@ body.day-mode .volume-slider::-moz-range-thumb {
     align-items: center;
     justify-content: space-between;
     padding: 8px 10px;
+    min-height: 40px;
+    box-sizing: border-box;
     background: rgba(255, 255, 255, 0.08);
     border: none;
     border-radius: 8px;
@@ -1638,6 +1637,7 @@ body.day-mode .settings-mode-switch {
 .settings-mode-switch .mode-option {
     flex: 1;
     padding: 6px 8px;
+    min-height: 32px;
     border: none;
     border-radius: 6px;
     background: transparent;
@@ -2383,7 +2383,7 @@ body.no-svg-filter .dialog-reply-bubble {
     max-width: 300px;
     min-width: 130px;
     padding: 11px 16px 9px;
-    background: #ffffffd8;
+    background: #ffffffc0;
     /* border: 3px solid #1a1a1a; */
     border-radius: 40px;
     box-shadow: 2px 2px 0 #1a1a1a5c;
@@ -2438,7 +2438,7 @@ body.pixel-max .dialog-bubble {
 }
 
 .dialog-tail-path {
-    fill: #ffffffd8;
+    fill: #ffffffc0;
 }
 
 /* Pixel modes: hide SVG tail, restore sharp CSS triangle at the left */
@@ -2512,15 +2512,15 @@ body.pixel-max    .dialog-bubble::before {
     max-width: 280px;
     min-width: 100px;
     padding: 11px 16px 9px;
-    background: #ffffffd8;
+    background: #ffffffc0;
     border-radius: 40px;
     box-shadow: 2px 2px 0 #1a1a1a5c;
     pointer-events: auto;
     cursor: default;
     user-select: none;
     display: none;
-    /* Pop animation scales from the tail tip: 8 px right of bubble, 22 px below */
-    transform-origin: calc(100% + 8px) calc(100% + 22px);
+    /* Pop animation scales from bottom-center since reply appears at viewport bottom */
+    transform-origin: 50% 100%;
     filter: url(#dialog-wobble);
 }
 
