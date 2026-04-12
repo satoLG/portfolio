@@ -2,7 +2,7 @@
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
 import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, preloadUISounds, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
-import { getCameraY, setIntroProgress, enableScroll, toggleCameraMode, isWebPageMode } from "./Control";
+import { getCameraY, setIntroProgress, enableScroll } from "./Control";
 import { setLoadingCallback } from "../scene/Island";
 import { setMarchSteps } from "../effects/Clouds";
 import { t, setLanguage, type Language } from "./i18n";
@@ -328,12 +328,8 @@ export function Start(): void {
 
     const _isMobileQ = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.innerWidth < 768;
     const curGfx = {
-        shadows:    loadQ('shadows',    _isMobileQ ? 'false' : 'true'),
         quality:    loadQ('quality',    _isMobileQ ? 'low' : 'medium'),
     };
-
-    // Shadows are now driven by the quality preset (low=off, medium/high=on).
-    // The user can still override via the toggle after the preset is applied.
 
     function applyQualityPreset(preset: string): void {
         switch (preset) {
@@ -347,21 +343,15 @@ export function Start(): void {
                 setDPR(isMobile ? 1.5 : 2);
                 setShadowsEnabled(true);
                 setShadowResolution(isMobile ? 512 : 1024);
-                setMarchSteps(isMobile ? 12 : 16);
+                setMarchSteps(isMobile ? 16 : 32);
                 break;
             case 'high':
                 setDPR(2);
                 setShadowsEnabled(true);
-                setShadowResolution(1024);
-                setMarchSteps(24);
+                setShadowResolution(2048);
+                setMarchSteps(48);
                 break;
         }
-        // Sync shadow toggle UI + persisted state with the preset's value
-        const shadowsOn = preset !== 'low';
-        curGfx.shadows = shadowsOn.toString();
-        saveQ('shadows', curGfx.shadows);
-        const toggle = settingsPanel.querySelector('.shadows-toggle') as HTMLButtonElement | null;
-        if (toggle) toggle.dataset.active = curGfx.shadows;
     }
     applyQualityPreset(curGfx.quality);
 
@@ -420,10 +410,7 @@ export function Start(): void {
                         <button class="mode-option${curGfx.quality === 'high' ? ' active' : ''}" data-value="high" data-i18n="settings.high">${t('settings.high')}</button>
                     </div>
                 </div>
-                <div class="settings-row">
-                    <span class="settings-label" data-i18n="settings.shadows">${t('settings.shadows')}</span>
-                    <button class="settings-toggle shadows-toggle" data-active="${curGfx.shadows}">${toggleOnSvg}${toggleOffSvg}</button>
-                </div>
+
             </div>
         </div>
         <div class="settings-tab${tabStates.misc ? ' open' : ''}" data-tab="misc">
@@ -451,10 +438,6 @@ export function Start(): void {
                         <button class="mode-option${colorFilterValue === 'bw' ? ' active' : ''}" data-value="bw" data-i18n="settings.bw">${t('settings.bw')}</button>
                         <button class="mode-option${colorFilterValue === 'sepia' ? ' active' : ''}" data-value="sepia" data-i18n="settings.sepia">${t('settings.sepia')}</button>
                     </div>
-                </div>
-                <div class="settings-row">
-                    <span class="settings-label" data-i18n="settings.freeRoam">${t('settings.freeRoam')}</span>
-                    <button class="settings-toggle free-roam-toggle" data-active="${!isWebPageMode()}">${toggleOnSvg}${toggleOffSvg}</button>
                 </div>
             </div>
         </div>
@@ -717,19 +700,6 @@ export function Start(): void {
         });
     });
 
-    const shadowsToggle   = settingsPanel.querySelector('.shadows-toggle')   as HTMLButtonElement;
-
-    // Shadows toggle
-    shadowsToggle.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const isActive = shadowsToggle.dataset.active === 'true';
-        const newVal = (!isActive).toString();
-        shadowsToggle.dataset.active = newVal;
-        setShadowsEnabled(!isActive);
-        curGfx.shadows = newVal;
-        saveQ('shadows', newVal);
-    });
-
     // ---- Misc Controls: Pixelation Mode Switch ----
     const pixelationSwitch = settingsPanel.querySelector('.pixelation-switch') as HTMLElement;
     pixelationSwitch.querySelectorAll('.mode-option').forEach(btn => {
@@ -754,16 +724,7 @@ export function Start(): void {
         });
     });
 
-    // ---- Misc Controls: Free Roam Camera Toggle ----
-    const freeRoamToggle = settingsPanel.querySelector('.free-roam-toggle') as HTMLElement;
-    freeRoamToggle.addEventListener('click', (e) => {
-        e.stopPropagation();
-        // toggleCameraMode() returns the new webPageMode value (true = normal scroll, false = free roam)
-        const newWebPageMode = toggleCameraMode();
-        // data-active="true" lights up the toggle â€” we want it lit when free roam is ON
-        freeRoamToggle.dataset.active = (!newWebPageMode).toString();
-    });
-    
+
     // ---- Language Controls ----
     const languageOptions = settingsPanel.querySelectorAll('.language-option');
     languageOptions.forEach(btn => {

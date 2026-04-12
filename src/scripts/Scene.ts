@@ -154,17 +154,27 @@ export function setShadowsEnabled(value: boolean): void
     renderer.shadowMap.needsUpdate = true;
     
     // Dispose shadow map textures so Three.js recreates them fresh
+    // VSM uses two render targets: shadow.map (main) and shadow.mapPass (blur pass).
+    // Both must be cleared — leaving mapPass causes size mismatch and shadows disappear.
     scene.traverse((obj) => {
         const light = obj as any;
         if (light.shadow?.map) {
             light.shadow.map.dispose();
             light.shadow.map = null;
         }
+        if (light.shadow?.mapPass) {
+            light.shadow.mapPass.dispose();
+            light.shadow.mapPass = null;
+        }
     });
     // Also check the directional light directly (may not be in scene yet during init)
     if (directionalLight?.shadow?.map) {
         directionalLight.shadow.map.dispose();
         (directionalLight.shadow as any).map = null;
+    }
+    if ((directionalLight?.shadow as any)?.mapPass) {
+        (directionalLight.shadow as any).mapPass.dispose();
+        (directionalLight.shadow as any).mapPass = null;
     }
     
     // Force all materials to recompile with updated shadow defines
@@ -635,6 +645,10 @@ export function setShadowResolution(res: number): void {
     if (directionalLight.shadow.map) {
         directionalLight.shadow.map.dispose();
         (directionalLight.shadow as any).map = null;
+    }
+    if ((directionalLight.shadow as any).mapPass) {
+        (directionalLight.shadow as any).mapPass.dispose();
+        (directionalLight.shadow as any).mapPass = null;
     }
     renderer.shadowMap.needsUpdate = true;
 }

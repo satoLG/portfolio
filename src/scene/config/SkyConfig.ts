@@ -4,7 +4,7 @@
 
 // ── Clouds: Mesh placement (world-space centre + scale) ───────────────────────
 export const posX   = 0.0000;
-export const posY   = 500.0000;
+export const posY   = 420.0000;
 export const posZ   = -424.0000;
 export const scaleX = 3000.0000;
 export const scaleY = 500.0000;
@@ -14,20 +14,20 @@ export const scaleZ = 1500.0000;
 export const windSpeed = 0.0110;
 
 // ── Clouds: Noise ─────────────────────────────────────────────────────────────
-export const noiseScale = 2.0000;
+export const noiseScale = 1.6000;
 
 // ── Clouds: Turbulence (domain warp) ──────────────────────────────────────────
-export const turbulenceStrength = 0.2400;
-export const turbulenceSpeed    = 0.0240;
+export const turbulenceStrength = 0.2800;
+export const turbulenceSpeed    = 0.0280;
 
 // ── Clouds: Shape ─────────────────────────────────────────────────────────────
-export const threshold = 0.9900;
-export const range     = 0.3450;
-export const opacity   = 0.7450;
-export const edgeFade  = 0.5000;
+export const threshold = 0.8300;
+export const range     = 0.1100;
+export const opacity   = 0.9200;
+export const edgeFade  = 0.2000;
 
 // ── Clouds: Quality ───────────────────────────────────────────────────────────
-export const marchSteps = 16;
+export const marchSteps = 48;
 
 // ── Clouds: Day colors ────────────────────────────────────────────────────────
 export const dayR = 1.0000;
@@ -35,9 +35,9 @@ export const dayG = 1.0000;
 export const dayB = 1.0000;
 
 // ── Clouds: Night colors ──────────────────────────────────────────────────────
-export const nightR = 0.1200;
-export const nightG = 0.1300;
-export const nightB = 0.1100;
+export const nightR = 0.1500;
+export const nightG = 0.1600;
+export const nightB = 0.1800;
 
 // ── Wind Lines: Spawning ──────────────────────────────────────────────────────
 export const maxLines  = 5;

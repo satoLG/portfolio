@@ -190,13 +190,13 @@ float sampleDensity(vec3 p) {
         uv.y * uNoiseScale,
         uv.z * uNoiseScale
     ));
-    float base = n.r * 0.60 + n.g * 0.25 + n.b * 0.15;
+    float base = n.r * 0.80 + n.g * 0.20;
     float d    = smoothstep(uThreshold - uRange, uThreshold + uRange, base);
 
-    // Vertical fade: dissolve near top and bottom of the box
-    float yAbs = abs(p.y);
-    float fade = 1.0 - smoothstep(0.5 - uEdgeFade, 0.5, yAbs);
-    return d * fade;
+    // Cumulus shape: rounded top, sharper flat bottom
+    float topFade    = 1.0 - smoothstep(0.5 - uEdgeFade, 0.5, p.y);
+    float bottomFade = 1.0 - smoothstep(0.0, 0.30, -p.y);
+    return d * topFade * bottomFade;
 }
 
 void main() {
@@ -226,7 +226,7 @@ void main() {
     // --- Per-pixel jitter to break up banding --------------------------------
     uint seed   = uint(gl_FragCoord.x) * 1973u + uint(gl_FragCoord.y) * 9277u
                 + uint(uFrame) * 26699u;
-    float jitter = randFloat(seed) * 2.0 - 1.0;
+    float jitter = randFloat(seed); // [0,1) — dithers ray start forward only, no backward steps
 
     vec3 cloudColor = mix(uColorNight, uColorDay, uDayFraction);
 
@@ -236,8 +236,8 @@ void main() {
         float d = sampleDensity(p) * uOpacity;
         if (d <= 0.0) continue;
 
-        // Simple ambient shading: lighter at top, darker at bottom
-        float shade = 0.2 + 0.8 * clamp((p.y + 0.5), 0.0, 1.0);
+        // Top-lit shading: bright white peaks, gray belly (classic cumulus)
+        float shade = 0.70 + 0.30 * clamp(p.y + 0.5, 0.0, 1.0);
         ac.rgb += (1.0 - ac.a) * d * cloudColor * shade;
         ac.a   += (1.0 - ac.a) * d;
         if (ac.a >= 0.95) break;
@@ -257,11 +257,10 @@ void main() {
 export function Start(): void {
     const noiseTex = buildNoiseTexture();
 
-    // Clamp default march steps to a device-appropriate ceiling.
-    // CC.marchSteps (64) is the high-quality target; real visitors rarely have
-    // the GPU headroom for it.  Desktop gets 24 steps, mobile gets 12 steps.
-    // Jitter + alpha early-exit make these visually close to higher counts.
-    const stepCeil = _isMobile ? 12 : 24;
+    // Initial step count — quality presets in UI.ts will override this immediately
+    // after Start(). This value is only used for the very first frame before the
+    // UI initialises. Desktop: 48 steps; mobile: 16 steps.
+    const stepCeil = _isMobile ? 16 : 48;
     config.marchSteps = Math.min(CC.marchSteps, stepCeil);
 
     _material = new RawShaderMaterial({

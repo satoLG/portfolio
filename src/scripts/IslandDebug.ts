@@ -76,7 +76,7 @@ import {
     rippleMaxClickDistance as RIPPLE_MAX_CLICK_DISTANCE,
 } from '../scene/config/OceanConfig';
 import { Object3D } from 'three';
-import { phoneZoomConfig, mainCameraConfig } from '../scripts/Control';
+import { phoneZoomConfig, mainCameraConfig, isWebPageMode, toggleCameraMode } from '../scripts/Control';
 import { mobileFov, mobileBreakpointWidth, aboveWaterBottomY as CFG_ABOVE_BOTTOM, aboveWaterBottomYMobile as CFG_ABOVE_BOTTOM_MOBILE, underwaterTopY as CFG_UNDER_TOP, underwaterTopYMobile as CFG_UNDER_TOP_MOBILE } from '../scene/config/CameraConfig';
 import { SetFOV } from '../scripts/Scene';
 import { phoneScreenConfig, updateOverlayStyle } from './PhoneScreen';
@@ -1388,6 +1388,13 @@ function buildGUI(): void {
         },
     };
     cameraFolder.add(cameraConfigActions, 'copyConfig').name('Copy CameraConfig.ts');
+
+    // ── Camera: Free Roam toggle ──────────────────────────────────────────────
+    const freeRoamProxy = {
+        get freeRoam() { return !isWebPageMode(); },
+        set freeRoam(v: boolean) { if (v !== !isWebPageMode()) toggleCameraMode(); },
+    };
+    cameraFolder.add(freeRoamProxy, 'freeRoam').name('Free Roam');
 
     // ── Camera: Main Camera live tweaks ────────────────────────────────────────
     const mainCamFolder = cameraFolder.addFolder('Main Camera');
