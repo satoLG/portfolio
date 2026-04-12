@@ -1,4 +1,4 @@
-// src/scene/SeaFloorConfig.ts
+// src/scene/config/SeaFloorConfig.ts
 // Explicit placement for every seafloor decoration.
 // All rotations are in radians.
 

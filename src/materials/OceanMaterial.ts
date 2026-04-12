@@ -3,7 +3,7 @@ import * as OceanShaders from "../shaders/OceanShaders";
 import { cameraForward } from "../scripts/Scene";
 import { timeUniform } from "../scripts/Time";
 import { SetSkyboxUniforms } from "./SkyboxMaterial";
-import * as OceanConfig from '../scene/OceanConfig';
+import * as OceanConfig from '../scene/config/OceanConfig';
 
 export const surface = new ShaderMaterial();
 export const volume = new ShaderMaterial();

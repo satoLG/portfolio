@@ -26,7 +26,7 @@ import {
     CLOVER_COUNT as CLOVER_COUNT_CFG,
     SURFACE_EDGE_PADDING,
     EXCL_R_BONFIRE, EXCL_R_TENT, EXCL_R_PALM, EXCL_R_PUG, EXCL_R_RADIO, EXCL_R_ROCKS,
-} from './IslandConfig';
+} from './config/IslandConfig';
 
 export const island = new Group();
 export const firecamp = new Group();

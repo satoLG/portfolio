@@ -23,7 +23,7 @@ import {
     LinearFilter
 } from "three";
 import { time } from "../scripts/Time";
-import { distortionStrength, distortionSpeed, distortionScale } from '../scene/OceanConfig';
+import { distortionStrength, distortionSpeed, distortionScale } from '../scene/config/OceanConfig';
 
 // ── Underwater constants ─────────────────────────────────────────────────────
 export const UNDERWATER_Y_THRESHOLD = 0.0;

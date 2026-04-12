@@ -90,7 +90,7 @@ export function UpdateCameraRotation(): void
     cameraForward.copy(_basisZ.set(0, 0, -1).applyQuaternion(camera.quaternion));
 }
 
-import { defaultFov } from '../scene/CameraConfig';
+import { defaultFov } from '../scene/config/CameraConfig';
 export let fov = defaultFov;
 export function SetFOV(value: number): void
 {

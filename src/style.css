@@ -206,9 +206,6 @@ body.day-mode {
     height: 100%;
     pointer-events: none;
     z-index: 5;
-    backdrop-filter: blur(50px);
-    -webkit-backdrop-filter: blur(50px);
-    background: rgba(10, 22, 40, 0.3);
     opacity: 1;
     transition: opacity 2s ease-in-out;
     will-change: opacity;
@@ -219,10 +216,6 @@ body.day-mode {
     isolation: isolate;
     transform: translateZ(0);
     -webkit-transform: translateZ(0);
-}
-
-body.day-mode #blur-overlay {
-    background: rgba(26, 90, 138, 0.3);
 }
 
 #blur-overlay.fade-out {

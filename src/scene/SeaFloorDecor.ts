@@ -15,7 +15,7 @@ import { camera, renderer }     from "../scripts/Scene";
 import { getAudioContext, getMasterDestination } from "../scripts/Audio";
 import { spawnBubble }          from "../effects/Bubbles";
 import { UNDERWATER_Y_THRESHOLD } from "../effects/PostProcess";
-import * as C                   from "./SeaFloorConfig";
+import * as C                   from "./config/SeaFloorConfig";
 
 // ── Live config ────────────────────────────────────────────────────────────────
 export const config = {
