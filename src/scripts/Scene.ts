@@ -26,6 +26,9 @@ import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial"
 let _sceneReady = true;
 export function setSceneReady(): void { _sceneReady = true; }
 
+/** Reveal the ocean surface — called once when the user clicks Start. */
+export function showOcean(): void { Ocean.surface.visible = true; }
+
 // DOM containers — matching Henry's #css / #webgl structure
 export const cssContainer = document.querySelector('#css') as HTMLDivElement;
 export const webglContainer = document.querySelector('#webgl') as HTMLDivElement;
@@ -300,6 +303,9 @@ export function Start(): void
 
     Ocean.Start();
     scene.add(Ocean.surface);
+    // Hide ocean until the user clicks Start — at the intro camera height the
+    // ocean edge is barely visible and creates a distracting frame flash.
+    Ocean.surface.visible = false;
 
     SeaFloor.Start();
     for (let i = 0; i < SeaFloor.tiles.length; i++)
@@ -418,9 +424,10 @@ async function prewarmGPU(): Promise<void> {
 
     // 3. Warm render — forces geometry VBO uploads and texture GPU transfers.
     //    Two passes: surface + underwater so both frustum regions are covered.
-    //    Renders go to the canvas behind the opaque loading overlay.
-    camera.position.set(0, 2, 4);
-    camera.lookAt(0, 0, -3);
+    //    Surface pass: camera at intro start position, tilted upward (matching
+    //    the intro tilt) so only sky is visible — no ocean edge flash.
+    camera.position.set(-0.1, 5, 1.78);
+    camera.lookAt(-0.1, 10, -1);       // look upward — same tilt as INTRO_TETHA_START
     camera.updateProjectionMatrix();
     renderer.render(scene, camera);
 
