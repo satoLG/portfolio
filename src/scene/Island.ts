@@ -103,6 +103,7 @@ let chestIsOpen = false;
 // Chest glow light (animates on open/close)
 let chestGlowLight: PointLight | null = null;
 let _chestGlowTarget = 0;
+let _chestGlowReady  = false;  // true only after CHEST_GLOW_DELAY_MS has elapsed
 // Chest Zelda-style ray beams
 let _chestRayGroup: Group | null = null;
 const _chestRayMats: MeshBasicMaterial[] = [];
@@ -1929,6 +1930,15 @@ function _hitAnyCoin(clientX: number, clientY: number): boolean {
 }
 
 // ── Chest audio ───────────────────────────────────────────────────────────────
+
+/** How many milliseconds before chestCloseAction starts the reversed sound begins.
+ *  Increase to hear more of the sound synced with the lid movement. */
+const CHEST_CLOSE_SOUND_LEAD_MS = 100;
+
+/** Fraction (0–1) of the reversed audio to play on close.
+ *  1.0 = full clip; 0.6 = stop at 60% of the reversed buffer's length. */
+const CHEST_CLOSE_SOUND_CUTOFF_RATIO = 0.60;
+
 let _chestAudioBuffer: AudioBuffer | null = null;
 
 async function _loadChestBuffer(): Promise<AudioBuffer | null> {
@@ -1974,13 +1984,30 @@ function _playChestSound(reverse: boolean): void {
     source.connect(filter);
     filter.connect(gain);
     gain.connect(dest);
-    source.start();
+    if (reverse) {
+        // Play only the first CHEST_CLOSE_SOUND_CUTOFF_RATIO fraction of the
+        // reversed buffer so the sound cuts off before the end of the clip.
+        const duration = buf.duration * CHEST_CLOSE_SOUND_CUTOFF_RATIO;
+        source.start(0, 0, duration);
+    } else {
+        source.start();
+    }
 }
+
+/** How many milliseconds after the open animation starts before the glow light fades in.
+ *  Tune to match the moment the lid actually swings open. */
+const CHEST_GLOW_DELAY_MS = 700;
 
 function openChest(): void {
     if (chestIsOpen || !chestOpenAction) return;
     chestIsOpen = true;
-    _chestGlowTarget = sfDecorConfig.chestGlowIntensity;
+    // Delay glow so it activates when the lid is actually open, not at the start of the animation
+    _chestGlowReady = false;
+    setTimeout(() => {
+        if (!chestIsOpen) return;
+        _chestGlowReady  = true;
+        _chestGlowTarget = sfDecorConfig.chestGlowIntensity;
+    }, CHEST_GLOW_DELAY_MS);
     // Collapse any coins that may still be visible (e.g. re-open after partial close)
     for (let i = 0; i < _coinRevealTimers.length; i++) _coinRevealTimers[i] = -1;
     // Start revealing coins partway through the lid animation (not waiting for full finish)
@@ -2000,7 +2027,8 @@ function openChest(): void {
 
 function closeChest(): void {
     if (!chestIsOpen || !chestCloseAction) return;
-    chestIsOpen = false;
+    chestIsOpen      = false;
+    _chestGlowReady  = false;
     _chestGlowTarget = 0;
     _selectedCoinIdx = -1;
     // Cancel pending reveals and collapse all coins
@@ -2008,10 +2036,18 @@ function closeChest(): void {
         _coinRevealTimers[i] = -1;
         _coinTargetScales[i] = 0;
     }
-    if (chestOpenAction) { chestOpenAction.stop(); }
-    chestCloseAction.reset();
-    chestCloseAction.play();
+    // Fire the reversed sound CHEST_CLOSE_SOUND_LEAD_MS before the animation
+    // starts so the audio lines up better with the lid movement.
+    // Keep chestOpenAction running (clamped at end) until the close animation
+    // takes over — stopping it early snaps the chest to its default pose.
     _loadChestBuffer().then(() => _playChestSound(true));
+    const _closeAction = chestCloseAction;
+    setTimeout(() => {
+        if (chestIsOpen) return; // re-opened before timer fired
+        if (chestOpenAction) { chestOpenAction.stop(); }
+        _closeAction.reset();
+        _closeAction.play();
+    }, CHEST_CLOSE_SOUND_LEAD_MS);
 }
 
 function setupChestInteraction(): void {
@@ -2537,8 +2573,10 @@ export function Update(isUnderwater = false): void {
     }
     // Animate chest glow light
     if (chestGlowLight) {
-        // Keep target in sync with live config (so debug slider works)
-        if (chestIsOpen) _chestGlowTarget = sfDecorConfig.chestGlowIntensity;
+        // Keep target in sync with live config (so debug slider works).
+        // Only after the delay has elapsed (_chestGlowReady) so the glow
+        // doesn't fire at the very first frame of the open animation.
+        if (chestIsOpen && _chestGlowReady) _chestGlowTarget = sfDecorConfig.chestGlowIntensity;
         const dt = Math.min(deltaTime, 0.1);
         chestGlowLight.intensity = MathUtils.damp(chestGlowLight.intensity, _chestGlowTarget, 4, dt);
     }

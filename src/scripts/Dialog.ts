@@ -196,11 +196,20 @@ const CHARS_PER_SEC = 22;
 const MAX_CHARS_PER_FRAME = 3;
 
 function _startTyping(text: string): void {
-    if (!_state || !_textEl || !_promptEl) return;
+    if (!_state || !_textEl || !_promptEl || !_bubbleEl) return;
     _state.typeIndex = 0;
     _state.isTyping  = true;
-    _textEl.textContent = '';
     _promptEl.classList.remove('dialog-prompt--visible');
+
+    // Pre-fix the bubble's dimensions to prevent width/height oscillation
+    // while characters are added one by one (line-wraps would cause jarring reflow).
+    _bubbleEl.style.width     = '';
+    _bubbleEl.style.minHeight = '';
+    _textEl.textContent = text;
+    void _bubbleEl.offsetWidth;                         // force reflow
+    _bubbleEl.style.width     = `${_bubbleEl.offsetWidth}px`;
+    _bubbleEl.style.minHeight = `${_bubbleEl.offsetHeight}px`;
+    _textEl.textContent = '';
 
     const msPerChar = 1000 / CHARS_PER_SEC;
     let lastTime = -1;          // −1 signals "first frame"
@@ -436,6 +445,8 @@ export function dismissDialog(): void {
     }
     _clearState();
     if (_bubbleEl) {
+        _bubbleEl.style.width     = '';
+        _bubbleEl.style.minHeight = '';
         _bubbleEl.classList.remove('dialog-visible');
         _bubbleEl.classList.add('dialog-out');
     }

@@ -427,7 +427,13 @@ async function prewarmGPU(): Promise<void> {
     camera.position.set(0, -3, 4);
     camera.lookAt(0, -5, -3);
     camera.updateProjectionMatrix();
-    renderer.render(scene, camera);
+    // Exercise the full PostProcess pipeline (copyFramebufferToTexture + distortion
+    // quad render) so the GPU path is warm before the user actually dives.
+    // Without this the first real crossing of UNDERWATER_Y_THRESHOLD causes a
+    // pipeline stall on the copyFramebufferToTexture call.
+    PostProcess.updateUnderwaterAmount(camera.position.y);  // sets underwaterAmount > 0
+    PostProcess.renderScene(renderer, scene, camera);
+    PostProcess.updateUnderwaterAmount(100);                 // reset to 0 (positive Y → depth < 0)
 
     // 4. Restore camera
     camera.position.copy(savedPos);

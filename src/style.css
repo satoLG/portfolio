@@ -2369,13 +2369,8 @@ a:visited
    DIALOG SPEECH BUBBLE
    ============================================ */
 
-/* iOS Safari: SVG filter + border-radius creates visible corner gaps due to
-   a compositing difference in WebKit. Suppress the wobble filter on iOS
-   (detected via JS which adds the class to <body>). */
-body.no-svg-filter .dialog-bubble,
-body.no-svg-filter .dialog-reply-bubble {
-    filter: none;
-}
+/* drop-shadow() is a CSS filter function, not an SVG filter — works on all
+   browsers including iOS Safari. No suppression needed. */
 
 .dialog-bubble {
     position: fixed;
@@ -2383,24 +2378,23 @@ body.no-svg-filter .dialog-reply-bubble {
     max-width: 300px;
     min-width: 130px;
     padding: 11px 16px 9px;
-    background: #ffffffc0;
-    /* border: 3px solid #1a1a1a; */
-    border-radius: 40px;
-    box-shadow: 2px 2px 0 #1a1a1a5c;
+    /* Opaque white — semi-transparent fills from two overlapping layers produce
+       a visible seam at the tail junction due to double alpha-compositing. */
+    background: #ffffff;
+    border-radius: 14px;
+    filter: drop-shadow(2px -2px 0 rgba(26,26,26,0.36));
     pointer-events: auto;
     cursor: pointer;
     user-select: none;
     display: none;
-    /* Pop animation scales from the tail tip: 8 px left of bubble, 22 px below */
-    transform-origin: -8px calc(100% + 22px);
-    /* Hand-drawn wobble edge (normal mode only) */
-    filter: url(#dialog-wobble);
+    transform-origin: -8px calc(100% + 20px);
 }
 
-/* Remove wobble in pixel modes — clean sharp edges fit the pixel aesthetic */
+/* Pixel modes: sharp square edges */
 body.pixel-medium .dialog-bubble,
 body.pixel-max .dialog-bubble {
-    filter: none;
+    border-radius: 0;
+    filter: drop-shadow(2px 2px 0 rgba(26,26,26,0.36));
 }
 
 .dialog-bubble.dialog-visible {
@@ -2432,13 +2426,15 @@ body.pixel-max .dialog-bubble {
 .dialog-tail {
     position: absolute;
     left: 20px;
-    bottom: -22px;
+    /* 2 px overlap into the bubble bottom ensures no transparent gap at the
+       junction — the drop-shadow then traces the full unified shape. */
+    bottom: -20px;
     overflow: visible;
     pointer-events: none;
 }
 
 .dialog-tail-path {
-    fill: #ffffffc0;
+    fill: #ffffff;
 }
 
 /* Pixel modes: hide SVG tail, restore sharp CSS triangle at the left */
@@ -2449,11 +2445,11 @@ body.pixel-max    .dialog-bubble .dialog-tail {
 
 body.pixel-medium .dialog-bubble::before,
 body.pixel-max    .dialog-bubble::before {
-    bottom: -16px;
-    left: 16px;
-    border-left: 9px solid transparent;
-    border-right: 9px solid transparent;
-    border-top: 16px solid #ffffffcc;
+    bottom: -14px;
+    left: 14px;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 14px solid #ffffff;
 }
 
 .dialog-text {
@@ -2512,21 +2508,20 @@ body.pixel-max    .dialog-bubble::before {
     max-width: 280px;
     min-width: 100px;
     padding: 11px 16px 9px;
-    background: #ffffffc0;
-    border-radius: 40px;
-    box-shadow: 2px 2px 0 #1a1a1a5c;
+    background: #ffffff;
+    border-radius: 14px;
+    filter: drop-shadow(4px -3px 0 rgba(26,26,26,0.36));
     pointer-events: auto;
     cursor: default;
     user-select: none;
     display: none;
-    /* Pop animation scales from bottom-center since reply appears at viewport bottom */
     transform-origin: 50% 100%;
-    filter: url(#dialog-wobble);
 }
 
 body.pixel-medium .dialog-reply-bubble,
 body.pixel-max    .dialog-reply-bubble {
-    filter: none;
+    border-radius: 0;
+    filter: drop-shadow(2px 2px 0 rgba(26,26,26,0.36));
 }
 
 .dialog-reply-bubble.dialog-visible {
@@ -2543,7 +2538,7 @@ body.pixel-max    .dialog-reply-bubble {
 .dialog-reply-tail {
     position: absolute;
     right: 20px;
-    bottom: -21px;
+    bottom: -19px;
     overflow: visible;
     pointer-events: none;
     transform: rotateY(354deg);
@@ -2561,11 +2556,11 @@ body.pixel-max    .dialog-reply-bubble::before {
     content: '';
     position: absolute;
     pointer-events: none;
-    bottom: -16px;
-    right: 16px;
-    border-left: 9px solid transparent;
-    border-right: 9px solid transparent;
-    border-top: 16px solid #ffffffcc;
+    bottom: -14px;
+    right: 14px;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 14px solid #ffffff;
 }
 
 .dialog-reply-options {
