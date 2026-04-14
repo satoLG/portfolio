@@ -327,20 +327,8 @@ export function Start(): void
     scene.add(Island.pug);
     scene.add(Island.tent);
     scene.add(Island.chest);
-    // Grass and clover patches are added dynamically as they load
-    const addedPatches = new Set<any>();
-    const grassInterval = setInterval(() => {
-        Island.grassPatches.forEach(patch => {
-            if (!addedPatches.has(patch)) {
-                scene.add(patch);
-                addedPatches.add(patch);
-            }
-        });
-        // Stop polling once both grass and clover loaders have finished
-        if (Island.isFoliageLoaded()) {
-            clearInterval(grassInterval);
-        }
-    }, 100);
+    // Procedural grass/clover meshes are added directly to the scene by Island.ts
+    // via threeScene.add() inside waitForIslandMeshes(). No polling needed.
 
     // Add fire effect to firecamp
     Fire.Start();
@@ -502,6 +490,8 @@ export function Update(): void
         Island.firecamp.visible = !deepUnderwater;
         Island.palmtree.visible = !deepUnderwater;
         Fire.fire.visible = !deepUnderwater;
+        // Hide procedural foliage when deep underwater
+        if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = !deepUnderwater;
 
         SeaFloor.Update();
         SeaFloorDecor.Update(deltaTime);
@@ -524,6 +514,8 @@ export function Update(): void
         Island.firecamp.visible = true;
         Island.palmtree.visible = true;
         Fire.fire.visible = true;
+        // Show procedural foliage on surface
+        if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = true;
 
         Island.Update(false);
         Fire.Update();

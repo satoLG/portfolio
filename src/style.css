@@ -1340,7 +1340,7 @@ body.day-mode .settings-button.active {
     right: 0;
     z-index: 9999;
     min-width: 230px;
-    max-height: calc(100dvh - 60px);
+    max-height: calc(100dvh - 80px);
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: 8px;

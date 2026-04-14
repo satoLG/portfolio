@@ -10,6 +10,7 @@ import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../scr
 import * as CoinTooltip from '../scripts/CoinTooltip';
 import type { DialogLine, ReplyOption } from "../scripts/Dialog";
 import { isBreezeActive, playPugSnoreOnce, stopPugSnore, getAudioContext, getMasterDestination } from "../scripts/Audio";
+import { createGrassMesh, createPerlinTexture, grassColorBase, grassColorTip, type GrassUniforms } from './ProceduralGrass';
 import { camera, renderer, scene as threeScene } from "../scripts/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
 import * as PhoneScreen from '../scripts/PhoneScreen';
@@ -19,11 +20,7 @@ import {
     pugOffset, tentOffset, dogBedOffset, littleRocksOffset, phoneOffset,
     islandScale, firecampScale, palmtreeScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, littleRocksScale, phoneScale,
     palmtreeRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, littleRocksRot, phoneRot,
-    CLUSTER_MAIN as CLUSTER_MAIN_CFG,
-    CLUSTER_PALM as CLUSTER_PALM_CFG,
     GRASS_COUNT  as GRASS_COUNT_CFG,
-    GRASS_COUNT_PALM as GRASS_COUNT_PALM_CFG,
-    CLOVER_COUNT as CLOVER_COUNT_CFG,
     SURFACE_EDGE_PADDING,
     EXCL_R_BONFIRE, EXCL_R_TENT, EXCL_R_PALM, EXCL_R_PUG, EXCL_R_RADIO, EXCL_R_ROCKS,
 } from './config/IslandConfig';
@@ -43,6 +40,14 @@ export const chest = new Group();
 let phoneDropped = false;  // True after the cutscene sequence (runtime only, no localStorage)
 export const grassPatches: Group[] = [];
 
+// ── Procedural grass mesh (single draw call) ────────────────────────────────
+export let proceduralGrassMesh: Mesh | null = null;
+let _perlinTexture: ReturnType<typeof createPerlinTexture> | null = null;
+let _grassUniforms: GrassUniforms | null = null;
+
+// Procedural grass spawn points (cached for respawning)
+let _grassSpawnPoints: Array<{ x: number; z: number; y: number }> = [];
+
 // Store palm tree leaves for wind animation
 const palmLeaves: Object3D[] = [];
 
@@ -54,6 +59,21 @@ const _spawnOrigin    = new Vector3();
 const _spawnDown      = new Vector3(0, -1, 0);
 
 // SURFACE_EDGE_PADDING is imported from IslandConfig.ts
+
+/** Mutable edge padding — how far inside the island edge blades must be rooted.
+ * Updated live via setGrassEdgePadding(); triggers a full respawn. */
+export let grassEdgePadding = SURFACE_EDGE_PADDING;
+export function setGrassEdgePadding(v: number): void {
+    grassEdgePadding = Math.max(0, v);
+    respawnFoliage();
+}
+function getSurfaceY(wx: number, wz: number): number {
+    if (islandMeshes.length === 0) return islandPosition.y + 1.0;
+    _spawnOrigin.set(wx, 5, wz);
+    _spawnRaycaster.set(_spawnOrigin, _spawnDown);
+    const hits = _spawnRaycaster.intersectObjects(islandMeshes, false);
+    return hits.length > 0 ? hits[0].point.y : (islandPosition.y + 1.0);
+}
 
 /**
  * Calls `callback` once islandMeshes has been populated.
@@ -72,7 +92,7 @@ function waitForIslandMeshes(callback: () => void): void {
  */
 function isOnIslandSurface(wx: number, wz: number): boolean {
     if (islandMeshes.length === 0) return true;
-    const p = SURFACE_EDGE_PADDING;
+    const p = grassEdgePadding;
     const checks: [number, number][] = [
         [wx,     wz    ],  // center
         [wx + p, wz    ],  // east
@@ -427,21 +447,33 @@ const radioVibeSpeed = 15;  // Quick vibration
 //   Pug       : X= 0.65  Z=-2.30   (islandPos + pugOffset)
 //   Radio     : X=-0.65  Z=-3.10   (islandPos + radioOffset)
 
-// Spawn clusters ─ each cluster is a filled annulus (donut) in world XZ
-// Mutable cluster objects — initialised from config, then mutated live by the debug panel
-export const CLUSTER_MAIN = { ...CLUSTER_MAIN_CFG };
-export const CLUSTER_PALM = { ...CLUSTER_PALM_CFG };
-
-// Per-cluster patch lists — used by IslandDebug to shift patches when the center moves
+// Per-cluster patch lists — kept for IslandDebug backward compat
 export const clusterMainPatches: Group[] = [];
 export const clusterPalmPatches: Group[] = [];
 export const clusterCloverPatches: Group[] = [];
 
-// Cached gltf source scenes for runtime respawning
-let grassGltfScene: Group | null = null;
-let cloverGltfScene: Group | null = null;
-const GRASS_Y   = islandPosition.y + 0.90;  // World Y for grass placement
-const CLOVER_Y  = islandPosition.y + 0.98;  // World Y for clover placement
+const GRASS_Y   = islandPosition.y + 1.0;  // Fallback Y when raycast unavailable
+
+/** Fine-tune how far above the raycasted surface blades are rooted (runtime, via debug GUI) */
+export let grassYOffset = 0.0;
+export let foliageWindStrength = 0.035;
+export function setGrassYOffset(v: number): void {
+    grassYOffset = v;
+    if (_grassUniforms) _grassUniforms.uYOffset.value = v;
+}
+
+export function setGrassColorBase(r: number, g: number, b: number): void {
+    grassColorBase.setRGB(r, g, b);
+    // Colors baked in vertex colors — caller must respawnFoliage() to apply
+}
+export function setGrassColorTip(r: number, g: number, b: number): void {
+    grassColorTip.setRGB(r, g, b);
+    // Colors baked in vertex colors — caller must respawnFoliage() to apply
+}
+export function setFoliageWindStrength(v: number): void {
+    foliageWindStrength = v;
+    foliageWindStrengthUniform.value = v;
+}
 
 // Exclusion zones — objects that should not have grass underneath them.
 // Radii are intentionally generous so footprints are fully clear.
@@ -491,84 +523,54 @@ function isValidSpawnPos(sx: number, sz: number, placed: Array<{x: number; z: nu
     return true;
 }
 
-// Shared placed-positions list so grass AND clover don't overlap each other
+// Shared placed-positions list so blades don't stack on top of each other
 const foliageSpawnPlaced: Array<{x: number; z: number}> = [];
 
-// Signals when both loader callbacks have finished so Scene.ts can stop polling
-let _grassLoaded  = false;
-let _cloverLoaded = false;
-export function isFoliageLoaded(): boolean { return _grassLoaded && _cloverLoaded; }
+// Signals when grass has finished generating
+let _grassLoaded = false;
+export function isFoliageLoaded(): boolean { return _grassLoaded; }
 
-// Mutable counts — initialised from config, then mutated live by the debug panel
-export let GRASS_COUNT      = GRASS_COUNT_CFG;
-export let GRASS_COUNT_PALM = GRASS_COUNT_PALM_CFG;
-const grassScale = 0.2;
-export let CLOVER_COUNT = CLOVER_COUNT_CFG;
-const cloverScale = 0.08;
+// Mutable count — initialised from config, then mutated live by the debug panel
+export let GRASS_COUNT = GRASS_COUNT_CFG;
+export function setGrassCount(n: number) { GRASS_COUNT = Math.max(0, Math.round(n)); }
 
-/** Setters — ES module bindings are read-only from outside, use these to mutate counts */
-export function setGrassCount(n: number)     { GRASS_COUNT      = Math.max(0, Math.round(n)); }
-export function setGrassPalmCount(n: number) { GRASS_COUNT_PALM = Math.max(0, Math.round(n)); }
-export function setCloverCount(n: number)    { CLOVER_COUNT     = Math.max(0, Math.round(n)); }
+// Bounding box for full-surface scatter (generous — isOnIslandSurface filters out edges)
+const SPAWN_BBOX = {
+    xMin: islandPosition.x - 2.5,
+    xMax: islandPosition.x + 2.5,
+    zMin: islandPosition.z - 2.5,
+    zMax: islandPosition.z + 2.5,
+};
 
 // ─── Runtime respawn ─────────────────────────────────────────────────────────
-export type FoliageCluster = 'grass-main' | 'grass-palm' | 'clover';
+export type FoliageCluster = 'grass';
 
-export function respawnFoliage(which: FoliageCluster): void {
-    const sourceScene = which === 'clover' ? cloverGltfScene : grassGltfScene;
-    if (!sourceScene) { console.warn('respawnFoliage: gltf not loaded yet'); return; }
+export function respawnFoliage(_which: FoliageCluster = 'grass'): void {
+    if (!_perlinTexture) { console.warn('respawnFoliage: procedural system not ready'); return; }
 
-    const targetPatches = which === 'grass-main' ? clusterMainPatches
-                        : which === 'grass-palm'  ? clusterPalmPatches
-                        : clusterCloverPatches;
-    const cluster   = which === 'grass-palm' ? CLUSTER_PALM : CLUSTER_MAIN;
-    const count     = which === 'grass-main' ? GRASS_COUNT
-                    : which === 'grass-palm'  ? GRASS_COUNT_PALM
-                    : CLOVER_COUNT;
-    const yPos  = which === 'clover' ? CLOVER_Y : GRASS_Y;
-    const scale = which === 'clover' ? cloverScale : grassScale;
+    foliageSpawnPlaced.length = 0;
+    _grassSpawnPoints = [];
 
-    // Remove old patches from the Three.js scene and tracking arrays
-    for (const p of targetPatches) {
-        p.parent?.remove(p);
-        const idx = grassPatches.indexOf(p);
-        if (idx !== -1) grassPatches.splice(idx, 1);
-    }
-    targetPatches.length = 0;
-
-    // Build placed list from ALL surviving patches (cross-cluster collision)
-    const placed: Array<{x: number; z: number}> = grassPatches.map(p => ({ x: p.position.x, z: p.position.z }));
-
-    // Spawn new patches
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < GRASS_COUNT; i++) {
         for (let attempt = 0; attempt < SPAWN_MAX_ATTEMPTS; attempt++) {
-            const angle = Math.random() * Math.PI * 2;
-            const dist  = cluster.minR + Math.random() * (cluster.maxR - cluster.minR);
-            const wx = cluster.wx + Math.cos(angle) * dist;
-            const wz = cluster.wz + Math.sin(angle) * dist;
-            if (!isValidSpawnPos(wx, wz, placed)) continue;
-
-            placed.push({ x: wx, z: wz });
-            const patch = new Group();
-            const model = sourceScene.clone();
-            applyFoliageWindShader(model);
-            model.traverse(child => {
-                if ((child as any).isMesh) {
-                    child.castShadow = true;
-                    (child as any).receiveShadow = true;
-                }
-            });
-            patch.add(model);
-            patch.position.set(wx, yPos, wz);
-            patch.scale.setScalar(scale);
-            patch.rotation.y = Math.random() * Math.PI * 2;
-            threeScene.add(patch);
-            grassPatches.push(patch);
-            targetPatches.push(patch);
+            const wx = SPAWN_BBOX.xMin + Math.random() * (SPAWN_BBOX.xMax - SPAWN_BBOX.xMin);
+            const wz = SPAWN_BBOX.zMin + Math.random() * (SPAWN_BBOX.zMax - SPAWN_BBOX.zMin);
+            if (!isValidSpawnPos(wx, wz, foliageSpawnPlaced)) continue;
+            foliageSpawnPlaced.push({ x: wx, z: wz });
+            _grassSpawnPoints.push({ x: wx, z: wz, y: getSurfaceY(wx, wz) });
             break;
         }
     }
-    console.log(`[Island] Respawned ${targetPatches.length}/${count} ${which} patches`);
+
+    if (proceduralGrassMesh) {
+        proceduralGrassMesh.geometry.dispose();
+        threeScene.remove(proceduralGrassMesh);
+    }
+    if (_grassUniforms) {
+        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment);
+        threeScene.add(proceduralGrassMesh);
+    }
+    console.log(`[Island] Respawned grass: ${_grassSpawnPoints.length} spawn points`);
 }
 
 // PALM TREE WIND SETTINGS - easily tweakable
@@ -598,7 +600,6 @@ const mouseInfluenceStrength = new Uniform(0.018); // Very subtle — barely not
 // BREEZE-DRIVEN WIND SETTINGS
 const BREEZE_RAMP_UP = 1.0;           // Seconds to ramp up wind when breeze starts
 const BREEZE_RAMP_DOWN = 4.0;         // Seconds to fade out wind after breeze ends
-const BREEZE_GRASS_STRENGTH = 0.08;   // How far grass patches sway (rotation radians)
 let windTime = 0;
 let breezeIntensity = 0;              // 0-1 smoothed breeze envelope
 
@@ -766,93 +767,6 @@ function applyPalmWindShader(model: Group): void {
     });
 }
 
-// Apply wind animation shader to grass/clover with mouse interaction
-function applyFoliageWindShader(model: Group): void {
-    model.traverse((child) => {
-        if ((child as any).isMesh && (child as any).material) {
-            const mesh = child as any;
-            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-            materials.forEach((mat: any) => {
-                if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial || mat.isMeshBasicMaterial) {
-                    // Fix transparency/depth issues
-                    mat.depthWrite = true;
-                    mat.alphaTest = 0.5;
-                    mat.transparent = false;  // Disable transparency to fix flickering
-                    mesh.renderOrder = 1;  // Render after ground
-
-                    // Custom depth material so the shadow map renderer uses alpha-test
-                    // properly even when onBeforeCompile has modified the main shader.
-                    const depthMat = new MeshDepthMaterial({ depthPacking: RGBADepthPacking, alphaTest: 0.5 });
-                    if (mat.map) depthMat.map = mat.map;
-                    mesh.customDepthMaterial = depthMat;
-                    mat.customProgramCacheKey = () => 'foliage_wind';
-                    mat.onBeforeCompile = (shader: any) => {
-                        // Add ocean lighting uniforms
-                        shader.uniforms.uLight = lightUniform;
-                        shader.uniforms.uAbsorption = oceanAbsorptionUniform;
-                        shader.uniforms.uSunVisibility = sunVisibilityUniform;
-                        // Add wind uniforms - independent for foliage
-                        shader.uniforms.uWindTime = palmWindTimeUniform;
-                        shader.uniforms.uWindStrength = foliageWindStrengthUniform;
-                        // Add mouse interaction uniforms
-                        shader.uniforms.uMouseWorldPos = mouseWorldPos;
-                        shader.uniforms.uMouseRadius = mouseInfluenceRadius;
-                        shader.uniforms.uMouseStrength = mouseInfluenceStrength;
-                        
-                        // Vertex shader - add wind sway with mouse interaction
-                        shader.vertexShader = shader.vertexShader.replace(
-                            '#include <common>',
-                            `#include <common>
-                            uniform float uWindTime;
-                            uniform float uWindStrength;
-                            uniform vec3 uMouseWorldPos;
-                            uniform float uMouseRadius;
-                            uniform float uMouseStrength;
-                            varying vec3 vWorldPosition;`
-                        );
-                        shader.vertexShader = shader.vertexShader.replace(
-                            '#include <begin_vertex>',
-                            `#include <begin_vertex>
-                            // Subtle wind sway - gentle tilt left/right only
-                            float heightFactor = smoothstep(0.0, 0.15, position.y);  // Gradual height influence
-                            float windSway = sin(uWindTime * 1.5 + position.x * 3.0) * uWindStrength * heightFactor;
-                            transformed.x += windSway;
-                            
-                            // Mouse proximity — very soft Y-compression (blade gently bows down)
-                            // Squared smoothstep gives an extremely gradual ramp-in so there
-                            // is no visible snap when the cursor enters/leaves the radius.
-                            vec4 worldPos4 = modelMatrix * vec4(position, 1.0);
-                            float mouseDist = length(worldPos4.xz - uMouseWorldPos.xz);
-                            float t = smoothstep(uMouseRadius, 0.0, mouseDist);
-                            float mouseInfluence = t * t * heightFactor;  // squared = very gentle
-                            transformed.y -= mouseInfluence * uMouseStrength;`
-                        );
-                        shader.vertexShader = shader.vertexShader.replace(
-                            '#include <worldpos_vertex>',
-                            `#include <worldpos_vertex>
-                            vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;`
-                        );
-                        
-                        // Fragment shader - ocean lighting
-                        shader.fragmentShader = shader.fragmentShader.replace(
-                            '#include <common>',
-                            `#include <common>
-                            varying vec3 vWorldPosition;
-                            ${oceanLightingPars}`
-                        );
-                        shader.fragmentShader = shader.fragmentShader.replace(
-                            '#include <opaque_fragment>',
-                            `${oceanLightingFragment}
-                            #include <opaque_fragment>`
-                        );
-                    };
-                    mat.needsUpdate = true;
-                }
-            });
-        }
-    });
-}
-
 export function Start(): void {
     loader.load(
         'models/surface/floating_island.glb',
@@ -993,113 +907,48 @@ export function Start(): void {
         }
     );
 
-    // Load grass patches — two clusters: main island area + palm tree ring
-    loader.load(
-        'models/surface/grass.glb',
-        (gltf) => {
-            grassGltfScene = gltf.scene;  // cache for respawning
+    // ── Procedural grass ──────────────────────────────────────────────────────
+    // Scattered over the full island surface (1 draw call, raycasted Y per blade).
+    // Deferred until island mesh is ready for raycasting validation.
+    waitForIslandMeshes(() => {
+        // Create shared Perlin noise texture for wind
+        _perlinTexture = createPerlinTexture();
 
-            // Defer placement until the island surface raycaster is ready.
-            waitForIslandMeshes(() => {
-
-            // Helper: place one patch from a given cluster annulus
-            const spawnGrassPatch = (cluster: typeof CLUSTER_MAIN) => {
-                for (let attempt = 0; attempt < SPAWN_MAX_ATTEMPTS; attempt++) {
-                    const angle = Math.random() * Math.PI * 2;
-                    const dist  = cluster.minR + Math.random() * (cluster.maxR - cluster.minR);
-                    const wx = cluster.wx + Math.cos(angle) * dist;
-                    const wz = cluster.wz + Math.sin(angle) * dist;
-                    if (!isValidSpawnPos(wx, wz, foliageSpawnPlaced)) continue;
-
-                    foliageSpawnPlaced.push({ x: wx, z: wz });
-                    const grassPatch = new Group();
-                    const grassModel = gltf.scene.clone();
-                    applyFoliageWindShader(grassModel);
-                    grassModel.traverse((child) => {
-                        if ((child as any).isMesh) {
-                            child.castShadow = true;
-                            (child as any).receiveShadow = true;
-                        }
-                    });
-                    grassPatch.add(grassModel);
-                    grassPatch.position.set(wx, GRASS_Y, wz);
-                    grassPatch.scale.setScalar(grassScale);
-                    grassPatch.rotation.y = Math.random() * Math.PI * 2;
-                    grassPatches.push(grassPatch);
-                    // Track cluster membership for debug shifting
-                    if (cluster === CLUSTER_MAIN) clusterMainPatches.push(grassPatch);
-                    else clusterPalmPatches.push(grassPatch);
-                    return true;
-                }
-                return false;  // Could not place
-            };
-
-            // Main cluster — broad island surface
-            for (let i = 0; i < GRASS_COUNT; i++) spawnGrassPatch(CLUSTER_MAIN);
-            // Palm cluster — ring of grass around the palm trunk
-            for (let i = 0; i < GRASS_COUNT_PALM; i++) spawnGrassPatch(CLUSTER_PALM);
-
-            _grassLoaded = true;
-            console.log(`${grassPatches.length} grass patches placed (target ${GRASS_COUNT + GRASS_COUNT_PALM})`);
-
-            }); // end waitForIslandMeshes
-        },
-        undefined,
-        (error) => {
-            console.error('Error loading grass:', error);
-        }
-    );
-
-    // Load clover patches — main cluster only
-    loader.load(
-        'models/surface/clover.glb',
-        (gltf) => {
-            cloverGltfScene = gltf.scene;  // cache for respawning
-
-            // Defer placement until the island surface raycaster is ready.
-            waitForIslandMeshes(() => {
-
-            const cloverStart = grassPatches.length;
-            for (let i = 0; i < CLOVER_COUNT; i++) {
-                let placed = false;
-                for (let attempt = 0; attempt < SPAWN_MAX_ATTEMPTS; attempt++) {
-                    const angle = Math.random() * Math.PI * 2;
-                    const dist  = CLUSTER_MAIN.minR + Math.random() * (CLUSTER_MAIN.maxR - CLUSTER_MAIN.minR);
-                    const wx = CLUSTER_MAIN.wx + Math.cos(angle) * dist;
-                    const wz = CLUSTER_MAIN.wz + Math.sin(angle) * dist;
-                    if (!isValidSpawnPos(wx, wz, foliageSpawnPlaced)) continue;
-
-                    foliageSpawnPlaced.push({ x: wx, z: wz });
-                    const cloverPatch = new Group();
-                    const cloverModel = gltf.scene.clone();
-                    applyFoliageWindShader(cloverModel);
-                    cloverModel.traverse((child) => {
-                        if ((child as any).isMesh) {
-                            child.castShadow = true;
-                            (child as any).receiveShadow = true;
-                        }
-                    });
-                    cloverPatch.add(cloverModel);
-                    cloverPatch.position.set(wx, CLOVER_Y, wz);
-                    cloverPatch.scale.setScalar(cloverScale);
-                    cloverPatch.rotation.y = Math.random() * Math.PI * 2;
-                    grassPatches.push(cloverPatch);
-                    clusterCloverPatches.push(cloverPatch);  // own array, separate from grass main
-                    placed = true;
-                    break;
-                }
-                if (!placed) console.warn('Clover: could not place patch after max attempts');
+        // ── Scatter spawn points across the full island surface ─────────
+        _grassSpawnPoints = [];
+        for (let i = 0; i < GRASS_COUNT; i++) {
+            for (let attempt = 0; attempt < SPAWN_MAX_ATTEMPTS; attempt++) {
+                const wx = SPAWN_BBOX.xMin + Math.random() * (SPAWN_BBOX.xMax - SPAWN_BBOX.xMin);
+                const wz = SPAWN_BBOX.zMin + Math.random() * (SPAWN_BBOX.zMax - SPAWN_BBOX.zMin);
+                if (!isValidSpawnPos(wx, wz, foliageSpawnPlaced)) continue;
+                foliageSpawnPlaced.push({ x: wx, z: wz });
+                _grassSpawnPoints.push({ x: wx, z: wz, y: getSurfaceY(wx, wz) });
+                break;
             }
-            _cloverLoaded = true;
-            console.log(`${grassPatches.length - cloverStart} clover patches placed (target ${CLOVER_COUNT})`);
-
-            }); // end waitForIslandMeshes
-        },
-        undefined,
-        (error) => {
-            console.error('Error loading clover:', error);
         }
-    );
+
+        // ── Create grass uniforms (shared with existing scene uniforms) ─
+        _grassUniforms = {
+            uWindTime:      palmWindTimeUniform,
+            uWindStrength:  foliageWindStrengthUniform,
+            uNoiseTexture:  new Uniform(_perlinTexture),
+            uNoiseScale:    new Uniform(0.5),
+            uMouseWorldPos: mouseWorldPos,
+            uMouseRadius:   mouseInfluenceRadius,
+            uMouseStrength: mouseInfluenceStrength,
+            uLight:         lightUniform,
+            uAbsorption:    oceanAbsorptionUniform,
+            uSunVisibility: sunVisibilityUniform,
+            uFogDist:       underwaterFogDistUniform,
+            uYOffset:       new Uniform(grassYOffset),
+        };
+
+        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment);
+        threeScene.add(proceduralGrassMesh);
+        console.log(`[ProceduralGrass] ${_grassSpawnPoints.length} spawn points → ${_grassSpawnPoints.length * 40} blades (1 draw call)`);
+
+        _grassLoaded = true;
+    });
 
     // Load radio in front of firecamp
     loader.load(
@@ -1445,8 +1294,8 @@ function updateMouseWorldPosition(): void {
     
     raycaster.setFromCamera(mouse, camera);
     
-    // Raycast against island and grass patches
-    const targets: Object3D[] = [island, ...grassPatches];
+    // Raycast against island surface only (procedural grass has no individual meshes)
+    const targets: Object3D[] = [island];
     const intersects = raycaster.intersectObjects(targets, true);
     
     if (intersects.length > 0) {
@@ -2469,17 +2318,10 @@ export function Update(isUnderwater = false): void {
     palmWindStrengthUniform.value = PALM_WIND_STRENGTH * breezeIntensity;
     foliageWindStrengthUniform.value = FOLIAGE_WIND_STRENGTH * breezeIntensity;
     
-    // Flickering wind: overlapping inharmonic sine waves for chaotic, natural feel
-    grassPatches.forEach((patch, i) => {
-        const phase = i * 0.5;
-        const flicker = Math.sin(windTime * 3.7 + phase) * 0.4
-                       + Math.sin(windTime * 7.3 + phase * 1.3) * 0.25
-                       + Math.sin(windTime * 11.1 + phase * 0.7) * 0.15
-                       + Math.sin(windTime * 17.0 + phase * 2.1) * 0.1;
-        const patchWind = flicker * breezeIntensity;
-        patch.rotation.z = patchWind * BREEZE_GRASS_STRENGTH;
-        patch.rotation.x = patchWind * BREEZE_GRASS_STRENGTH * 0.3;
-    });
+    // Procedural grass wind is handled entirely in the vertex shader via
+    // Perlin noise texture sampling — no per-patch JS rotation needed.
+
+    // Fire lighting on grass is now automatic via MeshStandardMaterial + PointLight
   }
     
     // Palm tree wind is handled entirely by the vertex shader (applyPalmWindShader)

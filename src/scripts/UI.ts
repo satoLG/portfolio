@@ -490,10 +490,10 @@ export function Start(): void {
     // Prevent wheel/touch scroll inside settings panel from scrolling the 3D scene
     settingsPanel.addEventListener('wheel', (e) => {
         e.stopPropagation();
-    }, { passive: true });
+    }, { passive: false });
     settingsPanel.addEventListener('touchmove', (e) => {
         e.stopPropagation();
-    }, { passive: true });
+    }, { passive: false });
     
     // Collapsible tab headers with state persistence
     settingsPanel.querySelectorAll('.settings-tab-header').forEach(tabHeader => {
