@@ -9,6 +9,7 @@
  */
 
 import GUI from 'lil-gui';
+import { Color } from 'three';
 import {
     island,
     firecamp,
@@ -19,20 +20,24 @@ import {
     tent,
     dogBed,
     littleRocks,
-    CLUSTER_MAIN,
-    CLUSTER_PALM,
     clusterMainPatches,
     clusterPalmPatches,
+    proceduralGrassMesh,
     respawnFoliage,
     setGrassCount,
-    setGrassPalmCount,
-    setCloverCount,
     exclRadii,
     setExclRadius,
+    grassYOffset,
+    setGrassYOffset,
+    grassEdgePadding,
+    setGrassEdgePadding,
+    setGrassColorBase,
+    setGrassColorTip,
+    foliageWindStrength,
+    setFoliageWindStrength,
     type FoliageCluster,
 } from '../scene/Island';
 import * as Island from '../scene/Island';
-import { SURFACE_EDGE_PADDING } from '../scene/config/IslandConfig';
 import {
     oceanAbsorptionUniform,
     normalMapScaleUniform,
@@ -59,6 +64,7 @@ import {
 } from '../materials/OceanMaterial';
 import * as WindLines from '../effects/WindLines';
 import * as Clouds from '../effects/Clouds';
+import { fireLightConfig } from '../scene/Fire';
 import * as SeaFloorDecor from '../scene/SeaFloorDecor';
 import {
     setDistortion as setUnderwaterDistortion,
@@ -181,62 +187,23 @@ function addObjectFolder(
 /**
  * Cluster folder — Center X/Z, Min/Max Radius, Count.
  * Changes update the cluster object then call respawnFoliage() after a 300 ms debounce.
+ * DEPRECATED — no longer used, kept to avoid breaking code that may reference it.
  */
 function addClusterFolder(
-    gui: GUI,
-    label: string,
-    which: FoliageCluster,
-    cluster: { wx: number; wz: number; minR: number; maxR: number },
-    countKey: 'GRASS_COUNT' | 'GRASS_COUNT_PALM' | 'CLOVER_COUNT',
-    setCount: (n: number) => void,
-) {
-    const folder = gui.addFolder(label);
-
-    const logCluster = () => {
-        const count = Island[countKey];
-        console.log(
-            `[IslandDebug] ${label}  wx=${r(cluster.wx)}  wz=${r(cluster.wz)}` +
-            `  minR=${r(cluster.minR)}  maxR=${r(cluster.maxR)}  count=${count}`
-        );
-    };
-
-    const doRespawn = debounce(() => {
-        respawnFoliage(which);
-        logCluster();
-    }, 300);
-
-    const proxy = {
-        get wx()    { return r(cluster.wx); },
-        set wx(v)   { cluster.wx   = v; doRespawn(); },
-        get wz()    { return r(cluster.wz); },
-        set wz(v)   { cluster.wz   = v; doRespawn(); },
-        get minR()  { return r(cluster.minR); },
-        set minR(v) { cluster.minR = Math.min(v, cluster.maxR - 0.01); doRespawn(); },
-        get maxR()  { return r(cluster.maxR); },
-        set maxR(v) { cluster.maxR = Math.max(v, cluster.minR + 0.01); doRespawn(); },
-        get count() { return Island[countKey]; },
-        set count(v) { setCount(v); doRespawn(); },
-    };
-
-    const cWx = r(cluster.wx);
-    const cWz = r(cluster.wz);
-
-    folder.add(proxy, 'wx',    cWx - 1.0, cWx + 1.0, 0.001).name('Center X').listen();
-    folder.add(proxy, 'wz',    cWz - 1.0, cWz + 1.0, 0.001).name('Center Z').listen();
-    folder.add(proxy, 'minR',  0.0,  1.5, 0.001).name('Min Radius').listen();
-    folder.add(proxy, 'maxR',  0.05, 2.0, 0.001).name('Max Radius').listen();
-    folder.add(proxy, 'count', 0, 300, 1).name('Count').listen();
-
-    folder.close();
-    return folder;
-}
+    _gui: GUI,
+    _label: string,
+    _which: FoliageCluster,
+    _cluster: object,
+    _countKey: string,
+    _setCount: (n: number) => void,
+) { /* no-op */ }
 
 // ─── public API ─────────────────────────────────────────────────────────────
 
 export function Start(): void {
     // Poll until foliage patches exist, then build the GUI
     const tryBuild = () => {
-        if (clusterMainPatches.length === 0 && clusterPalmPatches.length === 0) {
+        if (!proceduralGrassMesh && clusterMainPatches.length === 0 && clusterPalmPatches.length === 0) {
             requestAnimationFrame(tryBuild);
             return;
         }
@@ -301,7 +268,7 @@ function injectLevaCSS(): void {
   box-shadow: 0 0 12px 0 #00000066;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  max-height: calc(100vh - 16px);
+  max-height: calc(100vh - 76px - 16px);
 }
 
 /* ── Title bar ── */
@@ -428,11 +395,12 @@ function injectLevaCSS(): void {
 .lil-gui .lil-controller button {
   background: #007bff;
   color: #fff;
-  border-radius: 5px;
-  height: 26px;
+  border-radius: 4px;
+  height: 20px;
+  padding: 0 10px;
   font-weight: 600;
-  font-size: 10.5px;
-  letter-spacing: 0.3px;
+  font-size: 9px;
+  letter-spacing: 0.4px;
   text-transform: uppercase;
   transition: background 0.15s ease, transform 0.1s ease;
 }
@@ -472,14 +440,16 @@ function buildGUI(): void {
     injectLevaCSS();
     gui = new GUI({ title: 'Island Debug  [H]', width: 300 });
     gui.domElement.style.position = 'fixed';
-    gui.domElement.style.top = '8px';
+    gui.domElement.style.top = '76px';   // below the site-header (~74px tall)
     gui.domElement.style.right = '8px';
     gui.domElement.style.zIndex = '9999';
+    // Prevent wheel events from reaching the canvas/scene
+    gui.domElement.addEventListener('wheel', (e: WheelEvent) => { e.stopPropagation(); }, { passive: false });
 
-    // ── Top-level group folders ────────────────────────────────────────
+    // ── Top-level group folders (SKY → SURFACE → OCEAN → SEAFLOOR → CAMERA) ──
+    const skyFolder      = gui.addFolder('Sky');
     const surfaceFolder  = gui.addFolder('Surface');
     const oceanFolder    = gui.addFolder('Ocean');
-    const skyFolder      = gui.addFolder('Sky');
     const seafloorFolder = gui.addFolder('Seafloor');
     const cameraFolder   = gui.addFolder('Camera');
 
@@ -488,6 +458,14 @@ function buildGUI(): void {
         distortion: DISTORTION_STRENGTH,
         speed:      DISTORTION_SPEED,
         scale:      DISTORTION_SCALE,
+    };
+
+    // ── Foliage color state (hoisted here so copyConfig can read it) ─────────────
+    const LS_KEY_GRASS = 'island-grass-colors-v2';
+    const _storedColors = (() => { try { return JSON.parse(localStorage.getItem(LS_KEY_GRASS) ?? '{}'); } catch { return {}; } })();
+    const foliageColorState = {
+        baseColor: _storedColors.baseColor ?? '#7ca550',
+        tipColor:  _storedColors.tipColor  ?? '#b3d26c',
     };
 
     // ── Copy Config ───────────────────────────────────────────────────────────
@@ -534,17 +512,15 @@ function buildGUI(): void {
                 `export const littleRocksRot = { x: ${f(littleRocks.rotation.x)}, y: ${f(littleRocks.rotation.y)}, z: ${f(littleRocks.rotation.z)} };`,
                 `export const phoneRot       = { x: ${f(Island.phone.rotation.x)}, y: ${f(Island.phone.rotation.y)}, z: ${f(Island.phone.rotation.z)} };`,
                 ``,
-                `// ── Foliage clusters ──────────────────────────────────────────────────────────`,
-                `export const CLUSTER_MAIN = { wx: ${f(CLUSTER_MAIN.wx)}, wz: ${f(CLUSTER_MAIN.wz)}, minR: ${f(CLUSTER_MAIN.minR)}, maxR: ${f(CLUSTER_MAIN.maxR)} };`,
-                `export const CLUSTER_PALM = { wx: ${f(CLUSTER_PALM.wx)}, wz: ${f(CLUSTER_PALM.wz)}, minR: ${f(CLUSTER_PALM.minR)}, maxR: ${f(CLUSTER_PALM.maxR)} };`,
-                ``,
-                `// ── Foliage counts ────────────────────────────────────────────────────────────`,
-                `export const GRASS_COUNT      = ${Island.GRASS_COUNT};`,
-                `export const GRASS_COUNT_PALM = ${Island.GRASS_COUNT_PALM};`,
-                `export const CLOVER_COUNT     = ${Island.CLOVER_COUNT};`,
+                `// ── Foliage ────────────────────────────────────────────────────────────`,
+                `export const GRASS_COUNT          = ${Island.GRASS_COUNT};`,
+                `export const GRASS_Y_OFFSET        = ${grassYOffset.toFixed(4)};`,
+                `export const GRASS_COLOR_BASE      = '${foliageColorState.baseColor}'; // sRGB hex`,
+                `export const GRASS_COLOR_TIP       = '${foliageColorState.tipColor}';  // sRGB hex`,
+                `export const FOLIAGE_WIND_STRENGTH = ${foliageWindStrength.toFixed(4)};`,
                 ``,
                 `// ── Spawn edge padding ────────────────────────────────────────────────────────`,
-                `export const SURFACE_EDGE_PADDING = ${SURFACE_EDGE_PADDING};`,
+                `export const SURFACE_EDGE_PADDING = ${Island.grassEdgePadding.toFixed(3)};`,
                 ``,
                 `// ── Exclusion zone radii (grass spawn clearance around each surface object) ───`,
                 `export const EXCL_R_BONFIRE = ${exclRadii.bonfire.toFixed(2)};`,
@@ -553,6 +529,29 @@ function buildGUI(): void {
                 `export const EXCL_R_PUG     = ${exclRadii.pug.toFixed(2)};`,
                 `export const EXCL_R_RADIO   = ${exclRadii.radio.toFixed(2)};`,
                 `export const EXCL_R_ROCKS   = ${exclRadii.rocks.toFixed(2)};`,
+                ``,
+                `// ── Fire light ───────────────────────────────────────────────────────────────────`,
+                `export const FIRE_LIGHT_INTENSITY = ${fireLightConfig.intensity.toFixed(2)};   // Base intensity multiplier (before flicker)`,
+                `export const FIRE_LIGHT_RANGE     = ${fireLightConfig.range.toFixed(2)};   // PointLight max range in world units`,
+                `export const FIRE_LIGHT_DECAY     = 2.0;   // Light falloff (2 = physically based)`,
+                `export const FIRE_LIGHT_FLICKER   = ${fireLightConfig.flicker.toFixed(2)};   // 0 = steady, 1 = heavy flicker`,
+                ``,
+                `// ── Phone ─────────────────────────────────────────────────────────────────────`,
+                `export const phoneZoomHeight = ${f(phoneZoomConfig.height)};`,
+                `export const phoneZoomTilt   = ${f(phoneZoomConfig.tilt)};`,
+                `export const phoneZoomPitch  = ${f(phoneZoomConfig.pitch)};`,
+                `export const phoneZoomFov    = ${phoneZoomConfig.fov};`,
+                `export const phoneScreenWidth   = ${f(phoneScreenConfig.screenWidth)};`,
+                `export const phoneScreenHeight  = ${f(phoneScreenConfig.screenHeight)};`,
+                `export const phoneScreenOffsetX = ${f(phoneScreenConfig.offsetX)};`,
+                `export const phoneScreenOffsetY = ${f(phoneScreenConfig.offsetY)};`,
+                `export const phoneScreenOffsetZ = ${f(phoneScreenConfig.offsetZ)};`,
+                `export const phoneOverlayOpacity      = ${f(phoneScreenConfig.overlayOpacity)};`,
+                `export const phoneOverlayTintR        = ${phoneScreenConfig.overlayTintR};`,
+                `export const phoneOverlayTintG        = ${phoneScreenConfig.overlayTintG};`,
+                `export const phoneOverlayTintB        = ${phoneScreenConfig.overlayTintB};`,
+                `export const phoneOverlayGlareOpacity = ${f(phoneScreenConfig.overlayGlareOpacity)};`,
+                `export const phoneOverlayGlareAngle   = ${phoneScreenConfig.overlayGlareAngle};`,
             ].join('\n');
             navigator.clipboard.writeText(content).then(() => {
                 console.log('[IslandDebug] IslandConfig.ts content copied to clipboard!');
@@ -621,6 +620,13 @@ function buildGUI(): void {
         },
     };
     oceanFolder.add(oceanActions, 'copyOceanConfig').name('Copy OceanConfig.ts');
+
+    // ── Ocean subfolders — alphabetical order ─────────────────────────────────
+    const foamFolder  = oceanFolder.addFolder('Foam');
+    const reflFolder  = oceanFolder.addFolder('Reflection');
+    const surfFolder  = oceanFolder.addFolder('Surface Color');
+    const fogFolder   = oceanFolder.addFolder('Underwater');
+    const wavesFolder = oceanFolder.addFolder('Waves');
 
     const skyActions = {
         copySkyConfig: () => {
@@ -720,14 +726,121 @@ function buildGUI(): void {
     };
     skyFolder.add(skyActions, 'copySkyConfig').name('Copy SkyConfig.ts');
 
-    // ── Objects ──────────────────────────────────────────────────────────────
-    //   scaleRange: [min, max]   rotAxes: axes where rotation is meaningful
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Sky subfolders — alphabetical order ───────────────────────────────────
+    const cloudFolder = skyFolder.addFolder('Clouds');
+    const windFolder  = skyFolder.addFolder('Wind Lines');
+
+    // ── Surface objects — alphabetical order ─────────────────────────────────
+    addObjectFolder(surfaceFolder, 'Dog Bed', dogBed,       { scaleRange: [0.01, 1.5], rotAxes: ['y']           });
+
+    const firecampObjFolder = addObjectFolder(surfaceFolder, 'Firecamp',  firecamp,  { scaleRange: [0.1,  5.0]                           });
+    // Fire light sub-folder — controls feed directly into fireLightConfig used by Fire.Update()
+    const fireLightFolder = firecampObjFolder.addFolder('Fire Light');
+    fireLightFolder.add(fireLightConfig, 'intensity', 0, 10,  0.1 ).name('Intensity');
+    fireLightFolder.add(fireLightConfig, 'range',     0, 20,  0.5 ).name('Range');
+    fireLightFolder.add(fireLightConfig, 'flicker',   0,  1,  0.01).name('Flicker');
+    fireLightFolder.close();
+
+    // ── Foliage (inside Surface) ──────────────────────────────────────────────────
+    {
+        const LS_KEY = LS_KEY_GRASS;
+        const storedColors = _storedColors;
+        const colorState = foliageColorState;
+        const foliageFolder = surfaceFolder.addFolder('Foliage');
+        const doRespawn = debounce(() => respawnFoliage('grass'), 300);
+
+        // Count
+        const countProxy = { get count() { return Island.GRASS_COUNT; }, set count(v: number) { setGrassCount(v); doRespawn(); } };
+        foliageFolder.add(countProxy, 'count', 0, 400, 1).name('Count').listen();
+
+        // Edge padding
+        const paddingProxy = { get pad() { return r(grassEdgePadding); }, set pad(v: number) { setGrassEdgePadding(v); } };
+        foliageFolder.add(paddingProxy, 'pad', 0, 0.5, 0.01).name('Edge Padding').listen();
+
+        // Y offset
+        const yProxy = { get y() { return r(grassYOffset); }, set y(v: number) { setGrassYOffset(v); } };
+        foliageFolder.add(yProxy, 'y', -0.2, 0.3, 0.005).name('Y Offset').listen();
+
+        // Use Three.js Color to parse sRGB hex → linear, so the picker hex
+        // matches the actual rendered color (including when eyedropper is used).
+        const applyBase = (hex: string) => { const c = new Color(hex); setGrassColorBase(c.r, c.g, c.b); };
+        const applyTip  = (hex: string) => { const c = new Color(hex); setGrassColorTip(c.r,  c.g, c.b); };
+        // Apply stored (or default) colors immediately on GUI init, then respawn
+        applyBase(colorState.baseColor);
+        applyTip(colorState.tipColor);
+        doRespawn();
+
+        foliageFolder.addColor(colorState, 'baseColor')
+            .name('Color Base')
+            .onChange((hex: string) => {
+                applyBase(hex);
+                localStorage.setItem(LS_KEY, JSON.stringify(colorState));
+                doRespawn();
+            });
+        foliageFolder.addColor(colorState, 'tipColor')
+            .name('Color Tip')
+            .onChange((hex: string) => {
+                applyTip(hex);
+                localStorage.setItem(LS_KEY, JSON.stringify(colorState));
+                doRespawn();
+            });
+
+        // Wind strength (live) — initial value from exported foliageWindStrength
+        const windProxy = { wind: foliageWindStrength };
+        foliageFolder.add(windProxy, 'wind', 0, 0.3, 0.005)
+            .name('Wind Strength').onChange((v: number) => setFoliageWindStrength(v));
+
+        // Respawn button
+        foliageFolder.add({ respawn: () => respawnFoliage('grass') }, 'respawn').name('Respawn Grass');
+
+        // Exclusion radii
+        const exclFolder = foliageFolder.addFolder('Exclusion Radii');
+        exclFolder.close();
+        (['bonfire', 'tent', 'palm', 'pug', 'radio', 'rocks'] as const).forEach(key => {
+            exclFolder.add(exclRadii, key, 0, 1.5, 0.01)
+                .name(key.charAt(0).toUpperCase() + key.slice(1))
+                .listen()
+                .onChange((v: number) => { setExclRadius(key, v); doRespawn(); });
+        });
+
+        foliageFolder.close();
+    }
+
     addObjectFolder(surfaceFolder, 'Island',    island,    { scaleRange: [0.01, 1.0]                           });
-    addObjectFolder(surfaceFolder, 'Firecamp',  firecamp,  { scaleRange: [0.1,  5.0]                           });
+    addObjectFolder(surfaceFolder, 'Little Rocks', littleRocks, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
     addObjectFolder(surfaceFolder, 'Palm Tree', palmtree,  { scaleRange: [0.1,  2.0], rotAxes: ['y']           });
-    addObjectFolder(surfaceFolder, 'Radio',     radio,     { scaleRange: [0.01, 1.0], rotAxes: ['y']           });
-    addObjectFolder(surfaceFolder, 'Sword',     sword,     { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
+
+    const phoneFolder = addObjectFolder(surfaceFolder, 'Phone', Island.phone, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
+
+    const phoneZoomFolder = phoneFolder.addFolder('Zoom');
+    phoneZoomFolder.add(phoneZoomConfig, 'height', 0.05, 1.0,  0.005).name('Height above phone').listen();
+    phoneZoomFolder.add(phoneZoomConfig, 'tilt',  -0.5,  0.5,  0.01 ).name('Tilt (Z offset)').listen();
+    phoneZoomFolder.add(phoneZoomConfig, 'pitch', -1.57, -0.1,  0.01 ).name('Pitch (radians)').listen();
+    phoneZoomFolder.add(phoneZoomConfig, 'fov',   5,     70,   0.5  ).name('FOV (telephoto)').listen();
+    phoneZoomFolder.close();
+
+    const screenFolder = phoneFolder.addFolder('Screen');
+    screenFolder.add(phoneScreenConfig, 'screenWidth',  0.01, 0.5, 0.001).name('Screen Width (wu)').listen();
+    screenFolder.add(phoneScreenConfig, 'screenHeight', 0.01, 0.8, 0.001).name('Screen Height (wu)').listen();
+    screenFolder.add(phoneScreenConfig, 'offsetX', -0.2, 0.2, 0.001).name('Offset X').listen();
+    screenFolder.add(phoneScreenConfig, 'offsetY', -0.1, 0.2, 0.001).name('Offset Y (above surf)').listen();
+    screenFolder.add(phoneScreenConfig, 'offsetZ', -0.2, 0.2, 0.001).name('Offset Z').listen();
+    screenFolder.close();
+
+    const overlayFolder = phoneFolder.addFolder('Overlay');
+    overlayFolder.add(phoneScreenConfig, 'overlayOpacity',      0, 1,   0.001).name('Tint Opacity').listen()
+        .onChange(() => updateOverlayStyle());
+    overlayFolder.add(phoneScreenConfig, 'overlayTintR',        0, 255, 1).name('Tint R').listen()
+        .onChange(() => updateOverlayStyle());
+    overlayFolder.add(phoneScreenConfig, 'overlayTintG',        0, 255, 1).name('Tint G').listen()
+        .onChange(() => updateOverlayStyle());
+    overlayFolder.add(phoneScreenConfig, 'overlayTintB',        0, 255, 1).name('Tint B').listen()
+        .onChange(() => updateOverlayStyle());
+    overlayFolder.add(phoneScreenConfig, 'overlayGlareOpacity', 0, 1,   0.001).name('Glare Opacity').listen()
+        .onChange(() => updateOverlayStyle());
+    overlayFolder.add(phoneScreenConfig, 'overlayGlareAngle',   0, 360, 1).name('Glare Angle (deg)').listen()
+        .onChange(() => updateOverlayStyle());
+    overlayFolder.close();
 
     const pugFolder = addObjectFolder(surfaceFolder, 'Pug', pug, { scaleRange: [0.01, 2.0], rotAxes: ['y'] });
 
@@ -747,34 +860,11 @@ function buildGUI(): void {
         pugFolder.add(proxy, 'anim', options).name('Animation').listen();
     })();
 
-    addObjectFolder(surfaceFolder, 'Tent',    tent,         { scaleRange: [0.1,  5.0], rotAxes: ['y']           });
-    addObjectFolder(surfaceFolder, 'Dog Bed', dogBed,       { scaleRange: [0.01, 1.5], rotAxes: ['y']           });
-    addObjectFolder(surfaceFolder, 'Little Rocks', littleRocks, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
-    addObjectFolder(surfaceFolder, 'Phone',   Island.phone, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
+    addObjectFolder(surfaceFolder, 'Radio',     radio,     { scaleRange: [0.01, 1.0], rotAxes: ['y']           });
+    addObjectFolder(surfaceFolder, 'Sword',     sword,     { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
+    addObjectFolder(surfaceFolder, 'Tent',      tent,      { scaleRange: [0.1,  5.0], rotAxes: ['y']           });
 
-    // ── Foliage clusters ──
-    addClusterFolder(surfaceFolder, 'Grass – Main Cluster', 'grass-main', CLUSTER_MAIN, 'GRASS_COUNT',      setGrassCount);
-    addClusterFolder(surfaceFolder, 'Grass – Palm Cluster', 'grass-palm', CLUSTER_PALM, 'GRASS_COUNT_PALM', setGrassPalmCount);
-    addClusterFolder(surfaceFolder, 'Clover',               'clover',     CLUSTER_MAIN, 'CLOVER_COUNT',     setCloverCount);
-
-    // ── Exclusion radii ──
-    const exclFolder = surfaceFolder.addFolder('Exclusion Radii');
-    exclFolder.close();
-    const _exclRespawn = () => {
-        respawnFoliage('grass-main');
-        respawnFoliage('grass-palm');
-        respawnFoliage('clover');
-    };
-    (['bonfire', 'tent', 'palm', 'pug', 'radio', 'rocks'] as const).forEach(key => {
-        exclFolder.add(exclRadii, key, 0, 1.5, 0.01)
-            .name(key.charAt(0).toUpperCase() + key.slice(1))
-            .listen()
-            .onChange((v: number) => { setExclRadius(key, v); _exclRespawn(); });
-    });
-
-    // ── Ocean Reflection (removed — sky-only reflection now) ─────────
-    const reflFolder = oceanFolder.addFolder('Reflection');
-
+    // ── Ocean Reflection ────────────────────────────────────────────────
     const reflProxy = {
         get fresnelPower() { return reflectionFresnelPowerUniform.value as number; },
         set fresnelPower(v){ reflectionFresnelPowerUniform.value = v; },
@@ -809,8 +899,6 @@ function buildGUI(): void {
     reflFolder.close();
 
     // ── Ocean Waves ──────────────────────────────────────────────────────────
-    const wavesFolder = oceanFolder.addFolder('Waves');
-
     const wavesProxy = {
         get nmScale()    { return normalMapScaleUniform.value as number; },
         set nmScale(v)   { normalMapScaleUniform.value = v; },
@@ -839,8 +927,6 @@ function buildGUI(): void {
     wavesFolder.close();
 
     // ── Ocean Surface ────────────────────────────────────────────────────────
-    const surfFolder = oceanFolder.addFolder('Surface Color');
-
     const surfProxy = {
         get r()       { return surfaceColorUniform.value.x; },
         set r(v)      { surfaceColorUniform.value.x = v; },
@@ -860,8 +946,6 @@ function buildGUI(): void {
     surfFolder.close();
 
     // ── Ocean Foam ───────────────────────────────────────────────────────────
-    const foamFolder = oceanFolder.addFolder('Foam');
-
     const foamProxy = {
         get offsetX()    { return foamCenterOffsetUniform.value.x; },
         set offsetX(v)   { foamCenterOffsetUniform.value.x = v; },
@@ -899,8 +983,6 @@ function buildGUI(): void {
     foamFolder.close();
 
     // ── Wind Lines ────────────────────────────────────────────────────────────
-    const windFolder = skyFolder.addFolder('Wind Lines');
-
     const wc = WindLines.config;
 
     const windProxy = {
@@ -1009,8 +1091,6 @@ function buildGUI(): void {
 
     windFolder.close();
     // ── Volumetric Clouds ────────────────────────────────────────────────
-    const cloudFolder = skyFolder.addFolder('Clouds');
-
     const cc = Clouds.config;
 
     const cloudProxy = {
@@ -1080,8 +1160,6 @@ function buildGUI(): void {
 
     cloudFolder.close();
     // ── Underwater Fog ───────────────────────────────────────────────────────
-    const fogFolder = oceanFolder.addFolder('Underwater');
-
     const fogProxy = {
         get absR()       { return oceanAbsorptionUniform.value.x; },
         set absR(v)      { oceanAbsorptionUniform.value.x = v; },
@@ -1182,6 +1260,12 @@ function buildGUI(): void {
     };
     sfFolder.add(sfActions, 'copyConfig').name('Copy SeaFloorConfig.ts');
 
+    // ── Seafloor subfolders — alphabetical order ──────────────────────────────
+    const sfChestFolder  = sfFolder.addFolder('Chest');
+    const sfRocksFolder  = sfFolder.addFolder('Coral Rocks');
+    const sfCoralsFolder = sfFolder.addFolder('Corals');
+    const sfKelpFolder   = sfFolder.addFolder('Kelps');
+
     // ── Helper: make per-model placement sub-folder ───────────────────────────
     function makePlacementFolder(
         parent: any,
@@ -1213,14 +1297,12 @@ function buildGUI(): void {
     }
 
     // ── Coral Rocks ─────────────────────────────────────────────────────────
-    const sfRocksFolder = sfFolder.addFolder('Coral Rocks');
     makePlacementFolder(sfRocksFolder, 'Rock 1', () => sf.rock1,  () => SeaFloorDecor.updateRockTransform(0));
     makePlacementFolder(sfRocksFolder, 'Rock 2', () => sf.rock2,  () => SeaFloorDecor.updateRockTransform(1));
     makePlacementFolder(sfRocksFolder, 'Rock 3', () => sf.rock3,  () => SeaFloorDecor.updateRockTransform(2));
     sfRocksFolder.close();
 
     // ── Corals ───────────────────────────────────────────────────────────────
-    const sfCoralsFolder = sfFolder.addFolder('Corals');
     ([0, 1, 2] as const).forEach((i) => {
         const key = (['coral1', 'coral2', 'coral3'] as const)[i];
         const num = i + 1;
@@ -1239,7 +1321,6 @@ function buildGUI(): void {
     sfCoralsFolder.close();
 
     // ── Kelps ────────────────────────────────────────────────────────────────
-    const sfKelpFolder = sfFolder.addFolder('Kelps');
     // Shared sway settings at top of kelp folder
     const swayProxy = {
         get kelpTopY()          { return sf.kelpTopY;          }, set kelpTopY(v)          { sf.kelpTopY          = v; },
@@ -1259,7 +1340,6 @@ function buildGUI(): void {
     sfKelpFolder.close();
 
     // ── Chest ────────────────────────────────────────────────────────────────────
-    const sfChestFolder = sfFolder.addFolder('Chest');
     makePlacementFolder(sfChestFolder, 'Placement', () => sf.chest, () => Island.updateChestTransform());
     const chestZoomFolder = sfChestFolder.addFolder('Zoom');
     const chestZoomProxy = {
@@ -1421,79 +1501,6 @@ function buildGUI(): void {
     mainCamFolder.add(mainCamProxy, 'desktopFov',  10,  120, 0.5 ).name('FOV (desktop)').listen();
     mainCamFolder.add(mainCamProxy, 'mobileFov',   10,  120, 0.5 ).name('FOV (mobile)').listen();
     mainCamFolder.close();
-
-    // ── Surface: Phone (zoom + screen + overlay) ────────────────────────────────
-    const phoneFolder = surfaceFolder.addFolder('Phone');
-    const phoneConfigActions = {
-        copyConfig: () => {
-            const f  = (n: number) => n.toFixed(4);
-            const fi = (n: number) => String(n);
-            const pzc = phoneZoomConfig;
-            const psc = phoneScreenConfig;
-            const content = [
-                `// src/scene/PhoneConfig.ts`,
-                `// Phone interaction configuration — generated by IslandDebug.`,
-                `// Paste this entire file to replace src/scene/PhoneConfig.ts`,
-                ``,
-                `// ── Phone Zoom ────────────────────────────────────────────────────────────────`,
-                `export const phoneZoomHeight = ${f(pzc.height)};    // World-units above phone surface`,
-                `export const phoneZoomTilt   = ${f(pzc.tilt)};    // Z forward offset for slight viewing angle`,
-                `export const phoneZoomPitch  = ${f(pzc.pitch)};   // Camera pitch in radians (~-83° = nearly straight down)`,
-                `export const phoneZoomFov    = ${fi(pzc.fov)};        // Camera FOV during phone zoom (telephoto)`,
-                ``,
-                `// ── Phone Screen ──────────────────────────────────────────────────────────────`,
-                `export const phoneScreenWidth   = ${f(psc.screenWidth)};  // world units`,
-                `export const phoneScreenHeight  = ${f(psc.screenHeight)};  // world units`,
-                `export const phoneScreenOffsetX = ${f(psc.offsetX)};`,
-                `export const phoneScreenOffsetY = ${f(psc.offsetY)};`,
-                `export const phoneScreenOffsetZ = ${f(psc.offsetZ)};`,
-                ``,
-                `// ── Phone Screen Overlay ──────────────────────────────────────────────────────`,
-                `export const phoneOverlayOpacity      = ${f(psc.overlayOpacity)};`,
-                `export const phoneOverlayTintR        = ${fi(psc.overlayTintR)};`,
-                `export const phoneOverlayTintG        = ${fi(psc.overlayTintG)};`,
-                `export const phoneOverlayTintB        = ${fi(psc.overlayTintB)};`,
-                `export const phoneOverlayGlareOpacity = ${f(psc.overlayGlareOpacity)};`,
-                `export const phoneOverlayGlareAngle   = ${fi(psc.overlayGlareAngle)};`,
-            ].join('\n');
-            navigator.clipboard.writeText(content).then(() => {
-                console.log('[IslandDebug] PhoneConfig.ts content copied to clipboard!');
-            });
-        },
-    };
-    phoneFolder.add(phoneConfigActions, 'copyConfig').name('Copy PhoneConfig.ts');
-
-    const phoneZoomFolder = phoneFolder.addFolder('Zoom');
-    phoneZoomFolder.add(phoneZoomConfig, 'height', 0.05, 1.0,  0.005).name('Height above phone').listen();
-    phoneZoomFolder.add(phoneZoomConfig, 'tilt',  -0.5,  0.5,  0.01 ).name('Tilt (Z offset)').listen();
-    phoneZoomFolder.add(phoneZoomConfig, 'pitch', -1.57, -0.1,  0.01 ).name('Pitch (radians)').listen();
-    phoneZoomFolder.add(phoneZoomConfig, 'fov',   5,     70,   0.5  ).name('FOV (telephoto)').listen();
-    phoneZoomFolder.close();
-
-    const screenFolder = phoneFolder.addFolder('Screen');
-    screenFolder.add(phoneScreenConfig, 'screenWidth',  0.01, 0.5, 0.001).name('Screen Width (wu)').listen();
-    screenFolder.add(phoneScreenConfig, 'screenHeight', 0.01, 0.8, 0.001).name('Screen Height (wu)').listen();
-    screenFolder.add(phoneScreenConfig, 'offsetX', -0.2, 0.2, 0.001).name('Offset X').listen();
-    screenFolder.add(phoneScreenConfig, 'offsetY', -0.1, 0.2, 0.001).name('Offset Y (above surf)').listen();
-    screenFolder.add(phoneScreenConfig, 'offsetZ', -0.2, 0.2, 0.001).name('Offset Z').listen();
-    screenFolder.close();
-
-    const overlayFolder = phoneFolder.addFolder('Overlay');
-    overlayFolder.add(phoneScreenConfig, 'overlayOpacity',      0, 1,   0.001).name('Tint Opacity').listen()
-        .onChange(() => updateOverlayStyle());
-    overlayFolder.add(phoneScreenConfig, 'overlayTintR',        0, 255, 1).name('Tint R').listen()
-        .onChange(() => updateOverlayStyle());
-    overlayFolder.add(phoneScreenConfig, 'overlayTintG',        0, 255, 1).name('Tint G').listen()
-        .onChange(() => updateOverlayStyle());
-    overlayFolder.add(phoneScreenConfig, 'overlayTintB',        0, 255, 1).name('Tint B').listen()
-        .onChange(() => updateOverlayStyle());
-    overlayFolder.add(phoneScreenConfig, 'overlayGlareOpacity', 0, 1,   0.001).name('Glare Opacity').listen()
-        .onChange(() => updateOverlayStyle());
-    overlayFolder.add(phoneScreenConfig, 'overlayGlareAngle',   0, 360, 1).name('Glare Angle (deg)').listen()
-        .onChange(() => updateOverlayStyle());
-    overlayFolder.close();
-
-    phoneFolder.close();
 
     // ── Close all top-level groups by default ───────────────────────────────
     surfaceFolder.close();

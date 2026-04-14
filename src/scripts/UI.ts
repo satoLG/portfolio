@@ -1,4 +1,4 @@
-﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setDPR, setShadowResolution, isMobile } from "./Scene";
+﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setDPR, setShadowResolution, isMobile, showOcean } from "./Scene";
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
 import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, preloadUISounds, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
@@ -123,6 +123,9 @@ export function Start(): void {
     startButton.onclick = function() {
         // Start audio (must happen synchronously in click handler for iOS)
         startAudio();
+
+        // Reveal the ocean (hidden during loading to avoid visible edge at intro camera height)
+        showOcean();
 
         // Enable scrolling / trigger cinematic camera descent
         // (scene already rendering from frame 1 — camera descends from sky intro position)
@@ -487,10 +490,10 @@ export function Start(): void {
     // Prevent wheel/touch scroll inside settings panel from scrolling the 3D scene
     settingsPanel.addEventListener('wheel', (e) => {
         e.stopPropagation();
-    }, { passive: true });
+    }, { passive: false });
     settingsPanel.addEventListener('touchmove', (e) => {
         e.stopPropagation();
-    }, { passive: true });
+    }, { passive: false });
     
     // Collapsible tab headers with state persistence
     settingsPanel.querySelectorAll('.settings-tab-header').forEach(tabHeader => {

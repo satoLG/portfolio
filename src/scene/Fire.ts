@@ -15,10 +15,11 @@ import {
 } from "three";
 import { deltaTime, time } from "../scripts/Time";
 import { isDayTime } from "./Skybox";
+import { FIRE_LIGHT_INTENSITY, FIRE_LIGHT_RANGE, FIRE_LIGHT_DECAY, FIRE_LIGHT_FLICKER } from "./config/IslandConfig";
 
 export const fire = new Group();
 
-export const fireLight = new PointLight(0xff6622, 0, 8, 2);
+export const fireLight = new PointLight(0xff6622, 0, FIRE_LIGHT_RANGE, FIRE_LIGHT_DECAY);
 
 // PointLight doesn't support VSM blur, so use it only for illumination
 fireLight.castShadow = false;
@@ -38,8 +39,12 @@ fireShadowLight.shadow.blurSamples = 8;
 
 const FIRE_SCALE = 0.25;
 const FIRE_HEIGHT_OFFSET = 0.13;
-const FIRE_LIGHT_INTENSITY = 3.0;
-const FIRE_LIGHT_FLICKER = 0.3;
+// Mutable runtime config — tweakable via debug GUI, seeded from IslandConfig
+export const fireLightConfig = {
+    intensity: FIRE_LIGHT_INTENSITY,
+    range:     FIRE_LIGHT_RANGE,
+    flicker:   FIRE_LIGHT_FLICKER,
+};
 const FADE_SPEED = 1.5;
 
 const EMBER_COUNT = 15;
@@ -742,9 +747,10 @@ export function Update(): void {
     //     updateSmokeParticles();
     // }
     
-    const flicker = 1.0 + (Math.sin(time * 15.0) * 0.3 + Math.sin(time * 23.0) * 0.2) * FIRE_LIGHT_FLICKER;
-    fireLight.intensity = fireIntensity * FIRE_LIGHT_INTENSITY * flicker;
-    fireShadowLight.intensity = fireIntensity * FIRE_LIGHT_INTENSITY * flicker * 0.7;
+    const flicker = 1.0 + (Math.sin(time * 15.0) * 0.3 + Math.sin(time * 23.0) * 0.2) * fireLightConfig.flicker;
+    fireLight.intensity = fireIntensity * fireLightConfig.intensity * flicker;
+    fireShadowLight.intensity = fireIntensity * fireLightConfig.intensity * flicker * 0.7;
+    fireLight.distance = fireLightConfig.range;
     
     const colorFlicker = 0.9 + Math.sin(time * 10.0) * 0.1;
     fireLight.color.setRGB(1.0, 0.4 * colorFlicker, 0.1 * colorFlicker);

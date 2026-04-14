@@ -26,6 +26,9 @@ import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial"
 let _sceneReady = true;
 export function setSceneReady(): void { _sceneReady = true; }
 
+/** Reveal the ocean surface — called once when the user clicks Start. */
+export function showOcean(): void { Ocean.surface.visible = true; }
+
 // DOM containers — matching Henry's #css / #webgl structure
 export const cssContainer = document.querySelector('#css') as HTMLDivElement;
 export const webglContainer = document.querySelector('#webgl') as HTMLDivElement;
@@ -300,6 +303,9 @@ export function Start(): void
 
     Ocean.Start();
     scene.add(Ocean.surface);
+    // Hide ocean until the user clicks Start — at the intro camera height the
+    // ocean edge is barely visible and creates a distracting frame flash.
+    Ocean.surface.visible = false;
 
     SeaFloor.Start();
     for (let i = 0; i < SeaFloor.tiles.length; i++)
@@ -321,20 +327,8 @@ export function Start(): void
     scene.add(Island.pug);
     scene.add(Island.tent);
     scene.add(Island.chest);
-    // Grass and clover patches are added dynamically as they load
-    const addedPatches = new Set<any>();
-    const grassInterval = setInterval(() => {
-        Island.grassPatches.forEach(patch => {
-            if (!addedPatches.has(patch)) {
-                scene.add(patch);
-                addedPatches.add(patch);
-            }
-        });
-        // Stop polling once both grass and clover loaders have finished
-        if (Island.isFoliageLoaded()) {
-            clearInterval(grassInterval);
-        }
-    }, 100);
+    // Procedural grass/clover meshes are added directly to the scene by Island.ts
+    // via threeScene.add() inside waitForIslandMeshes(). No polling needed.
 
     // Add fire effect to firecamp
     Fire.Start();
@@ -418,16 +412,23 @@ async function prewarmGPU(): Promise<void> {
 
     // 3. Warm render — forces geometry VBO uploads and texture GPU transfers.
     //    Two passes: surface + underwater so both frustum regions are covered.
-    //    Renders go to the canvas behind the opaque loading overlay.
-    camera.position.set(0, 2, 4);
-    camera.lookAt(0, 0, -3);
+    //    Surface pass: camera at intro start position, tilted upward (matching
+    //    the intro tilt) so only sky is visible — no ocean edge flash.
+    camera.position.set(-0.1, 5, 1.78);
+    camera.lookAt(-0.1, 10, -1);       // look upward — same tilt as INTRO_TETHA_START
     camera.updateProjectionMatrix();
     renderer.render(scene, camera);
 
     camera.position.set(0, -3, 4);
     camera.lookAt(0, -5, -3);
     camera.updateProjectionMatrix();
-    renderer.render(scene, camera);
+    // Exercise the full PostProcess pipeline (copyFramebufferToTexture + distortion
+    // quad render) so the GPU path is warm before the user actually dives.
+    // Without this the first real crossing of UNDERWATER_Y_THRESHOLD causes a
+    // pipeline stall on the copyFramebufferToTexture call.
+    PostProcess.updateUnderwaterAmount(camera.position.y);  // sets underwaterAmount > 0
+    PostProcess.renderScene(renderer, scene, camera);
+    PostProcess.updateUnderwaterAmount(100);                 // reset to 0 (positive Y → depth < 0)
 
     // 4. Restore camera
     camera.position.copy(savedPos);
@@ -489,6 +490,8 @@ export function Update(): void
         Island.firecamp.visible = !deepUnderwater;
         Island.palmtree.visible = !deepUnderwater;
         Fire.fire.visible = !deepUnderwater;
+        // Hide procedural foliage when deep underwater
+        if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = !deepUnderwater;
 
         SeaFloor.Update();
         SeaFloorDecor.Update(deltaTime);
@@ -511,6 +514,8 @@ export function Update(): void
         Island.firecamp.visible = true;
         Island.palmtree.visible = true;
         Fire.fire.visible = true;
+        // Show procedural foliage on surface
+        if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = true;
 
         Island.Update(false);
         Fire.Update();
