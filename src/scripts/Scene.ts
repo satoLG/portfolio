@@ -483,7 +483,7 @@ export function Update(): void
         SeaFloor.setVisible(true);
         SeaFloorDecor.decorGroup.visible = true;
         Fish.setVisible(true);
-        Clouds.cloudsGroup.visible = false;
+        Clouds.cloudsGroup.visible = !deepUnderwater;
         WindLines.windLinesGroup.visible = false;
         // Island stays visible near the surface so the submerged portion renders
         Island.island.visible = !deepUnderwater;

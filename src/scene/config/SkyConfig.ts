@@ -14,20 +14,20 @@ export const scaleZ = 1500.0000;
 export const windSpeed = 0.0110;
 
 // ── Clouds: Noise ─────────────────────────────────────────────────────────────
-export const noiseScale = 1.6000;
+export const noiseScale = 0.5300;
 
 // ── Clouds: Turbulence (domain warp) ──────────────────────────────────────────
-export const turbulenceStrength = 0.2800;
+export const turbulenceStrength = 0.5000;
 export const turbulenceSpeed    = 0.0280;
 
 // ── Clouds: Shape ─────────────────────────────────────────────────────────────
-export const threshold = 0.8300;
-export const range     = 0.1100;
-export const opacity   = 0.9200;
+export const threshold = 0.8100;
+export const range     = 0.3550;
+export const opacity   = 0.4850;
 export const edgeFade  = 0.2000;
 
 // ── Clouds: Quality ───────────────────────────────────────────────────────────
-export const marchSteps = 48;
+export const marchSteps = 32;
 
 // ── Clouds: Day colors ────────────────────────────────────────────────────────
 export const dayR = 1.0000;

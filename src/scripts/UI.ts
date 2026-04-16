@@ -9,6 +9,46 @@ import { t, setLanguage, type Language } from "./i18n";
 
 const THEME_STORAGE_KEY = 'portfolio-theme-mode';
 
+// ── Celebration particle burst ───────────────────────────────────────────────
+const PARTICLE_COUNT = 14;  // easy to tweak
+const PARTICLE_BLUES = ['#40a4ff', '#2b7cd4', '#1a5faa']; // 3 blue tones
+
+function spawnParticles(button: HTMLElement, container: HTMLElement): void {
+    const rect = button.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const radius = rect.width / 2;  // spawn on the button edge
+    const baseStep = (Math.PI * 2) / PARTICLE_COUNT;
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const angle = baseStep * i + (Math.random() - 0.5) * 0.5;
+        // Start position: on button edge
+        const startX = cx + Math.cos(angle) * radius;
+        const startY = cy + Math.sin(angle) * radius;
+        // Fly-out distance from edge
+        const flyDist = 30 + Math.random() * 30;
+        const dx = Math.cos(angle) * flyDist;
+        const dy = Math.sin(angle) * flyDist;
+        const size = 5 + Math.random() * 7;
+        const dur = 500 + Math.random() * 300;
+        const color = PARTICLE_BLUES[i % 3];
+
+        const dot = document.createElement('span');
+        dot.className = 'burst-dot';
+        dot.style.left = `${startX}px`;
+        dot.style.top = `${startY}px`;
+        dot.style.width = `${size}px`;
+        dot.style.height = `${size}px`;
+        dot.style.backgroundColor = color;
+        dot.style.setProperty('--dx', `${dx}px`);
+        dot.style.setProperty('--dy', `${dy}px`);
+        dot.style.setProperty('--dur', `${dur}ms`);
+        container.appendChild(dot);
+
+        setTimeout(() => dot.remove(), dur + 50);
+    }
+}
+
 // Track previous camera Y for detecting surface crossing
 let previousCameraY = 1;
 let audioIsUnderwater = false;
@@ -50,9 +90,11 @@ export function Start(): void {
     startButton.disabled = true; // Disabled until loading complete
     startButton.innerHTML = `
         <div class="water-fill">
-            <svg class="wave-svg" viewBox="0 0 800 20" preserveAspectRatio="none">
-                <path class="wave wave2" d="M0 8 Q 10 3, 20 8 T 40 8 T 60 8 T 80 8 T 100 8 T 120 8 T 140 8 T 160 8 T 180 8 T 200 8 T 220 8 T 240 8 T 260 8 T 280 8 T 300 8 T 320 8 T 340 8 T 360 8 T 380 8 T 400 8 T 420 8 T 440 8 T 460 8 T 480 8 T 500 8 T 520 8 T 540 8 T 560 8 T 580 8 T 600 8 T 620 8 T 640 8 T 660 8 T 680 8 T 700 8 T 720 8 T 740 8 T 760 8 T 780 8 T 800 8 V 20 H 0 Z"/>
-            </svg>
+            <div class="wave-wrapper">
+                <svg class="wave-svg" viewBox="0 0 800 20" preserveAspectRatio="none">
+                    <path class="wave wave2" d="M0 8 Q 10 3, 20 8 T 40 8 T 60 8 T 80 8 T 100 8 T 120 8 T 140 8 T 160 8 T 180 8 T 200 8 T 220 8 T 240 8 T 260 8 T 280 8 T 300 8 T 320 8 T 340 8 T 360 8 T 380 8 T 400 8 T 420 8 T 440 8 T 460 8 T 480 8 T 500 8 T 520 8 T 540 8 T 560 8 T 580 8 T 600 8 T 620 8 T 640 8 T 660 8 T 680 8 T 700 8 T 720 8 T 740 8 T 760 8 T 780 8 T 800 8 V 20 H 0 Z"/>
+                </svg>
+            </div>
         </div>
         <span class="loading-percent">0</span>
         <svg class="headphone-icon icon-normal" xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -72,7 +114,11 @@ export function Start(): void {
     
     const percentText = startButton.querySelector('.loading-percent') as HTMLElement;
     const waterFill = startButton.querySelector('.water-fill') as HTMLElement;
-    
+
+    const BLUR_MAX = 50; // Starting blur in px
+
+    let rAFStopped = false;
+
     // Animation loop for smooth progress
     function animateProgress() {
         const elapsed = performance.now() - startTime;
@@ -93,6 +139,11 @@ export function Start(): void {
         percentText.textContent = String(percent);
         // Fill to 105% so waves go past the top and aren't visible
         waterFill.style.setProperty('--fill-level', `${displayedProgress * 105}%`);
+
+        // Blur overlay fades with progress
+        const blurPx = BLUR_MAX * (1 - displayedProgress);
+        blurOverlay.style.backdropFilter = `blur(${blurPx}px)`;
+        blurOverlay.style.setProperty('-webkit-backdrop-filter', `blur(${blurPx}px)`);
         
         // Check if we've reached 100% and both conditions are met
         if (displayedProgress >= 0.99 && targetProgress >= 1 && !loadingComplete) {
@@ -100,14 +151,27 @@ export function Start(): void {
             percentText.textContent = '100';
             waterFill.style.setProperty('--fill-level', '105%');
             loadingComplete = true;
-            // Transition to headphone icon
+            rAFStopped = true; // stop the rAF loop — CSS handles the wave from here
+            // Celebrate: bounce + particle burst (simultaneously)
+            startButton.style.opacity = '1';
+            startButton.style.transform = 'scale(1)';
+            startButton.classList.add('celebrate-bounce');
+            spawnParticles(startButton, startOverlay);
+            // Transition to headphone icon after bounce peaks
             setTimeout(() => {
                 startButton.classList.add('loaded');
                 startButton.disabled = false;
-            }, 400);
+                // Freeze animation state BEFORE removing celebrate-bounce so the
+                // base bouncy-pop-in animation doesn't replay (inline style wins
+                // over a normal CSS rule; celebrate-bounce's !important still wins
+                // while the class is present).
+                startButton.style.animation = 'none';
+                startButton.classList.remove('celebrate-bounce');
+            }, 600);
         }
         
-        if (!loadingComplete) {
+        // Always keep the loop alive — wave must scroll even when progress is stalled
+        if (!rAFStopped) {
             requestAnimationFrame(animateProgress);
         }
     }
@@ -135,6 +199,8 @@ export function Start(): void {
         document.body.classList.add('started');
         
         // Bounce out animation for the button
+        // Clear the frozen animation state so bounce-out can take over.
+        startButton.style.removeProperty('animation');
         startButton.classList.add('bounce-out');
         
         // Fade out blur overlay — start immediately so the reveal
@@ -176,6 +242,7 @@ export function Start(): void {
         setTimeout(() => {
             startOverlay.remove();
             blurOverlay.classList.add('hidden');
+            rAFStopped = true;
         }, 2500);
     };
     
