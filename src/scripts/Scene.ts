@@ -492,6 +492,7 @@ export function Update(): void
         Fire.fire.visible = !deepUnderwater;
         // Hide procedural foliage when deep underwater
         if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = !deepUnderwater;
+        if (Island.grassShadowMesh)     Island.grassShadowMesh.visible     = !deepUnderwater;
 
         SeaFloor.Update();
         SeaFloorDecor.Update(deltaTime);

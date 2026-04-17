@@ -18,6 +18,7 @@ import {
     Float32BufferAttribute,
     Mesh,
     MeshStandardMaterial,
+    ShaderMaterial,
     Uniform,
     Vector3,
     DataTexture,
@@ -28,6 +29,7 @@ import {
     DoubleSide,
     Color,
 } from "three";
+import { GRASS_COLOR_BASE, GRASS_COLOR_TIP } from './config/IslandConfig';
 
 // ─── Perlin noise generation (CPU, for DataTexture) ────────────────────────
 
@@ -117,20 +119,23 @@ export interface BladeConfig {
     bladesPerPoint: number;
     /** Spread radius around each spawn point */
     spreadRadius: number;
-    /** Base blade half-width */
+    /** Base blade half-width (distance from tip to side) */
     bladeWidth: number;
     /** Base blade height */
     bladeHeight: number;
     /** Height variation factor (0-1) */
     heightVariation: number;
+    /** Minimum blade scale at island edge (0=invisible, 1=full size) */
+    minEdgeScale: number;
 }
 
 const DEFAULT_BLADE_CONFIG: BladeConfig = {
     bladesPerPoint: 40,
     spreadRadius: 0.12,
-    bladeWidth: 0.003,
-    bladeHeight: 0.06,
-    heightVariation: 0.4,
+    bladeWidth: 0.009,
+    bladeHeight: 0.085,
+    heightVariation: 0.50,
+    minEdgeScale: 0.25,
 };
 
 /**
@@ -151,16 +156,19 @@ function mulberry32(seed: number): () => number {
 // Values are set from sRGB hex so the picker hex matches what you see on screen.
 // #7ca550 ≈ sRGB equivalent of linear (0.20, 0.38, 0.08)
 // #b3d26c ≈ sRGB equivalent of linear (0.45, 0.65, 0.15)
-export const grassColorBase = new Color('#7ca550');
-export const grassColorTip  = new Color('#b3d26c');
+export const grassColorBase = new Color(GRASS_COLOR_BASE);
+export const grassColorTip  = new Color(GRASS_COLOR_TIP);
 
 /**
  * Build a single merged BufferGeometry containing all grass blades.
- * Each blade = 2 quads (4 triangles) crossing at 90° with random Y-rotation.
- * Includes real normals, vertex colors, and custom attributes for wind/mouse.
+ * Each blade = 1 tall triangle (3 vertices, 1 triangle). Shape: two base
+ * corners at ground level + one apex at center+height. Random Y-rotation
+ * per blade preserves varied normals so PBR lighting (fire PointLight,
+ * directional sun) works correctly — no billboard rotation needed.
+ * Blades near the island edge are scaled down via the per-point edgeFactor.
  */
 export function buildGrassGeometry(
-    spawnPoints: Array<{ x: number; z: number; y?: number }>,
+    spawnPoints: Array<{ x: number; z: number; y?: number; edgeFactor?: number }>,
     worldY: number,
     config: Partial<BladeConfig> = {},
     seed = 42,
@@ -168,9 +176,9 @@ export function buildGrassGeometry(
     const cfg = { ...DEFAULT_BLADE_CONFIG, ...config };
     const totalBlades = spawnPoints.length * cfg.bladesPerPoint;
 
-    // Each blade = 2 quads = 8 vertices, 4 triangles = 12 indices
-    const vertsPerBlade = 8;
-    const indicesPerBlade = 12;
+    // Each blade = 1 triangle = 3 vertices, 3 indices
+    const vertsPerBlade   = 3;
+    const indicesPerBlade = 3;
 
     const positions    = new Float32Array(totalBlades * vertsPerBlade * 3);
     const normals      = new Float32Array(totalBlades * vertsPerBlade * 3);
@@ -180,133 +188,219 @@ export function buildGrassGeometry(
     const indices      = new Uint32Array(totalBlades * indicesPerBlade);
 
     const rng = mulberry32(seed);
-    let vi = 0;  // vertex index
-    let ii = 0;  // index index
+    let vi = 0;  // vertex cursor
+    let ii = 0;  // index cursor
 
     const tmpColor = new Color();
 
     for (const sp of spawnPoints) {
         const baseY = sp.y !== undefined ? sp.y : worldY;
+        // Smooth edge taper: 0 at edge → cfg.minEdgeScale blend → 1 at centre
+        const ef         = sp.edgeFactor !== undefined ? sp.edgeFactor : 1.0;
+        const edgeScale  = lerp(cfg.minEdgeScale, 1.0, ef);
+
         for (let b = 0; b < cfg.bladesPerPoint; b++) {
             // Random offset within spread radius
-            const angle = rng() * Math.PI * 2;
-            const dist  = rng() * cfg.spreadRadius;
-            const cx = sp.x + Math.cos(angle) * dist;
-            const cz = sp.z + Math.sin(angle) * dist;
+            const spreadAngle = rng() * Math.PI * 2;
+            const dist        = rng() * cfg.spreadRadius;
+            const cx = sp.x + Math.cos(spreadAngle) * dist;
+            const cz = sp.z + Math.sin(spreadAngle) * dist;
 
-            // Per-blade random for height/color variation
+            // Per-blade height / width variation
             const r = rng();
-            const h = cfg.bladeHeight * (1 - cfg.heightVariation + r * cfg.heightVariation);
-            const w = cfg.bladeWidth * (0.8 + rng() * 0.4);
+            const h = cfg.bladeHeight * edgeScale * (1.0 - cfg.heightVariation + r * cfg.heightVariation);
+            const w = cfg.bladeWidth  * edgeScale * (0.8 + rng() * 0.4);
 
-            // Random Y-rotation for each blade
-            const rotY = rng() * Math.PI;
+            // Random facing direction
+            const rotY = rng() * Math.PI * 2;
+            const cosA = Math.cos(rotY);
+            const sinA = Math.sin(rotY);
 
-            // Two quads at 90° apart
-            for (let q = 0; q < 2; q++) {
-                const qAngle = rotY + q * Math.PI * 0.5;
-                const cosA = Math.cos(qAngle);
-                const sinA = Math.sin(qAngle);
+            // Face normal: perpendicular to blade direction in XZ.
+            // Derived from cross(edge1, edge2) where:
+            //   edge1 = v1-v0 = (2*cosA*w, 0, 2*sinA*w)
+            //   edge2 = v2-v0 = (cosA*w,   h, sinA*w)
+            //   cross  = (-2*sinA*w*h, 0, 2*cosA*w*h)  →  normalise → (-sinA, 0, cosA)
+            const faceNx = -sinA;
+            const faceNz =  cosA;
 
-                // Quad half-width offset
-                const dx = cosA * w;
-                const dz = sinA * w;
+            // Vertex colors — base colour at roots, tip colour at apex
+            const baseStyle = 0.5 + r * 0.8;
+            tmpColor.copy(grassColorBase).multiplyScalar(baseStyle);
+            tmpColor.r = Math.max(0, Math.min(1, tmpColor.r + (r - 0.5) * 0.07));
+            tmpColor.g = Math.max(0, Math.min(1, tmpColor.g + (r - 0.5) * 0.03));
+            const baseR = tmpColor.r, baseG = tmpColor.g, baseB = tmpColor.b;
 
-                // Normal is perpendicular to the quad face (horizontal cross product with up)
-                const nx = -sinA;
-                const nz = cosA;
+            tmpColor.copy(grassColorBase).lerp(grassColorTip, 0.6 + r * 0.4).multiplyScalar(baseStyle);
+            tmpColor.r = Math.max(0, Math.min(1, tmpColor.r + (r - 0.5) * 0.07));
+            tmpColor.g = Math.max(0, Math.min(1, tmpColor.g + (r - 0.5) * 0.03));
+            const tipR  = tmpColor.r, tipG = tmpColor.g, tipB = tmpColor.b;
 
-                // Vertex colors: base→tip gradient + per-blade variation
-                // Base vertices
-                const baseStyle = 0.5 + r * 0.8;
-                tmpColor.copy(grassColorBase).multiplyScalar(baseStyle);
-                tmpColor.r += (r - 0.5) * 0.07;
-                tmpColor.g += (r - 0.5) * 0.03;
-                tmpColor.r = Math.max(0, Math.min(1, tmpColor.r));
-                tmpColor.g = Math.max(0, Math.min(1, tmpColor.g));
-                tmpColor.b = Math.max(0, Math.min(1, tmpColor.b));
-                const baseR = tmpColor.r, baseG = tmpColor.g, baseB = tmpColor.b;
+            const baseVi = vi;
 
-                // Tip color — blend toward tip color with shifted gradient
-                const styledTipness = Math.min(1, Math.max(0, 1.0 + (r - 0.5) * 0.5));
-                tmpColor.copy(grassColorBase).lerp(grassColorTip, styledTipness).multiplyScalar(baseStyle);
-                tmpColor.r += (r - 0.5) * 0.07;
-                tmpColor.g += (r - 0.5) * 0.03;
-                tmpColor.r = Math.max(0, Math.min(1, tmpColor.r));
-                tmpColor.g = Math.max(0, Math.min(1, tmpColor.g));
-                tmpColor.b = Math.max(0, Math.min(1, tmpColor.b));
-                const tipR = tmpColor.r, tipG = tmpColor.g, tipB = tmpColor.b;
+            // v0: bottom-left
+            let p = vi * 3, c = vi * 2;
+            positions[p    ] = cx - cosA * w;
+            positions[p + 1] = baseY;
+            positions[p + 2] = cz - sinA * w;
+            normals[p    ] = faceNx; normals[p + 1] = 0.0; normals[p + 2] = faceNz;
+            colors[p    ] = baseR;  colors[p + 1] = baseG; colors[p + 2] = baseB;
+            bladeCenters[c] = cx; bladeCenters[c + 1] = cz;
+            tipness[vi] = 0.0; vi++;
 
-                const baseVi = vi;
+            // v1: bottom-right
+            p = vi * 3; c = vi * 2;
+            positions[p    ] = cx + cosA * w;
+            positions[p + 1] = baseY;
+            positions[p + 2] = cz + sinA * w;
+            normals[p    ] = faceNx; normals[p + 1] = 0.0; normals[p + 2] = faceNz;
+            colors[p    ] = baseR;  colors[p + 1] = baseG; colors[p + 2] = baseB;
+            bladeCenters[c] = cx; bladeCenters[c + 1] = cz;
+            tipness[vi] = 0.0; vi++;
 
-                // v0: bottom-left
-                let p = vi * 3; let c = vi * 2;
-                positions[p] = cx - dx; positions[p+1] = baseY; positions[p+2] = cz - dz;
-                normals[p] = nx; normals[p+1] = 0; normals[p+2] = nz;
-                colors[p] = baseR; colors[p+1] = baseG; colors[p+2] = baseB;
-                bladeCenters[c] = cx; bladeCenters[c+1] = cz;
-                tipness[vi] = 0; vi++;
+            // v2: apex (tip, centred horizontally)
+            // Normal tilted slightly upward so tip catches overhead sun naturally
+            p = vi * 3; c = vi * 2;
+            positions[p    ] = cx;
+            positions[p + 1] = baseY + h;
+            positions[p + 2] = cz;
+            normals[p    ] = faceNx * 0.8; normals[p + 1] = 0.4; normals[p + 2] = faceNz * 0.8;
+            colors[p    ] = tipR;  colors[p + 1] = tipG;  colors[p + 2] = tipB;
+            bladeCenters[c] = cx; bladeCenters[c + 1] = cz;
+            tipness[vi] = 1.0; vi++;
 
-                // v1: bottom-right
-                p = vi * 3; c = vi * 2;
-                positions[p] = cx + dx; positions[p+1] = baseY; positions[p+2] = cz + dz;
-                normals[p] = nx; normals[p+1] = 0; normals[p+2] = nz;
-                colors[p] = baseR; colors[p+1] = baseG; colors[p+2] = baseB;
-                bladeCenters[c] = cx; bladeCenters[c+1] = cz;
-                tipness[vi] = 0; vi++;
+            indices[ii++] = baseVi;
+            indices[ii++] = baseVi + 1;
+            indices[ii++] = baseVi + 2;
+        }
+    }
 
-                // v2: top-right
-                p = vi * 3; c = vi * 2;
-                positions[p] = cx + dx; positions[p+1] = baseY + h; positions[p+2] = cz + dz;
-                normals[p] = nx; normals[p+1] = 0; normals[p+2] = nz;
-                colors[p] = tipR; colors[p+1] = tipG; colors[p+2] = tipB;
-                bladeCenters[c] = cx; bladeCenters[c+1] = cz;
-                tipness[vi] = 1; vi++;
+    const geom = new BufferGeometry();
+    geom.setAttribute('position',     new Float32BufferAttribute(positions, 3));
+    geom.setAttribute('normal',       new Float32BufferAttribute(normals, 3));
+    geom.setAttribute('color',        new Float32BufferAttribute(colors, 3));
+    geom.setAttribute('aBladeCenter', new Float32BufferAttribute(bladeCenters, 2));
+    geom.setAttribute('aTipness',     new Float32BufferAttribute(tipness, 1));
+    geom.setIndex(Array.from(indices));
+    return geom;
+}
 
-                // v3: top-left
-                p = vi * 3; c = vi * 2;
-                positions[p] = cx - dx; positions[p+1] = baseY + h; positions[p+2] = cz - dz;
-                normals[p] = nx; normals[p+1] = 0; normals[p+2] = nz;
-                colors[p] = tipR; colors[p+1] = tipG; colors[p+2] = tipB;
-                bladeCenters[c] = cx; bladeCenters[c+1] = cz;
-                tipness[vi] = 1; vi++;
+/**
+ * Creates a single merged-geometry dark floor covering all grass spawn points.
+ * Each spawn point contributes one flat polygon disc, with vertices pre-baked
+ * at world XZ coordinates — no instancing, no instanceMatrix, no GL extensions.
+ * Overlapping discs accumulate naturally over dense areas.
+ *
+ * @param instanceRadius  World-space radius per disc (≈ spreadRadius + margin)
+ */
+export function createShadowFloorMesh(
+    spawnPoints: Array<{ x: number; z: number; edgeFactor?: number }>,
+    cy: number,
+    instanceRadius: number,
+    opacity: number,
+    colorHex: string,
+): Mesh {
+    const SEGS = 10;  // triangles per disc (low-poly is fine, shadow is soft)
+    const count = spawnPoints.length;
 
-                // Two triangles: (0,1,2) and (0,2,3)
-                indices[ii++] = baseVi;
-                indices[ii++] = baseVi + 1;
-                indices[ii++] = baseVi + 2;
-                indices[ii++] = baseVi;
-                indices[ii++] = baseVi + 2;
-                indices[ii++] = baseVi + 3;
-            }
+    const vertsPerDisc = SEGS + 1;          // 1 centre + SEGS ring verts
+    const positions = new Float32Array(count * vertsPerDisc * 3);
+    const uvs       = new Float32Array(count * vertsPerDisc * 2);
+    const indices   = new Uint32Array(count * SEGS * 3);
+
+    let vi = 0, ii = 0;
+    for (let d = 0; d < count; d++) {
+        const sp    = spawnPoints[d];
+        const ef    = sp.edgeFactor ?? 1.0;
+        const r     = instanceRadius * ef;
+        const baseVi = vi;
+
+        // Centre vertex  (UV = 0.5, 0.5 so d=0 → fully opaque)
+        positions[vi * 3]     = sp.x;
+        positions[vi * 3 + 1] = cy;
+        positions[vi * 3 + 2] = sp.z;
+        uvs[vi * 2]     = 0.5;
+        uvs[vi * 2 + 1] = 0.5;
+        vi++;
+
+        // Ring vertices (UV on unit circle edge)
+        for (let s = 0; s < SEGS; s++) {
+            const a = (s / SEGS) * Math.PI * 2;
+            const cosA = Math.cos(a), sinA = Math.sin(a);
+            positions[vi * 3]     = sp.x + cosA * r;
+            positions[vi * 3 + 1] = cy;
+            positions[vi * 3 + 2] = sp.z + sinA * r;
+            uvs[vi * 2]     = cosA * 0.5 + 0.5;
+            uvs[vi * 2 + 1] = sinA * 0.5 + 0.5;
+            vi++;
+        }
+
+        // Fan triangles: (centre, ring[s], ring[(s+1)%SEGS])
+        for (let s = 0; s < SEGS; s++) {
+            indices[ii++] = baseVi;
+            indices[ii++] = baseVi + 1 + s;
+            indices[ii++] = baseVi + 1 + (s + 1) % SEGS;
         }
     }
 
     const geom = new BufferGeometry();
     geom.setAttribute('position', new Float32BufferAttribute(positions, 3));
-    geom.setAttribute('normal',   new Float32BufferAttribute(normals, 3));
-    geom.setAttribute('color',    new Float32BufferAttribute(colors, 3));
-    geom.setAttribute('aBladeCenter', new Float32BufferAttribute(bladeCenters, 2));
-    geom.setAttribute('aTipness', new Float32BufferAttribute(tipness, 1));
+    geom.setAttribute('uv',       new Float32BufferAttribute(uvs, 2));
     geom.setIndex(Array.from(indices));
-    return geom;
+
+    const colorObj = new Color(colorHex);
+    const material = new ShaderMaterial({
+        transparent:   true,
+        depthWrite:    false,
+        side:          DoubleSide,
+        polygonOffset:       true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits:  -1,
+        uniforms: {
+            uColor:   { value: new Vector3(colorObj.r, colorObj.g, colorObj.b) },
+            uOpacity: { value: opacity },
+        },
+        vertexShader: /* glsl */`
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: /* glsl */`
+            uniform vec3  uColor;
+            uniform float uOpacity;
+            varying vec2  vUv;
+            void main() {
+                float d     = length(vUv - vec2(0.5)) * 2.0;
+                float alpha = (1.0 - smoothstep(0.1, 1.0, d)) * uOpacity;
+                gl_FragColor = vec4(uColor, alpha);
+            }
+        `,
+    });
+
+    const mesh = new Mesh(geom, material);
+    mesh.frustumCulled = false;
+    mesh.renderOrder   = 1;  // after opaque island surface
+    return mesh;
 }
 
 // ─── Grass MeshStandardMaterial + onBeforeCompile ──────────────────────────
 
 export interface GrassUniforms {
-    uWindTime:      Uniform;
-    uWindStrength:  Uniform;
-    uNoiseTexture:  Uniform;
-    uNoiseScale:    Uniform;
-    uMouseWorldPos: Uniform;
-    uMouseRadius:   Uniform;
-    uMouseStrength: Uniform;
-    uLight:         Uniform;
-    uAbsorption:    Uniform;
-    uSunVisibility: Uniform;
-    uFogDist:       Uniform;
-    uYOffset:       Uniform;
+    uWindTime:       Uniform;
+    uWindStrength:   Uniform;
+    uWobbleStrength: Uniform;
+    uNoiseTexture:   Uniform;
+    uNoiseScale:     Uniform;
+    uMouseWorldPos:  Uniform;
+    uMouseRadius:    Uniform;
+    uMouseStrength:  Uniform;
+    uLight:          Uniform;
+    uAbsorption:     Uniform;
+    uSunVisibility:  Uniform;
+    uFogDist:        Uniform;
+    uYOffset:        Uniform;
 }
 
 export function createGrassMaterial(
@@ -327,8 +421,9 @@ export function createGrassMaterial(
 
     mat.onBeforeCompile = (shader) => {
         // Inject uniforms
-        shader.uniforms.uWindTime      = uniforms.uWindTime;
+        shader.uniforms.uWindTime       = uniforms.uWindTime;
         shader.uniforms.uWindStrength   = uniforms.uWindStrength;
+        shader.uniforms.uWobbleStrength = uniforms.uWobbleStrength;
         shader.uniforms.uNoiseTexture   = uniforms.uNoiseTexture;
         shader.uniforms.uNoiseScale     = uniforms.uNoiseScale;
         shader.uniforms.uMouseWorldPos  = uniforms.uMouseWorldPos;
@@ -349,6 +444,7 @@ export function createGrassMaterial(
             attribute float aTipness;
             uniform float uWindTime;
             uniform float uWindStrength;
+            uniform float uWobbleStrength;
             uniform sampler2D uNoiseTexture;
             uniform float uNoiseScale;
             uniform vec3 uMouseWorldPos;
@@ -363,16 +459,19 @@ export function createGrassMaterial(
             `#include <begin_vertex>
             transformed.y += uYOffset;
 
-            // Wind via Perlin noise — only tips move
+            // Wind via Perlin noise — wobble always on, breeze adds extra sway
             vec2 noiseUV = aBladeCenter * uNoiseScale + vec2(uWindTime * 0.08, uWindTime * 0.06);
             vec4 noiseVal = texture2D(uNoiseTexture, noiseUV);
-            transformed.x += (noiseVal.r - 0.5) * 2.0 * uWindStrength * aTipness;
-            transformed.z += (noiseVal.g - 0.5) * 2.0 * uWindStrength * aTipness * 0.6;
+            transformed.x += (noiseVal.r - 0.5) * 2.0 * (uWobbleStrength + uWindStrength) * aTipness;
+            transformed.z += (noiseVal.g - 0.5) * 2.0 * (uWobbleStrength + uWindStrength) * aTipness * 0.6;
 
-            // Mouse interaction — compress tips downward near cursor
-            float mDist = length(aBladeCenter - uMouseWorldPos.xz);
-            float mT = smoothstep(uMouseRadius, 0.0, mDist);
-            transformed.y -= mT * mT * aTipness * uMouseStrength;`
+            // Mouse interaction — deflect tips away from cursor (XZ repulsion)
+            vec2 bladeToCursor = uMouseWorldPos.xz - aBladeCenter;
+            float mDist = length(bladeToCursor);
+            float mT = smoothstep(uMouseRadius, 0.0, mDist) * aTipness * uMouseStrength;
+            vec2 awayDir = mDist > 0.001 ? normalize(-bladeToCursor) : vec2(1.0, 0.0);
+            transformed.x += awayDir.x * mT;
+            transformed.z += awayDir.y * mT;`
         );
 
         shader.vertexShader = shader.vertexShader.replace(
