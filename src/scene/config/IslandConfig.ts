@@ -13,6 +13,9 @@ export const tentOffset     = { x: 0.4800, y: 0.9800, z: -0.3500 };
 export const dogBedOffset      = { x: 0.0000, y: 0.8000, z: 3.3000 };
 export const littleRocksOffset = { x: 0.3200, y: 0.9850, z: 0.7000 };
 export const phoneOffset       = { x: 0.3300, y: 1.0540, z: 0.7720 };
+export const apple1Offset      = { x: -0.6090, y: 2.6000, z: 0.4920 };
+export const apple2Offset      = { x: -0.1540, y: 2.7500, z: 0.2400 };
+export const apple3Offset      = { x: -0.4040, y: 3.2500, z: 0.1310 };
 
 // ── Scales ────────────────────────────────────────────────────────────────────
 export const islandScale      = 0.2500;
@@ -25,6 +28,9 @@ export const tentScale        = 0.0750;
 export const dogBedScale      = 1.0000;
 export const littleRocksScale = 0.7440;
 export const phoneScale       = 0.1500;
+export const apple1Scale      = 0.0100;
+export const apple2Scale      = 0.0100;
+export const apple3Scale      = 0.0100;
 
 // ── Rotations ─────────────────────────────────────────────────────────────────
 export const palmtreeRotY   = 0.0000;
@@ -35,16 +41,27 @@ export const tentRotY       = -0.4000;
 export const dogBedRotY     = 0.0000;
 export const littleRocksRot = { x: 0.0000, y: -3.1416, z: 0.0000 };
 export const phoneRot       = { x: -0.3166, y: -0.0306, z: -0.0096 };
+export const apple1RotY     = 0.1764;
+export const apple2RotY     = -0.9226;
+export const apple3RotY     = -0.5000;
 
 // ── Foliage ────────────────────────────────────────────────────────────
-export const GRASS_COUNT          = 141;
+export const GRASS_COUNT          = 204;
 export const GRASS_Y_OFFSET        = 0.0000;
-export const GRASS_COLOR_BASE      = '#396f16'; // sRGB hex
-export const GRASS_COLOR_TIP       = '#498f38';  // sRGB hex
-export const FOLIAGE_WIND_STRENGTH = 0.0350;
+export const GRASS_COLOR_BASE      = '#3c550b'; // sRGB hex
+export const GRASS_COLOR_TIP       = '#50671d';  // sRGB hex
+export const FOLIAGE_WIND_STRENGTH = 0.0000;
+export const GRASS_WOBBLE_STRENGTH  = 0.034;  // constant base sway
+export const GRASS_MAX_HEIGHT       = 0.055;  // max blade height
+export const GRASS_EDGE_FALLOFF_RADIUS = 0.05;   // probe radius for edge blade taper
+export const GRASS_MIN_EDGE_SCALE      = 0.21;   // minimum blade scale at island edge (0–1)
+export const GRASS_SHADOW_OPACITY      = 0.20;   // alpha of dark AO floor under grass
+export const GRASS_SHADOW_COLOR        = '#0d1a05'; // sRGB dark green-black
+export const GRASS_SHADOW_Y_OFFSET     = 0.009;  // Y below average surface (negative = lower than blades)
+export const GRASS_SHADOW_SPREAD       = 1.04;   // disc radius scale (1.0 = cluster width)
 
 // ── Spawn edge padding ────────────────────────────────────────────────────────
-export const SURFACE_EDGE_PADDING = 0.190;
+export const SURFACE_EDGE_PADDING = 0.200;
 
 // ── Exclusion zone radii (grass spawn clearance around each surface object) ───
 export const EXCL_R_BONFIRE = 0.42;

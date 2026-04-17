@@ -207,8 +207,10 @@ body.day-mode {
     pointer-events: none;
     z-index: 5;
     opacity: 1;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     transition: opacity 2s ease-in-out;
-    will-change: opacity;
+    will-change: opacity, backdrop-filter, -webkit-backdrop-filter;
     /* iOS fix: isolation:isolate + translateZ(0) contains this element's
        compositing layer so it does NOT flatten the CSS3D preserve-3d context
        for the rest of the page. backdrop-filter siblings are a known iOS
@@ -944,14 +946,26 @@ body.day-mode .playlist-item.drag-over {
     }
 }
 
-/* Wave SVG at top of water */
-#start-button .wave-svg {
+/* Wave wrapper — CSS animation runs on compositor thread, immune to main-thread jank */
+#start-button .wave-wrapper {
     position: absolute;
     top: -15px;
     left: -300%;
     width: 800%;
     height: 20px;
     overflow: visible;
+    will-change: transform;
+    animation: wave-scroll 3s linear infinite;
+}
+
+@keyframes wave-scroll {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-20%); }
+}
+
+#start-button .wave-svg {
+    width: 100%;
+    height: 100%;
 }
 
 #start-button .wave {
@@ -959,22 +973,11 @@ body.day-mode .playlist-item.drag-over {
 }
 
 #start-button .wave1 {
-    animation: wave-horizontal 6s linear infinite;
     fill: rgba(64, 164, 255, 1);
 }
 
 #start-button .wave2 {
-    animation: wave-horizontal 6s linear infinite;
     fill: rgba(64, 164, 255, 1);
-}
-
-@keyframes wave-horizontal {
-    0% {
-        transform: translateX(0);
-    }
-    100% {
-        transform: translateX(-50%);
-    }
 }
 
 /* Loading percentage text */
@@ -1011,9 +1014,46 @@ body.day-mode .playlist-item.drag-over {
 }
 
 /* Keep water fill visible but hide the waves */
-#start-button.loaded .wave-svg {
+#start-button.loaded .wave-wrapper {
     opacity: 0;
     transition: opacity 0.7s ease;
+}
+
+/* ── Celebrate bounce when loading completes ─────────────────────────────── */
+#start-button.celebrate-bounce {
+    animation: celebrate-bounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both !important;
+    opacity: 1 !important;
+}
+
+@keyframes celebrate-bounce {
+    0%   { transform: scale(1); }
+    35%  { transform: scale(1.18); }
+    65%  { transform: scale(0.94); }
+    85%  { transform: scale(1.04); }
+    100% { transform: scale(1); }
+}
+
+/* ── Burst dot particles ─────────────────────────────────────────────────── */
+.burst-dot {
+    position: absolute;
+    pointer-events: none;
+    z-index: 20;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    animation:
+        burst-fly-out var(--dur) ease-out forwards,
+        burst-fade    var(--dur) ease-in forwards;
+}
+
+@keyframes burst-fly-out {
+    0%   { translate: 0 0; }
+    100% { translate: var(--dx) var(--dy); }
+}
+
+@keyframes burst-fade {
+    0%   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    60%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
 }
 
 /* Day mode start button */

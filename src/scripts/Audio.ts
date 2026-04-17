@@ -11,8 +11,8 @@ export function getAudioContext(): AudioContext | null { return _audioContext; }
 // ============================================
 // AUDIO SETTINGS (easily tweakable)
 // ============================================
-const WATER_VOLUME = 1.0;
-const BREEZE_VOLUME = 0.5;
+const WATER_VOLUME = 0.15;
+const BREEZE_VOLUME = 0.3;
 const BREEZE_MIN_DELAY = 6;
 const BREEZE_MAX_DELAY = 9;
 const FIREPLACE_VOLUME_MAX = 0.4;
@@ -29,7 +29,7 @@ const AUDIO_CHECK_INTERVAL = 2000;
 const FADE_IN_DURATION = 2.0;  // seconds — all audio fades in over this after start
 
 const AUDIO_PATHS = {
-    water: 'audio/nature/surface/ocean.wav',
+    water: 'audio/nature/surface/waves.mp3',
     breeze: 'audio/nature/surface/breeze.wav',
     fireplace: 'audio/nature/surface/fireplace.wav',
     underwaterAmb: 'audio/nature/underwater/366159__dcsfx__underwater-loop-amb.wav',

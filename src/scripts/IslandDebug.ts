@@ -20,6 +20,9 @@ import {
     tent,
     dogBed,
     littleRocks,
+    apple1,
+    apple2,
+    apple3,
     clusterMainPatches,
     clusterPalmPatches,
     proceduralGrassMesh,
@@ -31,10 +34,26 @@ import {
     setGrassYOffset,
     grassEdgePadding,
     setGrassEdgePadding,
+    grassEdgeFalloffRadius,
+    setGrassEdgeFalloffRadius,
+    grassMinEdgeScale,
+    setGrassMinEdgeScale,
+    grassShadowOpacity,
+    setShadowFloorOpacity,
+    grassShadowColor,
+    grassShadowYOffset,
+    setShadowFloorYOffset,
+    grassShadowSpread,
+    setShadowFloorSpread,
+    setShadowFloorColor,
     setGrassColorBase,
     setGrassColorTip,
     foliageWindStrength,
     setFoliageWindStrength,
+    grassWobbleStrength,
+    setGrassWobbleStrength,
+    grassMaxHeight,
+    setGrassMaxHeight,
     type FoliageCluster,
 } from '../scene/Island';
 import * as Island from '../scene/Island';
@@ -86,6 +105,7 @@ import { phoneZoomConfig, mainCameraConfig, isWebPageMode, toggleCameraMode } fr
 import { mobileFov, mobileBreakpointWidth, aboveWaterBottomY as CFG_ABOVE_BOTTOM, aboveWaterBottomYMobile as CFG_ABOVE_BOTTOM_MOBILE, underwaterTopY as CFG_UNDER_TOP, underwaterTopYMobile as CFG_UNDER_TOP_MOBILE } from '../scene/config/CameraConfig';
 import { SetFOV } from '../scripts/Scene';
 import { phoneScreenConfig, updateOverlayStyle } from './PhoneScreen';
+import { grassColorBase as _grassColorBase, grassColorTip as _grassColorTip } from '../scene/ProceduralGrass';
 
 let gui: GUI | null = null;
 let visible = false;
@@ -464,8 +484,8 @@ function buildGUI(): void {
     const LS_KEY_GRASS = 'island-grass-colors-v2';
     const _storedColors = (() => { try { return JSON.parse(localStorage.getItem(LS_KEY_GRASS) ?? '{}'); } catch { return {}; } })();
     const foliageColorState = {
-        baseColor: _storedColors.baseColor ?? '#7ca550',
-        tipColor:  _storedColors.tipColor  ?? '#b3d26c',
+        baseColor: _storedColors.baseColor ?? _grassColorBase.getHexString().replace(/^/, '#'),
+        tipColor:  _storedColors.tipColor  ?? _grassColorTip.getHexString().replace(/^/, '#'),
     };
 
     // ── Copy Config ───────────────────────────────────────────────────────────
@@ -489,6 +509,9 @@ function buildGUI(): void {
                 `export const dogBedOffset      = { x: ${f(dogBed.position.x - ip.x)}, y: ${f(dogBed.position.y - ip.y)}, z: ${f(dogBed.position.z - ip.z)} };`,
                 `export const littleRocksOffset = { x: ${f(littleRocks.position.x - ip.x)}, y: ${f(littleRocks.position.y - ip.y)}, z: ${f(littleRocks.position.z - ip.z)} };`,
                 `export const phoneOffset       = { x: ${f(Island.phone.position.x - ip.x)}, y: ${f(Island.phone.position.y - ip.y)}, z: ${f(Island.phone.position.z - ip.z)} };`,
+                `export const apple1Offset      = { x: ${f(apple1.position.x - ip.x)}, y: ${f(apple1.position.y - ip.y)}, z: ${f(apple1.position.z - ip.z)} };`,
+                `export const apple2Offset      = { x: ${f(apple2.position.x - ip.x)}, y: ${f(apple2.position.y - ip.y)}, z: ${f(apple2.position.z - ip.z)} };`,
+                `export const apple3Offset      = { x: ${f(apple3.position.x - ip.x)}, y: ${f(apple3.position.y - ip.y)}, z: ${f(apple3.position.z - ip.z)} };`,
                 ``,
                 `// ── Scales ────────────────────────────────────────────────────────────────────`,
                 `export const islandScale      = ${f(island.scale.x)};`,
@@ -501,6 +524,9 @@ function buildGUI(): void {
                 `export const dogBedScale      = ${f(dogBed.scale.x)};`,
                 `export const littleRocksScale = ${f(littleRocks.scale.x)};`,
                 `export const phoneScale       = ${f(Island.phone.scale.x)};`,
+                `export const apple1Scale      = ${f(apple1.scale.x)};`,
+                `export const apple2Scale      = ${f(apple2.scale.x)};`,
+                `export const apple3Scale      = ${f(apple3.scale.x)};`,
                 ``,
                 `// ── Rotations ─────────────────────────────────────────────────────────────────`,
                 `export const palmtreeRotY   = ${f(palmtree.rotation.y)};`,
@@ -511,6 +537,9 @@ function buildGUI(): void {
                 `export const dogBedRotY     = ${f(dogBed.rotation.y)};`,
                 `export const littleRocksRot = { x: ${f(littleRocks.rotation.x)}, y: ${f(littleRocks.rotation.y)}, z: ${f(littleRocks.rotation.z)} };`,
                 `export const phoneRot       = { x: ${f(Island.phone.rotation.x)}, y: ${f(Island.phone.rotation.y)}, z: ${f(Island.phone.rotation.z)} };`,
+                `export const apple1RotY     = ${f(apple1.rotation.y)};`,
+                `export const apple2RotY     = ${f(apple2.rotation.y)};`,
+                `export const apple3RotY     = ${f(apple3.rotation.y)};`,
                 ``,
                 `// ── Foliage ────────────────────────────────────────────────────────────`,
                 `export const GRASS_COUNT          = ${Island.GRASS_COUNT};`,
@@ -518,6 +547,14 @@ function buildGUI(): void {
                 `export const GRASS_COLOR_BASE      = '${foliageColorState.baseColor}'; // sRGB hex`,
                 `export const GRASS_COLOR_TIP       = '${foliageColorState.tipColor}';  // sRGB hex`,
                 `export const FOLIAGE_WIND_STRENGTH = ${foliageWindStrength.toFixed(4)};`,
+                `export const GRASS_WOBBLE_STRENGTH  = ${Island.grassWobbleStrength.toFixed(3)};  // constant base sway`,
+                `export const GRASS_MAX_HEIGHT       = ${Island.grassMaxHeight.toFixed(3)};  // max blade height`,
+                `export const GRASS_EDGE_FALLOFF_RADIUS = ${grassEdgeFalloffRadius.toFixed(2)};   // probe radius for edge blade taper`,
+                `export const GRASS_MIN_EDGE_SCALE      = ${grassMinEdgeScale.toFixed(2)};   // minimum blade scale at island edge (0–1)`,
+                `export const GRASS_SHADOW_OPACITY      = ${grassShadowOpacity.toFixed(2)};   // alpha of dark AO floor under grass`,
+                `export const GRASS_SHADOW_COLOR        = '${Island.grassShadowColor}'; // sRGB dark green-black`,
+                `export const GRASS_SHADOW_Y_OFFSET     = ${Island.grassShadowYOffset.toFixed(3)};  // Y below average surface (negative = lower than blades)`,
+                `export const GRASS_SHADOW_SPREAD       = ${Island.grassShadowSpread.toFixed(2)};   // disc radius scale (1.0 = cluster width)`,
                 ``,
                 `// ── Spawn edge padding ────────────────────────────────────────────────────────`,
                 `export const SURFACE_EDGE_PADDING = ${Island.grassEdgePadding.toFixed(3)};`,
@@ -790,6 +827,58 @@ function buildGUI(): void {
         foliageFolder.add(windProxy, 'wind', 0, 0.3, 0.005)
             .name('Wind Strength').onChange((v: number) => setFoliageWindStrength(v));
 
+        // Wobble strength — constant sway, always present regardless of breeze
+        const wobbleProxy = { wobble: grassWobbleStrength };
+        foliageFolder.add(wobbleProxy, 'wobble', 0, 0.2, 0.001)
+            .name('Wobble Strength').onChange((v: number) => setGrassWobbleStrength(v));
+
+        // Blade height — requires respawn to rebuild geometry
+        const heightProxy = {
+            get height() { return r(grassMaxHeight); },
+            set height(v: number) { setGrassMaxHeight(v); doRespawn(); },
+        };
+        foliageFolder.add(heightProxy, 'height', 0.01, 0.3, 0.005).name('Blade Height').listen();
+
+        // Edge falloff radius — probes this far from each blade to detect proximity to island edge
+        const edgeFalloffProxy = {
+            get radius() { return r(grassEdgeFalloffRadius); },
+            set radius(v: number) { setGrassEdgeFalloffRadius(v); doRespawn(); },
+        };
+        foliageFolder.add(edgeFalloffProxy, 'radius', 0, 0.8, 0.01).name('Edge Falloff Radius').listen();
+
+        // Minimum blade scale applied at the island perimeter
+        const minScaleProxy = {
+            get scale() { return r(grassMinEdgeScale); },
+            set scale(v: number) { setGrassMinEdgeScale(v); doRespawn(); },
+        };
+        foliageFolder.add(minScaleProxy, 'scale', 0, 1, 0.01).name('Min Edge Scale').listen();
+
+        // Shadow floor opacity — live, no respawn needed
+        const shadowProxy = {
+            get opacity() { return r(grassShadowOpacity); },
+            set opacity(v: number) { setShadowFloorOpacity(v); },
+        };
+        foliageFolder.add(shadowProxy, 'opacity', 0, 1, 0.01).name('Shadow Opacity').listen();
+
+        // Shadow Y offset — pushes shadow below grass blades (negative = lower), requires respawn
+        const shadowYProxy = {
+            get offset() { return r(grassShadowYOffset); },
+            set offset(v: number) { setShadowFloorYOffset(v); respawnFoliage('grass'); },
+        };
+        foliageFolder.add(shadowYProxy, 'offset', -0.1, 0.1, 0.001).name('Shadow Y Offset').listen();
+
+        // Shadow spread — disc radius relative to spawn spread (1.0 = full cluster width)
+        const shadowSpreadProxy = {
+            get spread() { return r(grassShadowSpread); },
+            set spread(v: number) { setShadowFloorSpread(v); respawnFoliage('grass'); },
+        };
+        foliageFolder.add(shadowSpreadProxy, 'spread', 0.1, 2.0, 0.01).name('Shadow Spread').listen();
+
+        // Shadow floor color — requires respawn to rebake geometry
+        const shadowColorProxy = { color: grassShadowColor };
+        foliageFolder.addColor(shadowColorProxy, 'color').name('Shadow Color')
+            .onChange((v: string) => { setShadowFloorColor(v); respawnFoliage('grass'); });
+
         // Respawn button
         foliageFolder.add({ respawn: () => respawnFoliage('grass') }, 'respawn').name('Respawn Grass');
 
@@ -808,6 +897,9 @@ function buildGUI(): void {
 
     addObjectFolder(surfaceFolder, 'Island',    island,    { scaleRange: [0.01, 1.0]                           });
     addObjectFolder(surfaceFolder, 'Little Rocks', littleRocks, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
+    addObjectFolder(surfaceFolder, 'Apple 1',   apple1,    { scaleRange: [0.01, 0.5], rotAxes: ['y']           });
+    addObjectFolder(surfaceFolder, 'Apple 2',   apple2,    { scaleRange: [0.01, 0.5], rotAxes: ['y']           });
+    addObjectFolder(surfaceFolder, 'Apple 3',   apple3,    { scaleRange: [0.01, 0.5], rotAxes: ['y']           });
     addObjectFolder(surfaceFolder, 'Palm Tree', palmtree,  { scaleRange: [0.1,  2.0], rotAxes: ['y']           });
 
     const phoneFolder = addObjectFolder(surfaceFolder, 'Phone', Island.phone, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });

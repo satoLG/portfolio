@@ -10,7 +10,7 @@ import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../scr
 import * as CoinTooltip from '../scripts/CoinTooltip';
 import type { DialogLine, ReplyOption } from "../scripts/Dialog";
 import { isBreezeActive, playPugSnoreOnce, stopPugSnore, getAudioContext, getMasterDestination } from "../scripts/Audio";
-import { createGrassMesh, createPerlinTexture, grassColorBase, grassColorTip, type GrassUniforms } from './ProceduralGrass';
+import { createGrassMesh, createPerlinTexture, createShadowFloorMesh, grassColorBase, grassColorTip, type GrassUniforms } from './ProceduralGrass';
 import { camera, renderer, scene as threeScene } from "../scripts/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
 import * as PhoneScreen from '../scripts/PhoneScreen';
@@ -18,11 +18,22 @@ import { UNDERWATER_Y_THRESHOLD } from "../effects/PostProcess";
 import {
     islandPosition, firecampOffset, palmtreeOffset, radioOffset, swordOffset,
     pugOffset, tentOffset, dogBedOffset, littleRocksOffset, phoneOffset,
+    apple1Offset, apple2Offset, apple3Offset,
     islandScale, firecampScale, palmtreeScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, littleRocksScale, phoneScale,
+    apple1Scale, apple2Scale, apple3Scale,
     palmtreeRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, littleRocksRot, phoneRot,
+    apple1RotY, apple2RotY, apple3RotY,
     GRASS_COUNT  as GRASS_COUNT_CFG,
     SURFACE_EDGE_PADDING,
     EXCL_R_BONFIRE, EXCL_R_TENT, EXCL_R_PALM, EXCL_R_PUG, EXCL_R_RADIO, EXCL_R_ROCKS,
+    GRASS_EDGE_FALLOFF_RADIUS as GRASS_EDGE_FALLOFF_RADIUS_CFG,
+    GRASS_MIN_EDGE_SCALE      as GRASS_MIN_EDGE_SCALE_CFG,
+    GRASS_SHADOW_OPACITY      as GRASS_SHADOW_OPACITY_CFG,
+    GRASS_SHADOW_COLOR        as GRASS_SHADOW_COLOR_CFG,
+    GRASS_SHADOW_Y_OFFSET     as GRASS_SHADOW_Y_OFFSET_CFG,
+    GRASS_SHADOW_SPREAD       as GRASS_SHADOW_SPREAD_CFG,
+    GRASS_WOBBLE_STRENGTH     as GRASS_WOBBLE_STRENGTH_CFG,
+    GRASS_MAX_HEIGHT          as GRASS_MAX_HEIGHT_CFG,
 } from './config/IslandConfig';
 
 export const island = new Group();
@@ -36,8 +47,36 @@ export const dogBed = new Group();
 export const littleRocks = new Group();
 export const phone = new Group();
 export const chest = new Group();
+export const apple1 = new Group();
+export const apple2 = new Group();
+export const apple3 = new Group();
 
-let phoneDropped = false;  // True after the cutscene sequence (runtime only, no localStorage)
+export let grassShadowMesh: Mesh | null = null;
+
+// Grass edge falloff + shadow floor — runtime-mutable, initialised from config
+export let grassEdgeFalloffRadius = GRASS_EDGE_FALLOFF_RADIUS_CFG;
+export let grassMinEdgeScale      = GRASS_MIN_EDGE_SCALE_CFG;
+export let grassShadowOpacity     = GRASS_SHADOW_OPACITY_CFG;
+export let grassShadowColor       = GRASS_SHADOW_COLOR_CFG;
+export let grassShadowYOffset     = GRASS_SHADOW_Y_OFFSET_CFG;
+export let grassShadowSpread      = GRASS_SHADOW_SPREAD_CFG;
+export let grassWobbleStrength    = GRASS_WOBBLE_STRENGTH_CFG;
+export let grassMaxHeight         = GRASS_MAX_HEIGHT_CFG;
+
+export function setGrassEdgeFalloffRadius(v: number): void { grassEdgeFalloffRadius = Math.max(0, v); }
+export function setGrassMinEdgeScale(v: number): void      { grassMinEdgeScale = Math.max(0, Math.min(1, v)); }
+export function setShadowFloorOpacity(v: number): void {
+    grassShadowOpacity = v;
+    if (grassShadowMesh) (grassShadowMesh.material as any).uniforms.uOpacity.value = v;
+}
+export function setShadowFloorYOffset(v: number): void  { grassShadowYOffset = v; }
+export function setShadowFloorSpread(v: number): void   { grassShadowSpread  = Math.max(0.1, v); }
+export function setShadowFloorColor(v: string): void    { grassShadowColor   = v; }
+export function setGrassWobbleStrength(v: number): void {
+    grassWobbleStrength = v;
+    if (_grassUniforms) _grassUniforms.uWobbleStrength.value = v;
+}
+export function setGrassMaxHeight(v: number): void { grassMaxHeight = Math.max(0.01, v); }
 export const grassPatches: Group[] = [];
 
 // ── Procedural grass mesh (single draw call) ────────────────────────────────
@@ -46,7 +85,7 @@ let _perlinTexture: ReturnType<typeof createPerlinTexture> | null = null;
 let _grassUniforms: GrassUniforms | null = null;
 
 // Procedural grass spawn points (cached for respawning)
-let _grassSpawnPoints: Array<{ x: number; z: number; y: number }> = [];
+let _grassSpawnPoints: Array<{ x: number; z: number; y: number; edgeFactor: number }> = [];
 
 // Store palm tree leaves for wind animation
 const palmLeaves: Object3D[] = [];
@@ -85,7 +124,47 @@ function waitForIslandMeshes(callback: () => void): void {
 }
 
 /**
- * Returns true if world position (wx, wz) is directly above the island mesh
+ * Returns how deep inside the island this point is (0 = on the very edge,
+ * 1 = comfortably interior). Used to taper blade size near the island perimeter.
+ */
+function computeEdgeFactor(wx: number, wz: number): number {
+    if (islandMeshes.length === 0) return 1.0;
+    let hits = 0;
+    const r = grassEdgeFalloffRadius;
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
+    for (const [dx, dz] of dirs) {
+        _spawnOrigin.set(wx + dx * r, 5, wz + dz * r);
+        _spawnRaycaster.set(_spawnOrigin, _spawnDown);
+        if (_spawnRaycaster.intersectObjects(islandMeshes, false).length > 0) hits++;
+    }
+    return hits / 4;
+}
+
+/**
+ * Builds (or rebuilds) a dark transparent circle under the full grass cluster
+ * to give the impression of a denser, shadow-under-foliage look.
+ */
+function buildShadowFloor(spawnPoints: Array<{ x: number; z: number; y?: number; edgeFactor?: number }>): void {
+    if (grassShadowMesh) {
+        (grassShadowMesh.material as any).dispose();
+        grassShadowMesh.geometry.dispose();
+        threeScene.remove(grassShadowMesh);
+        grassShadowMesh = null;
+    }
+    if (spawnPoints.length === 0) return;
+
+    // Average Y — island surface is shallow enough that a single cy is fine
+    let totalY = 0;
+    for (const sp of spawnPoints) totalY += (sp.y ?? 0);
+    const cy = (totalY / spawnPoints.length) + grassShadowYOffset;
+
+    // Disc radius = spreadRadius (0.12) * spread factor, scaled by edgeFactor per disc
+    const instanceRadius = 0.12 * grassShadowSpread * (1 / 0.80);  // base: spreadRadius=0.12
+    grassShadowMesh = createShadowFloorMesh(spawnPoints, cy, instanceRadius, grassShadowOpacity, grassShadowColor);
+    threeScene.add(grassShadowMesh);
+}
+
+/**
  * AND all four cardinal neighbours at SURFACE_EDGE_PADDING distance also hit
  * the island, ensuring the patch is not too close to any edge.
  * Falls back to true when island hasn't loaded yet so spawning isn't blocked.
@@ -557,7 +636,7 @@ export function respawnFoliage(_which: FoliageCluster = 'grass'): void {
             const wz = SPAWN_BBOX.zMin + Math.random() * (SPAWN_BBOX.zMax - SPAWN_BBOX.zMin);
             if (!isValidSpawnPos(wx, wz, foliageSpawnPlaced)) continue;
             foliageSpawnPlaced.push({ x: wx, z: wz });
-            _grassSpawnPoints.push({ x: wx, z: wz, y: getSurfaceY(wx, wz) });
+            _grassSpawnPoints.push({ x: wx, z: wz, y: getSurfaceY(wx, wz), edgeFactor: computeEdgeFactor(wx, wz) });
             break;
         }
     }
@@ -567,9 +646,10 @@ export function respawnFoliage(_which: FoliageCluster = 'grass'): void {
         threeScene.remove(proceduralGrassMesh);
     }
     if (_grassUniforms) {
-        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment);
+        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment, { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight });
         threeScene.add(proceduralGrassMesh);
     }
+    buildShadowFloor(_grassSpawnPoints);
     console.log(`[Island] Respawned grass: ${_grassSpawnPoints.length} spawn points`);
 }
 
@@ -589,6 +669,7 @@ const palmLeafFullYUniform = new Uniform(PALM_LEAF_FULL_Y);
 const FOLIAGE_WIND_STRENGTH = 0.035;  // TWEAK: Very subtle sway
 // const FOLIAGE_WIND_SPEED = 0.8;       // TWEAK: Slow gentle movement
 const foliageWindStrengthUniform = new Uniform(FOLIAGE_WIND_STRENGTH);
+const grassWobbleStrengthUniform = new Uniform(GRASS_WOBBLE_STRENGTH_CFG);
 
 // Mouse interaction for grass
 const raycaster = new Raycaster();
@@ -922,16 +1003,17 @@ export function Start(): void {
                 const wz = SPAWN_BBOX.zMin + Math.random() * (SPAWN_BBOX.zMax - SPAWN_BBOX.zMin);
                 if (!isValidSpawnPos(wx, wz, foliageSpawnPlaced)) continue;
                 foliageSpawnPlaced.push({ x: wx, z: wz });
-                _grassSpawnPoints.push({ x: wx, z: wz, y: getSurfaceY(wx, wz) });
+                _grassSpawnPoints.push({ x: wx, z: wz, y: getSurfaceY(wx, wz), edgeFactor: computeEdgeFactor(wx, wz) });
                 break;
             }
         }
 
         // ── Create grass uniforms (shared with existing scene uniforms) ─
         _grassUniforms = {
-            uWindTime:      palmWindTimeUniform,
-            uWindStrength:  foliageWindStrengthUniform,
-            uNoiseTexture:  new Uniform(_perlinTexture),
+            uWindTime:       palmWindTimeUniform,
+            uWindStrength:   foliageWindStrengthUniform,
+            uWobbleStrength: grassWobbleStrengthUniform,
+            uNoiseTexture:   new Uniform(_perlinTexture),
             uNoiseScale:    new Uniform(0.5),
             uMouseWorldPos: mouseWorldPos,
             uMouseRadius:   mouseInfluenceRadius,
@@ -943,9 +1025,11 @@ export function Start(): void {
             uYOffset:       new Uniform(grassYOffset),
         };
 
-        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment);
+        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment, { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight });
         threeScene.add(proceduralGrassMesh);
         console.log(`[ProceduralGrass] ${_grassSpawnPoints.length} spawn points → ${_grassSpawnPoints.length * 40} blades (1 draw call)`);
+
+        buildShadowFloor(_grassSpawnPoints);
 
         _grassLoaded = true;
     });
@@ -1218,6 +1302,40 @@ export function Start(): void {
         (error) => { console.error('Error loading chest:', error); }
     );
 
+    // ── Apples — three independent instances near the palm tree ──────────────
+    const appleConfigs = [
+        { group: apple1, offset: apple1Offset, scale: apple1Scale, rotY: apple1RotY, label: 'apple1' },
+        { group: apple2, offset: apple2Offset, scale: apple2Scale, rotY: apple2RotY, label: 'apple2' },
+        { group: apple3, offset: apple3Offset, scale: apple3Scale, rotY: apple3RotY, label: 'apple3' },
+    ] as const;
+    loader.load(
+        'models/surface/apple.glb',
+        (gltf) => {
+            for (const cfg of appleConfigs) {
+                const clone = gltf.scene.clone(true);
+                applyOceanLightingToModel(clone);
+                clone.traverse((child) => {
+                    if ((child as any).isMesh) {
+                        child.castShadow = true;
+                        (child as any).receiveShadow = true;
+                    }
+                });
+                cfg.group.add(clone);
+                cfg.group.position.set(
+                    islandPosition.x + cfg.offset.x,
+                    islandPosition.y + cfg.offset.y,
+                    islandPosition.z + cfg.offset.z,
+                );
+                cfg.group.scale.setScalar(cfg.scale);
+                cfg.group.rotation.y = cfg.rotY;
+                threeScene.add(cfg.group);
+                console.log(`${cfg.label} loaded`);
+            }
+        },
+        undefined,
+        (error) => { console.error('Error loading apple.glb:', error); }
+    );
+
     // Setup mouse/touch event listeners for grass interaction
     setupGrassInteraction();
 
@@ -1333,6 +1451,8 @@ const PUG_ANIM_WALK = 10;  // walk animation clip index
 const PUG_ANIM_DROP = 0;   // drop / place item animation clip index
 /** Walk animation playback speed during the phone drop cutscene — TWEAK (1.0 = normal) */
 const PUG_CUTSCENE_WALK_SPEED = 0.55;
+
+let phoneDropped = false;  // True after the cutscene sequence (runtime only, no localStorage)
 
 // ── Helper: build the "who's Leo?" branch (ends with phone drop cutscene) ────
 function _buildLeoBranch(): DialogLine[] {
@@ -2316,7 +2436,7 @@ export function Update(isUnderwater = false): void {
     // Update shader uniforms so vertex wind also syncs with breeze
     palmWindTimeUniform.value = windTime;
     palmWindStrengthUniform.value = PALM_WIND_STRENGTH * breezeIntensity;
-    foliageWindStrengthUniform.value = FOLIAGE_WIND_STRENGTH * breezeIntensity;
+    foliageWindStrengthUniform.value = foliageWindStrength * breezeIntensity;
     
     // Procedural grass wind is handled entirely in the vertex shader via
     // Perlin noise texture sampling — no per-patch JS rotation needed.
