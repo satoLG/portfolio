@@ -1,4 +1,4 @@
-import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, DoubleSide, MeshBasicMaterial } from "three";
+import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, DoubleSide, MeshBasicMaterial, Box3, MeshStandardMaterial } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { config as sfDecorConfig } from './SeaFloorDecor';
 import { oceanAbsorptionUniform, underwaterFogDistUniform, setFoamMask } from "../materials/OceanMaterial";
@@ -34,7 +34,24 @@ import {
     GRASS_SHADOW_SPREAD       as GRASS_SHADOW_SPREAD_CFG,
     GRASS_WOBBLE_STRENGTH     as GRASS_WOBBLE_STRENGTH_CFG,
     GRASS_MAX_HEIGHT          as GRASS_MAX_HEIGHT_CFG,
+    APPLE_WIND_STRENGTH       as APPLE_WIND_STRENGTH_CFG,
+    APPLE_CLICK_TILT_BOOST,
+    APPLE_RESPAWN_FADE_DURATION,
+    APPLE_CLICK_COUNT_TO_FALL,
+    MAX_GROUND_APPLES,
+    APPLE_RESPAWN_DELAY,
+    GOLDEN_APPLE_INTERVAL,
+    GOLDEN_APPLE_COLOR,
+    GOLDEN_APPLE_EMISSIVE,
+    GOLDEN_APPLE_EMISSIVE_INTENSITY,
+    GOLDEN_APPLE_COLOR_Y_CUTOFF,
+    GOLDEN_APPLE_LIGHT_COLOR,
+    GOLDEN_APPLE_LIGHT_INTENSITY,
+    GOLDEN_APPLE_LIGHT_DISTANCE,
+    GOLDEN_APPLE_LIGHT_DECAY,
 } from './config/IslandConfig';
+import { initPhysicsWorld, addAppleBody, removeAppleBody, stepPhysics, physicsConfig, updateDebugger, registerPalmMeshes, registerExtraStaticMeshes } from './ApplePhysics';
+import { Body } from 'cannon-es';
 
 export const island = new Group();
 export const firecamp = new Group();
@@ -89,6 +106,7 @@ let _grassSpawnPoints: Array<{ x: number; z: number; y: number; edgeFactor: numb
 
 // Store palm tree leaves for wind animation
 const palmLeaves: Object3D[] = [];
+const palmTrunkMeshes: Mesh[] = [];
 
 // Island surface meshes — populated once the island glTF loads.
 // Used by isOnIslandSurface() to confine foliage spawning to the island top.
@@ -536,6 +554,275 @@ const GRASS_Y   = islandPosition.y + 1.0;  // Fallback Y when raycast unavailabl
 /** Fine-tune how far above the raycasted surface blades are rooted (runtime, via debug GUI) */
 export let grassYOffset = 0.0;
 export let foliageWindStrength = 0.035;
+export let appleWindStrength = APPLE_WIND_STRENGTH_CFG;
+export function setAppleWindStrength(v: number): void {
+    appleWindStrength = v;
+}
+export let appleRespawnDelay = APPLE_RESPAWN_DELAY;
+export function setAppleRespawnDelay(v: number): void {
+    appleRespawnDelay = v;
+}
+
+// ── Apple interaction state (tree apples) ────────────────────────────────────
+interface AppleState {
+    clickCount: number;
+    tiltBoost: number;
+    hidden: boolean;         // tree apple is invisible while waiting for ground clone to land
+    respawning: boolean;     // spring scale-up after respawn
+    respawnScale: number;
+    respawnVelocity: number;
+    originalPos: Vector3;
+    originalRotY: number;
+    originalScale: number;
+}
+
+const appleStates: AppleState[] = [
+    { clickCount: 0, tiltBoost: 0, hidden: false, respawning: false, respawnScale: 1, respawnVelocity: 0, originalPos: new Vector3(), originalRotY: 0, originalScale: 1 },
+    { clickCount: 0, tiltBoost: 0, hidden: false, respawning: false, respawnScale: 1, respawnVelocity: 0, originalPos: new Vector3(), originalRotY: 0, originalScale: 1 },
+    { clickCount: 0, tiltBoost: 0, hidden: false, respawning: false, respawnScale: 1, respawnVelocity: 0, originalPos: new Vector3(), originalRotY: 0, originalScale: 1 },
+];
+
+// ── Golden apple easter egg ─────────────────────────────────────────────────
+const MAX_GOLDEN_APPLES = 3; // hard cap — pool of 3 PointLights, reused
+let _totalAppleRespawns = 0;  // global counter — incremented each time ANY tree apple respawns (not counting page-load)
+export const goldenAppleConfig = {
+    interval:          GOLDEN_APPLE_INTERVAL,
+    color:             GOLDEN_APPLE_COLOR,
+    emissive:          GOLDEN_APPLE_EMISSIVE,
+    emissiveIntensity: GOLDEN_APPLE_EMISSIVE_INTENSITY,
+    colorYCutoff:      GOLDEN_APPLE_COLOR_Y_CUTOFF,
+    lightColor:        GOLDEN_APPLE_LIGHT_COLOR,
+    lightIntensity:    GOLDEN_APPLE_LIGHT_INTENSITY,
+    lightDistance:      GOLDEN_APPLE_LIGHT_DISTANCE,
+    lightDecay:        GOLDEN_APPLE_LIGHT_DECAY,
+};
+/** Per-apple: original materials saved before applying golden tint, null when normal. */
+const _savedAppleMaterials: (Map<Mesh, { color: Color; emissive: Color; emissiveIntensity: number }> | null)[] = [null, null, null];
+/** Per-apple bounding box (computed once at load, used for Y cutoff). */
+const _appleBBoxes: Box3[] = [];
+/** Track which tree apple indices are currently golden. */
+const _isGolden: boolean[] = [false, false, false];
+
+// ── PointLight pool (3 lights, pre-created at Start(), never add/removed) ───
+const _goldenLightPool: PointLight[] = [];
+/** Which apple group (or ground clone) each pooled light is currently attached to. null = available. */
+const _goldenLightOwners: (Group | null)[] = [null, null, null];
+
+/** Initialise the 3 pooled PointLights and add to scene (call once in Start()). */
+function _initGoldenLightPool(): void {
+    for (let i = 0; i < MAX_GOLDEN_APPLES; i++) {
+        const light = new PointLight(
+            new Color(goldenAppleConfig.lightColor), 0,
+            goldenAppleConfig.lightDistance, goldenAppleConfig.lightDecay,
+        );
+        light.castShadow = false;
+        // Add to threeScene at origin — intensity 0 means no visual impact
+        // but the renderer compiles the shader with this light on the FIRST frame.
+        threeScene.add(light);
+        _goldenLightPool.push(light);
+    }
+}
+
+/** Acquire a pooled light and attach to a group. Returns the light, or null if pool exhausted. */
+function _acquireGoldenLight(owner: Group): PointLight | null {
+    for (let i = 0; i < MAX_GOLDEN_APPLES; i++) {
+        if (!_goldenLightOwners[i]) {
+            const light = _goldenLightPool[i];
+            // Reparent from scene root into the owner group
+            threeScene.remove(light);
+            owner.add(light);
+            light.position.set(0, 0, 0);
+            light.color.set(goldenAppleConfig.lightColor);
+            light.intensity = goldenAppleConfig.lightIntensity;
+            light.distance = goldenAppleConfig.lightDistance;
+            light.decay = goldenAppleConfig.lightDecay;
+            _goldenLightOwners[i] = owner;
+            return light;
+        }
+    }
+    return null; // all 3 in use
+}
+
+/** Release a pooled light back (park it at scene root with intensity 0). */
+function _releaseGoldenLight(owner: Group): void {
+    for (let i = 0; i < MAX_GOLDEN_APPLES; i++) {
+        if (_goldenLightOwners[i] === owner) {
+            const light = _goldenLightPool[i];
+            owner.remove(light);
+            threeScene.add(light);
+            light.intensity = 0;
+            _goldenLightOwners[i] = null;
+            return;
+        }
+    }
+}
+
+/** Count how many golden apples currently exist (tree + ground). */
+function _countGoldenApples(): number {
+    let count = 0;
+    for (let i = 0; i < 3; i++) if (_isGolden[i]) count++;
+    for (const ga of groundApples) if (ga.isGolden) count++;
+    return count;
+}
+
+/** Compute golden blend factor for a mesh based on its Y position relative to the apple bbox. */
+function _goldenBlendFactor(mesh: Mesh, appleIndex: number): number {
+    const bbox = _appleBBoxes[appleIndex];
+    if (!bbox) return 1;
+    const cutoff = goldenAppleConfig.colorYCutoff;
+    if (cutoff >= 1) return 1;
+    if (cutoff <= 0) return 0;
+
+    // Get mesh center Y in world space
+    mesh.updateWorldMatrix(true, false);
+    const meshBBox = new Box3().setFromObject(mesh);
+    const meshMinY = meshBBox.min.y;
+    const meshMaxY = meshBBox.max.y;
+
+    // cutoff maps to a Y position within the apple bbox (bottom = 0, top = 1)
+    const appleMinY = bbox.min.y;
+    const appleMaxY = bbox.max.y;
+    const cutoffY = appleMinY + (appleMaxY - appleMinY) * cutoff;
+
+    // If mesh is fully below cutoff — fully golden
+    if (meshMaxY <= cutoffY) return 1;
+    // If mesh is fully above cutoff — not golden
+    if (meshMinY >= cutoffY) return 0;
+    // Partially overlapping — blend based on how much of the mesh is below
+    return (cutoffY - meshMinY) / (meshMaxY - meshMinY);
+}
+
+function _applyGoldenTint(index: number): void {
+    const grp = [apple1, apple2, apple3][index];
+    const saved = new Map<Mesh, { color: Color; emissive: Color; emissiveIntensity: number }>();
+    const goldColor = new Color(goldenAppleConfig.color);
+    const goldEmissive = new Color(goldenAppleConfig.emissive);
+
+    grp.traverse((child) => {
+        if ((child as any).isMesh) {
+            const mesh = child as Mesh;
+            const mat = mesh.material as MeshStandardMaterial;
+            if (mat && mat.color) {
+                saved.set(mesh, {
+                    color: mat.color.clone(),
+                    emissive: mat.emissive ? mat.emissive.clone() : new Color(0),
+                    emissiveIntensity: mat.emissiveIntensity ?? 0,
+                });
+                const t = _goldenBlendFactor(mesh, index);
+                if (t > 0) {
+                    mat.color.lerp(goldColor, t);
+                    if (mat.emissive) mat.emissive.lerp(goldEmissive, t);
+                    mat.emissiveIntensity = (mat.emissiveIntensity ?? 0) * (1 - t) + goldenAppleConfig.emissiveIntensity * t;
+                }
+            }
+        }
+    });
+    _savedAppleMaterials[index] = saved;
+    _isGolden[index] = true;
+
+    // Acquire a pooled light
+    _acquireGoldenLight(grp);
+}
+
+function _removeGoldenTint(index: number): void {
+    const saved = _savedAppleMaterials[index];
+    if (saved) {
+        saved.forEach((orig, mesh) => {
+            const mat = mesh.material as MeshStandardMaterial;
+            if (mat) {
+                mat.color.copy(orig.color);
+                if (mat.emissive) mat.emissive.copy(orig.emissive);
+                mat.emissiveIntensity = orig.emissiveIntensity;
+            }
+        });
+        _savedAppleMaterials[index] = null;
+    }
+    if (_isGolden[index]) {
+        const grp = [apple1, apple2, apple3][index];
+        _releaseGoldenLight(grp);
+    }
+    _isGolden[index] = false;
+}
+
+/** Live-update all currently golden apples (called from debug GUI). */
+export function updateAllGoldenApples(): void {
+    for (let i = 0; i < 3; i++) {
+        if (!_isGolden[i]) continue;
+        const grp = [apple1, apple2, apple3][i];
+        const saved = _savedAppleMaterials[i];
+        const goldColor = new Color(goldenAppleConfig.color);
+        const goldEmissive = new Color(goldenAppleConfig.emissive);
+        // Re-evaluate Y cutoff — restore originals first, then re-apply with blend
+        grp.traverse((child) => {
+            if ((child as any).isMesh) {
+                const mesh = child as Mesh;
+                const mat = mesh.material as MeshStandardMaterial;
+                if (!mat || !mat.color) return;
+                const orig = saved?.get(mesh);
+                if (!orig) return;
+                const t = _goldenBlendFactor(mesh, i);
+                if (t > 0) {
+                    mat.color.copy(orig.color).lerp(goldColor, t);
+                    if (mat.emissive) mat.emissive.copy(orig.emissive).lerp(goldEmissive, t);
+                    mat.emissiveIntensity = orig.emissiveIntensity * (1 - t) + goldenAppleConfig.emissiveIntensity * t;
+                } else {
+                    mat.color.copy(orig.color);
+                    if (mat.emissive) mat.emissive.copy(orig.emissive);
+                    mat.emissiveIntensity = orig.emissiveIntensity;
+                }
+            }
+        });
+    }
+    // Update all active pooled lights
+    for (let i = 0; i < MAX_GOLDEN_APPLES; i++) {
+        if (_goldenLightOwners[i]) {
+            const light = _goldenLightPool[i];
+            light.color.set(goldenAppleConfig.lightColor);
+            light.intensity = goldenAppleConfig.lightIntensity;
+            light.distance = goldenAppleConfig.lightDistance;
+            light.decay = goldenAppleConfig.lightDecay;
+        }
+    }
+}
+
+/** Start the tree apple respawn animation + golden Easter egg check. */
+function _startTreeAppleRespawn(treeIndex: number): void {
+    const st = appleStates[treeIndex];
+    if (!st.hidden) return;
+    st.hidden = false;
+    st.respawning = true;
+    st.respawnScale = 0;
+    st.respawnVelocity = 0;
+    [apple1, apple2, apple3][treeIndex].scale.setScalar(0.001);
+
+    // Golden apple Easter egg — every Nth respawn (capped at MAX_GOLDEN_APPLES)
+    _totalAppleRespawns++;
+    if (goldenAppleConfig.interval > 0
+        && _totalAppleRespawns % goldenAppleConfig.interval === 0
+        && _countGoldenApples() < MAX_GOLDEN_APPLES) {
+        _applyGoldenTint(treeIndex);
+    } else {
+        _removeGoldenTint(treeIndex);
+    }
+}
+
+// ── Ground apples (clones that fell and sit on the surface) ──────────────────
+interface GroundApple {
+    clone: Group;
+    physicsBody: Body;
+    fading: boolean;
+    fadeAlpha: number;
+    landed: boolean;         // true once the first collision happened
+    treeIndex: number;       // which tree apple spawned this clone
+    respawnTimer: number;    // countdown after landing before tree apple respawns
+    respawnTriggered: boolean; // true once tree respawn has been kicked off
+    isGolden: boolean;       // true if this ground clone was golden when it fell
+}
+const groundApples: GroundApple[] = [];
+
+const appleRaycaster = new Raycaster();
+const appleMouse = new Vector2();
+let isAppleHovered = false;
 export function setGrassYOffset(v: number): void {
     grassYOffset = v;
     if (_grassUniforms) _grassUniforms.uYOffset.value = v;
@@ -849,6 +1136,10 @@ function applyPalmWindShader(model: Group): void {
 }
 
 export function Start(): void {
+    // Pre-create golden apple PointLights so the renderer compiles the shader
+    // on the very first frame (behind the loading screen) — no mid-game stutter.
+    _initGoldenLightPool();
+
     loader.load(
         'models/surface/floating_island.glb',
         (gltf) => {
@@ -978,6 +1269,14 @@ export function Start(): void {
             );
             palmtree.scale.setScalar(palmtreeScale);
             palmtree.rotation.y = palmtreeRotY;
+
+            // Collect palm trunk meshes for physics collisions
+            palmtree.updateMatrixWorld(true);
+            palmtree.traverse((child) => {
+                if ((child as any).isMesh) palmTrunkMeshes.push(child as Mesh);
+            });
+            // Register with physics world (may trigger rebuild if world already exists)
+            registerPalmMeshes(palmTrunkMeshes);
             console.log('Palm tree loaded with ocean lighting');
         },
         (progress) => {
@@ -1054,6 +1353,14 @@ export function Start(): void {
             );
             radio.scale.setScalar(radioScale);
             radio.rotation.y = radioRotY;
+
+            // Register radio meshes as physics colliders
+            radio.updateMatrixWorld(true);
+            const radioMeshes: Mesh[] = [];
+            radio.traverse((child) => {
+                if ((child as any).isMesh) radioMeshes.push(child as Mesh);
+            });
+            registerExtraStaticMeshes(radioMeshes);
             console.log('Radio loaded with ocean lighting');
         },
         undefined,
@@ -1314,13 +1621,27 @@ export function Start(): void {
             for (const cfg of appleConfigs) {
                 const clone = gltf.scene.clone(true);
                 applyOceanLightingToModel(clone);
+                // Deep-clone materials so golden tint on one apple doesn't affect others
                 clone.traverse((child) => {
                     if ((child as any).isMesh) {
+                        const mesh = child as Mesh;
+                        if (Array.isArray(mesh.material)) {
+                            mesh.material = mesh.material.map((m) => m.clone());
+                        } else if (mesh.material) {
+                            mesh.material = mesh.material.clone();
+                        }
                         child.castShadow = true;
                         (child as any).receiveShadow = true;
                     }
                 });
-                cfg.group.add(clone);
+                // Wrap clone in an inner group offset downward so cfg.group's
+                // local Y=0 sits at the TOP of the apple (stem attachment point).
+                // Rotating cfg.group then swings the apple from the top, like a pendulum.
+                const contentGroup = new Group();
+                contentGroup.add(clone);
+                const box = new Box3().setFromObject(clone);
+                contentGroup.position.y = -box.max.y; // pull content down so top aligns with pivot
+                cfg.group.add(contentGroup);
                 cfg.group.position.set(
                     islandPosition.x + cfg.offset.x,
                     islandPosition.y + cfg.offset.y,
@@ -1330,6 +1651,17 @@ export function Start(): void {
                 cfg.group.rotation.y = cfg.rotY;
                 threeScene.add(cfg.group);
                 console.log(`${cfg.label} loaded`);
+            }
+            // Cache original positions for respawn
+            const appleGroups = [apple1, apple2, apple3];
+            for (let i = 0; i < 3; i++) {
+                appleStates[i].originalPos.copy(appleGroups[i].position);
+                appleStates[i].originalRotY = appleGroups[i].rotation.y;
+                appleStates[i].originalScale = appleGroups[i].scale.x;
+
+                // Cache bounding box for golden Y cutoff
+                appleGroups[i].updateMatrixWorld(true);
+                _appleBBoxes[i] = new Box3().setFromObject(appleGroups[i]);
             }
         },
         undefined,
@@ -1356,6 +1688,162 @@ export function Start(): void {
 
     // Setup coin hover/tap tooltips
     setupCoinInteraction();
+
+    // Setup apple click/hover interaction
+    setupAppleInteraction();
+
+    // Init cannon-es physics world for falling apples (after island meshes are ready)
+    waitForIslandMeshes(() => {
+        initPhysicsWorld(islandMeshes, palmTrunkMeshes);
+    });
+}
+
+// ── Apple click/hover interaction ───────────────────────────────────────────
+function setupAppleInteraction(): void {
+    const canvas = renderer.domElement;
+    if (!canvas) return;
+    const appleGroups = [apple1, apple2, apple3];
+
+    const onAppleClick = (clientX: number, clientY: number) => {
+        if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
+        if (isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive() || isChestZoomActive()) return;
+
+        appleMouse.x = (clientX / window.innerWidth) * 2 - 1;
+        appleMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+        appleRaycaster.setFromCamera(appleMouse, camera);
+
+        for (let i = 0; i < 3; i++) {
+            const st = appleStates[i];
+            if (st.hidden || st.respawning) continue;
+            if (appleGroups[i].children.length === 0) continue;
+            const hits = appleRaycaster.intersectObjects(appleGroups[i].children, true);
+            if (hits.length > 0) {
+                st.clickCount++;
+                st.tiltBoost = APPLE_CLICK_TILT_BOOST;
+                if (st.clickCount >= APPLE_CLICK_COUNT_TO_FALL) {
+                    triggerAppleFall(i);
+                }
+                break; // only one apple per click
+            }
+        }
+    };
+
+    canvas.addEventListener('click', (e: MouseEvent) => { onAppleClick(e.clientX, e.clientY); });
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (_touchWasMulti) return;
+        if (e.changedTouches.length > 0) {
+            const t = e.changedTouches[0];
+            onAppleClick(t.clientX, t.clientY);
+        }
+    });
+
+    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+        if (camera.position.y < UNDERWATER_Y_THRESHOLD) {
+            if (isAppleHovered) { isAppleHovered = false; canvas.style.cursor = ''; }
+            return;
+        }
+        appleMouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        appleMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        appleRaycaster.setFromCamera(appleMouse, camera);
+        let anyHit = false;
+        for (let i = 0; i < 3; i++) {
+            if (appleStates[i].hidden || appleStates[i].respawning) continue;
+            if (appleGroups[i].children.length === 0) continue;
+            if (appleRaycaster.intersectObjects(appleGroups[i].children, true).length > 0) {
+                anyHit = true; break;
+            }
+        }
+        if (anyHit) {
+            if (!isAppleHovered) { isAppleHovered = true; canvas.style.cursor = 'pointer'; }
+        } else {
+            if (isAppleHovered) { isAppleHovered = false; canvas.style.cursor = ''; }
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (isAppleHovered) { isAppleHovered = false; canvas.style.cursor = ''; }
+    });
+}
+
+function triggerAppleFall(index: number): void {
+    const appleGroups = [apple1, apple2, apple3];
+    const group = appleGroups[index];
+    const st = appleStates[index];
+
+    // Get world position before cloning
+    const worldPos = new Vector3();
+    group.getWorldPosition(worldPos);
+
+    // Clone the apple visual for the ground
+    const clone = group.clone(true);
+    // Deep-clone materials so fading the ground apple doesn't affect the tree apple
+    clone.traverse((child) => {
+        if ((child as any).isMesh) {
+            const mesh = child as Mesh;
+            if (Array.isArray(mesh.material)) {
+                mesh.material = mesh.material.map((m) => m.clone());
+            } else if (mesh.material) {
+                mesh.material = mesh.material.clone();
+            }
+        }
+    });
+    clone.position.copy(worldPos);
+    clone.rotation.set(0, st.originalRotY, 0);
+    clone.scale.setScalar(st.originalScale);
+    threeScene.add(clone);
+
+    // Compute the visual bounding box center of the clone (not the pivot)
+    const bbox = new Box3().setFromObject(clone);
+    const visualCenter = new Vector3();
+    bbox.getCenter(visualCenter);
+
+    // Recenter the clone so its origin is at the visual center of the fruit.
+    // This ensures physics body and visual rotate around the same point.
+    // localCenter is world-space; divide by scale to get local-space offset.
+    const s = st.originalScale;
+    const localOffset = visualCenter.clone().sub(clone.position).divideScalar(s);
+    clone.children.forEach(child => child.position.sub(localOffset));
+    clone.position.copy(visualCenter);
+    console.log(`[Apple${index}] pivot=${worldPos.y.toFixed(3)} visCenter=${visualCenter.y.toFixed(3)} bboxMin=${bbox.min.y.toFixed(3)} bboxMax=${bbox.max.y.toFixed(3)} scale=${s} localOffY=${localOffset.y.toFixed(3)}`);
+
+    // Create physics body at the visual center of the apple fruit
+    let body: Body;
+    try {
+        body = addAppleBody(visualCenter);
+    } catch {
+        threeScene.remove(clone);
+        return;
+    }
+
+    const wasGolden = _isGolden[index];
+    const ga: GroundApple = { clone, physicsBody: body, fading: false, fadeAlpha: 1, landed: false, treeIndex: index, respawnTimer: appleRespawnDelay, respawnTriggered: false, isGolden: wasGolden };
+    groundApples.push(ga);
+
+    // If the tree apple was golden, transfer the pooled light to the ground clone
+    if (wasGolden) {
+        const grp = [apple1, apple2, apple3][index];
+        _releaseGoldenLight(grp);
+        _acquireGoldenLight(clone);
+    }
+
+    // When the clone hits the surface, mark landed (for queue tracking)
+    body.addEventListener('collide', () => { ga.landed = true; });
+
+    // Evict oldest ground apples if over the limit
+    let groundCount = 0;
+    for (const g of groundApples) if (!g.fading) groundCount++;
+    while (groundCount > MAX_GROUND_APPLES) {
+        for (const g of groundApples) {
+            if (!g.fading) { g.fading = true; groundCount--; break; }
+        }
+    }
+
+    // Hide the tree apple until the ground clone lands + delay elapses
+    _removeGoldenTint(index); // clear any golden tint before hiding
+    st.clickCount = 0;
+    st.tiltBoost = 0;
+    st.hidden = true;
+    group.scale.setScalar(0.001);
 }
 
 // ── Multi-touch gesture tracker ─────────────────────────────────────────────
@@ -2437,7 +2925,104 @@ export function Update(isUnderwater = false): void {
     palmWindTimeUniform.value = windTime;
     palmWindStrengthUniform.value = PALM_WIND_STRENGTH * breezeIntensity;
     foliageWindStrengthUniform.value = foliageWindStrength * breezeIntensity;
-    
+
+    // ── Apple pendulum sway / fall / respawn ─────────────────────────────────
+    const APPLE_PHASES = [0.00, 1.37, 2.71];
+    const appleGroups  = [apple1, apple2, apple3];
+
+    // Step physics world (no-op when no bodies are in-flight)
+    stepPhysics(deltaTime);
+    updateDebugger();
+
+    // ── Tree apples: sway + respawn spring ──────────────────────────────────
+    for (let i = 0; i < 3; i++) {
+        const st = appleStates[i];
+        const grp = appleGroups[i];
+
+        // Hidden: waiting for ground clone to land before respawn kicks in
+        if (st.hidden) continue;
+
+        // Respawn spring-scale animation
+        if (st.respawning) {
+            const SPRING_K = 120;
+            const SPRING_D = 10;
+            const target = 1.0;
+            const clampedDt = Math.min(deltaTime, 0.05); // prevent overshoot on lag spikes
+            const displacement = st.respawnScale - target;
+            const springForce = -SPRING_K * displacement - SPRING_D * st.respawnVelocity;
+            st.respawnVelocity += springForce * clampedDt;
+            st.respawnScale += st.respawnVelocity * clampedDt;
+            st.respawnScale = Math.min(st.respawnScale, 1.3); // hard cap
+            grp.scale.setScalar(st.originalScale * Math.max(0, st.respawnScale));
+            if (Math.abs(displacement) < 0.005 && Math.abs(st.respawnVelocity) < 0.01) {
+                st.respawnScale = 1;
+                st.respawning = false;
+                grp.scale.setScalar(st.originalScale);
+            }
+            continue;
+        }
+
+        // Normal sway + tilt boost
+        const ph = APPLE_PHASES[i];
+        const t  = windTime;
+        const tiltX = Math.sin(t * 2.3  + ph)             * 0.65
+                    + Math.sin(t * 5.1  + ph * 1.4 + 0.6) * 0.35;
+        const tiltZ = Math.sin(t * 1.9  + ph + 1.2)       * 0.65
+                    + Math.sin(t * 4.7  + ph * 2.3 + 2.0)  * 0.35;
+        const amplitude = 0.008 + appleWindStrength * breezeIntensity + st.tiltBoost;
+        grp.rotation.x = tiltX * amplitude;
+        grp.rotation.z = tiltZ * amplitude;
+
+        if (st.tiltBoost > 0) {
+            st.tiltBoost = Math.max(0, st.tiltBoost - deltaTime * 2.0);
+        }
+    }
+
+    // ── Ground apples: sync physics, fade, cleanup ──────────────────────────
+    const appleGroupsForRespawn = [apple1, apple2, apple3];
+    for (let i = groundApples.length - 1; i >= 0; i--) {
+        const ga = groundApples[i];
+
+        // Sync clone position from physics body (both centered at visual center)
+        const bp = ga.physicsBody.position;
+        const bq = ga.physicsBody.quaternion;
+        ga.clone.position.set(bp.x, bp.y - physicsConfig.appleBodyYOffset, bp.z);
+        ga.clone.quaternion.set(bq.x, bq.y, bq.z, bq.w);
+
+        // After landing, count down the respawn delay then trigger tree apple respawn
+        if (ga.landed && !ga.respawnTriggered) {
+            ga.respawnTimer -= deltaTime;
+            if (ga.respawnTimer <= 0) {
+                ga.respawnTriggered = true;
+                _startTreeAppleRespawn(ga.treeIndex);
+            }
+        }
+
+        // Fade-out
+        if (ga.fading) {
+            ga.fadeAlpha -= deltaTime / APPLE_RESPAWN_FADE_DURATION;
+            const alpha = Math.max(0, ga.fadeAlpha);
+            ga.clone.traverse((child) => {
+                if ((child as any).isMesh) {
+                    const mat = (child as any).material;
+                    if (mat) { mat.transparent = true; mat.opacity = alpha; }
+                }
+            });
+            if (ga.fadeAlpha <= 0) {
+                // Ensure tree apple is respawned before removing ground apple
+                if (!ga.respawnTriggered) {
+                    ga.respawnTriggered = true;
+                    _startTreeAppleRespawn(ga.treeIndex);
+                }
+                // Remove from scene and physics
+                if (ga.isGolden) _releaseGoldenLight(ga.clone);
+                removeAppleBody(ga.physicsBody);
+                threeScene.remove(ga.clone);
+                groundApples.splice(i, 1);
+            }
+        }
+    }
+
     // Procedural grass wind is handled entirely in the vertex shader via
     // Perlin noise texture sampling — no per-patch JS rotation needed.
 

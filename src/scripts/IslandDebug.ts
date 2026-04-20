@@ -54,9 +54,13 @@ import {
     setGrassWobbleStrength,
     grassMaxHeight,
     setGrassMaxHeight,
+    appleWindStrength,
+    setAppleWindStrength,
     type FoliageCluster,
 } from '../scene/Island';
 import * as Island from '../scene/Island';
+import { APPLE_CLICK_TILT_BOOST, APPLE_RESPAWN_FADE_DURATION, APPLE_CLICK_COUNT_TO_FALL, MAX_GROUND_APPLES, APPLE_RESPAWN_DELAY } from '../scene/config/IslandConfig';
+import { physicsConfig, refreshContactMaterial, setDebugEnabled, rebuildPhysicsWorld } from '../scene/ApplePhysics';
 import {
     oceanAbsorptionUniform,
     normalMapScaleUniform,
@@ -103,7 +107,7 @@ import {
 import { Object3D } from 'three';
 import { phoneZoomConfig, mainCameraConfig, isWebPageMode, toggleCameraMode } from '../scripts/Control';
 import { mobileFov, mobileBreakpointWidth, aboveWaterBottomY as CFG_ABOVE_BOTTOM, aboveWaterBottomYMobile as CFG_ABOVE_BOTTOM_MOBILE, underwaterTopY as CFG_UNDER_TOP, underwaterTopYMobile as CFG_UNDER_TOP_MOBILE } from '../scene/config/CameraConfig';
-import { SetFOV } from '../scripts/Scene';
+import { SetFOV, scene as threeScene } from '../scripts/Scene';
 import { phoneScreenConfig, updateOverlayStyle } from './PhoneScreen';
 import { grassColorBase as _grassColorBase, grassColorTip as _grassColorTip } from '../scene/ProceduralGrass';
 
@@ -466,12 +470,13 @@ function buildGUI(): void {
     // Prevent wheel events from reaching the canvas/scene
     gui.domElement.addEventListener('wheel', (e: WheelEvent) => { e.stopPropagation(); }, { passive: false });
 
-    // ── Top-level group folders (SKY → SURFACE → OCEAN → SEAFLOOR → CAMERA) ──
+    // ── Top-level group folders (SKY → SURFACE → OCEAN → SEAFLOOR → CAMERA → PHYSICS) ──
     const skyFolder      = gui.addFolder('Sky');
     const surfaceFolder  = gui.addFolder('Surface');
     const oceanFolder    = gui.addFolder('Ocean');
     const seafloorFolder = gui.addFolder('Seafloor');
     const cameraFolder   = gui.addFolder('Camera');
+    const physicsFolder  = gui.addFolder('Physics');
 
     // Fog distortion state — must be declared before copy actions
     const _fogState = {
@@ -540,6 +545,13 @@ function buildGUI(): void {
                 `export const apple1RotY     = ${f(apple1.rotation.y)};`,
                 `export const apple2RotY     = ${f(apple2.rotation.y)};`,
                 `export const apple3RotY     = ${f(apple3.rotation.y)};`,
+                ``,
+                `// ── Apple wind sway ───────────────────────────────────────────────────────────────`,
+                `export const APPLE_WIND_STRENGTH  = ${appleWindStrength.toFixed(4)};   // TWEAK: Max tilt angle in radians (0 = off, 0.3 = strong)`,
+                `export const APPLE_CLICK_TILT_BOOST   = ${APPLE_CLICK_TILT_BOOST.toFixed(2)};`,
+                `export const APPLE_RESPAWN_FADE_DURATION = ${APPLE_RESPAWN_FADE_DURATION.toFixed(1)};`,
+                `export const APPLE_CLICK_COUNT_TO_FALL  = ${APPLE_CLICK_COUNT_TO_FALL};`,
+                `export const MAX_GROUND_APPLES          = ${MAX_GROUND_APPLES};`,
                 ``,
                 `// ── Foliage ────────────────────────────────────────────────────────────`,
                 `export const GRASS_COUNT          = ${Island.GRASS_COUNT};`,
@@ -900,6 +912,152 @@ function buildGUI(): void {
     addObjectFolder(surfaceFolder, 'Apple 1',   apple1,    { scaleRange: [0.01, 0.5], rotAxes: ['y']           });
     addObjectFolder(surfaceFolder, 'Apple 2',   apple2,    { scaleRange: [0.01, 0.5], rotAxes: ['y']           });
     addObjectFolder(surfaceFolder, 'Apple 3',   apple3,    { scaleRange: [0.01, 0.5], rotAxes: ['y']           });
+
+    {
+        const appleWindFolder = physicsFolder.addFolder('Apple Wind');
+        const appleWindProxy = { strength: appleWindStrength };
+        appleWindFolder.add(appleWindProxy, 'strength', 0, 0.5, 0.005)
+            .name('Sway Strength')
+            .onChange((v: number) => setAppleWindStrength(v));
+        appleWindFolder.add({ v: APPLE_CLICK_TILT_BOOST }, 'v', 0, 0.5, 0.005)
+            .name('Click Tilt Boost')
+            .listen();
+        appleWindFolder.add({ v: APPLE_CLICK_COUNT_TO_FALL }, 'v', 1, 10, 1)
+            .name('Clicks to Fall')
+            .listen();
+        appleWindFolder.add({ v: MAX_GROUND_APPLES }, 'v', 1, 20, 1)
+            .name('Max Ground Apples')
+            .listen();
+        appleWindFolder.add({ v: APPLE_RESPAWN_FADE_DURATION }, 'v', 0.1, 5, 0.1)
+            .name('Fade Duration (s)')
+            .listen();
+        const respawnDelayProxy = { delay: Island.appleRespawnDelay };
+        appleWindFolder.add(respawnDelayProxy, 'delay', 0, 3, 0.1)
+            .name('Respawn Delay (s)')
+            .onChange((v: number) => Island.setAppleRespawnDelay(v));
+        appleWindFolder.close();
+    }
+
+    {
+        const goldenFolder = physicsFolder.addFolder('Golden Apple');
+        const liveUpdate = () => Island.updateAllGoldenApples();
+        goldenFolder.add(Island.goldenAppleConfig, 'interval', 1, 20, 1)
+            .name('Every Nth Respawn');
+        goldenFolder.addColor(Island.goldenAppleConfig, 'color')
+            .name('Gold Tint')
+            .onChange(liveUpdate);
+        goldenFolder.addColor(Island.goldenAppleConfig, 'emissive')
+            .name('Emissive Color')
+            .onChange(liveUpdate);
+        goldenFolder.add(Island.goldenAppleConfig, 'emissiveIntensity', 0, 2, 0.05)
+            .name('Emissive Intensity')
+            .onChange(liveUpdate);
+        goldenFolder.add(Island.goldenAppleConfig, 'colorYCutoff', 0, 1, 0.05)
+            .name('Color Y Cutoff')
+            .onChange(liveUpdate);
+        goldenFolder.addColor(Island.goldenAppleConfig, 'lightColor')
+            .name('Light Color')
+            .onChange(liveUpdate);
+        goldenFolder.add(Island.goldenAppleConfig, 'lightIntensity', 0, 3, 0.05)
+            .name('Light Intensity')
+            .onChange(liveUpdate);
+        goldenFolder.add(Island.goldenAppleConfig, 'lightDistance', 0.1, 5, 0.1)
+            .name('Light Distance')
+            .onChange(liveUpdate);
+        goldenFolder.add(Island.goldenAppleConfig, 'lightDecay', 0, 5, 0.1)
+            .name('Light Decay')
+            .onChange(liveUpdate);
+        goldenFolder.close();
+    }
+
+    {
+        const applePhysicsFolder = physicsFolder.addFolder('Apple');
+        applePhysicsFolder.add(physicsConfig, 'gravity', -30, 0, 0.1)
+            .name('Gravity');
+        applePhysicsFolder.add(physicsConfig, 'appleBodyYOffset', -0.3, 0.3, 0.005)
+            .name('Body Y Offset');
+
+        // Compound corner spheres
+        const compoundFolder = applePhysicsFolder.addFolder('Compound Spheres');
+        compoundFolder.add(physicsConfig, 'sphereRadius', 0.005, 0.1, 0.001).name('Sphere Radius');
+        compoundFolder.add(physicsConfig, 'sphereSpread', 0.005, 0.1, 0.001).name('Corner Spread');
+        compoundFolder.add(physicsConfig, 'sphereYTop', -0.1, 0.1, 0.001).name('Top Y');
+        compoundFolder.add(physicsConfig, 'sphereYBottom', -0.1, 0.1, 0.001).name('Bottom Y');
+        compoundFolder.close();
+
+        applePhysicsFolder.add(physicsConfig, 'appleMass', 0.01, 2, 0.01)
+            .name('Mass (kg)');
+        applePhysicsFolder.add(physicsConfig, 'linearDamping', 0, 1, 0.01)
+            .name('Linear Damping');
+        applePhysicsFolder.add(physicsConfig, 'angularDamping', 0, 1, 0.01)
+            .name('Angular Damping');
+        applePhysicsFolder.add(physicsConfig, 'friction', 0, 2, 0.05)
+            .name('Friction')
+            .onChange(() => refreshContactMaterial());
+        applePhysicsFolder.add(physicsConfig, 'restitution', 0, 1, 0.05)
+            .name('Restitution (bounce)')
+            .onChange(() => refreshContactMaterial());
+        applePhysicsFolder.add(physicsConfig, 'sleepSpeedLimit', 0.01, 1, 0.01)
+            .name('Sleep Speed Limit');
+        applePhysicsFolder.add(physicsConfig, 'sleepTimeLimit', 0.1, 5, 0.1)
+            .name('Sleep Time Limit');
+        applePhysicsFolder.add(physicsConfig, 'safetyPlaneY', -10, 0, 0.1)
+            .name('Safety Plane Y');
+        applePhysicsFolder.add(physicsConfig, 'substeps', 1, 30, 1)
+            .name('Substeps');
+        applePhysicsFolder.add(physicsConfig, 'palmTrunkMaxY', -2, 1, 0.01)
+            .name('Palm Trunk Max Y')
+            .onChange(() => rebuildPhysicsWorld());
+
+        const debugProxy = { wireframe: false };
+        applePhysicsFolder.add(debugProxy, 'wireframe')
+            .name('Show Wireframe')
+            .onChange((v: boolean) => setDebugEnabled(v, threeScene));
+
+        applePhysicsFolder.add({
+            copyPhysicsConfig: () => {
+                const content = [
+                    `// src/scene/config/Physics/AppleConfig.ts`,
+                    `// Apple physics configuration — generated by IslandDebug.`,
+                    `// Paste this entire file to replace src/scene/config/Physics/AppleConfig.ts`,
+                    ``,
+                    `// ── World ─────────────────────────────────────────────────────────────────────`,
+                    `export const GRAVITY           = ${physicsConfig.gravity.toFixed(2)};`,
+                    `export const SUBSTEPS          = ${physicsConfig.substeps};`,
+                    `export const SAFETY_PLANE_Y   = ${physicsConfig.safetyPlaneY.toFixed(1)};`,
+                    ``,
+                    `// ── Apple body (compound: 4 corner spheres) ─────────────────────────────────`,
+                    `export const APPLE_BODY_Y_OFFSET = ${physicsConfig.appleBodyYOffset.toFixed(2)};  // offset whole compound center from visual center`,
+                    `export const APPLE_MASS        = ${physicsConfig.appleMass.toFixed(2)};    // kg`,
+                    `export const LINEAR_DAMPING    = ${physicsConfig.linearDamping.toFixed(2)};`,
+                    `export const ANGULAR_DAMPING   = ${physicsConfig.angularDamping.toFixed(2)};`,
+                    ``,
+                    `// All 4 spheres share a radius and spread — adjust these two to resize the cage`,
+                    `export const SPHERE_RADIUS     = ${physicsConfig.sphereRadius.toFixed(3)};   // individual sphere radius`,
+                    `export const SPHERE_SPREAD     = ${physicsConfig.sphereSpread.toFixed(3)};   // distance from center to each corner`,
+                    `export const SPHERE_Y_TOP      = ${physicsConfig.sphereYTop.toFixed(3)};   // Y offset for top pair`,
+                    `export const SPHERE_Y_BOTTOM   = ${physicsConfig.sphereYBottom.toFixed(3)};  // Y offset for bottom pair`,
+                    ``,
+                    `// ── Contact material ──────────────────────────────────────────────────────────`,
+                    `export const FRICTION          = ${physicsConfig.friction.toFixed(2)};`,
+                    `export const RESTITUTION       = ${physicsConfig.restitution.toFixed(2)};`,
+                    ``,
+                    `// ── Sleep detection ───────────────────────────────────────────────────────────`,
+                    `export const SLEEP_SPEED_LIMIT = ${physicsConfig.sleepSpeedLimit.toFixed(2)};`,
+                    `export const SLEEP_TIME_LIMIT  = ${physicsConfig.sleepTimeLimit.toFixed(2)};`,
+                    ``,
+                    `// ── Collider geometry ─────────────────────────────────────────────────────────`,
+                    `export const PALM_TRUNK_MAX_Y  = ${physicsConfig.palmTrunkMaxY.toFixed(2)};    // world-space Y cutoff — only trunk geometry below this gets a collider`,
+                ].join('\n') + '\n';
+                navigator.clipboard.writeText(content).then(() => {
+                    console.log('📋 PhysicsConfig.ts copied to clipboard');
+                });
+            }
+        }, 'copyPhysicsConfig').name('📋 Copy Physics Config');
+
+        applePhysicsFolder.close();
+    }
+
     addObjectFolder(surfaceFolder, 'Palm Tree', palmtree,  { scaleRange: [0.1,  2.0], rotAxes: ['y']           });
 
     const phoneFolder = addObjectFolder(surfaceFolder, 'Phone', Island.phone, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });

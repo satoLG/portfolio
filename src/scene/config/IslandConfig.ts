@@ -13,9 +13,9 @@ export const tentOffset     = { x: 0.4800, y: 0.9800, z: -0.3500 };
 export const dogBedOffset      = { x: 0.0000, y: 0.8000, z: 3.3000 };
 export const littleRocksOffset = { x: 0.3200, y: 0.9850, z: 0.7000 };
 export const phoneOffset       = { x: 0.3300, y: 1.0540, z: 0.7720 };
-export const apple1Offset      = { x: -0.6090, y: 2.6000, z: 0.4920 };
-export const apple2Offset      = { x: -0.1540, y: 2.7500, z: 0.2400 };
-export const apple3Offset      = { x: -0.4040, y: 3.2500, z: 0.1310 };
+export const apple1Offset      = { x: -0.7090, y: 2.5500, z: 0.4180 };
+export const apple2Offset      = { x: -0.1540, y: 2.6760, z: 0.2710 };
+export const apple3Offset      = { x: -0.4780, y: 3.2500, z: 0.1620 };
 
 // ── Scales ────────────────────────────────────────────────────────────────────
 export const islandScale      = 0.2500;
@@ -45,12 +45,31 @@ export const apple1RotY     = 0.1764;
 export const apple2RotY     = -0.9226;
 export const apple3RotY     = -0.5000;
 
+// ── Apple wind sway ───────────────────────────────────────────────────────────────
+export const APPLE_WIND_STRENGTH  = 0.1700;   // TWEAK: Max tilt angle in radians (0 = off, 0.3 = strong)
+export const APPLE_CLICK_TILT_BOOST   = 0.15;   // TWEAK: One-shot tilt amplitude on click (radians)
+export const APPLE_RESPAWN_FADE_DURATION = 1.5; // TWEAK: Seconds for fade-out / scale-up
+export const APPLE_CLICK_COUNT_TO_FALL  = 3;    // TWEAK: Clicks needed to detach apple
+export const MAX_GROUND_APPLES          = 6;    // When a fallen apple exceeds this, the oldest despawns
+export const APPLE_RESPAWN_DELAY        = 0.8;  // TWEAK: Seconds after landing before tree apple respawns
+
+// ── Golden apple easter egg ───────────────────────────────────────────────────
+export const GOLDEN_APPLE_INTERVAL      = 3;      // Every Nth respawn is golden (3 = 3rd, 6th, 9th…)
+export const GOLDEN_APPLE_COLOR         = '#c8a820'; // sRGB hex — yellow-gold tint
+export const GOLDEN_APPLE_EMISSIVE      = '#e2b512'; // sRGB hex — subtle gold emissive glow
+export const GOLDEN_APPLE_EMISSIVE_INTENSITY = 1.15; // TWEAK: emissive intensity (0 = off)
+export const GOLDEN_APPLE_COLOR_Y_CUTOFF    = 1.0;   // 0–1 normalized: 1 = full apple, 0.5 = bottom half only
+export const GOLDEN_APPLE_LIGHT_COLOR       = '#d0ba62'; // sRGB hex — point light color
+export const GOLDEN_APPLE_LIGHT_INTENSITY   = 0.45;       // point light intensity
+export const GOLDEN_APPLE_LIGHT_DISTANCE    = 1.0;       // point light range
+export const GOLDEN_APPLE_LIGHT_DECAY       = 2;         // physically correct decay
+
 // ── Foliage ────────────────────────────────────────────────────────────
 export const GRASS_COUNT          = 204;
 export const GRASS_Y_OFFSET        = 0.0000;
 export const GRASS_COLOR_BASE      = '#3c550b'; // sRGB hex
 export const GRASS_COLOR_TIP       = '#50671d';  // sRGB hex
-export const FOLIAGE_WIND_STRENGTH = 0.0000;
+export const FOLIAGE_WIND_STRENGTH = 0.0350;
 export const GRASS_WOBBLE_STRENGTH  = 0.034;  // constant base sway
 export const GRASS_MAX_HEIGHT       = 0.055;  // max blade height
 export const GRASS_EDGE_FALLOFF_RADIUS = 0.05;   // probe radius for edge blade taper
