@@ -27,6 +27,8 @@
   "dependencies": {
     "@types/three": "^0.183.0",
     "bezier-easing": "^2.1.0",
+    "cannon-es": "^0.20.0",
+    "cannon-es-debugger": "^1.0.0",
     "lil-gui": "^0.21.0",
     "three": "0.183.2",
     "wavesurfer.js": "^7.12.1"
