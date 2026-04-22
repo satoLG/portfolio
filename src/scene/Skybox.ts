@@ -1,7 +1,7 @@
 import { BufferAttribute, BufferGeometry, Matrix3, Mesh, Uniform, Vector3 } from "three";
 import * as skyboxMaterial from "../materials/SkyboxMaterial";
-import { deltaTime } from "../scripts/Time";
-import { camera } from "../scripts/Scene";
+import { deltaTime } from "../core/Time";
+import { camera } from "../core/Scene";
 
 export const skybox = new Mesh();
 export const dirToLight = new Vector3();

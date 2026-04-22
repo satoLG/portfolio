@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node scripts/capture-demo.cjs)",
+      "Bash(npx playwright *)",
+      "Bash(npx tsc *)",
+      "Bash(grep -E \"\\\\.js$|\\\\.d\\\\.ts$\")"
+    ]
+  }
+}

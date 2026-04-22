@@ -5,8 +5,8 @@ import {
     ShaderMaterial,
     NormalBlending
 } from "three";
-import { camera, scene } from "../scripts/Scene";
-import { deltaTime } from "../scripts/Time";
+import { camera, scene } from "../core/Scene";
+import { deltaTime } from "../core/Time";
 import { UNDERWATER_Y_THRESHOLD } from "./PostProcess";
 
 // ============================================

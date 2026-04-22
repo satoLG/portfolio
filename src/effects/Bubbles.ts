@@ -8,10 +8,10 @@ import {
     InstancedBufferAttribute,
     Object3D
 } from "three";
-import { camera, scene } from "../scripts/Scene";
-import { deltaTime, time } from "../scripts/Time";
+import { camera, scene } from "../core/Scene";
+import { deltaTime, time } from "../core/Time";
 import { UNDERWATER_Y_THRESHOLD } from "./PostProcess";
-import { playDiveSound } from "../scripts/Audio";
+import { playDiveSound } from "../core/Audio";
 
 // ============================================
 // BUBBLE SETTINGS (tweak these!)

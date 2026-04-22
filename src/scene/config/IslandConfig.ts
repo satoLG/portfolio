@@ -5,7 +5,7 @@
 // ── Positions ─────────────────────────────────────────────────────────────────
 export const islandPosition = { x: 0.0000, y: -0.8000, z: -3.3000 };
 export const firecampOffset = { x: 0.0080, y: 1.0000, z: 0.4000 };
-export const palmtreeOffset = { x: -0.4500, y: 1.0000, z: -0.3000 };
+export const treeOffset = { x: -0.4500, y: 1.0000, z: -0.3000 };
 export const radioOffset    = { x: -0.7470, y: 1.0000, z: 0.0960 };
 export const swordOffset    = { x: 0.1550, y: 1.3270, z: 0.1570 };
 export const pugOffset      = { x: 0.6500, y: 0.9820, z: 1.0000 };
@@ -20,7 +20,7 @@ export const apple3Offset      = { x: -0.4780, y: 3.2500, z: 0.1620 };
 // ── Scales ────────────────────────────────────────────────────────────────────
 export const islandScale      = 0.2500;
 export const firecampScale    = 1.4000;
-export const palmtreeScale    = 0.4330;
+export const treeScale    = 0.4330;
 export const radioScale       = 0.2200;
 export const swordScale       = 0.2500;
 export const pugScale         = 0.4500;
@@ -33,7 +33,7 @@ export const apple2Scale      = 0.0100;
 export const apple3Scale      = 0.0100;
 
 // ── Rotations ─────────────────────────────────────────────────────────────────
-export const palmtreeRotY   = 0.0000;
+export const treeRotY   = 0.0000;
 export const radioRotY      = 0.4954;
 export const swordRot       = { x: 2.6364, y: 0.0834, z: 0.1664 };
 export const pugRotY        = -0.4536;
@@ -46,8 +46,10 @@ export const apple2RotY     = -0.9226;
 export const apple3RotY     = -0.5000;
 
 // ── Apple wind sway ───────────────────────────────────────────────────────────────
-export const APPLE_WIND_STRENGTH  = 0.1700;   // TWEAK: Max tilt angle in radians (0 = off, 0.3 = strong)
-export const APPLE_CLICK_TILT_BOOST   = 0.15;   // TWEAK: One-shot tilt amplitude on click (radians)
+export const APPLE_WIND_STRENGTH   = 0.1700;  // TWEAK: Background sway amplitude (0 = off, 0.3 = strong)
+export const APPLE_SWING_STIFFNESS = 18.0;    // TWEAK: Spring K (rad/s²) — higher = faster oscillation
+export const APPLE_SWING_DAMPING   = 4.5;     // TWEAK: Damping D — higher = settles faster
+export const APPLE_CLICK_IMPULSE   = 4.5;     // TWEAK: Angular velocity kick on click (rad/s)
 export const APPLE_RESPAWN_FADE_DURATION = 1.5; // TWEAK: Seconds for fade-out / scale-up
 export const APPLE_CLICK_COUNT_TO_FALL  = 3;    // TWEAK: Clicks needed to detach apple
 export const MAX_GROUND_APPLES          = 6;    // When a fallen apple exceeds this, the oldest despawns
@@ -85,7 +87,7 @@ export const SURFACE_EDGE_PADDING = 0.200;
 // ── Exclusion zone radii (grass spawn clearance around each surface object) ───
 export const EXCL_R_BONFIRE = 0.42;
 export const EXCL_R_TENT    = 0.73;   // custom tent — increase to push grass further out
-export const EXCL_R_PALM    = 0.14;
+export const EXCL_R_TREE    = 0.14;
 export const EXCL_R_PUG     = 0.34;
 export const EXCL_R_RADIO   = 0.26;
 export const EXCL_R_ROCKS   = 0.20;

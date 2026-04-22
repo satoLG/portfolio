@@ -1,5 +1,5 @@
 /**
- * ApplePhysics — cannon-es physics world for falling apples.
+ * Physics — cannon-es physics world for falling apples.
  *
  * Creates a lightweight physics world with static Trimesh collision bodies
  * built from the island surface (and optionally the palm trunk).
@@ -17,7 +17,7 @@ import {
     APPLE_BODY_Y_OFFSET, APPLE_MASS, LINEAR_DAMPING, ANGULAR_DAMPING,
     SPHERE_RADIUS, SPHERE_SPREAD, SPHERE_Y_TOP, SPHERE_Y_BOTTOM,
     FRICTION, RESTITUTION, SLEEP_SPEED_LIMIT, SLEEP_TIME_LIMIT,
-    PALM_TRUNK_MAX_Y,
+    TREE_TRUNK_MAX_Y,
 } from './config/Physics/AppleConfig';
 
 // ── Mutable runtime config (seeded from PhysicsConfig, tweakable via GUI) ────
@@ -38,7 +38,7 @@ export const physicsConfig = {
     sleepTimeLimit:   SLEEP_TIME_LIMIT,
     safetyPlaneY:     SAFETY_PLANE_Y,
     substeps:         SUBSTEPS,
-    palmTrunkMaxY:    PALM_TRUNK_MAX_Y,
+    treeTrunkMaxY:    TREE_TRUNK_MAX_Y,
 };
 
 // ── World ────────────────────────────────────────────────────────────────────
@@ -81,19 +81,19 @@ export function updateDebugger(): void {
 
 // ── Cached source meshes for rebuild ─────────────────────────────────────────
 let _islandMeshes: Mesh[] = [];
-let _palmMeshes: Mesh[] = [];
+let _treeMeshes: Mesh[] = [];
 let _extraStaticMeshes: Mesh[] = [];
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-export function initPhysicsWorld(islandMeshes: Mesh[], palmTrunkMeshes: Mesh[] = []): void {
+export function initPhysicsWorld(islandMeshes: Mesh[], treeTrunkMeshes: Mesh[] = []): void {
     _islandMeshes = islandMeshes;
-    _palmMeshes   = palmTrunkMeshes;
+    _treeMeshes   = treeTrunkMeshes;
     rebuildPhysicsWorld();
 }
 
-/** Register palm trunk meshes (call when palm tree finishes loading, triggers rebuild). */
-export function registerPalmMeshes(meshes: Mesh[]): void {
-    _palmMeshes = meshes;
+/** Register tree trunk meshes (call when tree finishes loading, triggers rebuild). */
+export function registerTreeMeshes(meshes: Mesh[]): void {
+    _treeMeshes = meshes;
     if (world) rebuildPhysicsWorld();
 }
 
@@ -120,9 +120,9 @@ export function rebuildPhysicsWorld(): void {
     });
     world.addContactMaterial(contactMaterial);
 
-    // Island + palm trunk + extra static trimesh colliders
+    // Island + tree trunk + extra static trimesh colliders
     for (const mesh of _islandMeshes) addStaticTrimesh(mesh);
-    for (const mesh of _palmMeshes)   addStaticTrimesh(mesh, physicsConfig.palmTrunkMaxY);
+    for (const mesh of _treeMeshes)   addStaticTrimesh(mesh, physicsConfig.treeTrunkMaxY);
     for (const mesh of _extraStaticMeshes) addStaticTrimesh(mesh);
 
     // Re-add any active apple bodies

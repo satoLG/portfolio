@@ -1,7 +1,7 @@
 import { DoubleSide, RepeatWrapping, ShaderMaterial, Texture, TextureLoader, Uniform, Vector3, Vector2 } from "three";
 import * as OceanShaders from "../shaders/OceanShaders";
-import { cameraForward } from "../scripts/Scene";
-import { timeUniform } from "../scripts/Time";
+import { cameraForward } from "../core/Scene";
+import { timeUniform } from "../core/Time";
 import { SetSkyboxUniforms } from "./SkyboxMaterial";
 import * as OceanConfig from '../scene/config/OceanConfig';
 

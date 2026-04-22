@@ -321,7 +321,7 @@ export function Start(): void
     Island.Start();
     scene.add(Island.island);
     scene.add(Island.firecamp);
-    scene.add(Island.palmtree);
+    scene.add(Island.tree);
     scene.add(Island.radio);
     scene.add(Island.sword);
     scene.add(Island.pug);
@@ -488,7 +488,7 @@ export function Update(): void
         // Island stays visible near the surface so the submerged portion renders
         Island.island.visible = !deepUnderwater;
         Island.firecamp.visible = !deepUnderwater;
-        Island.palmtree.visible = !deepUnderwater;
+        Island.tree.visible = !deepUnderwater;
         Fire.fire.visible = !deepUnderwater;
         // Hide procedural foliage when deep underwater
         if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = !deepUnderwater;
@@ -513,7 +513,7 @@ export function Update(): void
         WindLines.windLinesGroup.visible = true;
         Island.island.visible = true;
         Island.firecamp.visible = true;
-        Island.palmtree.visible = true;
+        Island.tree.visible = true;
         Fire.fire.visible = true;
         // Show procedural foliage on surface
         if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = true;

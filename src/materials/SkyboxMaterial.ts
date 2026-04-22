@@ -1,7 +1,7 @@
 import { DataTexture, MathUtils, RepeatWrapping, ShaderMaterial, TextureLoader, Uniform, Vector2, Vector3 } from "three";
 import { fragment, vertex } from "../shaders/SkyboxShader";
 import { dirToLight, rotationMatrix } from "../scene/Skybox";
-import { Random } from "../scripts/Random";
+import { Random } from "../utils/Random";
 
 export const material = new ShaderMaterial();
 export let SetSkyboxUniforms: (material: ShaderMaterial) => void;

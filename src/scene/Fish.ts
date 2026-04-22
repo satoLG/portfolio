@@ -3,8 +3,8 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — r137 @types declares a namespace but the module exports clone directly
 import { clone as _skeletonClone } from "three/examples/jsm/utils/SkeletonUtils";
-import { deltaTime } from "../scripts/Time";
-import { camera, renderer } from "../scripts/Scene";
+import { deltaTime } from "../core/Time";
+import { camera, renderer } from "../core/Scene";
 import { isDayTime } from "./Skybox";
 
 // Local mobile check — avoids circular-dependency TDZ crash when importing
