@@ -13,7 +13,7 @@ import {
     Points,
     Vector3
 } from "three";
-import { deltaTime, time } from "../scripts/Time";
+import { deltaTime, time } from "../core/Time";
 import { isDayTime } from "./Skybox";
 import { FIRE_LIGHT_INTENSITY, FIRE_LIGHT_RANGE, FIRE_LIGHT_DECAY, FIRE_LIGHT_FLICKER } from "./config/IslandConfig";
 

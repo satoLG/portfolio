@@ -1,7 +1,7 @@
 import { BufferAttribute, BufferGeometry, MathUtils, Mesh, Vector2 } from "three";
 import * as oceanMaterials from "../materials/OceanMaterial";
-import { Random } from "../scripts/Random";
-import { camera } from "../scripts/Scene";
+import { Random } from "../utils/Random";
+import { camera } from "../core/Scene";
 
 const tilesPerAxis = 13;
 const tileSize = 32;

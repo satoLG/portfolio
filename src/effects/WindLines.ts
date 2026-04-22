@@ -7,7 +7,7 @@
     Color,
     DoubleSide,
 } from 'three';
-import { isBreezeActive } from '../scripts/Audio';
+import { isBreezeActive } from '../core/Audio';
 import { UNDERWATER_Y_THRESHOLD } from './PostProcess';
 import { islandPosition } from '../scene/config/IslandConfig';
 import * as WLC from '../scene/config/SkyConfig';

@@ -1,19 +1,143 @@
 ﻿/**
- * IslandDebug — press H to toggle
+ * Debug — press H to toggle scene debug GUI
  *
- * lil-gui panel with position, scale, and rotation sliders for every
- * island object, plus per-cluster foliage controls.
- *
- * Every change prints a copy-paste-ready line to the console so values
- * can be pasted straight back into Island.ts constants.
+ * Combines:
+ *  - Performance panel (FPS, CPU, memory, camera position)
+ *  - lil-gui panel with live controls for every scene object
  */
+
+import { BufferGeometry, Group, Line, LineBasicMaterial, Vector3 } from "three";
+import { webglContainer, camera, cameraForward } from "./Scene";
+import { deltaTime } from "./Time";
+
+// ── Performance panel ────────────────────────────────────────────────────────
+
+export const debugging = false;
+const axesSize = 0.06;
+
+let showPanel = debugging;
+export let showAll  = debugging;
+export let showFps  = debugging;
+export let showCpu  = debugging;
+export let showMem  = debugging;
+export let showPos  = debugging;
+export let showAxes = debugging;
+export const axes = new Group();
+axes.visible = debugging;
+
+export function changeShowAll(value: boolean): void { showAll = value; }
+
+export function allVisible(value: boolean): void {
+    showAll = value;
+    fpsVisible(showAll); cpuVisible(showAll); memVisible(showAll);
+    posVisible(showAll); axesVisible(showAll);
+}
+export function fpsVisible(value: boolean): void {
+    showFps = value;
+    showPanel = showFps || showCpu || showMem || showPos;
+    debugPanel.style.display = showPanel ? "block" : "none";
+    fpsDiv.style.display = showFps ? "block" : "none";
+}
+export function cpuVisible(value: boolean): void {
+    showCpu = value;
+    showPanel = showFps || showCpu || showMem || showPos;
+    debugPanel.style.display = showPanel ? "block" : "none";
+    cpuDiv.style.display = showCpu ? "block" : "none";
+}
+export function memVisible(value: boolean): void {
+    showMem = value;
+    showPanel = showFps || showCpu || showMem || showPos;
+    debugPanel.style.display = showPanel ? "block" : "none";
+    memDiv.style.display = showMem ? "block" : "none";
+}
+export function posVisible(value: boolean): void {
+    showPos = value;
+    showPanel = showFps || showCpu || showMem || showPos;
+    debugPanel.style.display = showPanel ? "block" : "none";
+    posDiv.style.display = showPos ? "block" : "none";
+}
+export function axesVisible(value: boolean): void {
+    showAxes = value;
+    axes.visible = showAxes;
+}
+
+const debugPanel = document.createElement("debug") as HTMLElement;
+const fpsDiv = document.createElement("div");
+const cpuDiv = document.createElement("div");
+const memDiv = document.createElement("div");
+const posDiv = document.createElement("div");
+
+let fps = 0, frameTime = 0, deltaTimeSum = 0, cpuTime = 0, cpuUsage = 0;
+let mem: Performance["memory"] | undefined = undefined;
+let lastRefresh = 0, frameCount = 0, cpuSum = 0, cpuDeltaSum = 0, lastFrame = 0;
+let _now: number, _axesVec: Vector3;
+
+declare global {
+    interface Performance {
+        memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number; };
+    }
+}
+
+function initPerfPanel(): void {
+    debugPanel.style.display = showPanel ? "block" : "none";
+    fpsDiv.style.display = showFps ? "block" : "none";
+    cpuDiv.style.display = showCpu ? "block" : "none";
+    memDiv.style.display = showMem ? "block" : "none";
+    posDiv.style.display = showPos ? "block" : "none";
+    debugPanel.appendChild(fpsDiv);
+    debugPanel.appendChild(cpuDiv);
+    debugPanel.appendChild(memDiv);
+    debugPanel.appendChild(posDiv);
+    webglContainer.appendChild(debugPanel);
+
+    function AxisLine(a: Vector3, b: Vector3, color: number): Line {
+        return new Line(new BufferGeometry().setFromPoints([a, b]), new LineBasicMaterial({ color }));
+    }
+    axes.add(AxisLine(new Vector3(0,0,0), new Vector3(axesSize,0,0), 0xff0000));
+    axes.add(AxisLine(new Vector3(0,0,0), new Vector3(0,axesSize,0), 0x00ff00));
+    axes.add(AxisLine(new Vector3(0,0,0), new Vector3(0,0,axesSize), 0x0000ff));
+    allVisible(showAll);
+    lastRefresh = performance.now();
+}
+
+export function Update(): void {
+    frameCount++;
+    deltaTimeSum += deltaTime;
+    _now = performance.now();
+    cpuDeltaSum += _now - lastFrame;
+    lastFrame = _now;
+    if (lastRefresh + 500 <= _now) {
+        frameTime  = deltaTimeSum / frameCount;
+        fps        = Math.round(1 / frameTime * 10) / 10;
+        frameTime  = Math.round(frameTime * 10000) / 10;
+        cpuTime    = Math.round(cpuSum / frameCount * 10) / 10;
+        cpuUsage   = Math.round(cpuTime / (cpuDeltaSum / frameCount) * 1000) / 10;
+        frameCount = 0; deltaTimeSum = 0; cpuSum = 0; cpuDeltaSum = 0;
+        mem = performance.memory;
+        lastRefresh = _now;
+    }
+    fpsDiv.textContent = "FPS: " + fps + " (" + frameTime + " MS)";
+    cpuDiv.textContent = "CPU: " + cpuTime + " MS (" + cpuUsage + "%)";
+    memDiv.textContent = mem
+        ? "Memory: " + Math.round(mem.usedJSHeapSize / 1048576 * 10) / 10 + " MB / " + Math.round(mem.jsHeapSizeLimit / 104857.6) / 10 + " MB"
+        : "Memory: cannot measure";
+    posDiv.textContent = "Position: " + Math.round(camera.position.x * 10) / 10 + ", " + Math.round(camera.position.y * 10) / 10 + ", " + Math.round(camera.position.z * 10) / 10;
+    _axesVec = new Vector3().copy(cameraForward);
+    axes.position.set(_axesVec.x, _axesVec.y, _axesVec.z);
+}
+
+let beginTime = 0;
+export function Begin(): void { beginTime = performance.now(); }
+export function End(): void   { cpuSum += performance.now() - beginTime; }
+
+// ── Scene GUI ────────────────────────────────────────────────────────────────
 
 import GUI from 'lil-gui';
 import { Color } from 'three';
 import {
     island,
     firecamp,
-    palmtree,
+    tree,
     radio,
     sword,
     pug,
@@ -24,7 +148,7 @@ import {
     apple2,
     apple3,
     clusterMainPatches,
-    clusterPalmPatches,
+    clusterTreePatches,
     proceduralGrassMesh,
     respawnFoliage,
     setGrassCount,
@@ -56,11 +180,17 @@ import {
     setGrassMaxHeight,
     appleWindStrength,
     setAppleWindStrength,
+    appleSwingStiffness,
+    setAppleSwingStiffness,
+    appleSwingDamping,
+    setAppleSwingDamping,
+    appleClickImpulse,
+    setAppleClickImpulse,
     type FoliageCluster,
 } from '../scene/Island';
 import * as Island from '../scene/Island';
-import { APPLE_CLICK_TILT_BOOST, APPLE_RESPAWN_FADE_DURATION, APPLE_CLICK_COUNT_TO_FALL, MAX_GROUND_APPLES, APPLE_RESPAWN_DELAY } from '../scene/config/IslandConfig';
-import { physicsConfig, refreshContactMaterial, setDebugEnabled, rebuildPhysicsWorld } from '../scene/ApplePhysics';
+import { APPLE_RESPAWN_FADE_DURATION, APPLE_CLICK_COUNT_TO_FALL, MAX_GROUND_APPLES, APPLE_RESPAWN_DELAY } from '../scene/config/IslandConfig';
+import { physicsConfig, refreshContactMaterial, setDebugEnabled, rebuildPhysicsWorld } from '../scene/Physics';
 import {
     oceanAbsorptionUniform,
     normalMapScaleUniform,
@@ -105,9 +235,9 @@ import {
     rippleMaxClickDistance as RIPPLE_MAX_CLICK_DISTANCE,
 } from '../scene/config/OceanConfig';
 import { Object3D } from 'three';
-import { phoneZoomConfig, mainCameraConfig, isWebPageMode, toggleCameraMode } from '../scripts/Control';
+import { phoneZoomConfig, mainCameraConfig, isWebPageMode, toggleCameraMode } from './Control';
 import { mobileFov, mobileBreakpointWidth, aboveWaterBottomY as CFG_ABOVE_BOTTOM, aboveWaterBottomYMobile as CFG_ABOVE_BOTTOM_MOBILE, underwaterTopY as CFG_UNDER_TOP, underwaterTopYMobile as CFG_UNDER_TOP_MOBILE } from '../scene/config/CameraConfig';
-import { SetFOV, scene as threeScene } from '../scripts/Scene';
+import { SetFOV, scene as threeScene } from './Scene';
 import { phoneScreenConfig, updateOverlayStyle } from './PhoneScreen';
 import { grassColorBase as _grassColorBase, grassColorTip as _grassColorTip } from '../scene/ProceduralGrass';
 
@@ -157,7 +287,7 @@ function addObjectFolder(
             const parts = rotAxes.map(a => `${a}=${r(obj.rotation[a])}`).join(', ');
             rot = `  rot=(${parts})`;
         }
-        console.log(`[IslandDebug] ${label}  ${pos}${sc}${rot}`);
+        console.log(`[Debug] ${label}  ${pos}${sc}${rot}`);
     };
 
     // ── position ──
@@ -225,9 +355,11 @@ function addClusterFolder(
 // ─── public API ─────────────────────────────────────────────────────────────
 
 export function Start(): void {
+    initPerfPanel();
+
     // Poll until foliage patches exist, then build the GUI
     const tryBuild = () => {
-        if (!proceduralGrassMesh && clusterMainPatches.length === 0 && clusterPalmPatches.length === 0) {
+        if (!proceduralGrassMesh && clusterMainPatches.length === 0 && clusterTreePatches.length === 0) {
             requestAnimationFrame(tryBuild);
             return;
         }
@@ -462,7 +594,7 @@ function injectLevaCSS(): void {
 
 function buildGUI(): void {
     injectLevaCSS();
-    gui = new GUI({ title: 'Island Debug  [H]', width: 300 });
+    gui = new GUI({ title: 'Debug  [H]', width: 300 });
     gui.domElement.style.position = 'fixed';
     gui.domElement.style.top = '76px';   // below the site-header (~74px tall)
     gui.domElement.style.right = '8px';
@@ -477,6 +609,7 @@ function buildGUI(): void {
     const seafloorFolder = gui.addFolder('Seafloor');
     const cameraFolder   = gui.addFolder('Camera');
     const physicsFolder  = gui.addFolder('Physics');
+    physicsFolder.close();
 
     // Fog distortion state — must be declared before copy actions
     const _fogState = {
@@ -500,13 +633,13 @@ function buildGUI(): void {
             const ip = island.position;
             const content = [
                 `// src/scene/IslandConfig.ts`,
-                `// Island placement configuration — generated by IslandDebug.`,
+                `// Island placement configuration — generated by Debug.`,
                 `// Paste this entire file to replace src/scene/IslandConfig.ts`,
                 ``,
                 `// ── Positions ─────────────────────────────────────────────────────────────────`,
                 `export const islandPosition = { x: ${f(ip.x)}, y: ${f(ip.y)}, z: ${f(ip.z)} };`,
                 `export const firecampOffset = { x: ${f(firecamp.position.x - ip.x)}, y: ${f(firecamp.position.y - ip.y)}, z: ${f(firecamp.position.z - ip.z)} };`,
-                `export const palmtreeOffset = { x: ${f(palmtree.position.x - ip.x)}, y: ${f(palmtree.position.y - ip.y)}, z: ${f(palmtree.position.z - ip.z)} };`,
+                `export const treeOffset = { x: ${f(tree.position.x - ip.x)}, y: ${f(tree.position.y - ip.y)}, z: ${f(tree.position.z - ip.z)} };`,
                 `export const radioOffset    = { x: ${f(radio.position.x - ip.x)}, y: ${f(radio.position.y - ip.y)}, z: ${f(radio.position.z - ip.z)} };`,
                 `export const swordOffset    = { x: ${f(sword.position.x - ip.x)}, y: ${f(sword.position.y - ip.y)}, z: ${f(sword.position.z - ip.z)} };`,
                 `export const pugOffset      = { x: ${f(pug.position.x - ip.x)}, y: ${f(pug.position.y - ip.y)}, z: ${f(pug.position.z - ip.z)} };`,
@@ -521,7 +654,7 @@ function buildGUI(): void {
                 `// ── Scales ────────────────────────────────────────────────────────────────────`,
                 `export const islandScale      = ${f(island.scale.x)};`,
                 `export const firecampScale    = ${f(firecamp.scale.x)};`,
-                `export const palmtreeScale    = ${f(palmtree.scale.x)};`,
+                `export const treeScale    = ${f(tree.scale.x)};`,
                 `export const radioScale       = ${f(radio.scale.x)};`,
                 `export const swordScale       = ${f(sword.scale.x)};`,
                 `export const pugScale         = ${f(pug.scale.x)};`,
@@ -534,7 +667,7 @@ function buildGUI(): void {
                 `export const apple3Scale      = ${f(apple3.scale.x)};`,
                 ``,
                 `// ── Rotations ─────────────────────────────────────────────────────────────────`,
-                `export const palmtreeRotY   = ${f(palmtree.rotation.y)};`,
+                `export const treeRotY   = ${f(tree.rotation.y)};`,
                 `export const radioRotY      = ${f(radio.rotation.y)};`,
                 `export const swordRot       = { x: ${f(sword.rotation.x)}, y: ${f(sword.rotation.y)}, z: ${f(sword.rotation.z)} };`,
                 `export const pugRotY        = ${f(pug.rotation.y)};`,
@@ -547,8 +680,10 @@ function buildGUI(): void {
                 `export const apple3RotY     = ${f(apple3.rotation.y)};`,
                 ``,
                 `// ── Apple wind sway ───────────────────────────────────────────────────────────────`,
-                `export const APPLE_WIND_STRENGTH  = ${appleWindStrength.toFixed(4)};   // TWEAK: Max tilt angle in radians (0 = off, 0.3 = strong)`,
-                `export const APPLE_CLICK_TILT_BOOST   = ${APPLE_CLICK_TILT_BOOST.toFixed(2)};`,
+                `export const APPLE_WIND_STRENGTH   = ${appleWindStrength.toFixed(4)};  // TWEAK: Background sway amplitude (0 = off, 0.3 = strong)`,
+                `export const APPLE_SWING_STIFFNESS = ${appleSwingStiffness.toFixed(1)};    // TWEAK: Spring K (rad/s²) — higher = faster oscillation`,
+                `export const APPLE_SWING_DAMPING   = ${appleSwingDamping.toFixed(1)};     // TWEAK: Damping D — higher = settles faster`,
+                `export const APPLE_CLICK_IMPULSE   = ${appleClickImpulse.toFixed(1)};     // TWEAK: Angular velocity kick on click (rad/s)`,
                 `export const APPLE_RESPAWN_FADE_DURATION = ${APPLE_RESPAWN_FADE_DURATION.toFixed(1)};`,
                 `export const APPLE_CLICK_COUNT_TO_FALL  = ${APPLE_CLICK_COUNT_TO_FALL};`,
                 `export const MAX_GROUND_APPLES          = ${MAX_GROUND_APPLES};`,
@@ -574,7 +709,7 @@ function buildGUI(): void {
                 `// ── Exclusion zone radii (grass spawn clearance around each surface object) ───`,
                 `export const EXCL_R_BONFIRE = ${exclRadii.bonfire.toFixed(2)};`,
                 `export const EXCL_R_TENT    = ${exclRadii.tent.toFixed(2)};   // custom tent — increase to push grass further out`,
-                `export const EXCL_R_PALM    = ${exclRadii.palm.toFixed(2)};`,
+                `export const EXCL_R_TREE    = ${exclRadii.tree.toFixed(2)};`,
                 `export const EXCL_R_PUG     = ${exclRadii.pug.toFixed(2)};`,
                 `export const EXCL_R_RADIO   = ${exclRadii.radio.toFixed(2)};`,
                 `export const EXCL_R_ROCKS   = ${exclRadii.rocks.toFixed(2)};`,
@@ -603,7 +738,7 @@ function buildGUI(): void {
                 `export const phoneOverlayGlareAngle   = ${phoneScreenConfig.overlayGlareAngle};`,
             ].join('\n');
             navigator.clipboard.writeText(content).then(() => {
-                console.log('[IslandDebug] IslandConfig.ts content copied to clipboard!');
+                console.log('[Debug] IslandConfig.ts content copied to clipboard!');
             });
         },
     };
@@ -618,7 +753,7 @@ function buildGUI(): void {
             const abs  = oceanAbsorptionUniform.value;
             const content = [
                 `// src/scene/OceanConfig.ts`,
-                `// Ocean visual configuration — generated by IslandDebug.`,
+                `// Ocean visual configuration — generated by Debug.`,
                 `// Paste this entire file to replace src/scene/OceanConfig.ts`,
                 ``,
                 `// ── Foam ─────────────────────────────────────────────────────────────────────`,
@@ -664,7 +799,7 @@ function buildGUI(): void {
                 `export const rippleMaxClickDistance = ${RIPPLE_MAX_CLICK_DISTANCE};  // Max XZ distance (world units) from camera for the effect to trigger`,
             ].join('\n');
             navigator.clipboard.writeText(content).then(() => {
-                console.log('[IslandDebug] OceanConfig.ts content copied to clipboard!');
+                console.log('[Debug] OceanConfig.ts content copied to clipboard!');
             });
         },
     };
@@ -685,7 +820,7 @@ function buildGUI(): void {
             const c  = Clouds.config;
             const content = [
                 `// src/scene/config/SkyConfig.ts`,
-                `// Sky visual configuration (clouds + wind lines) — generated by IslandDebug.`,
+                `// Sky visual configuration (clouds + wind lines) — generated by Debug.`,
                 `// Paste this entire file to replace src/scene/config/SkyConfig.ts`,
                 ``,
                 `// ── Clouds: Mesh placement (world-space centre + scale) ───────────────────────`,
@@ -769,7 +904,7 @@ function buildGUI(): void {
                 `export const islandAppearDist    = ${f(wc.islandAppearDist)};  // dist where lines START appearing (approaching island)`,
             ].join('\n');
             navigator.clipboard.writeText(content).then(() => {
-                console.log('[IslandDebug] SkyConfig.ts content copied to clipboard!');
+                console.log('[Debug] SkyConfig.ts content copied to clipboard!');
             });
         },
     };
@@ -897,7 +1032,7 @@ function buildGUI(): void {
         // Exclusion radii
         const exclFolder = foliageFolder.addFolder('Exclusion Radii');
         exclFolder.close();
-        (['bonfire', 'tent', 'palm', 'pug', 'radio', 'rocks'] as const).forEach(key => {
+        (['bonfire', 'tent', 'tree', 'pug', 'radio', 'rocks'] as const).forEach(key => {
             exclFolder.add(exclRadii, key, 0, 1.5, 0.01)
                 .name(key.charAt(0).toUpperCase() + key.slice(1))
                 .listen()
@@ -907,21 +1042,34 @@ function buildGUI(): void {
         foliageFolder.close();
     }
 
-    addObjectFolder(surfaceFolder, 'Island',    island,    { scaleRange: [0.01, 1.0]                           });
+    addObjectFolder(surfaceFolder, 'Island',       island,      { scaleRange: [0.01, 1.0]                           });
     addObjectFolder(surfaceFolder, 'Little Rocks', littleRocks, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
-    addObjectFolder(surfaceFolder, 'Apple 1',   apple1,    { scaleRange: [0.01, 0.5], rotAxes: ['y']           });
-    addObjectFolder(surfaceFolder, 'Apple 2',   apple2,    { scaleRange: [0.01, 0.5], rotAxes: ['y']           });
-    addObjectFolder(surfaceFolder, 'Apple 3',   apple3,    { scaleRange: [0.01, 0.5], rotAxes: ['y']           });
 
     {
-        const appleWindFolder = physicsFolder.addFolder('Apple Wind');
-        const appleWindProxy = { strength: appleWindStrength };
-        appleWindFolder.add(appleWindProxy, 'strength', 0, 0.5, 0.005)
-            .name('Sway Strength')
+        const appleFolder = surfaceFolder.addFolder('Apple');
+        addObjectFolder(appleFolder, 'Apple 1', apple1, { scaleRange: [0.01, 0.5], rotAxes: ['y'] });
+        addObjectFolder(appleFolder, 'Apple 2', apple2, { scaleRange: [0.01, 0.5], rotAxes: ['y'] });
+        addObjectFolder(appleFolder, 'Apple 3', apple3, { scaleRange: [0.01, 0.5], rotAxes: ['y'] });
+
+        const appleWindFolder = appleFolder.addFolder('Apple Swing');
+        const swingProxy = {
+            windStrength: appleWindStrength,
+            stiffness:    appleSwingStiffness,
+            damping:      appleSwingDamping,
+            impulse:      appleClickImpulse,
+        };
+        appleWindFolder.add(swingProxy, 'windStrength', 0, 0.5, 0.005)
+            .name('Wind Sway Strength')
             .onChange((v: number) => setAppleWindStrength(v));
-        appleWindFolder.add({ v: APPLE_CLICK_TILT_BOOST }, 'v', 0, 0.5, 0.005)
-            .name('Click Tilt Boost')
-            .listen();
+        appleWindFolder.add(swingProxy, 'stiffness', 1, 50, 0.5)
+            .name('Swing Stiffness')
+            .onChange((v: number) => setAppleSwingStiffness(v));
+        appleWindFolder.add(swingProxy, 'damping', 0.5, 15, 0.1)
+            .name('Swing Damping')
+            .onChange((v: number) => setAppleSwingDamping(v));
+        appleWindFolder.add(swingProxy, 'impulse', 0, 8, 0.1)
+            .name('Click Impulse (rad/s)')
+            .onChange((v: number) => setAppleClickImpulse(v));
         appleWindFolder.add({ v: APPLE_CLICK_COUNT_TO_FALL }, 'v', 1, 10, 1)
             .name('Clicks to Fall')
             .listen();
@@ -936,6 +1084,7 @@ function buildGUI(): void {
             .name('Respawn Delay (s)')
             .onChange((v: number) => Island.setAppleRespawnDelay(v));
         appleWindFolder.close();
+        appleFolder.close();
     }
 
     {
@@ -1005,8 +1154,8 @@ function buildGUI(): void {
             .name('Safety Plane Y');
         applePhysicsFolder.add(physicsConfig, 'substeps', 1, 30, 1)
             .name('Substeps');
-        applePhysicsFolder.add(physicsConfig, 'palmTrunkMaxY', -2, 1, 0.01)
-            .name('Palm Trunk Max Y')
+        applePhysicsFolder.add(physicsConfig, 'treeTrunkMaxY', -2, 1, 0.01)
+            .name('Tree Trunk Max Y')
             .onChange(() => rebuildPhysicsWorld());
 
         const debugProxy = { wireframe: false };
@@ -1018,7 +1167,7 @@ function buildGUI(): void {
             copyPhysicsConfig: () => {
                 const content = [
                     `// src/scene/config/Physics/AppleConfig.ts`,
-                    `// Apple physics configuration — generated by IslandDebug.`,
+                    `// Apple physics configuration — generated by Debug.`,
                     `// Paste this entire file to replace src/scene/config/Physics/AppleConfig.ts`,
                     ``,
                     `// ── World ─────────────────────────────────────────────────────────────────────`,
@@ -1047,7 +1196,7 @@ function buildGUI(): void {
                     `export const SLEEP_TIME_LIMIT  = ${physicsConfig.sleepTimeLimit.toFixed(2)};`,
                     ``,
                     `// ── Collider geometry ─────────────────────────────────────────────────────────`,
-                    `export const PALM_TRUNK_MAX_Y  = ${physicsConfig.palmTrunkMaxY.toFixed(2)};    // world-space Y cutoff — only trunk geometry below this gets a collider`,
+                    `export const TREE_TRUNK_MAX_Y  = ${physicsConfig.treeTrunkMaxY.toFixed(2)};    // world-space Y cutoff — only trunk geometry below this gets a collider`,
                 ].join('\n') + '\n';
                 navigator.clipboard.writeText(content).then(() => {
                     console.log('📋 PhysicsConfig.ts copied to clipboard');
@@ -1058,7 +1207,7 @@ function buildGUI(): void {
         applePhysicsFolder.close();
     }
 
-    addObjectFolder(surfaceFolder, 'Palm Tree', palmtree,  { scaleRange: [0.1,  2.0], rotAxes: ['y']           });
+    addObjectFolder(surfaceFolder, 'Tree', tree,  { scaleRange: [0.1,  2.0], rotAxes: ['y']           });
 
     const phoneFolder = addObjectFolder(surfaceFolder, 'Phone', Island.phone, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
 
@@ -1504,7 +1653,7 @@ function buildGUI(): void {
                 `export const chestCoin3Color = { bodyR: ${f(sf.chestCoin3Color.bodyR)}, bodyG: ${f(sf.chestCoin3Color.bodyG)}, bodyB: ${f(sf.chestCoin3Color.bodyB)}, circleR: ${f(sf.chestCoin3Color.circleR)}, circleG: ${f(sf.chestCoin3Color.circleG)}, circleB: ${f(sf.chestCoin3Color.circleB)} };`,
             ].join('\n');
             navigator.clipboard.writeText(content).then(() => {
-                console.log('[IslandDebug] SeaFloorConfig.ts content copied to clipboard!');
+                console.log('[Debug] SeaFloorConfig.ts content copied to clipboard!');
             });
         },
     };
@@ -1694,7 +1843,7 @@ function buildGUI(): void {
             const mcc = mainCameraConfig;
             const content = [
                 `// src/scene/CameraConfig.ts`,
-                `// Camera configuration — generated by IslandDebug.`,
+                `// Camera configuration — generated by Debug.`,
                 `// Paste this entire file to replace src/scene/CameraConfig.ts`,
                 ``,
                 `// ── Main Camera ─────────────────────────────────────────────────────────────────`,
@@ -1713,7 +1862,7 @@ function buildGUI(): void {
                 `export const underwaterTopYMobile    = ${f(CFG_UNDER_TOP_MOBILE)}; // Mobile: lowered for the same reason`,
             ].join('\n');
             navigator.clipboard.writeText(content).then(() => {
-                console.log('[IslandDebug] CameraConfig.ts content copied to clipboard!');
+                console.log('[Debug] CameraConfig.ts content copied to clipboard!');
             });
         },
     };

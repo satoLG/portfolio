@@ -22,7 +22,7 @@ import {
     FramebufferTexture,
     LinearFilter
 } from "three";
-import { time } from "../scripts/Time";
+import { time } from "../core/Time";
 import { distortionStrength, distortionSpeed, distortionScale } from '../scene/config/OceanConfig';
 
 // ── Underwater constants ─────────────────────────────────────────────────────

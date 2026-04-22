@@ -6,7 +6,7 @@
 export const defaultCameraX        = -0.1000;   // World-space X offset of the camera at rest
 export const defaultCameraZ        = 1.7800;   // World-space Z position of the camera at rest
 export const defaultFov            = 50.5;     // Default camera Field-of-View in degrees (desktop)
-export const mobileFov             = 65;       // FOV used when viewport width ≤ mobileBreakpointWidth
+export const mobileFov             = 57;       // FOV used when viewport width ≤ mobileBreakpointWidth
 export const mobileBreakpointWidth = 768;      // px — widths at or below this are treated as mobile
 
 // ── Scroll Y Limits ───────────────────────────────────────────────────────────
@@ -16,4 +16,3 @@ export const aboveWaterBottomY       = 1.0000;  // Desktop: lowest Y above water
 export const aboveWaterBottomYMobile = 1.4000;  // Mobile: raised because wider FOV reveals surface sooner
 export const underwaterTopY          = -1.0000; // Desktop: highest Y underwater before dead-zone snaps
 export const underwaterTopYMobile    = -1.4000; // Mobile: lowered for the same reason
-

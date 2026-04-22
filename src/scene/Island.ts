@@ -3,29 +3,29 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { config as sfDecorConfig } from './SeaFloorDecor';
 import { oceanAbsorptionUniform, underwaterFogDistUniform, setFoamMask } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
-import { deltaTime, time } from "../scripts/Time";
-import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../scripts/MediaPlayer";
-import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive } from "../scripts/Control";
-import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../scripts/Dialog";
-import * as CoinTooltip from '../scripts/CoinTooltip';
-import type { DialogLine, ReplyOption } from "../scripts/Dialog";
-import { isBreezeActive, playPugSnoreOnce, stopPugSnore, getAudioContext, getMasterDestination } from "../scripts/Audio";
+import { deltaTime, time } from "../core/Time";
+import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../core/MediaPlayer";
+import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive } from "../core/Control";
+import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../core/Dialog";
+import * as CoinTooltip from '../core/CoinTooltip';
+import type { DialogLine, ReplyOption } from "../core/Dialog";
+import { isBreezeActive, playPugSnoreOnce, stopPugSnore, getAudioContext, getMasterDestination } from "../core/Audio";
 import { createGrassMesh, createPerlinTexture, createShadowFloorMesh, grassColorBase, grassColorTip, type GrassUniforms } from './ProceduralGrass';
-import { camera, renderer, scene as threeScene } from "../scripts/Scene";
+import { camera, renderer, scene as threeScene } from "../core/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
-import * as PhoneScreen from '../scripts/PhoneScreen';
+import * as PhoneScreen from '../core/PhoneScreen';
 import { UNDERWATER_Y_THRESHOLD } from "../effects/PostProcess";
 import {
-    islandPosition, firecampOffset, palmtreeOffset, radioOffset, swordOffset,
+    islandPosition, firecampOffset, treeOffset, radioOffset, swordOffset,
     pugOffset, tentOffset, dogBedOffset, littleRocksOffset, phoneOffset,
     apple1Offset, apple2Offset, apple3Offset,
-    islandScale, firecampScale, palmtreeScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, littleRocksScale, phoneScale,
+    islandScale, firecampScale, treeScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, littleRocksScale, phoneScale,
     apple1Scale, apple2Scale, apple3Scale,
-    palmtreeRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, littleRocksRot, phoneRot,
+    treeRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, littleRocksRot, phoneRot,
     apple1RotY, apple2RotY, apple3RotY,
     GRASS_COUNT  as GRASS_COUNT_CFG,
     SURFACE_EDGE_PADDING,
-    EXCL_R_BONFIRE, EXCL_R_TENT, EXCL_R_PALM, EXCL_R_PUG, EXCL_R_RADIO, EXCL_R_ROCKS,
+    EXCL_R_BONFIRE, EXCL_R_TENT, EXCL_R_TREE, EXCL_R_PUG, EXCL_R_RADIO, EXCL_R_ROCKS,
     GRASS_EDGE_FALLOFF_RADIUS as GRASS_EDGE_FALLOFF_RADIUS_CFG,
     GRASS_MIN_EDGE_SCALE      as GRASS_MIN_EDGE_SCALE_CFG,
     GRASS_SHADOW_OPACITY      as GRASS_SHADOW_OPACITY_CFG,
@@ -35,7 +35,9 @@ import {
     GRASS_WOBBLE_STRENGTH     as GRASS_WOBBLE_STRENGTH_CFG,
     GRASS_MAX_HEIGHT          as GRASS_MAX_HEIGHT_CFG,
     APPLE_WIND_STRENGTH       as APPLE_WIND_STRENGTH_CFG,
-    APPLE_CLICK_TILT_BOOST,
+    APPLE_SWING_STIFFNESS,
+    APPLE_SWING_DAMPING,
+    APPLE_CLICK_IMPULSE,
     APPLE_RESPAWN_FADE_DURATION,
     APPLE_CLICK_COUNT_TO_FALL,
     MAX_GROUND_APPLES,
@@ -50,12 +52,12 @@ import {
     GOLDEN_APPLE_LIGHT_DISTANCE,
     GOLDEN_APPLE_LIGHT_DECAY,
 } from './config/IslandConfig';
-import { initPhysicsWorld, addAppleBody, removeAppleBody, stepPhysics, physicsConfig, updateDebugger, registerPalmMeshes, registerExtraStaticMeshes } from './ApplePhysics';
+import { initPhysicsWorld, addAppleBody, removeAppleBody, stepPhysics, physicsConfig, updateDebugger, registerTreeMeshes, registerExtraStaticMeshes } from './Physics';
 import { Body } from 'cannon-es';
 
 export const island = new Group();
 export const firecamp = new Group();
-export const palmtree = new Group();
+export const tree = new Group();
 export const radio = new Group();
 export const sword = new Group();
 export const pug = new Group();
@@ -104,9 +106,9 @@ let _grassUniforms: GrassUniforms | null = null;
 // Procedural grass spawn points (cached for respawning)
 let _grassSpawnPoints: Array<{ x: number; z: number; y: number; edgeFactor: number }> = [];
 
-// Store palm tree leaves for wind animation
-const palmLeaves: Object3D[] = [];
-const palmTrunkMeshes: Mesh[] = [];
+// Store tree leaves for wind animation
+const treeLeaves: Object3D[] = [];
+const treeTrunkMeshes: Mesh[] = [];
 
 // Island surface meshes — populated once the island glTF loads.
 // Used by isOnIslandSurface() to confine foliage spawning to the island top.
@@ -540,13 +542,13 @@ const radioVibeSpeed = 15;  // Quick vibration
 // Object world positions (for reference):
 //   Firecamp  : X= 0.00  Z=-2.90   (islandPos + firecampOffset)  scale 1.4
 //   Tent      : X= 0.48  Z=-3.65   (islandPos + tentOffset)       scale 1.8
-//   Palm trunk: X=-0.35  Z=-3.60   (islandPos + palmtreeOffset)
+//   Tree trunk: X=-0.35  Z=-3.60   (islandPos + treeOffset)
 //   Pug       : X= 0.65  Z=-2.30   (islandPos + pugOffset)
 //   Radio     : X=-0.65  Z=-3.10   (islandPos + radioOffset)
 
 // Per-cluster patch lists — kept for IslandDebug backward compat
 export const clusterMainPatches: Group[] = [];
-export const clusterPalmPatches: Group[] = [];
+export const clusterTreePatches: Group[] = [];
 export const clusterCloverPatches: Group[] = [];
 
 const GRASS_Y   = islandPosition.y + 1.0;  // Fallback Y when raycast unavailable
@@ -555,9 +557,13 @@ const GRASS_Y   = islandPosition.y + 1.0;  // Fallback Y when raycast unavailabl
 export let grassYOffset = 0.0;
 export let foliageWindStrength = 0.035;
 export let appleWindStrength = APPLE_WIND_STRENGTH_CFG;
-export function setAppleWindStrength(v: number): void {
-    appleWindStrength = v;
-}
+export function setAppleWindStrength(v: number): void { appleWindStrength = v; }
+export let appleSwingStiffness = APPLE_SWING_STIFFNESS;
+export function setAppleSwingStiffness(v: number): void { appleSwingStiffness = v; }
+export let appleSwingDamping = APPLE_SWING_DAMPING;
+export function setAppleSwingDamping(v: number): void { appleSwingDamping = v; }
+export let appleClickImpulse = APPLE_CLICK_IMPULSE;
+export function setAppleClickImpulse(v: number): void { appleClickImpulse = v; }
 export let appleRespawnDelay = APPLE_RESPAWN_DELAY;
 export function setAppleRespawnDelay(v: number): void {
     appleRespawnDelay = v;
@@ -566,8 +572,11 @@ export function setAppleRespawnDelay(v: number): void {
 // ── Apple interaction state (tree apples) ────────────────────────────────────
 interface AppleState {
     clickCount: number;
-    tiltBoost: number;
-    hidden: boolean;         // tree apple is invisible while waiting for ground clone to land
+    angleX:  number;    // current spring angle around X (radians)
+    angleZ:  number;    // current spring angle around Z (radians)
+    angVelX: number;    // angular velocity around X (rad/s)
+    angVelZ: number;    // angular velocity around Z (rad/s)
+    hidden: boolean;    // tree apple is invisible while waiting for ground clone to land
     respawning: boolean;     // spring scale-up after respawn
     respawnScale: number;
     respawnVelocity: number;
@@ -577,9 +586,9 @@ interface AppleState {
 }
 
 const appleStates: AppleState[] = [
-    { clickCount: 0, tiltBoost: 0, hidden: false, respawning: false, respawnScale: 1, respawnVelocity: 0, originalPos: new Vector3(), originalRotY: 0, originalScale: 1 },
-    { clickCount: 0, tiltBoost: 0, hidden: false, respawning: false, respawnScale: 1, respawnVelocity: 0, originalPos: new Vector3(), originalRotY: 0, originalScale: 1 },
-    { clickCount: 0, tiltBoost: 0, hidden: false, respawning: false, respawnScale: 1, respawnVelocity: 0, originalPos: new Vector3(), originalRotY: 0, originalScale: 1 },
+    { clickCount: 0, angleX: 0, angleZ: 0, angVelX: 0, angVelZ: 0, hidden: false, respawning: false, respawnScale: 1, respawnVelocity: 0, originalPos: new Vector3(), originalRotY: 0, originalScale: 1 },
+    { clickCount: 0, angleX: 0, angleZ: 0, angVelX: 0, angVelZ: 0, hidden: false, respawning: false, respawnScale: 1, respawnVelocity: 0, originalPos: new Vector3(), originalRotY: 0, originalScale: 1 },
+    { clickCount: 0, angleX: 0, angleZ: 0, angVelX: 0, angVelZ: 0, hidden: false, respawning: false, respawnScale: 1, respawnVelocity: 0, originalPos: new Vector3(), originalRotY: 0, originalScale: 1 },
 ];
 
 // ── Golden apple easter egg ─────────────────────────────────────────────────
@@ -847,7 +856,7 @@ interface ExclusionZone { x: number; z: number; r: number; }
 const SPAWN_EXCLUSION_ZONES: ExclusionZone[] = [
     { x:  0.00,  z: -2.90, r: EXCL_R_BONFIRE },  // Bonfire + sword + campfire footprint
     { x:  0.48,  z: -3.65, r: EXCL_R_TENT    },  // Custom tent
-    { x: -0.35,  z: -3.60, r: EXCL_R_PALM    },  // Palm trunk (small — palm-cluster grass grows around it)
+    { x: -0.35,  z: -3.60, r: EXCL_R_TREE    },  // Tree trunk
     { x:  0.65,  z: -2.30, r: EXCL_R_PUG     },  // Pug
     { x: -0.65,  z: -3.10, r: EXCL_R_RADIO   },  // Radio
     { x:  0.32,  z: -2.60, r: EXCL_R_ROCKS   },  // Little rocks + phone
@@ -857,7 +866,7 @@ const SPAWN_EXCLUSION_ZONES: ExclusionZone[] = [
 export const exclRadii = {
     bonfire: EXCL_R_BONFIRE,
     tent:    EXCL_R_TENT,
-    palm:    EXCL_R_PALM,
+    tree:    EXCL_R_TREE,
     pug:     EXCL_R_PUG,
     radio:   EXCL_R_RADIO,
     rocks:   EXCL_R_ROCKS,
@@ -867,7 +876,7 @@ export const exclRadii = {
 export function setExclRadius(key: keyof typeof exclRadii, v: number): void {
     exclRadii[key] = v;
     const IDX: Record<keyof typeof exclRadii, number> = {
-        bonfire: 0, tent: 1, palm: 2, pug: 3, radio: 4, rocks: 5,
+        bonfire: 0, tent: 1, tree: 2, pug: 3, radio: 4, rocks: 5,
     };
     SPAWN_EXCLUSION_ZONES[IDX[key]].r = v;
 }
@@ -940,19 +949,19 @@ export function respawnFoliage(_which: FoliageCluster = 'grass'): void {
     console.log(`[Island] Respawned grass: ${_grassSpawnPoints.length} spawn points`);
 }
 
-// PALM TREE WIND SETTINGS - easily tweakable
-const PALM_WIND_STRENGTH = 0.03;    // TWEAK: How much leaves sway (0.05-0.3)
-const PALM_WIND_SPEED = 0.5;       // TWEAK: Speed of wind oscillation (0.5-3.0)
-const PALM_LEAF_START_Y = 3.0;     // TWEAK: Y height where leaves start swaying (local coords)
-const PALM_LEAF_FULL_Y = 3.25;      // TWEAK: Y height where full sway happens
+// TREE WIND SETTINGS - easily tweakable
+const TREE_WIND_STRENGTH = 0.03;    // TWEAK: How much leaves sway (0.05-0.3)
+const TREE_WIND_SPEED = 0.5;       // TWEAK: Speed of wind oscillation (0.5-3.0)
+const TREE_LEAF_START_Y = 3.0;     // TWEAK: Y height where leaves start swaying (local coords)
+const TREE_LEAF_FULL_Y = 3.25;      // TWEAK: Y height where full sway happens
 
 // Wind uniforms for shader
-const palmWindTimeUniform = new Uniform(0.0);
-const palmWindStrengthUniform = new Uniform(PALM_WIND_STRENGTH);
-const palmLeafStartYUniform = new Uniform(PALM_LEAF_START_Y);
-const palmLeafFullYUniform = new Uniform(PALM_LEAF_FULL_Y);
+const treeWindTimeUniform = new Uniform(0.0);
+const treeWindStrengthUniform = new Uniform(TREE_WIND_STRENGTH);
+const treeLeafStartYUniform = new Uniform(TREE_LEAF_START_Y);
+const treeLeafFullYUniform = new Uniform(TREE_LEAF_FULL_Y);
 
-// FOLIAGE (GRASS/CLOVER) WIND SETTINGS - independent from palm
+// FOLIAGE (GRASS/CLOVER) WIND SETTINGS - independent from tree
 const FOLIAGE_WIND_STRENGTH = 0.035;  // TWEAK: Very subtle sway
 // const FOLIAGE_WIND_SPEED = 0.8;       // TWEAK: Slow gentle movement
 const foliageWindStrengthUniform = new Uniform(FOLIAGE_WIND_STRENGTH);
@@ -1055,8 +1064,8 @@ function applyOceanLightingToModel(model: Group): void {
     });
 }
 
-// Apply wind animation shader to palm tree
-function applyPalmWindShader(model: Group): void {
+// Apply wind animation shader to tree
+function applyTreeWindShader(model: Group): void {
     model.traverse((child) => {
         if ((child as any).isMesh && (child as any).material) {
             const mesh = child as any;
@@ -1071,18 +1080,18 @@ function applyPalmWindShader(model: Group): void {
                         mat.depthWrite = true;
                         mat.alphaTest = 0.5;
                     }
-                    mat.customProgramCacheKey = () => 'palm_wind';
+                    mat.customProgramCacheKey = () => 'tree_wind';
                     mat.onBeforeCompile = (shader: any) => {
-                        console.log('🌴 Palm wind shader compiling!');
+                        console.log('🌳 Tree wind shader compiling!');
                         // Add ocean lighting uniforms
                         shader.uniforms.uLight = lightUniform;
                         shader.uniforms.uAbsorption = oceanAbsorptionUniform;
                         shader.uniforms.uSunVisibility = sunVisibilityUniform;
                         // Add wind uniforms
-                        shader.uniforms.uWindTime = palmWindTimeUniform;
-                        shader.uniforms.uWindStrength = palmWindStrengthUniform;
-                        shader.uniforms.uLeafStartY = palmLeafStartYUniform;
-                        shader.uniforms.uLeafFullY = palmLeafFullYUniform;
+                        shader.uniforms.uWindTime = treeWindTimeUniform;
+                        shader.uniforms.uWindStrength = treeWindStrengthUniform;
+                        shader.uniforms.uLeafStartY = treeLeafStartYUniform;
+                        shader.uniforms.uLeafFullY = treeLeafFullYUniform;
                         
                         // Vertex shader - add wind sway
                         shader.vertexShader = shader.vertexShader.replace(
@@ -1213,7 +1222,7 @@ export function Start(): void {
         'models/surface/tree.glb',
         (gltf) => {
             // Apply wind shader instead of just ocean lighting
-            applyPalmWindShader(gltf.scene);
+            applyTreeWindShader(gltf.scene);
             // Enable shadow casting and receiving
             gltf.scene.traverse((child) => {
                 if ((child as any).isMesh) {
@@ -1224,7 +1233,7 @@ export function Start(): void {
                     mesh.geometry.computeBoundingBox();
                     const bbox = mesh.geometry.boundingBox;
                     // Log all mesh info for debugging
-                    console.log('🌴 Palm mesh found:', {
+                    console.log('🌳 Tree mesh found:', {
                         name: child.name,
                         position: { x: mesh.position.x.toFixed(2), y: mesh.position.y.toFixed(2), z: mesh.position.z.toFixed(2) },
                         materialName: mesh.material?.name || 'unnamed',
@@ -1234,13 +1243,13 @@ export function Start(): void {
                     // Try to identify leaves by name (common naming conventions)
                     const name = child.name.toLowerCase();
                     if (name.includes('leaf') || name.includes('leaves') || name.includes('frond') || name.includes('palm') && !name.includes('trunk')) {
-                        palmLeaves.push(child);
+                        treeLeaves.push(child);
                         console.log('  ↳ Identified as LEAF');
                     }
                 }
             });
             // If no leaves found by name, use all meshes except the lowest one (trunk)
-            if (palmLeaves.length === 0) {
+            if (treeLeaves.length === 0) {
                 const meshes: Object3D[] = [];
                 gltf.scene.traverse((child) => {
                     if ((child as any).isMesh) {
@@ -1252,38 +1261,38 @@ export function Start(): void {
                 if (meshes.length > 1) {
                     // Skip the bottom mesh (trunk), add rest as leaves
                     for (let i = 1; i < meshes.length; i++) {
-                        palmLeaves.push(meshes[i]);
+                        treeLeaves.push(meshes[i]);
                     }
-                    console.log('Auto-detected', palmLeaves.length, 'palm leaf meshes');
+                    console.log('Auto-detected', treeLeaves.length, 'tree leaf meshes');
                 } else if (meshes.length === 1) {
                     // Only one mesh, animate the whole thing
-                    palmLeaves.push(meshes[0]);
-                    console.log('Single mesh palm tree, animating entire model');
+                    treeLeaves.push(meshes[0]);
+                    console.log('Single mesh tree, animating entire model');
                 }
             }
-            palmtree.add(gltf.scene);
-            palmtree.position.set(
-                islandPosition.x + palmtreeOffset.x,
-                islandPosition.y + palmtreeOffset.y,
-                islandPosition.z + palmtreeOffset.z
+            tree.add(gltf.scene);
+            tree.position.set(
+                islandPosition.x + treeOffset.x,
+                islandPosition.y + treeOffset.y,
+                islandPosition.z + treeOffset.z
             );
-            palmtree.scale.setScalar(palmtreeScale);
-            palmtree.rotation.y = palmtreeRotY;
+            tree.scale.setScalar(treeScale);
+            tree.rotation.y = treeRotY;
 
-            // Collect palm trunk meshes for physics collisions
-            palmtree.updateMatrixWorld(true);
-            palmtree.traverse((child) => {
-                if ((child as any).isMesh) palmTrunkMeshes.push(child as Mesh);
+            // Collect tree trunk meshes for physics collisions
+            tree.updateMatrixWorld(true);
+            tree.traverse((child) => {
+                if ((child as any).isMesh) treeTrunkMeshes.push(child as Mesh);
             });
             // Register with physics world (may trigger rebuild if world already exists)
-            registerPalmMeshes(palmTrunkMeshes);
-            console.log('Palm tree loaded with ocean lighting');
+            registerTreeMeshes(treeTrunkMeshes);
+            console.log('Tree loaded with ocean lighting');
         },
         (progress) => {
-            console.log('Palm tree loading:', (progress.loaded / progress.total * 100) + '%');
+            console.log('Tree loading:', (progress.loaded / progress.total * 100) + '%');
         },
         (error) => {
-            console.error('Error loading palm tree:', error);
+            console.error('Error loading tree:', error);
         }
     );
 
@@ -1309,7 +1318,7 @@ export function Start(): void {
 
         // ── Create grass uniforms (shared with existing scene uniforms) ─
         _grassUniforms = {
-            uWindTime:       palmWindTimeUniform,
+            uWindTime:       treeWindTimeUniform,
             uWindStrength:   foliageWindStrengthUniform,
             uWobbleStrength: grassWobbleStrengthUniform,
             uNoiseTexture:   new Uniform(_perlinTexture),
@@ -1694,7 +1703,7 @@ export function Start(): void {
 
     // Init cannon-es physics world for falling apples (after island meshes are ready)
     waitForIslandMeshes(() => {
-        initPhysicsWorld(islandMeshes, palmTrunkMeshes);
+        initPhysicsWorld(islandMeshes, treeTrunkMeshes);
     });
 }
 
@@ -1719,7 +1728,14 @@ function setupAppleInteraction(): void {
             const hits = appleRaycaster.intersectObjects(appleGroups[i].children, true);
             if (hits.length > 0) {
                 st.clickCount++;
-                st.tiltBoost = APPLE_CLICK_TILT_BOOST;
+
+                // Apply angular impulse away from camera
+                const appleWorldPos = appleGroups[i].getWorldPosition(new Vector3());
+                const awayX = appleWorldPos.x - camera.position.x;
+                const awayZ = appleWorldPos.z - camera.position.z;
+                const awayLen = Math.sqrt(awayX * awayX + awayZ * awayZ) || 1;
+                st.angVelX += (-awayZ / awayLen) * appleClickImpulse;
+                st.angVelZ += ( awayX / awayLen) * appleClickImpulse;
                 if (st.clickCount >= APPLE_CLICK_COUNT_TO_FALL) {
                     triggerAppleFall(i);
                 }
@@ -1841,7 +1857,8 @@ function triggerAppleFall(index: number): void {
     // Hide the tree apple until the ground clone lands + delay elapses
     _removeGoldenTint(index); // clear any golden tint before hiding
     st.clickCount = 0;
-    st.tiltBoost = 0;
+    st.angleX = 0; st.angleZ = 0;
+    st.angVelX = 0; st.angVelZ = 0;
     st.hidden = true;
     group.scale.setScalar(0.001);
 }
@@ -2908,7 +2925,7 @@ function setupRadioInteraction(): void {
 export function Update(isUnderwater = false): void {
   if (!isUnderwater) {
     // Update palm tree wind shader time
-    palmWindTimeUniform.value = time * PALM_WIND_SPEED;
+    treeWindTimeUniform.value = time * TREE_WIND_SPEED;
     
     // Breeze-driven wind animation for grass and palm tree
     windTime += deltaTime;
@@ -2922,8 +2939,8 @@ export function Update(isUnderwater = false): void {
     }
     
     // Update shader uniforms so vertex wind also syncs with breeze
-    palmWindTimeUniform.value = windTime;
-    palmWindStrengthUniform.value = PALM_WIND_STRENGTH * breezeIntensity;
+    treeWindTimeUniform.value = windTime;
+    treeWindStrengthUniform.value = TREE_WIND_STRENGTH * breezeIntensity;
     foliageWindStrengthUniform.value = foliageWindStrength * breezeIntensity;
 
     // ── Apple pendulum sway / fall / respawn ─────────────────────────────────
@@ -2962,20 +2979,23 @@ export function Update(isUnderwater = false): void {
             continue;
         }
 
-        // Normal sway + tilt boost
+        // Spring-damper pendulum integration
+        const accX = -appleSwingStiffness * st.angleX - appleSwingDamping * st.angVelX;
+        const accZ = -appleSwingStiffness * st.angleZ - appleSwingDamping * st.angVelZ;
+        st.angVelX += accX * deltaTime;
+        st.angVelZ += accZ * deltaTime;
+        st.angleX  += st.angVelX * deltaTime;
+        st.angleZ  += st.angVelZ * deltaTime;
+
+        // Wind sway layered on top
         const ph = APPLE_PHASES[i];
         const t  = windTime;
-        const tiltX = Math.sin(t * 2.3  + ph)             * 0.65
-                    + Math.sin(t * 5.1  + ph * 1.4 + 0.6) * 0.35;
-        const tiltZ = Math.sin(t * 1.9  + ph + 1.2)       * 0.65
-                    + Math.sin(t * 4.7  + ph * 2.3 + 2.0)  * 0.35;
-        const amplitude = 0.008 + appleWindStrength * breezeIntensity + st.tiltBoost;
-        grp.rotation.x = tiltX * amplitude;
-        grp.rotation.z = tiltZ * amplitude;
+        const windAmp = 0.008 + appleWindStrength * breezeIntensity;
+        const windX = (Math.sin(t * 2.3 + ph) * 0.65 + Math.sin(t * 5.1 + ph * 1.4 + 0.6) * 0.35) * windAmp;
+        const windZ = (Math.sin(t * 1.9 + ph + 1.2) * 0.65 + Math.sin(t * 4.7 + ph * 2.3 + 2.0) * 0.35) * windAmp;
 
-        if (st.tiltBoost > 0) {
-            st.tiltBoost = Math.max(0, st.tiltBoost - deltaTime * 2.0);
-        }
+        grp.rotation.x = st.angleX + windX;
+        grp.rotation.z = st.angleZ + windZ;
     }
 
     // ── Ground apples: sync physics, fade, cleanup ──────────────────────────
@@ -3029,7 +3049,7 @@ export function Update(isUnderwater = false): void {
     // Fire lighting on grass is now automatic via MeshStandardMaterial + PointLight
   }
     
-    // Palm tree wind is handled entirely by the vertex shader (applyPalmWindShader)
+    // Palm tree wind is handled entirely by the vertex shader (applyTreeWindShader)
     // which uses smoothstep(uLeafStartY, uLeafFullY, position.y) to only move leaves,
     // not the trunk. No JS rotation needed here.
     

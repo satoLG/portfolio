@@ -1,10 +1,9 @@
-import * as TIME from "./scripts/Time";
-import * as SCENE from "./scripts/Scene";
-import * as INPUT from "./scripts/Input";
-import * as CONTROL from "./scripts/Control";
-import * as UI from "./scripts/UI";
-import * as DEBUG from "./scripts/Debug";
-import * as ISLAND_DEBUG from "./scripts/IslandDebug";
+import * as TIME from "./core/Time";
+import * as SCENE from "./core/Scene";
+import * as INPUT from "./core/Input";
+import * as CONTROL from "./core/Control";
+import * as UI from "./core/UI";
+import * as DEBUG from "./core/Debug";
 import * as SETTINGS from "./shaders/Settings"
 import "./style.css";
 
@@ -28,7 +27,6 @@ INPUT.Start();
 CONTROL.Start();
 UI.Start();
 DEBUG.Start();
-ISLAND_DEBUG.Start();
 
 requestAnimationFrame(UpdateFrame);
 

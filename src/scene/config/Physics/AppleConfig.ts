@@ -28,4 +28,4 @@ export const SLEEP_SPEED_LIMIT = 0.05;
 export const SLEEP_TIME_LIMIT  = 0.80;
 
 // ── Collider geometry ─────────────────────────────────────────────────────────
-export const PALM_TRUNK_MAX_Y  = 1.00;    // world-space Y cutoff — only trunk geometry below this gets a collider
+export const TREE_TRUNK_MAX_Y  = 1.00;    // world-space Y cutoff — only trunk geometry below this gets a collider
