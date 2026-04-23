@@ -88,6 +88,19 @@ let _mesh: Mesh | null = null;
 let _material: RawShaderMaterial | null = null;
 let _frame = 0;
 
+// ── Cloud intro animation ─────────────────────────────────────────────────────
+// Clouds start hidden and off to the right. After prewarmGPU() completes,
+// startCloudIntro() triggers a slide-in from right + opacity fade-in.
+const _INTRO_DURATION  = 2.5;   // seconds
+const _INTRO_X_OFFSET  = 2000;  // world units offset from final posX
+let   _introElapsed    = -1;    // −1 = not started / complete
+
+/** Begin the cloud entrance animation (slide from right + fade in). */
+export function startCloudIntro(): void {
+    _introElapsed = 0;
+    cloudsGroup.visible = true;
+}
+
 const VERT = `in vec3 position;
 
 uniform mat4 modelMatrix;
@@ -254,8 +267,15 @@ void main() {
 }`;
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
+export let noiseTexture: Data3DTexture;
+
 export function Start(): void {
-    const noiseTex = buildNoiseTexture();
+    noiseTexture = buildNoiseTexture();
+    const noiseTex = noiseTexture;
+
+    // Start clouds hidden and offset to the right; startCloudIntro() reveals them.
+    config.posX    = CC.posX + _INTRO_X_OFFSET;
+    config.opacity = 0;
 
     // Initial step count — quality presets in UI.ts will override this immediately
     // after Start(). This value is only used for the very first frame before the
@@ -291,12 +311,13 @@ export function Start(): void {
 
     const geo  = new BoxGeometry(1, 1, 1);
     _mesh      = new Mesh(geo, _material);
-    _mesh.position.set(CC.posX, CC.posY, CC.posZ);
+    _mesh.position.set(config.posX, CC.posY, CC.posZ);
     _mesh.scale.set(CC.scaleX, CC.scaleY, CC.scaleZ);
     _mesh.frustumCulled = false;
     _mesh.renderOrder   = 0;
 
     cloudsGroup.add(_mesh);
+    cloudsGroup.visible = false;
 }
 
 /** Override the ray-march step count for quality presets (Low=16, Medium=32, High=48). */
@@ -307,6 +328,16 @@ export function setMarchSteps(steps: number): void {
 // ── Per-frame update ──────────────────────────────────────────────────────────
 export function Update(deltaTime: number, dayFraction: number): void {
     if (!_material || !_mesh) return;
+
+    // Drive intro animation: slide from right + fade in
+    if (_introElapsed >= 0) {
+        _introElapsed += deltaTime;
+        const t    = Math.min(_introElapsed / _INTRO_DURATION, 1.0);
+        const ease = t * t * (3 - 2 * t);
+        config.posX    = CC.posX + _INTRO_X_OFFSET * (1 - ease);
+        config.opacity = CC.opacity * ease;
+        if (t >= 1.0) _introElapsed = -1;
+    }
 
     const u = _material.uniforms;
     u.uTime.value        = (u.uTime.value as number) + deltaTime;
