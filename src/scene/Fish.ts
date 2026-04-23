@@ -126,6 +126,7 @@ let genericFishAnimations: AnimationClip[] = [];
 
 // Jellyfish spawn system (night mode)
 let jellyfishTemplate: Group | null = null;
+export function getJellyfishTemplate(): Group | null { return jellyfishTemplate; }
 let jellyfishAnimations: AnimationClip[] = [];
 
 interface PooledFish {
@@ -224,39 +225,31 @@ function createPoolEntry(template: Group, animations: AnimationClip[], jellyfish
     return { group, scene, materials, baseTintColors, mixer, clip, isJellyfish: jellyfish };
 }
 
-// Staggered pool initialization — create one entry per frame to avoid a massive spike
-let _fishPoolQueue = 0;
-let _jellyPoolQueue = 0;
-
-/** Populate the day fish object pool, one entry per frame */
+/** Build entire fish pool synchronously inside the loader callback.
+ *  All entries exist at prewarm time so their shaders compile then, not on first dive. */
 function initFishPool(): void {
     if (fishPoolInitialized || !genericFishTemplate) return;
     fishPoolInitialized = true;
-    _fishPoolQueue = POOL_SIZE;
-}
-
-/** Populate the night jellyfish object pool, one entry per frame */
-function initJellyPool(): void {
-    if (jellyPoolInitialized || !jellyfishTemplate) return;
-    jellyPoolInitialized = true;
-    _jellyPoolQueue = JELLY_POOL_SIZE;
-}
-
-/** Drip-feed pool creation — call once per Update() */
-function tickPoolCreation(): void {
-    if (_fishPoolQueue > 0 && genericFishTemplate) {
+    for (let i = 0; i < POOL_SIZE; i++) {
         const entry = createPoolEntry(genericFishTemplate, genericFishAnimations, false);
         genericFishContainer.add(entry.group);
         fishPool.push(entry);
-        _fishPoolQueue--;
     }
-    if (_jellyPoolQueue > 0 && jellyfishTemplate) {
+}
+
+/** Build entire jellyfish pool synchronously inside the loader callback. */
+function initJellyPool(): void {
+    if (jellyPoolInitialized || !jellyfishTemplate) return;
+    jellyPoolInitialized = true;
+    for (let i = 0; i < JELLY_POOL_SIZE; i++) {
         const entry = createPoolEntry(jellyfishTemplate, jellyfishAnimations, true);
         genericFishContainer.add(entry.group);
         jellyPool.push(entry);
-        _jellyPoolQueue--;
     }
 }
+
+/** No-op kept for call-site compatibility — pool is now built synchronously at load. */
+function tickPoolCreation(): void {}
 
 /** Take a creature from the correct pool, apply tint/position/scale, activate it */
 function activatePooledFish(

@@ -225,6 +225,7 @@ let _chestGlowTarget = 0;
 let _chestGlowReady  = false;  // true only after CHEST_GLOW_DELAY_MS has elapsed
 // Chest Zelda-style ray beams
 let _chestRayGroup: Group | null = null;
+export function getChestRayMats(): MeshBasicMaterial[] { return _chestRayMats; }
 const _chestRayMats: MeshBasicMaterial[] = [];
 // Coins stored for live debug-GUI transforms
 const _chestCoins: Group[] = [];
@@ -605,8 +606,9 @@ export const goldenAppleConfig = {
     lightDistance:      GOLDEN_APPLE_LIGHT_DISTANCE,
     lightDecay:        GOLDEN_APPLE_LIGHT_DECAY,
 };
-/** Per-apple: original materials saved before applying golden tint, null when normal. */
-const _savedAppleMaterials: (Map<Mesh, { color: Color; emissive: Color; emissiveIntensity: number }> | null)[] = [null, null, null];
+interface _GoldenMatEntry { mesh: Mesh; normalMat: MeshStandardMaterial; goldenMat: MeshStandardMaterial; blendFactor: number; }
+/** Pre-baked golden materials per apple (created once at load, swapped atomically). */
+const _goldenMatCache: _GoldenMatEntry[][] = [[], [], []];
 /** Per-apple bounding box (computed once at load, used for Y cutoff). */
 const _appleBBoxes: Box3[] = [];
 /** Track which tree apple indices are currently golden. */
@@ -701,50 +703,38 @@ function _goldenBlendFactor(mesh: Mesh, appleIndex: number): number {
     return (cutoffY - meshMinY) / (meshMaxY - meshMinY);
 }
 
-function _applyGoldenTint(index: number): void {
-    const grp = [apple1, apple2, apple3][index];
-    const saved = new Map<Mesh, { color: Color; emissive: Color; emissiveIntensity: number }>();
+function _prebakeGoldenMaterials(grp: Group, index: number): void {
     const goldColor = new Color(goldenAppleConfig.color);
     const goldEmissive = new Color(goldenAppleConfig.emissive);
-
+    _goldenMatCache[index] = [];
     grp.traverse((child) => {
-        if ((child as any).isMesh) {
-            const mesh = child as Mesh;
-            const mat = mesh.material as MeshStandardMaterial;
-            if (mat && mat.color) {
-                saved.set(mesh, {
-                    color: mat.color.clone(),
-                    emissive: mat.emissive ? mat.emissive.clone() : new Color(0),
-                    emissiveIntensity: mat.emissiveIntensity ?? 0,
-                });
-                const t = _goldenBlendFactor(mesh, index);
-                if (t > 0) {
-                    mat.color.lerp(goldColor, t);
-                    if (mat.emissive) mat.emissive.lerp(goldEmissive, t);
-                    mat.emissiveIntensity = (mat.emissiveIntensity ?? 0) * (1 - t) + goldenAppleConfig.emissiveIntensity * t;
-                }
-            }
+        if (!(child as any).isMesh) return;
+        const mesh = child as Mesh;
+        const normalMat = mesh.material as MeshStandardMaterial;
+        if (!normalMat || !normalMat.color) return;
+        const t = _goldenBlendFactor(mesh, index);
+        const goldenMat = normalMat.clone();
+        if (t > 0) {
+            goldenMat.color.lerp(goldColor, t);
+            goldenMat.emissive.lerp(goldEmissive, t);
+            goldenMat.emissiveIntensity = goldenMat.emissiveIntensity * (1 - t) + goldenAppleConfig.emissiveIntensity * t;
         }
+        _goldenMatCache[index].push({ mesh, normalMat, goldenMat, blendFactor: t });
     });
-    _savedAppleMaterials[index] = saved;
-    _isGolden[index] = true;
+}
 
-    // Acquire a pooled light
+function _applyGoldenTint(index: number): void {
+    for (const entry of _goldenMatCache[index]) {
+        entry.mesh.material = entry.goldenMat;
+    }
+    _isGolden[index] = true;
+    const grp = [apple1, apple2, apple3][index];
     _acquireGoldenLight(grp);
 }
 
 function _removeGoldenTint(index: number): void {
-    const saved = _savedAppleMaterials[index];
-    if (saved) {
-        saved.forEach((orig, mesh) => {
-            const mat = mesh.material as MeshStandardMaterial;
-            if (mat) {
-                mat.color.copy(orig.color);
-                if (mat.emissive) mat.emissive.copy(orig.emissive);
-                mat.emissiveIntensity = orig.emissiveIntensity;
-            }
-        });
-        _savedAppleMaterials[index] = null;
+    for (const entry of _goldenMatCache[index]) {
+        entry.mesh.material = entry.normalMat;
     }
     if (_isGolden[index]) {
         const grp = [apple1, apple2, apple3][index];
@@ -755,32 +745,16 @@ function _removeGoldenTint(index: number): void {
 
 /** Live-update all currently golden apples (called from debug GUI). */
 export function updateAllGoldenApples(): void {
+    const goldColor = new Color(goldenAppleConfig.color);
+    const goldEmissive = new Color(goldenAppleConfig.emissive);
     for (let i = 0; i < 3; i++) {
-        if (!_isGolden[i]) continue;
-        const grp = [apple1, apple2, apple3][i];
-        const saved = _savedAppleMaterials[i];
-        const goldColor = new Color(goldenAppleConfig.color);
-        const goldEmissive = new Color(goldenAppleConfig.emissive);
-        // Re-evaluate Y cutoff — restore originals first, then re-apply with blend
-        grp.traverse((child) => {
-            if ((child as any).isMesh) {
-                const mesh = child as Mesh;
-                const mat = mesh.material as MeshStandardMaterial;
-                if (!mat || !mat.color) return;
-                const orig = saved?.get(mesh);
-                if (!orig) return;
-                const t = _goldenBlendFactor(mesh, i);
-                if (t > 0) {
-                    mat.color.copy(orig.color).lerp(goldColor, t);
-                    if (mat.emissive) mat.emissive.copy(orig.emissive).lerp(goldEmissive, t);
-                    mat.emissiveIntensity = orig.emissiveIntensity * (1 - t) + goldenAppleConfig.emissiveIntensity * t;
-                } else {
-                    mat.color.copy(orig.color);
-                    if (mat.emissive) mat.emissive.copy(orig.emissive);
-                    mat.emissiveIntensity = orig.emissiveIntensity;
-                }
-            }
-        });
+        for (const entry of _goldenMatCache[i]) {
+            if (entry.blendFactor <= 0) continue;
+            const t = entry.blendFactor;
+            entry.goldenMat.color.copy(entry.normalMat.color).lerp(goldColor, t);
+            entry.goldenMat.emissive.copy(entry.normalMat.emissive).lerp(goldEmissive, t);
+            entry.goldenMat.emissiveIntensity = entry.normalMat.emissiveIntensity * (1 - t) + goldenAppleConfig.emissiveIntensity * t;
+        }
     }
     // Update all active pooled lights
     for (let i = 0; i < MAX_GOLDEN_APPLES; i++) {
@@ -1668,9 +1642,10 @@ export function Start(): void {
                 appleStates[i].originalRotY = appleGroups[i].rotation.y;
                 appleStates[i].originalScale = appleGroups[i].scale.x;
 
-                // Cache bounding box for golden Y cutoff
+                // Cache bounding box for golden Y cutoff, then pre-bake golden materials
                 appleGroups[i].updateMatrixWorld(true);
                 _appleBBoxes[i] = new Box3().setFromObject(appleGroups[i]);
+                _prebakeGoldenMaterials(appleGroups[i], i);
             }
         },
         undefined,

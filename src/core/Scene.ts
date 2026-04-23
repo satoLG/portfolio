@@ -377,6 +377,7 @@ export function Start(): void
     // Volumetric clouds
     Clouds.Start();
     scene.add(Clouds.cloudsGroup);
+    renderer.initTexture(Clouds.noiseTexture);
 
     // Register GPU prewarm to run after all models finish loading.
     // This compiles every shader program during the loading screen so the
@@ -407,6 +408,12 @@ async function prewarmGPU(): Promise<void> {
     //    hooks on SeaFloorDecor ocean lighting, kelp sway, Island wind, etc.)
     renderer.compile(scene, camera);
 
+    // Pre-upload the chest ray canvas textures to GPU (canvas textures require
+    // initTexture — they're not uploaded by renderer.compile, only on render).
+    for (const mat of Island.getChestRayMats()) {
+        if (mat.map) renderer.initTexture(mat.map);
+    }
+
     // Compile the post-process quad (underwater distortion + pixelation)
     PostProcess.prewarm(renderer);
 
@@ -419,9 +426,27 @@ async function prewarmGPU(): Promise<void> {
     camera.updateProjectionMatrix();
     renderer.render(scene, camera);
 
+    // Island-facing pass: uploads all island/tree/object textures to GPU
+    // (the sky pass above looks away from the island, so nothing on it gets uploaded).
+    const surfaceWasVisible = Ocean.surface.visible;
+    Ocean.surface.visible = true;
+    camera.position.set(0, 3.5, 0);
+    camera.lookAt(0, 0, -3.3);
+    camera.updateProjectionMatrix();
+    renderer.render(scene, camera);
+    Ocean.surface.visible = surfaceWasVisible;
+
     camera.position.set(0, -3, 4);
     camera.lookAt(0, -5, -3);
     camera.updateProjectionMatrix();
+    // Briefly make a jellyfish visible so the transparent+depthWrite=false shader
+    // variant compiles now. Jellyfish use a different GL program than opaque fish,
+    // and visible=false causes Three.js to skip them during renderer.compile().
+    const jellyTemplate = Fish.getJellyfishTemplate();
+    if (jellyTemplate) {
+        jellyTemplate.visible = true;
+        jellyTemplate.position.set(0, -3, -3);
+    }
     // Exercise the full PostProcess pipeline (copyFramebufferToTexture + distortion
     // quad render) so the GPU path is warm before the user actually dives.
     // Without this the first real crossing of UNDERWATER_Y_THRESHOLD causes a
@@ -429,6 +454,7 @@ async function prewarmGPU(): Promise<void> {
     PostProcess.updateUnderwaterAmount(camera.position.y);  // sets underwaterAmount > 0
     PostProcess.renderScene(renderer, scene, camera);
     PostProcess.updateUnderwaterAmount(100);                 // reset to 0 (positive Y → depth < 0)
+    if (jellyTemplate) jellyTemplate.visible = false;
 
     // 4. Restore camera
     camera.position.copy(savedPos);
@@ -438,7 +464,10 @@ async function prewarmGPU(): Promise<void> {
     // 5. Restore visibility
     for (const { obj, vis } of savedVis) obj.visible = vis;
 
-    // 6. Preload all music tracks into browser cache (non-blocking)
+    // 6. Begin cloud entrance animation (slide in from right + fade in opacity)
+    Clouds.startCloudIntro();
+
+    // 7. Preload all music tracks into browser cache (non-blocking)
     MediaPlayer.preloadAllTracks();
 }
 
