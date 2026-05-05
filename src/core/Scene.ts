@@ -464,10 +464,7 @@ async function prewarmGPU(): Promise<void> {
     // 5. Restore visibility
     for (const { obj, vis } of savedVis) obj.visible = vis;
 
-    // 6. Begin cloud entrance animation (slide in from right + fade in opacity)
-    Clouds.startCloudIntro();
-
-    // 7. Preload all music tracks into browser cache (non-blocking)
+    // 6. Preload all music tracks into browser cache (non-blocking)
     MediaPlayer.preloadAllTracks();
 }
 

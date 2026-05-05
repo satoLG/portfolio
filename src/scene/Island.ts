@@ -614,6 +614,180 @@ const _appleBBoxes: Box3[] = [];
 /** Track which tree apple indices are currently golden. */
 const _isGolden: boolean[] = [false, false, false];
 
+// ── Apple hit — audio + cartoon impact streaks ────────────────────────────────
+let _appleImpactBuffer: AudioBuffer | null = null;
+let _appleImpactTexture: CanvasTexture | null = null;
+
+interface AppleImpactStreak {
+    sprite: Sprite;
+    dir: Vector2;
+    normal: Vector2;
+    center: Vector3;
+    age: number;
+    delay: number;
+    duration: number;
+    startRadius: number;
+    travel: number;
+    curve: number;
+    maxLength: number;
+    maxWidth: number;
+    baseOpacity: number;
+}
+const _appleImpactStreaks: AppleImpactStreak[] = [];
+const _appleImpactRight = new Vector3();
+const _appleImpactUp = new Vector3();
+const _appleImpactPos = new Vector3();
+
+function _playAppleImpactAudio(): void {
+    const ctx = getAudioContext();
+    const dest = getMasterDestination();
+    if (!ctx || !dest) return;
+    if (!_appleImpactBuffer) {
+        fetch('audio/overall/209012__owlstorm__fruit-impact-1.wav')
+            .then(r => r.arrayBuffer())
+            .then(ab => ctx.decodeAudioData(ab))
+            .then(buf => { _appleImpactBuffer = buf; })
+            .catch(e => console.warn('[Apple] Failed to load impact audio:', e));
+        return;
+    }
+    const gain = ctx.createGain();
+    gain.gain.value = 1.5;
+    const src = ctx.createBufferSource();
+    src.buffer = _appleImpactBuffer;
+    src.connect(gain);
+    gain.connect(dest);
+    src.start();
+}
+
+function _getAppleImpactTexture(): CanvasTexture {
+    if (_appleImpactTexture) return _appleImpactTexture;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 32;
+    const ctx = canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+    gradient.addColorStop(0.00, 'rgba(255,255,255,0)');
+    gradient.addColorStop(0.16, 'rgba(255,255,255,0.95)');
+    gradient.addColorStop(0.72, 'rgba(255,255,255,1)');
+    gradient.addColorStop(1.00, 'rgba(255,255,255,0)');
+
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.moveTo(14, 16);
+    ctx.quadraticCurveTo(24, 4, 62, 4);
+    ctx.lineTo(106, 4);
+    ctx.quadraticCurveTo(124, 16, 106, 28);
+    ctx.lineTo(62, 28);
+    ctx.quadraticCurveTo(24, 28, 14, 16);
+    ctx.closePath();
+    ctx.fill();
+
+    _appleImpactTexture = new CanvasTexture(canvas);
+    _appleImpactTexture.needsUpdate = true;
+    return _appleImpactTexture;
+}
+
+function _spawnAppleImpactBurst(appleIdx: number): void {
+    const appleGroups = [apple1, apple2, apple3];
+    const group = appleGroups[appleIdx];
+    const worldCenter = new Vector3();
+
+    group.updateMatrixWorld(true);
+    const bbox = new Box3().setFromObject(group);
+    if (!bbox.isEmpty()) bbox.getCenter(worldCenter);
+    else if (_appleBBoxes[appleIdx]) _appleBBoxes[appleIdx].getCenter(worldCenter);
+    else group.getWorldPosition(worldCenter);
+
+    const size = bbox.getSize(new Vector3());
+    const radius = Math.max(0.055, Math.min(0.13, size.length() * 0.38));
+    const texture = _getAppleImpactTexture();
+    const baseAngle = Math.random() * Math.PI * 2;
+    const burstCount = 8;
+
+    for (let i = 0; i < burstCount; i++) {
+        const a = baseAngle + (i / burstCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.22;
+        const dir = new Vector2(Math.cos(a), Math.sin(a)).normalize();
+        const normal = new Vector2(-dir.y, dir.x);
+        const mat = new SpriteMaterial({
+            map: texture,
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+            depthTest: false,
+            blending: AdditiveBlending,
+        });
+        mat.rotation = a;
+
+        const sprite = new Sprite(mat);
+        sprite.renderOrder = 80;
+        sprite.position.copy(worldCenter);
+        sprite.scale.set(0.001, 0.001, 1);
+        threeScene.add(sprite);
+
+        _appleImpactStreaks.push({
+            sprite,
+            dir,
+            normal,
+            center: worldCenter.clone(),
+            age: 0,
+            delay: i * 0.008 + Math.random() * 0.018,
+            duration: 0.20 + Math.random() * 0.08,
+            startRadius: radius * (0.55 + Math.random() * 0.18),
+            travel: radius * (1.15 + Math.random() * 0.65),
+            curve: radius * (Math.random() - 0.5) * 0.34,
+            maxLength: radius * (0.95 + Math.random() * 0.45),
+            maxWidth: radius * (0.105 + Math.random() * 0.04),
+            baseOpacity: 0.88 + Math.random() * 0.12,
+        });
+    }
+}
+
+function _updateAppleImpacts(): void {
+    if (_appleImpactStreaks.length === 0) return;
+
+    _appleImpactRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    _appleImpactUp.setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+
+    for (let i = _appleImpactStreaks.length - 1; i >= 0; i--) {
+        const streak = _appleImpactStreaks[i];
+        streak.age += deltaTime;
+
+        const localAge = streak.age - streak.delay;
+        if (localAge < 0) continue;
+
+        const t = Math.min(localAge / streak.duration, 1);
+        if (t >= 1) {
+            streak.sprite.parent?.remove(streak.sprite);
+            (streak.sprite.material as SpriteMaterial).dispose();
+            _appleImpactStreaks.splice(i, 1);
+            continue;
+        }
+
+        const out = 1 - Math.pow(1 - t, 3);
+        const pop = Math.sin(Math.min(1, t / 0.42) * Math.PI * 0.5);
+        const fade = 1 - MathUtils.smoothstep(t, 0.46, 1);
+        const dist = streak.startRadius + streak.travel * out;
+        const bend = Math.sin(t * Math.PI) * streak.curve;
+
+        _appleImpactPos.copy(streak.center)
+            .addScaledVector(_appleImpactRight, streak.dir.x * dist + streak.normal.x * bend)
+            .addScaledVector(_appleImpactUp, streak.dir.y * dist + streak.normal.y * bend);
+
+        streak.sprite.position.copy(_appleImpactPos);
+        streak.sprite.scale.set(
+            streak.maxLength * (0.25 + pop * 0.75),
+            streak.maxWidth * (0.75 + pop * 0.35),
+            1,
+        );
+        const mat = streak.sprite.material as SpriteMaterial;
+        mat.opacity = streak.baseOpacity * fade;
+        mat.rotation += deltaTime * 1.8 * (streak.curve >= 0 ? 1 : -1);
+    }
+}
+
 // ── PointLight pool (3 lights, pre-created at Start(), never add/removed) ───
 const _goldenLightPool: PointLight[] = [];
 /** Which apple group (or ground clone) each pooled light is currently attached to. null = available. */
@@ -1703,6 +1877,8 @@ function setupAppleInteraction(): void {
             const hits = appleRaycaster.intersectObjects(appleGroups[i].children, true);
             if (hits.length > 0) {
                 st.clickCount++;
+                _playAppleImpactAudio();
+                _spawnAppleImpactBurst(i);
 
                 // Apply angular impulse away from camera
                 const appleWorldPos = appleGroups[i].getWorldPosition(new Vector3());
@@ -2898,6 +3074,8 @@ function setupRadioInteraction(): void {
 }
 
 export function Update(isUnderwater = false): void {
+  _updateAppleImpacts();
+
   if (!isUnderwater) {
     // Update palm tree wind shader time
     treeWindTimeUniform.value = time * TREE_WIND_SPEED;

@@ -4,7 +4,7 @@ import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from 
 import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, preloadUISounds, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
 import { getCameraY, setIntroProgress, enableScroll } from "./Control";
 import { setLoadingCallback } from "../scene/Island";
-import { setMarchSteps } from "../effects/Clouds";
+import { setMarchSteps, startCloudIntro } from "../effects/Clouds";
 import { t, setLanguage, type Language } from "./i18n";
 
 const THEME_STORAGE_KEY = 'portfolio-theme-mode';
@@ -238,11 +238,12 @@ export function Start(): void {
             document.body.classList.add('music-visible');
         }, 800);
         
-        // Remove overlays from DOM after animation completes
+        // Remove overlays from DOM after animation completes, then start cloud entrance
         setTimeout(() => {
             startOverlay.remove();
             blurOverlay.classList.add('hidden');
             rAFStopped = true;
+            startCloudIntro();
         }, 2500);
     };
     

@@ -91,7 +91,7 @@ let _frame = 0;
 // ── Cloud intro animation ─────────────────────────────────────────────────────
 // Clouds start hidden and off to the right. After prewarmGPU() completes,
 // startCloudIntro() triggers a slide-in from right + opacity fade-in.
-const _INTRO_DURATION  = 2.5;   // seconds
+const _INTRO_DURATION  = 10.0;  // seconds
 const _INTRO_X_OFFSET  = 2000;  // world units offset from final posX
 let   _introElapsed    = -1;    // −1 = not started / complete
 
