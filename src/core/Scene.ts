@@ -14,7 +14,6 @@ import * as PostProcess from "../effects/PostProcess.ts";
 import * as Bubbles from "../effects/Bubbles.ts";
 import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
 import * as WindLines from "../effects/WindLines.ts";
-import * as Clouds from "../effects/Clouds.ts";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
@@ -374,11 +373,6 @@ export function Start(): void
     WindLines.Start();
     scene.add(WindLines.windLinesGroup);
 
-    // Volumetric clouds
-    Clouds.Start();
-    scene.add(Clouds.cloudsGroup);
-    renderer.initTexture(Clouds.noiseTexture);
-
     // Register GPU prewarm to run after all models finish loading.
     // This compiles every shader program during the loading screen so the
     // first scroll and first underwater transition are stutter-free.
@@ -499,7 +493,7 @@ export function Update(): void
     // Also toggle mesh visibility so the GPU skips hidden geometry entirely.
 
     // The island extends below the waterline, so keep it visible until the
-    // camera is well below the surface.  Clouds/wind are pure sky effects —
+    // camera is well below the surface. Wind lines are pure sky effects, so
     // hide them as soon as we cross the waterline.
     const ISLAND_HIDE_DEPTH = -7;          // Y below which island meshes are culled
     const deepUnderwater = camera.position.y < ISLAND_HIDE_DEPTH;
@@ -509,7 +503,6 @@ export function Update(): void
         SeaFloor.setVisible(true);
         SeaFloorDecor.decorGroup.visible = true;
         Fish.setVisible(true);
-        Clouds.cloudsGroup.visible = !deepUnderwater;
         WindLines.windLinesGroup.visible = false;
         // Island stays visible near the surface so the submerged portion renders
         Island.island.visible = !deepUnderwater;
@@ -535,7 +528,6 @@ export function Update(): void
         SeaFloor.setVisible(false);
         SeaFloorDecor.decorGroup.visible = false;
         Fish.setVisible(false);
-        Clouds.cloudsGroup.visible = true;
         WindLines.windLinesGroup.visible = true;
         Island.island.visible = true;
         Island.firecamp.visible = true;
@@ -607,8 +599,6 @@ export function Update(): void
     // Wind lines 3D update — moves ribbon meshes and updates vertex positions
     WindLines.Update(deltaTime, camera.position.x, camera.position.y, camera.position.z, camera.fov);
 
-    // Volumetric clouds — sunVisible drives day(1)/night(0) color transition
-    Clouds.Update(deltaTime, sunVisible);
 }
 
 // Shadow configuration helpers

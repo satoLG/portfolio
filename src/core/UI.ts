@@ -4,7 +4,6 @@ import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from 
 import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, preloadUISounds, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
 import { getCameraY, setIntroProgress, enableScroll } from "./Control";
 import { setLoadingCallback } from "../scene/Island";
-import { setMarchSteps, startCloudIntro } from "../effects/Clouds";
 import { t, setLanguage, type Language } from "./i18n";
 
 const THEME_STORAGE_KEY = 'portfolio-theme-mode';
@@ -238,12 +237,11 @@ export function Start(): void {
             document.body.classList.add('music-visible');
         }, 800);
         
-        // Remove overlays from DOM after animation completes, then start cloud entrance
+        // Remove overlays from DOM after animation completes.
         setTimeout(() => {
             startOverlay.remove();
             blurOverlay.classList.add('hidden');
             rAFStopped = true;
-            startCloudIntro();
         }, 2500);
     };
     
@@ -408,19 +406,16 @@ export function Start(): void {
                 setDPR(1);
                 setShadowsEnabled(false);
                 setShadowResolution(256);
-                setMarchSteps(8);
                 break;
             case 'medium':
                 setDPR(isMobile ? 1.5 : 2);
                 setShadowsEnabled(true);
                 setShadowResolution(isMobile ? 512 : 1024);
-                setMarchSteps(isMobile ? 16 : 32);
                 break;
             case 'high':
                 setDPR(2);
                 setShadowsEnabled(true);
                 setShadowResolution(2048);
-                setMarchSteps(48);
                 break;
         }
     }
