@@ -462,9 +462,8 @@ export function Update(): void
         }
         else if (touchControls && webPageMode)
         {
-            // Two-finger scroll: gate on 2+ simultaneous touches.
-            // Only process for the first pointer (i === 0) to avoid double-counting.
-            if (pointer.phase == PointerPhase.moved && pointers.length >= 2 && i === 0)
+            // Single-finger scroll: only process for the first pointer to avoid double-counting.
+            if (pointer.phase == PointerPhase.moved && pointers.length >= 1 && i === 0)
             {
                 // Average Y delta across all active touch pointers for stable scrolling
                 let avgDeltaY = 0;

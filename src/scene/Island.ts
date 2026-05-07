@@ -5,7 +5,7 @@ import { oceanAbsorptionUniform, underwaterFogDistUniform, setFoamMask } from ".
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../core/Time";
 import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../core/MediaPlayer";
-import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive } from "../core/Control";
+import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive, touchControls } from "../core/Control";
 import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../core/Dialog";
 import * as CoinTooltip from '../core/CoinTooltip';
 import type { DialogLine, ReplyOption } from "../core/Dialog";
@@ -980,6 +980,19 @@ const groundApples: GroundApple[] = [];
 const appleRaycaster = new Raycaster();
 const appleMouse = new Vector2();
 let isAppleHovered = false;
+const APPLE_TOUCH_RADIUS = 0.35; // world units — expand hit area on touch
+const _appleTouchScratch = new Vector3();
+
+function _appleInTouchRadius(group: Group): boolean {
+    if (!touchControls) return false;
+    group.getWorldPosition(_appleTouchScratch);
+    const ray = appleRaycaster.ray;
+    const toApple = _appleTouchScratch.clone().sub(ray.origin);
+    const dot = toApple.dot(ray.direction);
+    if (dot < 0) return false; // behind camera
+    const closest = ray.origin.clone().addScaledVector(ray.direction, dot);
+    return closest.distanceTo(_appleTouchScratch) < APPLE_TOUCH_RADIUS;
+}
 export function setGrassYOffset(v: number): void {
     grassYOffset = v;
     if (_grassUniforms) _grassUniforms.uYOffset.value = v;
@@ -1875,7 +1888,7 @@ function setupAppleInteraction(): void {
             if (st.hidden || st.respawning) continue;
             if (appleGroups[i].children.length === 0) continue;
             const hits = appleRaycaster.intersectObjects(appleGroups[i].children, true);
-            if (hits.length > 0) {
+            if (hits.length > 0 || _appleInTouchRadius(appleGroups[i])) {
                 st.clickCount++;
                 _playAppleImpactAudio();
                 _spawnAppleImpactBurst(i);
@@ -1897,7 +1910,7 @@ function setupAppleInteraction(): void {
 
     canvas.addEventListener('click', (e: MouseEvent) => { onAppleClick(e.clientX, e.clientY); });
     canvas.addEventListener('touchend', (e: TouchEvent) => {
-        if (_touchWasMulti) return;
+        if (_touchWasMulti || _touchDragged) return;
         if (e.changedTouches.length > 0) {
             const t = e.changedTouches[0];
             onAppleClick(t.clientX, t.clientY);
@@ -2015,17 +2028,33 @@ function triggerAppleFall(index: number): void {
 }
 
 // ── Multi-touch gesture tracker ─────────────────────────────────────────────
-// Tracks whether 2+ fingers were ever active simultaneously during the current
-// gesture. Prevents scroll-gesture finger-lifts from triggering click actions.
-let _touchWasMulti = false;
+// Tracks whether 2+ fingers were active (multi-touch), or single finger dragged
+// significantly — both prevent tap interactions from firing on finger lift.
+let _touchWasMulti  = false;
+let _touchDragged   = false;
+let _touchStartX    = 0;
+let _touchStartY    = 0;
+const _TOUCH_DRAG_THRESHOLD_PX = 10;
 
 function _setupMultiTouchTracker(): void {
     const canvas = renderer.domElement;
     canvas.addEventListener('touchstart', (e: TouchEvent) => {
         if (e.touches.length >= 2) _touchWasMulti = true;
+        if (e.touches.length === 1) {
+            _touchStartX  = e.touches[0].clientX;
+            _touchStartY  = e.touches[0].clientY;
+            _touchDragged = false;
+        }
+    }, { passive: true });
+    canvas.addEventListener('touchmove', (e: TouchEvent) => {
+        if (!_touchWasMulti && e.touches.length === 1) {
+            const dx = e.touches[0].clientX - _touchStartX;
+            const dy = e.touches[0].clientY - _touchStartY;
+            if (Math.sqrt(dx * dx + dy * dy) > _TOUCH_DRAG_THRESHOLD_PX) _touchDragged = true;
+        }
     }, { passive: true });
     canvas.addEventListener('touchend', (e: TouchEvent) => {
-        if (e.touches.length === 0) _touchWasMulti = false; // all fingers lifted — reset
+        if (e.touches.length === 0) { _touchWasMulti = false; _touchDragged = false; }
     }, { passive: true });
 }
 
@@ -2435,7 +2464,7 @@ function setupPhoneInteraction(): void {
     });
 
     canvas.addEventListener('touchend', (e: TouchEvent) => {
-        if (_touchWasMulti) return;
+        if (_touchWasMulti || _touchDragged) return;
         if (e.changedTouches.length > 0) {
             const touch = e.changedTouches[0];
             onPhoneClick(touch.clientX, touch.clientY);
@@ -2709,7 +2738,7 @@ function setupChestInteraction(): void {
     });
 
     canvas.addEventListener('touchend', (e: TouchEvent) => {
-        if (_touchWasMulti) return;
+        if (_touchWasMulti || _touchDragged) return;
         if (e.changedTouches.length > 0) {
             const touch = e.changedTouches[0];
             onChestClick(touch.clientX, touch.clientY);
@@ -2793,7 +2822,7 @@ function setupCoinInteraction(): void {
     // ── Mobile: touchend on coin → show tooltip ────────────────────────────
     canvas.addEventListener('touchend', (e: TouchEvent) => {
         if (!CoinTooltip.IS_TOUCH_DEVICE) return;
-        if (_touchWasMulti) return;
+        if (_touchWasMulti || _touchDragged) return;
         if (_chestCoins.length === 0) return;
         if (e.changedTouches.length === 0) return;
 
@@ -2950,7 +2979,7 @@ function setupPugInteraction(): void {
     });
 
     canvas.addEventListener('touchend', (e: TouchEvent) => {
-        if (_touchWasMulti) return;  // was a 2-finger scroll gesture — skip click
+        if (_touchWasMulti || _touchDragged) return;  // was a scroll gesture — skip click
         if (e.changedTouches.length > 0) {
             const touch = e.changedTouches[0];
             onPugClick(touch.clientX, touch.clientY);
@@ -3028,7 +3057,7 @@ function setupRadioInteraction(): void {
     });
 
     canvas.addEventListener('touchend', (e: TouchEvent) => {
-        if (_touchWasMulti) return;  // was a 2-finger scroll gesture — skip click
+        if (_touchWasMulti || _touchDragged) return;  // was a scroll gesture — skip click
         if (e.changedTouches.length > 0) {
             const touch = e.changedTouches[0];
             onRadioClick(touch.clientX, touch.clientY);
