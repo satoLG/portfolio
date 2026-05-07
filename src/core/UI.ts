@@ -3,6 +3,7 @@ import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
 import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, preloadUISounds, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
 import { getCameraY, setIntroProgress, enableScroll } from "./Control";
+import { beginDescent as beginCloudDescent } from "../effects/CloudSprites.ts";
 import { setLoadingCallback } from "../scene/Island";
 import { t, setLanguage, type Language } from "./i18n";
 
@@ -189,6 +190,7 @@ export function Start(): void {
 
         // Reveal the ocean (hidden during loading to avoid visible edge at intro camera height)
         showOcean();
+        beginCloudDescent();
 
         // Enable scrolling / trigger cinematic camera descent
         // (scene already rendering from frame 1 — camera descends from sky intro position)

@@ -14,6 +14,7 @@ import * as PostProcess from "../effects/PostProcess.ts";
 import * as Bubbles from "../effects/Bubbles.ts";
 import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
 import * as WindLines from "../effects/WindLines.ts";
+import * as CloudSprites from "../effects/CloudSprites.ts";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
@@ -373,6 +374,8 @@ export function Start(): void
     WindLines.Start();
     scene.add(WindLines.windLinesGroup);
 
+    CloudSprites.Start();
+
     // Register GPU prewarm to run after all models finish loading.
     // This compiles every shader program during the loading screen so the
     // first scroll and first underwater transition are stutter-free.
@@ -415,8 +418,8 @@ async function prewarmGPU(): Promise<void> {
     //    Two passes: surface + underwater so both frustum regions are covered.
     //    Surface pass: camera at intro start position, tilted upward (matching
     //    the intro tilt) so only sky is visible — no ocean edge flash.
-    camera.position.set(-0.1, 5, 1.78);
-    camera.lookAt(-0.1, 10, -1);       // look upward — same tilt as INTRO_TETHA_START
+    camera.position.set(-0.1, 6.05, 1.78);
+    camera.lookAt(-0.1, 7.45, -6.0);
     camera.updateProjectionMatrix();
     renderer.render(scene, camera);
 
@@ -481,6 +484,7 @@ export function Update(): void
     const isUnderwater = getIsUnderwater();
 
     Skybox.Update();
+    CloudSprites.Update(camera.position.y, deltaTime, Skybox.getDayNightBlend());
     Ocean.Update();
     Audio.Update();
     UI.Update();
@@ -584,6 +588,7 @@ export function Update(): void
     // PostProcess.renderScene wraps renderer.render() with post-processing
     // (pixelation + underwater distortion).
     PostProcess.renderScene(renderer, scene, camera);
+    CloudSprites.Render(renderer, camera);
 
     // Debug axes
     renderer.autoClearColor = false;

@@ -55,15 +55,17 @@ let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
 // ============================================
 // INTRO CAMERA DESCENT SETTINGS
 // ============================================
-const introStartY = 5;         // Camera starts high above scene (can't see island)
+const introStartY = 6;      // Camera starts just above the cloud deck
 const introEndY = aboveWaterTopY;  // Camera ends at normal top position
-const introSmooth = 2.5;       // Cinematic descent speed after start click (lower = slower)
+const introSmooth = 0.55;      // Cinematic descent speed after start click (lower = slower)
+const introFinishYThreshold = 0.01;
+const introFinishTethaThreshold = 0.001;
 let introActive = false;       // Kept false during loading — camera parked. True only during post-click descent.
 let scrollEnabled = false;     // Prevent scrolling until descent completes
 // Camera tilts up during loading so the viewport shows only sky (horizon below frame).
 // Must exceed the half-vertical-FOV (~25°) to guarantee no ocean is visible.
 // Damped back to 0 once the user clicks Start, giving a cinematic sky→scene swoop.
-const INTRO_TETHA_START = 0.55;   // radians (~31.5° upward tilt — positive = look up in Three.js)
+const INTRO_TETHA_START = 0.18;   // radians; keeps the cloud deck in the lower frame
 let introTetha = INTRO_TETHA_START;
 
 // Set intro loading progress (called from UI.ts for the loading bar animation).
@@ -78,6 +80,12 @@ export function setIntroProgress(_progress: number): void {
 // Triggers the cinematic camera descent from introStartY → introEndY.
 export function enableScroll(): void {
     introActive = true;   // triggers smooth descent in Update()
+    scrollEnabled = false;
+    isScrolling = false;
+    if (scrollTimeout) {
+        clearTimeout(scrollTimeout);
+        scrollTimeout = null;
+    }
     targetY = introEndY;  // destination
     // scrollEnabled will be set true once the descent reaches the destination
 }
@@ -344,6 +352,10 @@ export function handleScroll(deltaY: number): void {
     }
 }
 
+export function isSceneScrollEnabled(): boolean {
+    return scrollEnabled;
+}
+
 declare global {
     interface Window {
         mobileAndTabletCheck: () => boolean;
@@ -450,9 +462,8 @@ export function Update(): void
         }
         else if (touchControls && webPageMode)
         {
-            // Two-finger scroll: gate on 2+ simultaneous touches.
-            // Only process for the first pointer (i === 0) to avoid double-counting.
-            if (pointer.phase == PointerPhase.moved && pointers.length >= 2 && i === 0)
+            // Single-finger scroll: only process for the first pointer to avoid double-counting.
+            if (pointer.phase == PointerPhase.moved && pointers.length >= 1 && i === 0)
             {
                 // Average Y delta across all active touch pointers for stable scrolling
                 let avgDeltaY = 0;
@@ -683,20 +694,25 @@ export function Update(): void
             currentY = MathUtils.damp(currentY, targetY, smoothFactor, deltaTime);
             camera.position.y = currentY;
 
-            // Once the post-click intro descent is within a hair of the target,
-            // unlock scroll. No hard snap — let damp finish the last tiny delta
-            // so there is no visible position jump or sudden speed change.
-            if (introActive && Math.abs(currentY - introEndY) < 0.12) {
-                introActive = false;
-                scrollEnabled = true;
-            }
-
             // Damp the sky-tilt back to horizontal once the user has clicked Start.
             // Before click: introTetha stays fixed so only sky is visible.
             // After click: smoothly levels off as camera descends.
             if (introActive && introTetha !== 0) {
                 introTetha = MathUtils.damp(introTetha, 0, introSmooth * 2, deltaTime);
-                if (Math.abs(introTetha) < 0.001) introTetha = 0;
+                if (Math.abs(introTetha) < introFinishTethaThreshold) introTetha = 0;
+            }
+
+            // Keep the intro smoothing active until both the camera height and
+            // the intro tilt are done. This prevents the last few centimetres of
+            // Y from switching to the much faster scroll smoothing after the
+            // camera appears to have stopped.
+            if (introActive && Math.abs(currentY - introEndY) < introFinishYThreshold && Math.abs(introTetha) <= introFinishTethaThreshold) {
+                currentY = introEndY;
+                targetY = introEndY;
+                camera.position.y = introEndY;
+                introTetha = 0;
+                introActive = false;
+                scrollEnabled = true;
             }
         }
     }

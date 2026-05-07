@@ -11,8 +11,8 @@ const skybox =
 
     const float DITHER_STRENGTH = 0.1;
 
-    const vec3 DAY_SKY_COLOR = vec3(0.25, 0.4, 0.6);
-    const vec3 DAY_HORIZON_COLOR = vec3(0.75, 0.9, 1);
+    const vec3 DAY_SKY_COLOR = vec3(0.16, 0.34, 0.54);
+    const vec3 DAY_HORIZON_COLOR = vec3(0.4, 0.6, 0.7);
     const vec3 EARLY_TWILIGHT_COLOR = vec3(1, 0.83, 0.5);
     const vec3 LATE_TWILIGHT_COLOR = vec3(1, 0.333, 0.167);
     const vec3 NIGHT_SKY_COLOR = vec3(0.06, 0.1, 0.15);
