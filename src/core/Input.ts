@@ -1,7 +1,7 @@
 import { Vector2 } from "three";
 import { renderer } from "./Scene";
 import { time } from "./Time";
-import { handleScroll } from "./Control.ts";
+import { handleScroll, isSceneScrollEnabled } from "./Control.ts";
 
 class Pointer
 {
@@ -170,8 +170,19 @@ export function Start(): void
     // Wheel event for web page mode scrolling
     document.addEventListener("wheel", function(e)
     {
+        if (!isSceneScrollEnabled()) {
+            e.preventDefault();
+            return;
+        }
         handleScroll(e.deltaY);
-    }, { passive: true });
+    }, { passive: false });
+
+    document.addEventListener("touchmove", function(e)
+    {
+        if (!isSceneScrollEnabled()) {
+            e.preventDefault();
+        }
+    }, { passive: false });
 
     renderer.domElement.addEventListener("pointerdown", function(e)
     {   
