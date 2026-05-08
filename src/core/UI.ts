@@ -2,8 +2,9 @@
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
 import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, preloadUISounds, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
-import { getCameraY, setIntroProgress, enableScroll } from "./Control";
+import { getCameraY, setIntroProgress, enableScroll, onDescentComplete } from "./Control";
 import { beginDescent as beginCloudDescent } from "../effects/CloudSprites.ts";
+import { showWelcomeText } from "../effects/WelcomeText";
 import { setLoadingCallback } from "../scene/Island";
 import { t, setLanguage, type Language } from "./i18n";
 
@@ -188,57 +189,44 @@ export function Start(): void {
         // Start audio (must happen synchronously in click handler for iOS)
         startAudio();
 
-        // Reveal the ocean (hidden during loading to avoid visible edge at intro camera height)
-        showOcean();
-        beginCloudDescent();
+        // Welcome text fires 1s after click. Camera descent, ocean reveal,
+        // cloud descent, and all header UI wait until the animation finishes.
+        function afterWelcome(): void {
+            showOcean();
+            beginCloudDescent();
+            // Header and music appear only once the camera finishes descending
+            onDescentComplete(() => {
+                document.body.classList.add('header-visible');
+                setTimeout(() => { typewriterEffect(); }, 400);
+                setTimeout(() => { document.body.classList.add('music-visible'); }, 500);
+            });
+            enableScroll();
+        }
 
-        // Enable scrolling / trigger cinematic camera descent
-        // (scene already rendering from frame 1 — camera descends from sky intro position)
-        enableScroll();
-        
+        setTimeout(() => {
+            showWelcomeText(afterWelcome);
+        }, 1000);
+
         // Mark as started
         document.body.classList.add('started');
-        
+
         // Bounce out animation for the button
-        // Clear the frozen animation state so bounce-out can take over.
         startButton.style.removeProperty('animation');
         startButton.classList.add('bounce-out');
-        
-        // Fade out blur overlay — start immediately so the reveal
-        // unfolds across the full 2s ease-in-out transition rather than
-        // popping in after the button animation finishes.
+
+        // Fade out blur overlay immediately so the background is visible
         blurOverlay.classList.add('fade-out');
-        
+
         // Hide the start button overlay after bounce-out
         setTimeout(() => {
             startOverlay.classList.add('hidden');
         }, 600);
-        
+
         // Defer UI sounds preload to not compete with critical audio
         setTimeout(() => {
             preloadUISounds();
         }, 1000);
-        
-        // Trigger bouncy pop-in for header elements with stagger
-        setTimeout(() => {
-            document.body.classList.add('header-visible');
-            
-            // Start typewriter effect for name after header pops in
-            setTimeout(() => {
-                typewriterEffect();
-            }, 400);
-        }, 300);
-        
-        // Dive button will appear after scrolling down, not during intro
-        // setTimeout(() => {
-        //     document.body.classList.add('dive-visible');
-        // }, 600);
-        
-        // Enable radio interaction after a short delay
-        setTimeout(() => {
-            document.body.classList.add('music-visible');
-        }, 800);
-        
+
         // Remove overlays from DOM after animation completes.
         setTimeout(() => {
             startOverlay.remove();

@@ -21,7 +21,7 @@ const CLOUD_CHUNK_COUNT = 3;
 const CLOUD_LOOP_DEPTH = 35;
 const CLOUD_GROUP_Z = 10;
 const CLOUD_WIDTH = 180;
-const CLOUD_TOP_Y = 4.65;
+const CLOUD_TOP_Y = 7.65;
 const CLOUD_LAYER_DEPTH = 1.7;
 const CLOUD_BASE_SIZE = 2.95;
 

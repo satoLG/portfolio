@@ -55,18 +55,24 @@ let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
 // ============================================
 // INTRO CAMERA DESCENT SETTINGS
 // ============================================
-const introStartY = 6;      // Camera starts just above the cloud deck
+const introStartY = 9;      // Camera starts just above the cloud deck
 const introEndY = aboveWaterTopY;  // Camera ends at normal top position
-const introSmooth = 0.55;      // Cinematic descent speed after start click (lower = slower)
-const introFinishYThreshold = 0.01;
-const introFinishTethaThreshold = 0.001;
 let introActive = false;       // Kept false during loading — camera parked. True only during post-click descent.
 let scrollEnabled = false;     // Prevent scrolling until descent completes
+let _descentCompleteCallback: (() => void) | null = null;
+
+export function onDescentComplete(cb: () => void): void {
+    _descentCompleteCallback = cb;
+}
 // Camera tilts up during loading so the viewport shows only sky (horizon below frame).
 // Must exceed the half-vertical-FOV (~25°) to guarantee no ocean is visible.
 // Damped back to 0 once the user clicks Start, giving a cinematic sky→scene swoop.
-const INTRO_TETHA_START = 0.18;   // radians; keeps the cloud deck in the lower frame
+const INTRO_TETHA_START = 0.35;   // radians; keeps the cloud deck in the lower frame
 let introTetha = INTRO_TETHA_START;
+const INTRO_DESCENT_SPEED  = 2.5;   // units/second at full speed
+const INTRO_EASE_OUT_ZONE  = 1.8;   // last N units before landing where speed tapers — raise to ease earlier
+const INTRO_MIN_SPEED      = 0.3;   // speed multiplier at the very end (0.3 = 30% of full speed)
+const INTRO_TETHA_SPEED = INTRO_TETHA_START / (introStartY - introEndY) * INTRO_DESCENT_SPEED;
 
 // Set intro loading progress (called from UI.ts for the loading bar animation).
 // Camera no longer follows loading progress — it stays parked at introStartY
@@ -642,7 +648,7 @@ export function Update(): void
             }
         } else {
             // NORMAL MODE: Smooth Y scrolling, fixed X and Z
-            let smoothFactor = introActive ? introSmooth : scrollSmooth;
+            let smoothFactor = scrollSmooth;
             
             // Dead zone snap: when user stops scrolling in the dead zone, snap to nearest edge
             if (!isScrolling && !introActive && targetY < deadZoneTop && targetY > deadZoneBottom) {
@@ -691,28 +697,33 @@ export function Update(): void
             currentFov = MathUtils.damp(currentFov, mainCameraConfig.fov, ZOOM_SMOOTH, deltaTime);
             if (Math.abs(currentFov - mainCameraConfig.fov) < 0.05) currentFov = mainCameraConfig.fov;
 
-            currentY = MathUtils.damp(currentY, targetY, smoothFactor, deltaTime);
-            camera.position.y = currentY;
+            if (introActive) {
+                const yDist    = targetY - currentY;
+                const remaining = Math.abs(yDist);
+                const speedScale = remaining < INTRO_EASE_OUT_ZONE
+                    ? MathUtils.lerp(INTRO_MIN_SPEED, 1.0, remaining / INTRO_EASE_OUT_ZONE)
+                    : 1.0;
+                const yStep = INTRO_DESCENT_SPEED * speedScale * deltaTime;
+                currentY = remaining <= yStep ? targetY : currentY + Math.sign(yDist) * yStep;
+                camera.position.y = currentY;
 
-            // Damp the sky-tilt back to horizontal once the user has clicked Start.
-            // Before click: introTetha stays fixed so only sky is visible.
-            // After click: smoothly levels off as camera descends.
-            if (introActive && introTetha !== 0) {
-                introTetha = MathUtils.damp(introTetha, 0, introSmooth * 2, deltaTime);
-                if (Math.abs(introTetha) < introFinishTethaThreshold) introTetha = 0;
-            }
+                if (introTetha !== 0) {
+                    const tStep = INTRO_TETHA_SPEED * speedScale * deltaTime;
+                    introTetha  = introTetha <= tStep ? 0 : introTetha - tStep;
+                }
 
-            // Keep the intro smoothing active until both the camera height and
-            // the intro tilt are done. This prevents the last few centimetres of
-            // Y from switching to the much faster scroll smoothing after the
-            // camera appears to have stopped.
-            if (introActive && Math.abs(currentY - introEndY) < introFinishYThreshold && Math.abs(introTetha) <= introFinishTethaThreshold) {
-                currentY = introEndY;
-                targetY = introEndY;
-                camera.position.y = introEndY;
-                introTetha = 0;
-                introActive = false;
-                scrollEnabled = true;
+                if (currentY === targetY && introTetha === 0) {
+                    introActive   = false;
+                    scrollEnabled = true;
+                    if (_descentCompleteCallback) {
+                        const cb = _descentCompleteCallback;
+                        _descentCompleteCallback = null;
+                        cb();
+                    }
+                }
+            } else {
+                currentY = MathUtils.damp(currentY, targetY, smoothFactor, deltaTime);
+                camera.position.y = currentY;
             }
         }
     }

@@ -18,6 +18,9 @@ export default defineConfig({
     })
   ],
   optimizeDeps: {
+    // Prevent Vite pre-bundling tegaki's TTF assets — the pre-bundler
+    // wraps binary files as JS modules which corrupts the font bytes.
+    exclude: ['tegaki', 'tegaki/core', 'tegaki/fonts/parisienne'],
     esbuildOptions: {
       target: 'esnext'
     }

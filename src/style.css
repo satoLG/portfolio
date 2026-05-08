@@ -2495,8 +2495,8 @@ body.pixel-max    .dialog-bubble::before {
 .dialog-text {
     margin: 0 0 2px;
     font-size: 25px !important;
-    font-family: 'Margarine', cursive !important;
-    font-weight: 400 !important;   /* Margarine is a single-weight display font */
+    font-family: 'Patrick Hand', cursive !important;
+    font-weight: 400 !important;
     color: #1a1a1a;
     line-height: 1.4;
     min-height: 1.4em;
@@ -2614,7 +2614,7 @@ body.pixel-max    .dialog-reply-bubble::before {
 .dialog-reply-option {
     display: block;
     font-size: 25px !important;
-    font-family: 'Margarine', cursive !important;
+    font-family: 'Patrick Hand', cursive !important;
     font-weight: 400 !important;
     color: #1a1a1a;
     line-height: 1.4;
