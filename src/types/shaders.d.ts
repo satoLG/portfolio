@@ -1,3 +1,8 @@
+declare module '*.ttf' {
+  const src: string
+  export default src
+}
+
 // Declaração de tipos para arquivos de shader
 declare module '*.glsl' {
   const content: string
