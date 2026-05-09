@@ -7,7 +7,7 @@ const patrickHand = _patrickHand as unknown as TegakiBundle;
 
 // ── Speed knob ────────────────────────────────────────────────────────────────
 // Playback speed multiplier. 1 = default, 0.6 = slower, 1.5 = faster.
-const PLAYBACK_SPEED = 1.3;
+const PLAYBACK_SPEED = 1.5;
 // ─────────────────────────────────────────────────────────────────────────────
 
 const HOLD_DURATION     = 450;
@@ -32,8 +32,9 @@ export function showWelcomeText(
     `;
 
     const container = document.createElement('div');
+    container.className = 'welcome-tegaki';
     container.style.cssText = `
-        color: white;
+        color: #e8eced36;
         font-size: clamp(40px, 7vw, 64px);
         white-space: nowrap;
     `;

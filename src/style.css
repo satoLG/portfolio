@@ -70,6 +70,22 @@ body.pixel-max * {
     border-radius: 0px !important;
 }
 
+.welcome-tegaki,
+.welcome-tegaki *,
+.welcome-tegaki *::before,
+.welcome-tegaki *::after,
+body.pixel-medium .welcome-tegaki,
+body.pixel-medium .welcome-tegaki *,
+body.pixel-medium .welcome-tegaki *::before,
+body.pixel-medium .welcome-tegaki *::after,
+body.pixel-max .welcome-tegaki,
+body.pixel-max .welcome-tegaki *,
+body.pixel-max .welcome-tegaki *::before,
+body.pixel-max .welcome-tegaki *::after {
+    font-family: 'Patrick Hand Tegaki' !important;
+    font-size-adjust: none;
+}
+
 /* ============================================
    PIXEL ICON SWAP
    Default: hide pixel variant icons
