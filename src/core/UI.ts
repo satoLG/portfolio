@@ -186,12 +186,11 @@ export function Start(): void {
         targetProgress = progress;
     });
     startButton.onclick = function() {
-        // Start audio (must happen synchronously in click handler for iOS)
-        startAudio();
-
-        // Welcome text fires 1s after click. Camera descent, ocean reveal,
-        // cloud descent, and all header UI wait until the animation finishes.
-        function afterWelcome(): void {
+        // Welcome text fires 1s after click. Audio, camera descent, ocean reveal,
+        // cloud descent, and all header UI wait for the second click/touch.
+        function continueAfterWelcome(): void {
+            // Start audio in the second user gesture so mobile browsers allow it.
+            startAudio();
             showOcean();
             beginCloudDescent();
             // Header and music appear only once the camera finishes descending
@@ -201,10 +200,15 @@ export function Start(): void {
                 setTimeout(() => { document.body.classList.add('music-visible'); }, 500);
             });
             enableScroll();
+
+            // Defer UI sounds preload to not compete with critical audio
+            setTimeout(() => {
+                preloadUISounds();
+            }, 1000);
         }
 
         setTimeout(() => {
-            showWelcomeText(afterWelcome);
+            showWelcomeText(continueAfterWelcome);
         }, 1000);
 
         // Mark as started
@@ -221,11 +225,6 @@ export function Start(): void {
         setTimeout(() => {
             startOverlay.classList.add('hidden');
         }, 600);
-
-        // Defer UI sounds preload to not compete with critical audio
-        setTimeout(() => {
-            preloadUISounds();
-        }, 1000);
 
         // Remove overlays from DOM after animation completes.
         setTimeout(() => {
