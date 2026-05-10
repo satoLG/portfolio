@@ -55,7 +55,7 @@ let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
 // ============================================
 // INTRO CAMERA DESCENT SETTINGS
 // ============================================
-const introStartY = 9;      // Camera starts just above the cloud deck
+const introStartY = 8.5;      // Camera starts just above the cloud deck
 const introEndY = aboveWaterTopY;  // Camera ends at normal top position
 let introActive = false;       // Kept false during loading — camera parked. True only during post-click descent.
 let scrollEnabled = false;     // Prevent scrolling until descent completes

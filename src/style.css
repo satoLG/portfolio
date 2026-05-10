@@ -86,6 +86,29 @@ body.pixel-max .welcome-tegaki *::after {
     font-size-adjust: none;
 }
 
+.welcome-continue-arrow {
+    width: 0;
+    height: 0;
+    margin-top: 10px;
+    border-left: 9px solid transparent;
+    border-right: 9px solid transparent;
+    border-top: 13px solid #e8eced36;
+    opacity: 0;
+    transform: translateY(-2px);
+    transition: opacity 1800ms ease, transform 180ms ease;
+}
+
+.welcome-continue-arrow--visible {
+    opacity: 1;
+    transform: translateY(0);
+    animation: welcome-arrow-float 1.75s ease-in-out infinite;
+}
+
+@keyframes welcome-arrow-float {
+    0%, 100% { transform: translateY(0);   }
+    50%      { transform: translateY(3px); }
+}
+
 /* ============================================
    PIXEL ICON SWAP
    Default: hide pixel variant icons
