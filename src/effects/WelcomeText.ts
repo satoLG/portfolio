@@ -7,7 +7,7 @@ const patrickHand = _patrickHand as unknown as TegakiBundle;
 
 // ── Speed knob ────────────────────────────────────────────────────────────────
 // Playback speed multiplier. 1 = default, 0.6 = slower, 1.5 = faster.
-const PLAYBACK_SPEED = 1.2;
+const PLAYBACK_SPEED = 1.5;
 // ─────────────────────────────────────────────────────────────────────────────
 
 const FADE_OUT_DURATION = 650;

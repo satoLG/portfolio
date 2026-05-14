@@ -21,10 +21,14 @@ let starsTimer = 0;                  // Independent timer for stars
 
 // Stars count - TWEAK THIS (was 10000)
 export let starsCount = 5000;
+export const starsMaxScale = 0.3;    // TWEAK: lower = smaller night stars
+export const starsMaxOpacity = 0.5;  // TWEAK: lower = dimmer night stars
 
 const maxOffset = 0.43;
 const starsMap = new Uint8Array(gridSize * gridSize * 24);
 const stars = new Uniform(null as any);
+const starsMaxScaleUniform = new Uniform(starsMaxScale);
+const starsMaxOpacityUniform = new Uniform(starsMaxOpacity);
 
 export const lightUniform = new Uniform(new Vector3(1, 1, 1));
 export const sunVisibilityUniform = sunVisibility;
@@ -146,6 +150,8 @@ export function Start(): void
         mat.uniforms._GridSizeScaled = new Uniform(gridSize * 6);
         mat.uniforms._Stars = stars;
         mat.uniforms._StarsTransition = starsTransition;
+        mat.uniforms._StarsMaxScale = starsMaxScaleUniform;
+        mat.uniforms._StarsMaxOpacity = starsMaxOpacityUniform;
         mat.uniforms._DirToLight = new Uniform(dirToLight);
         mat.uniforms._Light = lightUniform;
     }

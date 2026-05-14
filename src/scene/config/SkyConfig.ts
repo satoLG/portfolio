@@ -26,7 +26,7 @@ export const minSpeed = 200; // px/s
 export const maxSpeed = 315; // px/s
 
 // Wind Lines: Appearance
-export const lineOpacity = 0.5100; // peak opacity per line (0-1)
+export const lineOpacity = 0.3100; // peak opacity per line (0-1)
 export const colorR      = 232;    // RGB 0-255
 export const colorG      = 228;
 export const colorB      = 228;

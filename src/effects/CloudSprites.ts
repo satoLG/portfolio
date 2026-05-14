@@ -21,7 +21,9 @@ const CLOUD_CHUNK_COUNT = 3;
 const CLOUD_LOOP_DEPTH = 35;
 const CLOUD_GROUP_Z = 10;
 const CLOUD_WIDTH = 180;
-const CLOUD_TOP_Y = 7.65;
+// Tweak this to keep the initial cloud sprites below the welcome Tegaki text.
+// This is a hard cap for the rotated sprite vertices, not just the sprite center.
+const CLOUD_MAX_TOP_Y = 9.25;
 const CLOUD_LAYER_DEPTH = 1.7;
 const CLOUD_BASE_SIZE = 2.95;
 
@@ -332,10 +334,11 @@ function createCloudGeometry(count: number): BufferGeometry {
         const t = i / (count - 1);
         const z = -CLOUD_LOOP_DEPTH + t * CLOUD_LOOP_DEPTH;
         const x = Math.random() * CLOUD_WIDTH - CLOUD_WIDTH * 0.5;
-        const y = CLOUD_TOP_Y - Math.random() * Math.random() * CLOUD_LAYER_DEPTH;
         const rotation = Math.random() * Math.PI;
         const scale = Math.random() * Math.random() * 1.5 + 0.5;
         const half = CLOUD_BASE_SIZE * scale * 0.5;
+        const topExtent = half * (Math.abs(Math.cos(rotation)) + Math.abs(Math.sin(rotation)));
+        const y = CLOUD_MAX_TOP_Y - topExtent - Math.random() * Math.random() * CLOUD_LAYER_DEPTH;
 
         writePlane(positions, uvs, indices, i, x, y, z, half, rotation);
     }
