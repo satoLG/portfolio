@@ -16,13 +16,14 @@ import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "..
 import * as PhoneScreen from '../core/PhoneScreen';
 import { UNDERWATER_Y_THRESHOLD } from "../effects/PostProcess";
 import {
-    islandPosition, firecampOffset, treeOffset, radioOffset, swordOffset,
+    islandPosition, firecampOffset, treeOffset, bushOffset, bushRadioOffset, bushRadio2Offset, bushPugOffset, radioOffset, swordOffset,
     pugOffset, tentOffset, dogBedOffset, littleRocksOffset, phoneOffset,
     apple1Offset, apple2Offset, apple3Offset,
-    islandScale, firecampScale, treeScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, littleRocksScale, phoneScale,
+    islandScale, firecampScale, treeScale, bushScale, bushRadioScale, bushRadio2Scale, bushPugScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, littleRocksScale, phoneScale,
     apple1Scale, apple2Scale, apple3Scale,
-    treeRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, littleRocksRot, phoneRot,
+    treeRotY, bushRotY, bushRadioRotY, bushRadio2RotY, bushPugRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, littleRocksRot, phoneRot,
     apple1RotY, apple2RotY, apple3RotY,
+    bushFlowerColor, bushRadioFlowerColor, bushRadio2FlowerColor, bushPugFlowerColor,
     GRASS_COUNT  as GRASS_COUNT_CFG,
     SURFACE_EDGE_PADDING,
     EXCL_R_BONFIRE, EXCL_R_TENT, EXCL_R_TREE, EXCL_R_PUG, EXCL_R_RADIO, EXCL_R_ROCKS,
@@ -58,6 +59,10 @@ import { Body } from 'cannon-es';
 export const island = new Group();
 export const firecamp = new Group();
 export const tree = new Group();
+export const bush = new Group();
+export const bushRadio = new Group();
+export const bushRadio2 = new Group();
+export const bushPug = new Group();
 export const radio = new Group();
 export const sword = new Group();
 export const pug = new Group();
@@ -1115,12 +1120,22 @@ const TREE_WIND_STRENGTH = 0.03;    // TWEAK: How much leaves sway (0.05-0.3)
 const TREE_WIND_SPEED = 0.5;       // TWEAK: Speed of wind oscillation (0.5-3.0)
 const TREE_LEAF_START_Y = 3.0;     // TWEAK: Y height where leaves start swaying (local coords)
 const TREE_LEAF_FULL_Y = 3.25;      // TWEAK: Y height where full sway happens
+const BUSH_WIND_STRENGTH = 0.018;   // TWEAK: very subtle bush leaf distortion
 
 // Wind uniforms for shader
 const treeWindTimeUniform = new Uniform(0.0);
 const treeWindStrengthUniform = new Uniform(TREE_WIND_STRENGTH);
 const treeLeafStartYUniform = new Uniform(TREE_LEAF_START_Y);
 const treeLeafFullYUniform = new Uniform(TREE_LEAF_FULL_Y);
+const bushWindStrengthUniform = new Uniform(BUSH_WIND_STRENGTH);
+
+export const bushFlowerConfig = {
+    main:  bushFlowerColor,
+    radio: bushRadioFlowerColor,
+    radio2: bushRadio2FlowerColor,
+    pug:   bushPugFlowerColor,
+};
+export type BushFlowerKey = keyof typeof bushFlowerConfig;
 
 // FOLIAGE (GRASS/CLOVER) WIND SETTINGS - independent from tree
 const FOLIAGE_WIND_STRENGTH = 0.035;  // TWEAK: Very subtle sway
@@ -1305,6 +1320,117 @@ function applyTreeWindShader(model: Group): void {
     });
 }
 
+function isBushFlowerMaterial(mat: any): boolean {
+    return typeof mat?.name === 'string' && mat.name.toLowerCase().includes('flower');
+}
+
+function applyBushFlowerColor(group: Group, color: string): void {
+    const flowerColor = new Color(color);
+    group.traverse((child) => {
+        if (!(child as any).isMesh || !(child as any).material) return;
+        const mesh = child as Mesh;
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        materials.forEach((mat: any) => {
+            if (!isBushFlowerMaterial(mat)) return;
+            mat.userData.flowerColor = color;
+            mat.color?.set(flowerColor);
+            mat.userData.flowerColorUniform?.value.set(flowerColor);
+            mat.needsUpdate = true;
+        });
+    });
+}
+
+export function setBushFlowerColor(key: BushFlowerKey, color: string): void {
+    bushFlowerConfig[key] = color;
+    const group = key === 'main' ? bush : key === 'radio' ? bushRadio : key === 'radio2' ? bushRadio2 : bushPug;
+    applyBushFlowerColor(group, color);
+}
+
+function applyBushWindShader(model: Group, flowerColor: string): void {
+    model.traverse((child) => {
+        if ((child as any).isMesh && (child as any).material) {
+            const mesh = child as Mesh;
+            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            materials.forEach((mat: any) => {
+                if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial || mat.isMeshBasicMaterial) {
+                    const isFlower = isBushFlowerMaterial(mat);
+                    if (isFlower) {
+                        mat.userData.flowerColor = flowerColor;
+                        mat.color?.set(flowerColor);
+                    }
+                    mat.transparent = false;
+                    mat.depthWrite = true;
+                    mat.depthTest = true;
+                    if (mat.alphaMap || mat.map?.image || mat.alphaTest > 0) {
+                        mat.alphaTest = Math.max(mat.alphaTest || 0, 0.5);
+                    }
+
+                    mat.customProgramCacheKey = () => isFlower ? 'bush_wind_flower' : 'bush_wind';
+                    mat.onBeforeCompile = (shader: any) => {
+                        shader.uniforms.uLight = lightUniform;
+                        shader.uniforms.uAbsorption = oceanAbsorptionUniform;
+                        shader.uniforms.uFogDist = underwaterFogDistUniform;
+                        shader.uniforms.uSunVisibility = sunVisibilityUniform;
+                        shader.uniforms.uWindTime = treeWindTimeUniform;
+                        shader.uniforms.uWindStrength = bushWindStrengthUniform;
+                        if (isFlower) {
+                            mat.userData.flowerColorUniform = new Uniform(new Color(mat.userData.flowerColor));
+                            shader.uniforms.uFlowerColor = mat.userData.flowerColorUniform;
+                        }
+
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <common>',
+                            `#include <common>
+                            uniform float uWindTime;
+                            uniform float uWindStrength;
+                            varying vec3 vWorldPosition;`
+                        );
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <begin_vertex>',
+                            `#include <begin_vertex>
+                            float heightFactor = smoothstep(-0.05, 0.55, position.y);
+                            float leafNoise = sin(uWindTime * 1.7 + position.x * 4.1 + position.z * 1.3)
+                                            + sin(uWindTime * 2.6 + position.z * 3.4) * 0.45;
+                            transformed.x += leafNoise * uWindStrength * heightFactor;
+                            transformed.z += leafNoise * uWindStrength * 0.35 * heightFactor;`
+                        );
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <worldpos_vertex>',
+                            `#include <worldpos_vertex>
+                            vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;`
+                        );
+                        if (isFlower) {
+                            shader.fragmentShader = shader.fragmentShader.replace(
+                                '#include <common>',
+                                `#include <common>
+                                uniform vec3 uFlowerColor;`
+                            );
+                            shader.fragmentShader = shader.fragmentShader.replace(
+                                '#include <map_fragment>',
+                                `#include <map_fragment>
+                                float flowerLuma = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+                                diffuseColor.rgb = uFlowerColor * max(flowerLuma, 0.42);`
+                            );
+                        }
+                        shader.fragmentShader = shader.fragmentShader.replace(
+                            '#include <common>',
+                            `#include <common>
+                            varying vec3 vWorldPosition;
+                            ${oceanLightingPars}`
+                        );
+                        shader.fragmentShader = shader.fragmentShader.replace(
+                            '#include <opaque_fragment>',
+                            `${oceanLightingFragment}
+                            #include <opaque_fragment>`
+                        );
+                    };
+                    mat.needsUpdate = true;
+                }
+            });
+        }
+    });
+}
+
 export function Start(): void {
     // Pre-create golden apple PointLights so the renderer compiles the shader
     // on the very first frame (behind the loading screen) — no mid-game stutter.
@@ -1455,6 +1581,53 @@ export function Start(): void {
         (error) => {
             console.error('Error loading tree:', error);
         }
+    );
+
+    // Load three tweakable bushes. Content is lifted so each group's Y value
+    // remains the floor contact point for debug tuning.
+    loader.load(
+        'models/surface/bush.glb',
+        (gltf) => {
+            const configs = [
+                { group: bush,      offset: bushOffset,      scale: bushScale,      rotY: bushRotY,      flowerColor: bushFlowerConfig.main,  label: 'Bush' },
+                { group: bushRadio, offset: bushRadioOffset, scale: bushRadioScale, rotY: bushRadioRotY, flowerColor: bushFlowerConfig.radio, label: 'Radio bush' },
+                { group: bushRadio2, offset: bushRadio2Offset, scale: bushRadio2Scale, rotY: bushRadio2RotY, flowerColor: bushFlowerConfig.radio2, label: 'Radio bush 2' },
+                { group: bushPug,   offset: bushPugOffset,   scale: bushPugScale,   rotY: bushPugRotY,   flowerColor: bushFlowerConfig.pug,   label: 'Pug bush' },
+            ] as const;
+
+            for (const cfg of configs) {
+                const bushScene = gltf.scene.clone(true) as Group;
+                bushScene.traverse((child) => {
+                    if ((child as any).isMesh && (child as any).material) {
+                        const mesh = child as Mesh;
+                        if (Array.isArray(mesh.material)) {
+                            mesh.material = mesh.material.map((mat) => mat.clone());
+                        } else {
+                            mesh.material = mesh.material.clone();
+                        }
+                        child.castShadow = true;
+                        (child as any).receiveShadow = true;
+                    }
+                });
+                applyBushWindShader(bushScene, cfg.flowerColor);
+
+                const contentGroup = new Group();
+                contentGroup.add(bushScene);
+                const box = new Box3().setFromObject(bushScene);
+                contentGroup.position.y = -box.min.y;
+                cfg.group.add(contentGroup);
+                cfg.group.position.set(
+                    islandPosition.x + cfg.offset.x,
+                    islandPosition.y + cfg.offset.y,
+                    islandPosition.z + cfg.offset.z
+                );
+                cfg.group.scale.setScalar(cfg.scale);
+                cfg.group.rotation.y = cfg.rotY;
+                console.log(`${cfg.label} loaded`);
+            }
+        },
+        undefined,
+        (error) => { console.error('Error loading bush:', error); }
     );
 
     // ── Procedural grass ──────────────────────────────────────────────────────
@@ -3123,6 +3296,7 @@ export function Update(isUnderwater = false): void {
     // Update shader uniforms so vertex wind also syncs with breeze
     treeWindTimeUniform.value = windTime;
     treeWindStrengthUniform.value = TREE_WIND_STRENGTH * breezeIntensity;
+    bushWindStrengthUniform.value = BUSH_WIND_STRENGTH * breezeIntensity;
     foliageWindStrengthUniform.value = foliageWindStrength * breezeIntensity;
 
     // ── Apple pendulum sway / fall / respawn ─────────────────────────────────

@@ -47,6 +47,8 @@ const skybox =
     uniform float _GridSizeScaled;
     uniform sampler2D _Stars;
     uniform float _StarsTransition;
+    uniform float _StarsMaxScale;
+    uniform float _StarsMaxOpacity;
     uniform vec3 _DirToLight;
     uniform vec3 _Light;
 
@@ -143,8 +145,8 @@ const skybox =
 
         vec2 gridCoords = vec2(cubeCoords.x * _GridSizeScaled, cubeCoords.y * _GridSize);
         vec2 gridCenterCoords = floor(gridCoords) + gridValue.xy;
-        float stars = min(pow(1.0 - min(distance(gridCoords, gridCenterCoords), 1.0), STARS_SHARPNESS) * gridValue.z * STARS_SIZE, 1.0);
-        stars *= min(exp(-dot(sky, vec3(1.0)) * STARS_FALLOFF) * STARS_VISIBILITY, 1.0);
+        float stars = min(pow(1.0 - min(distance(gridCoords, gridCenterCoords), 1.0), STARS_SHARPNESS) * gridValue.z * STARS_SIZE * _StarsMaxScale, 1.0);
+        stars *= min(exp(-dot(sky, vec3(1.0)) * STARS_FALLOFF) * STARS_VISIBILITY, 1.0) * _StarsMaxOpacity;
         
         // Staggered star appearance: each star has its own delay based on gridValue.w
         // Stars appear at different times during the transition

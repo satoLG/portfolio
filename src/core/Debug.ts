@@ -133,11 +133,15 @@ export function End(): void   { cpuSum += performance.now() - beginTime; }
 // ── Scene GUI ────────────────────────────────────────────────────────────────
 
 import GUI from 'lil-gui';
-import { Color } from 'three';
+import { Color, Object3D } from 'three';
 import {
     island,
     firecamp,
     tree,
+    bush,
+    bushRadio,
+    bushRadio2,
+    bushPug,
     radio,
     sword,
     pug,
@@ -233,7 +237,6 @@ import {
     rippleNormalStrength as RIPPLE_NORMAL_STRENGTH,
     rippleMaxClickDistance as RIPPLE_MAX_CLICK_DISTANCE,
 } from '../scene/config/OceanConfig';
-import { Object3D } from 'three';
 import { phoneZoomConfig, mainCameraConfig, isWebPageMode, toggleCameraMode } from './Control';
 import { mobileFov, mobileBreakpointWidth, aboveWaterBottomY as CFG_ABOVE_BOTTOM, aboveWaterBottomYMobile as CFG_ABOVE_BOTTOM_MOBILE, underwaterTopY as CFG_UNDER_TOP, underwaterTopYMobile as CFG_UNDER_TOP_MOBILE } from '../scene/config/CameraConfig';
 import { SetFOV, scene as threeScene } from './Scene';
@@ -639,6 +642,10 @@ function buildGUI(): void {
                 `export const islandPosition = { x: ${f(ip.x)}, y: ${f(ip.y)}, z: ${f(ip.z)} };`,
                 `export const firecampOffset = { x: ${f(firecamp.position.x - ip.x)}, y: ${f(firecamp.position.y - ip.y)}, z: ${f(firecamp.position.z - ip.z)} };`,
                 `export const treeOffset = { x: ${f(tree.position.x - ip.x)}, y: ${f(tree.position.y - ip.y)}, z: ${f(tree.position.z - ip.z)} };`,
+                `export const bushOffset = { x: ${f(bush.position.x - ip.x)}, y: ${f(bush.position.y - ip.y)}, z: ${f(bush.position.z - ip.z)} };`,
+                `export const bushRadioOffset = { x: ${f(bushRadio.position.x - ip.x)}, y: ${f(bushRadio.position.y - ip.y)}, z: ${f(bushRadio.position.z - ip.z)} };`,
+                `export const bushRadio2Offset = { x: ${f(bushRadio2.position.x - ip.x)}, y: ${f(bushRadio2.position.y - ip.y)}, z: ${f(bushRadio2.position.z - ip.z)} };`,
+                `export const bushPugOffset   = { x: ${f(bushPug.position.x - ip.x)}, y: ${f(bushPug.position.y - ip.y)}, z: ${f(bushPug.position.z - ip.z)} };`,
                 `export const radioOffset    = { x: ${f(radio.position.x - ip.x)}, y: ${f(radio.position.y - ip.y)}, z: ${f(radio.position.z - ip.z)} };`,
                 `export const swordOffset    = { x: ${f(sword.position.x - ip.x)}, y: ${f(sword.position.y - ip.y)}, z: ${f(sword.position.z - ip.z)} };`,
                 `export const pugOffset      = { x: ${f(pug.position.x - ip.x)}, y: ${f(pug.position.y - ip.y)}, z: ${f(pug.position.z - ip.z)} };`,
@@ -654,6 +661,10 @@ function buildGUI(): void {
                 `export const islandScale      = ${f(island.scale.x)};`,
                 `export const firecampScale    = ${f(firecamp.scale.x)};`,
                 `export const treeScale    = ${f(tree.scale.x)};`,
+                `export const bushScale    = ${f(bush.scale.x)};`,
+                `export const bushRadioScale = ${f(bushRadio.scale.x)};`,
+                `export const bushRadio2Scale = ${f(bushRadio2.scale.x)};`,
+                `export const bushPugScale   = ${f(bushPug.scale.x)};`,
                 `export const radioScale       = ${f(radio.scale.x)};`,
                 `export const swordScale       = ${f(sword.scale.x)};`,
                 `export const pugScale         = ${f(pug.scale.x)};`,
@@ -667,6 +678,10 @@ function buildGUI(): void {
                 ``,
                 `// ── Rotations ─────────────────────────────────────────────────────────────────`,
                 `export const treeRotY   = ${f(tree.rotation.y)};`,
+                `export const bushRotY   = ${f(bush.rotation.y)};`,
+                `export const bushRadioRotY = ${f(bushRadio.rotation.y)};`,
+                `export const bushRadio2RotY = ${f(bushRadio2.rotation.y)};`,
+                `export const bushPugRotY   = ${f(bushPug.rotation.y)};`,
                 `export const radioRotY      = ${f(radio.rotation.y)};`,
                 `export const swordRot       = { x: ${f(sword.rotation.x)}, y: ${f(sword.rotation.y)}, z: ${f(sword.rotation.z)} };`,
                 `export const pugRotY        = ${f(pug.rotation.y)};`,
@@ -678,6 +693,12 @@ function buildGUI(): void {
                 `export const apple2RotY     = ${f(apple2.rotation.y)};`,
                 `export const apple3RotY     = ${f(apple3.rotation.y)};`,
                 ``,
+                `// ── Bush flower colors ───────────────────────────────────────────────────────`,
+                `export const bushFlowerColor      = '${Island.bushFlowerConfig.main}';`,
+                `export const bushRadioFlowerColor = '${Island.bushFlowerConfig.radio}';`,
+                `export const bushRadio2FlowerColor = '${Island.bushFlowerConfig.radio2}';`,
+                `export const bushPugFlowerColor   = '${Island.bushFlowerConfig.pug}';`,
+                ``,
                 `// ── Apple wind sway ───────────────────────────────────────────────────────────────`,
                 `export const APPLE_WIND_STRENGTH   = ${appleWindStrength.toFixed(4)};  // TWEAK: Background sway amplitude (0 = off, 0.3 = strong)`,
                 `export const APPLE_SWING_STIFFNESS = ${appleSwingStiffness.toFixed(1)};    // TWEAK: Spring K (rad/s²) — higher = faster oscillation`,
@@ -686,6 +707,18 @@ function buildGUI(): void {
                 `export const APPLE_RESPAWN_FADE_DURATION = ${APPLE_RESPAWN_FADE_DURATION.toFixed(1)};`,
                 `export const APPLE_CLICK_COUNT_TO_FALL  = ${APPLE_CLICK_COUNT_TO_FALL};`,
                 `export const MAX_GROUND_APPLES          = ${MAX_GROUND_APPLES};`,
+                `export const APPLE_RESPAWN_DELAY        = ${Island.appleRespawnDelay.toFixed(1)};  // TWEAK: Seconds after landing before tree apple respawns`,
+                ``,
+                `// ── Golden apple easter egg ─────────────────────────────────────────────────────`,
+                `export const GOLDEN_APPLE_INTERVAL      = ${Island.goldenAppleConfig.interval};`,
+                `export const GOLDEN_APPLE_COLOR         = '${Island.goldenAppleConfig.color}';`,
+                `export const GOLDEN_APPLE_EMISSIVE      = '${Island.goldenAppleConfig.emissive}';`,
+                `export const GOLDEN_APPLE_EMISSIVE_INTENSITY = ${Island.goldenAppleConfig.emissiveIntensity.toFixed(2)};`,
+                `export const GOLDEN_APPLE_COLOR_Y_CUTOFF    = ${Island.goldenAppleConfig.colorYCutoff.toFixed(2)};`,
+                `export const GOLDEN_APPLE_LIGHT_COLOR       = '${Island.goldenAppleConfig.lightColor}';`,
+                `export const GOLDEN_APPLE_LIGHT_INTENSITY   = ${Island.goldenAppleConfig.lightIntensity.toFixed(2)};`,
+                `export const GOLDEN_APPLE_LIGHT_DISTANCE    = ${Island.goldenAppleConfig.lightDistance.toFixed(2)};`,
+                `export const GOLDEN_APPLE_LIGHT_DECAY       = ${Island.goldenAppleConfig.lightDecay.toFixed(2)};`,
                 ``,
                 `// ── Foliage ────────────────────────────────────────────────────────────`,
                 `export const GRASS_COUNT          = ${Island.GRASS_COUNT};`,
@@ -1168,6 +1201,18 @@ function buildGUI(): void {
     }
 
     addObjectFolder(surfaceFolder, 'Tree', tree,  { scaleRange: [0.1,  2.0], rotAxes: ['y']           });
+    const addBushFolder = (label: string, obj: Object3D, key: 'main' | 'radio' | 'radio2' | 'pug') => {
+        const folder = addObjectFolder(surfaceFolder, label, obj, { scaleRange: [0.01, 2.0], rotAxes: ['y'] });
+        const colorProxy = { flower: Island.bushFlowerConfig[key] };
+        folder.addColor(colorProxy, 'flower')
+            .name('Flower Color')
+            .onChange((v: string) => Island.setBushFlowerColor(key, v));
+        return folder;
+    };
+    addBushFolder('Bush', bush, 'main');
+    addBushFolder('Bush Radio', bushRadio, 'radio');
+    addBushFolder('Bush Radio 2', bushRadio2, 'radio2');
+    addBushFolder('Bush Pug', bushPug, 'pug');
 
     const phoneFolder = addObjectFolder(surfaceFolder, 'Phone', Island.phone, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
 

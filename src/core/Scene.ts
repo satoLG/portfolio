@@ -322,6 +322,10 @@ export function Start(): void
     scene.add(Island.island);
     scene.add(Island.firecamp);
     scene.add(Island.tree);
+    scene.add(Island.bush);
+    scene.add(Island.bushRadio);
+    scene.add(Island.bushRadio2);
+    scene.add(Island.bushPug);
     scene.add(Island.radio);
     scene.add(Island.sword);
     scene.add(Island.pug);
@@ -512,6 +516,10 @@ export function Update(): void
         Island.island.visible = !deepUnderwater;
         Island.firecamp.visible = !deepUnderwater;
         Island.tree.visible = !deepUnderwater;
+        Island.bush.visible = !deepUnderwater;
+        Island.bushRadio.visible = !deepUnderwater;
+        Island.bushRadio2.visible = !deepUnderwater;
+        Island.bushPug.visible = !deepUnderwater;
         Fire.fire.visible = !deepUnderwater;
         // Hide procedural foliage when deep underwater
         if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = !deepUnderwater;
@@ -536,6 +544,10 @@ export function Update(): void
         Island.island.visible = true;
         Island.firecamp.visible = true;
         Island.tree.visible = true;
+        Island.bush.visible = true;
+        Island.bushRadio.visible = true;
+        Island.bushRadio2.visible = true;
+        Island.bushPug.visible = true;
         Fire.fire.visible = true;
         // Show procedural foliage on surface
         if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = true;

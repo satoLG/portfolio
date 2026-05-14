@@ -4,11 +4,11 @@ import { camera } from "../core/Scene";
 import { deltaTime } from "../core/Time";
 import * as Audio from "../core/Audio";
 import { isPugZoomActive, isRadioZoomActive } from "../core/Control";
-import { island, firecamp, tree, radio, sword, pug, tent, dogBed, phone } from "./Island";
+import { island, firecamp, tree, bush, bushRadio, bushRadio2, bushPug, radio, sword, pug, tent, dogBed, phone } from "./Island";
 
 // All solid island objects that should occlude ripple clicks.
 // Built lazily so we never hold stale references.
-const _islandBlockers = () => [island, firecamp, tree, radio, sword, pug, tent, dogBed, phone];
+const _islandBlockers = () => [island, firecamp, tree, bush, bushRadio, bushRadio2, bushPug, radio, sword, pug, tent, dogBed, phone];
 
 export const surface = new Mesh();
 export const volume = new Mesh();
