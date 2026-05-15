@@ -176,6 +176,32 @@ import {
     setShadowFloorColor,
     setGrassColorBase,
     setGrassColorTip,
+    islandSurfaceGrassColor,
+    islandSurfaceGrassStrength,
+    islandSurfaceGrassGreenThreshold,
+    islandSurfaceGrassNormalThreshold,
+    islandSurfaceGrassMaskSoftness,
+    islandSurfaceGrassTopFillStrength,
+    islandSurfaceGrassTopFillNormalThreshold,
+    islandSurfacePointLightInfluence,
+    islandCampfireGroundColor,
+    islandCampfireGroundRadius,
+    islandCampfireGroundSoftness,
+    islandCampfireGroundStrength,
+    islandCampfireGroundNormalThreshold,
+    setIslandSurfaceGrassColor,
+    setIslandSurfaceGrassStrength,
+    setIslandSurfaceGrassGreenThreshold,
+    setIslandSurfaceGrassNormalThreshold,
+    setIslandSurfaceGrassMaskSoftness,
+    setIslandSurfaceGrassTopFillStrength,
+    setIslandSurfaceGrassTopFillNormalThreshold,
+    setIslandSurfacePointLightInfluence,
+    setIslandCampfireGroundColor,
+    setIslandCampfireGroundRadius,
+    setIslandCampfireGroundSoftness,
+    setIslandCampfireGroundStrength,
+    setIslandCampfireGroundNormalThreshold,
     foliageWindStrength,
     setFoliageWindStrength,
     grassWobbleStrength,
@@ -693,6 +719,21 @@ function buildGUI(): void {
                 `export const apple2RotY     = ${f(apple2.rotation.y)};`,
                 `export const apple3RotY     = ${f(apple3.rotation.y)};`,
                 ``,
+                `// ── Island surface grass filter ──────────────────────────────────────────────`,
+                `export const ISLAND_SURFACE_GRASS_COLOR = '${Island.islandSurfaceGrassColor}'; // sRGB hex`,
+                `export const ISLAND_SURFACE_GRASS_STRENGTH = ${Island.islandSurfaceGrassStrength.toFixed(4)}; // 0 = original texture, 1 = full tint`,
+                `export const ISLAND_SURFACE_GRASS_GREEN_THRESHOLD = ${Island.islandSurfaceGrassGreenThreshold.toFixed(4)}; // green dominance needed for mask`,
+                `export const ISLAND_SURFACE_GRASS_NORMAL_THRESHOLD = ${Island.islandSurfaceGrassNormalThreshold.toFixed(4)}; // upward-facing normal needed`,
+                `export const ISLAND_SURFACE_GRASS_MASK_SOFTNESS = ${Island.islandSurfaceGrassMaskSoftness.toFixed(4)}; // feather for color/normal mask`,
+                `export const ISLAND_SURFACE_GRASS_TOP_FILL_STRENGTH = ${Island.islandSurfaceGrassTopFillStrength.toFixed(4)}; // fills upward top faces that miss the color mask`,
+                `export const ISLAND_SURFACE_GRASS_TOP_FILL_NORMAL_THRESHOLD = ${Island.islandSurfaceGrassTopFillNormalThreshold.toFixed(4)}; // lower upward-facing normal cutoff for top fill`,
+                `export const ISLAND_SURFACE_POINT_LIGHT_INFLUENCE = ${Island.islandSurfacePointLightInfluence.toFixed(4)}; // lowers fire point-light faceting on island only`,
+                `export const ISLAND_CAMPFIRE_GROUND_COLOR = '${Island.islandCampfireGroundColor}'; // sRGB hex`,
+                `export const ISLAND_CAMPFIRE_GROUND_RADIUS = ${Island.islandCampfireGroundRadius.toFixed(4)};`,
+                `export const ISLAND_CAMPFIRE_GROUND_SOFTNESS = ${Island.islandCampfireGroundSoftness.toFixed(4)};`,
+                `export const ISLAND_CAMPFIRE_GROUND_STRENGTH = ${Island.islandCampfireGroundStrength.toFixed(4)};`,
+                `export const ISLAND_CAMPFIRE_GROUND_NORMAL_THRESHOLD = ${Island.islandCampfireGroundNormalThreshold.toFixed(4)}; // upward-facing normal needed for ground tint`,
+                ``,
                 `// ── Bush flower colors ───────────────────────────────────────────────────────`,
                 `export const bushFlowerColor      = '${Island.bushFlowerConfig.main}';`,
                 `export const bushRadioFlowerColor = '${Island.bushFlowerConfig.radio}';`,
@@ -1035,7 +1076,88 @@ function buildGUI(): void {
         foliageFolder.close();
     }
 
-    addObjectFolder(surfaceFolder, 'Island',       island,      { scaleRange: [0.01, 1.0]                           });
+    const islandFolder = addObjectFolder(surfaceFolder, 'Island', island, { scaleRange: [0.01, 1.0] });
+    {
+        const surfaceFilterFolder = islandFolder.addFolder('Surface Grass Filter');
+        const filterProxy = {
+            color: islandSurfaceGrassColor,
+            strength: islandSurfaceGrassStrength,
+            greenThreshold: islandSurfaceGrassGreenThreshold,
+            normalThreshold: islandSurfaceGrassNormalThreshold,
+            softness: islandSurfaceGrassMaskSoftness,
+            topFillStrength: islandSurfaceGrassTopFillStrength,
+            topFillNormalThreshold: islandSurfaceGrassTopFillNormalThreshold,
+            pointLight: islandSurfacePointLightInfluence,
+        };
+
+        surfaceFilterFolder.addColor(filterProxy, 'color')
+            .name('Tint Color')
+            .onChange((v: string) => {
+                filterProxy.color = v;
+                setIslandSurfaceGrassColor(v);
+            });
+        surfaceFilterFolder.add(filterProxy, 'strength', 0, 1, 0.01)
+            .name('Strength')
+            .listen()
+            .onChange((v: number) => setIslandSurfaceGrassStrength(v));
+        surfaceFilterFolder.add(filterProxy, 'greenThreshold', -0.2, 0.5, 0.005)
+            .name('Green Threshold')
+            .listen()
+            .onChange((v: number) => setIslandSurfaceGrassGreenThreshold(v));
+        surfaceFilterFolder.add(filterProxy, 'normalThreshold', -0.2, 1.0, 0.01)
+            .name('Normal Threshold')
+            .listen()
+            .onChange((v: number) => setIslandSurfaceGrassNormalThreshold(v));
+        surfaceFilterFolder.add(filterProxy, 'softness', 0.001, 0.8, 0.005)
+            .name('Mask Softness')
+            .listen()
+            .onChange((v: number) => setIslandSurfaceGrassMaskSoftness(v));
+        surfaceFilterFolder.add(filterProxy, 'topFillStrength', 0, 1, 0.01)
+            .name('Top Fill Strength')
+            .listen()
+            .onChange((v: number) => setIslandSurfaceGrassTopFillStrength(v));
+        surfaceFilterFolder.add(filterProxy, 'topFillNormalThreshold', -0.2, 1.0, 0.01)
+            .name('Top Fill Normal')
+            .listen()
+            .onChange((v: number) => setIslandSurfaceGrassTopFillNormalThreshold(v));
+        surfaceFilterFolder.add(filterProxy, 'pointLight', 0, 1, 0.01)
+            .name('Point Light Influence')
+            .listen()
+            .onChange((v: number) => setIslandSurfacePointLightInfluence(v));
+        surfaceFilterFolder.close();
+
+        const campfireGroundFolder = islandFolder.addFolder('Campfire Ground Tint');
+        const campfireProxy = {
+            color: islandCampfireGroundColor,
+            radius: islandCampfireGroundRadius,
+            softness: islandCampfireGroundSoftness,
+            strength: islandCampfireGroundStrength,
+            normalThreshold: islandCampfireGroundNormalThreshold,
+        };
+        campfireGroundFolder.addColor(campfireProxy, 'color')
+            .name('Color')
+            .onChange((v: string) => {
+                campfireProxy.color = v;
+                setIslandCampfireGroundColor(v);
+            });
+        campfireGroundFolder.add(campfireProxy, 'radius', 0, 2.5, 0.01)
+            .name('Radius')
+            .listen()
+            .onChange((v: number) => setIslandCampfireGroundRadius(v));
+        campfireGroundFolder.add(campfireProxy, 'softness', 0.001, 2.0, 0.01)
+            .name('Softness')
+            .listen()
+            .onChange((v: number) => setIslandCampfireGroundSoftness(v));
+        campfireGroundFolder.add(campfireProxy, 'strength', 0, 1, 0.01)
+            .name('Strength')
+            .listen()
+            .onChange((v: number) => setIslandCampfireGroundStrength(v));
+        campfireGroundFolder.add(campfireProxy, 'normalThreshold', -0.2, 1.0, 0.01)
+            .name('Ground Normal')
+            .listen()
+            .onChange((v: number) => setIslandCampfireGroundNormalThreshold(v));
+        campfireGroundFolder.close();
+    }
     addObjectFolder(surfaceFolder, 'Little Rocks', littleRocks, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
 
     {

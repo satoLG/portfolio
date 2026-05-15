@@ -1,4 +1,4 @@
-import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, DoubleSide, MeshBasicMaterial, Box3, MeshStandardMaterial } from "three";
+import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, DoubleSide, MeshBasicMaterial, Box3, MeshStandardMaterial, ShaderChunk } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { config as sfDecorConfig } from './SeaFloorDecor';
 import { oceanAbsorptionUniform, underwaterFogDistUniform, setFoamMask } from "../materials/OceanMaterial";
@@ -23,6 +23,19 @@ import {
     apple1Scale, apple2Scale, apple3Scale,
     treeRotY, bushRotY, bushRadioRotY, bushRadio2RotY, bushPugRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, littleRocksRot, phoneRot,
     apple1RotY, apple2RotY, apple3RotY,
+    ISLAND_SURFACE_GRASS_COLOR,
+    ISLAND_SURFACE_GRASS_STRENGTH,
+    ISLAND_SURFACE_GRASS_GREEN_THRESHOLD,
+    ISLAND_SURFACE_GRASS_NORMAL_THRESHOLD,
+    ISLAND_SURFACE_GRASS_MASK_SOFTNESS,
+    ISLAND_SURFACE_GRASS_TOP_FILL_STRENGTH,
+    ISLAND_SURFACE_GRASS_TOP_FILL_NORMAL_THRESHOLD,
+    ISLAND_SURFACE_POINT_LIGHT_INFLUENCE,
+    ISLAND_CAMPFIRE_GROUND_COLOR,
+    ISLAND_CAMPFIRE_GROUND_RADIUS,
+    ISLAND_CAMPFIRE_GROUND_SOFTNESS,
+    ISLAND_CAMPFIRE_GROUND_STRENGTH,
+    ISLAND_CAMPFIRE_GROUND_NORMAL_THRESHOLD,
     bushFlowerColor, bushRadioFlowerColor, bushRadio2FlowerColor, bushPugFlowerColor,
     GRASS_COUNT  as GRASS_COUNT_CFG,
     SURFACE_EDGE_PADDING,
@@ -1121,6 +1134,10 @@ const TREE_WIND_SPEED = 0.5;       // TWEAK: Speed of wind oscillation (0.5-3.0)
 const TREE_LEAF_START_Y = 3.0;     // TWEAK: Y height where leaves start swaying (local coords)
 const TREE_LEAF_FULL_Y = 3.25;      // TWEAK: Y height where full sway happens
 const BUSH_WIND_STRENGTH = 0.018;   // TWEAK: very subtle bush leaf distortion
+const BUSH_FLOWER_COLOR_STRENGTH = 1.0; // 1 = configured hue wins, 0 = original texture hue
+const BUSH_FLOWER_SHADE_MIN = 0.78;     // Higher = less muddy/dark flower recolor
+const BUSH_FLOWER_SHADE_MAX = 1.18;     // Higher = brighter flower highlights
+const BUSH_FLOWER_EMISSIVE_INTENSITY = 0.08; // Small color lift after scene lighting
 
 // Wind uniforms for shader
 const treeWindTimeUniform = new Uniform(0.0);
@@ -1196,6 +1213,226 @@ const oceanLightingFragment = /*glsl*/`
         outgoingLight = mix(outgoingLight, underwaterLight * 0.3, uwFog);
     }
 `;
+
+export let islandSurfaceGrassColor = ISLAND_SURFACE_GRASS_COLOR;
+export let islandSurfaceGrassStrength = ISLAND_SURFACE_GRASS_STRENGTH;
+export let islandSurfaceGrassGreenThreshold = ISLAND_SURFACE_GRASS_GREEN_THRESHOLD;
+export let islandSurfaceGrassNormalThreshold = ISLAND_SURFACE_GRASS_NORMAL_THRESHOLD;
+export let islandSurfaceGrassMaskSoftness = ISLAND_SURFACE_GRASS_MASK_SOFTNESS;
+export let islandSurfaceGrassTopFillStrength = ISLAND_SURFACE_GRASS_TOP_FILL_STRENGTH;
+export let islandSurfaceGrassTopFillNormalThreshold = ISLAND_SURFACE_GRASS_TOP_FILL_NORMAL_THRESHOLD;
+export let islandSurfacePointLightInfluence = ISLAND_SURFACE_POINT_LIGHT_INFLUENCE;
+export let islandCampfireGroundColor = ISLAND_CAMPFIRE_GROUND_COLOR;
+export let islandCampfireGroundRadius = ISLAND_CAMPFIRE_GROUND_RADIUS;
+export let islandCampfireGroundSoftness = ISLAND_CAMPFIRE_GROUND_SOFTNESS;
+export let islandCampfireGroundStrength = ISLAND_CAMPFIRE_GROUND_STRENGTH;
+export let islandCampfireGroundNormalThreshold = ISLAND_CAMPFIRE_GROUND_NORMAL_THRESHOLD;
+
+const islandSurfaceGrassColorUniform = new Uniform(new Color(islandSurfaceGrassColor));
+const islandSurfaceGrassStrengthUniform = new Uniform(islandSurfaceGrassStrength);
+const islandSurfaceGrassGreenThresholdUniform = new Uniform(islandSurfaceGrassGreenThreshold);
+const islandSurfaceGrassNormalThresholdUniform = new Uniform(islandSurfaceGrassNormalThreshold);
+const islandSurfaceGrassMaskSoftnessUniform = new Uniform(islandSurfaceGrassMaskSoftness);
+const islandSurfaceGrassTopFillStrengthUniform = new Uniform(islandSurfaceGrassTopFillStrength);
+const islandSurfaceGrassTopFillNormalThresholdUniform = new Uniform(islandSurfaceGrassTopFillNormalThreshold);
+const islandSurfacePointLightInfluenceUniform = new Uniform(islandSurfacePointLightInfluence);
+const islandCampfireGroundColorUniform = new Uniform(new Color(islandCampfireGroundColor));
+const islandCampfireGroundRadiusUniform = new Uniform(islandCampfireGroundRadius);
+const islandCampfireGroundSoftnessUniform = new Uniform(islandCampfireGroundSoftness);
+const islandCampfireGroundStrengthUniform = new Uniform(islandCampfireGroundStrength);
+const islandCampfireGroundNormalThresholdUniform = new Uniform(islandCampfireGroundNormalThreshold);
+const islandCampfireGroundCenterUniform = new Uniform(new Vector2());
+
+export function setIslandSurfaceGrassColor(color: string): void {
+    islandSurfaceGrassColor = color;
+    islandSurfaceGrassColorUniform.value.set(color);
+}
+
+export function setIslandSurfaceGrassStrength(v: number): void {
+    islandSurfaceGrassStrength = MathUtils.clamp(v, 0, 1);
+    islandSurfaceGrassStrengthUniform.value = islandSurfaceGrassStrength;
+}
+
+export function setIslandSurfaceGrassGreenThreshold(v: number): void {
+    islandSurfaceGrassGreenThreshold = MathUtils.clamp(v, -0.5, 0.8);
+    islandSurfaceGrassGreenThresholdUniform.value = islandSurfaceGrassGreenThreshold;
+}
+
+export function setIslandSurfaceGrassNormalThreshold(v: number): void {
+    islandSurfaceGrassNormalThreshold = MathUtils.clamp(v, -1, 1);
+    islandSurfaceGrassNormalThresholdUniform.value = islandSurfaceGrassNormalThreshold;
+}
+
+export function setIslandSurfaceGrassMaskSoftness(v: number): void {
+    islandSurfaceGrassMaskSoftness = Math.max(0.001, v);
+    islandSurfaceGrassMaskSoftnessUniform.value = islandSurfaceGrassMaskSoftness;
+}
+
+export function setIslandSurfaceGrassTopFillStrength(v: number): void {
+    islandSurfaceGrassTopFillStrength = MathUtils.clamp(v, 0, 1);
+    islandSurfaceGrassTopFillStrengthUniform.value = islandSurfaceGrassTopFillStrength;
+}
+
+export function setIslandSurfaceGrassTopFillNormalThreshold(v: number): void {
+    islandSurfaceGrassTopFillNormalThreshold = MathUtils.clamp(v, -1, 1);
+    islandSurfaceGrassTopFillNormalThresholdUniform.value = islandSurfaceGrassTopFillNormalThreshold;
+}
+
+export function setIslandSurfacePointLightInfluence(v: number): void {
+    islandSurfacePointLightInfluence = MathUtils.clamp(v, 0, 1);
+    islandSurfacePointLightInfluenceUniform.value = islandSurfacePointLightInfluence;
+}
+
+export function setIslandCampfireGroundColor(color: string): void {
+    islandCampfireGroundColor = color;
+    islandCampfireGroundColorUniform.value.set(color);
+}
+
+export function setIslandCampfireGroundRadius(v: number): void {
+    islandCampfireGroundRadius = Math.max(0, v);
+    islandCampfireGroundRadiusUniform.value = islandCampfireGroundRadius;
+}
+
+export function setIslandCampfireGroundSoftness(v: number): void {
+    islandCampfireGroundSoftness = Math.max(0.001, v);
+    islandCampfireGroundSoftnessUniform.value = islandCampfireGroundSoftness;
+}
+
+export function setIslandCampfireGroundStrength(v: number): void {
+    islandCampfireGroundStrength = MathUtils.clamp(v, 0, 1);
+    islandCampfireGroundStrengthUniform.value = islandCampfireGroundStrength;
+}
+
+export function setIslandCampfireGroundNormalThreshold(v: number): void {
+    islandCampfireGroundNormalThreshold = MathUtils.clamp(v, -1, 1);
+    islandCampfireGroundNormalThresholdUniform.value = islandCampfireGroundNormalThreshold;
+}
+
+function applyIslandSurfaceFilterShader(model: Group): void {
+    model.traverse((child) => {
+        if ((child as any).isMesh && (child as any).material) {
+            const mesh = child as any;
+            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            materials.forEach((mat: any) => {
+                if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial || mat.isMeshBasicMaterial) {
+                    mat.customProgramCacheKey = () => 'island_surface_grass_filter';
+                    mat.onBeforeCompile = (shader: any) => {
+                        shader.uniforms.uLight = lightUniform;
+                        shader.uniforms.uAbsorption = oceanAbsorptionUniform;
+                        shader.uniforms.uFogDist = underwaterFogDistUniform;
+                        shader.uniforms.uSunVisibility = sunVisibilityUniform;
+                        shader.uniforms.uIslandSurfaceGrassColor = islandSurfaceGrassColorUniform;
+                        shader.uniforms.uIslandSurfaceGrassStrength = islandSurfaceGrassStrengthUniform;
+                        shader.uniforms.uIslandSurfaceGrassGreenThreshold = islandSurfaceGrassGreenThresholdUniform;
+                        shader.uniforms.uIslandSurfaceGrassNormalThreshold = islandSurfaceGrassNormalThresholdUniform;
+                        shader.uniforms.uIslandSurfaceGrassMaskSoftness = islandSurfaceGrassMaskSoftnessUniform;
+                        shader.uniforms.uIslandSurfaceGrassTopFillStrength = islandSurfaceGrassTopFillStrengthUniform;
+                        shader.uniforms.uIslandSurfaceGrassTopFillNormalThreshold = islandSurfaceGrassTopFillNormalThresholdUniform;
+                        shader.uniforms.uIslandSurfacePointLightInfluence = islandSurfacePointLightInfluenceUniform;
+                        shader.uniforms.uIslandCampfireGroundColor = islandCampfireGroundColorUniform;
+                        shader.uniforms.uIslandCampfireGroundRadius = islandCampfireGroundRadiusUniform;
+                        shader.uniforms.uIslandCampfireGroundSoftness = islandCampfireGroundSoftnessUniform;
+                        shader.uniforms.uIslandCampfireGroundStrength = islandCampfireGroundStrengthUniform;
+                        shader.uniforms.uIslandCampfireGroundNormalThreshold = islandCampfireGroundNormalThresholdUniform;
+                        shader.uniforms.uIslandCampfireGroundCenter = islandCampfireGroundCenterUniform;
+
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <common>',
+                            `#include <common>
+                            varying vec3 vWorldPosition;
+                            varying vec3 vWorldNormal;`
+                        );
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <beginnormal_vertex>',
+                            `#include <beginnormal_vertex>
+                            vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`
+                        );
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <worldpos_vertex>',
+                            `#include <worldpos_vertex>
+                            vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;`
+                        );
+                        shader.fragmentShader = shader.fragmentShader.replace(
+                            '#include <common>',
+                            `#include <common>
+                            varying vec3 vWorldPosition;
+                            varying vec3 vWorldNormal;
+                            uniform vec3 uIslandSurfaceGrassColor;
+                            uniform float uIslandSurfaceGrassStrength;
+                            uniform float uIslandSurfaceGrassGreenThreshold;
+                            uniform float uIslandSurfaceGrassNormalThreshold;
+                            uniform float uIslandSurfaceGrassMaskSoftness;
+                            uniform float uIslandSurfaceGrassTopFillStrength;
+                            uniform float uIslandSurfaceGrassTopFillNormalThreshold;
+                            uniform float uIslandSurfacePointLightInfluence;
+                            uniform vec3 uIslandCampfireGroundColor;
+                            uniform float uIslandCampfireGroundRadius;
+                            uniform float uIslandCampfireGroundSoftness;
+                            uniform float uIslandCampfireGroundStrength;
+                            uniform float uIslandCampfireGroundNormalThreshold;
+                            uniform vec2 uIslandCampfireGroundCenter;
+                            ${oceanLightingPars}`
+                        );
+                        shader.fragmentShader = shader.fragmentShader.replace(
+                            '#include <map_fragment>',
+                            `#include <map_fragment>
+                            vec3 islandSurfaceSample = diffuseColor.rgb;
+                            float islandGreenDominance = islandSurfaceSample.g - max(islandSurfaceSample.r, islandSurfaceSample.b);
+                            float islandGreenMask = smoothstep(
+                                uIslandSurfaceGrassGreenThreshold,
+                                uIslandSurfaceGrassGreenThreshold + uIslandSurfaceGrassMaskSoftness,
+                                islandGreenDominance
+                            );
+                            float islandUpMask = smoothstep(
+                                uIslandSurfaceGrassNormalThreshold,
+                                min(uIslandSurfaceGrassNormalThreshold + uIslandSurfaceGrassMaskSoftness, 1.0),
+                                normalize(vWorldNormal).y
+                            );
+                            float islandTopFillMask = smoothstep(
+                                uIslandSurfaceGrassTopFillNormalThreshold,
+                                min(uIslandSurfaceGrassTopFillNormalThreshold + uIslandSurfaceGrassMaskSoftness, 1.0),
+                                normalize(vWorldNormal).y
+                            ) * uIslandSurfaceGrassTopFillStrength;
+                            float islandGrassMask = max(islandGreenMask * islandUpMask, islandTopFillMask) * uIslandSurfaceGrassStrength;
+                            float islandSurfaceLuma = dot(islandSurfaceSample, vec3(0.299, 0.587, 0.114));
+                            vec3 islandTintedGrass = uIslandSurfaceGrassColor * max(islandSurfaceLuma, 0.22);
+                            diffuseColor.rgb = mix(diffuseColor.rgb, islandTintedGrass, islandGrassMask);
+
+                            float islandCampfireDist = distance(vWorldPosition.xz, uIslandCampfireGroundCenter);
+                            float islandCampfireInner = max(uIslandCampfireGroundRadius - uIslandCampfireGroundSoftness, 0.0);
+                            float islandCampfireMask = 1.0 - smoothstep(islandCampfireInner, uIslandCampfireGroundRadius, islandCampfireDist);
+                            float islandCampfireUpMask = smoothstep(
+                                uIslandCampfireGroundNormalThreshold,
+                                min(uIslandCampfireGroundNormalThreshold + uIslandSurfaceGrassMaskSoftness, 1.0),
+                                normalize(vWorldNormal).y
+                            );
+                            islandCampfireMask *= islandCampfireUpMask;
+                            islandCampfireMask *= uIslandCampfireGroundStrength;
+                            float islandCampfireLuma = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+                            vec3 islandCampfireTint = uIslandCampfireGroundColor * max(islandCampfireLuma, 0.32);
+                            diffuseColor.rgb = mix(diffuseColor.rgb, islandCampfireTint, islandCampfireMask);`
+                        );
+                        const pointLightReducedChunk = (ShaderChunk as any).lights_fragment_begin.replace(
+                            'getPointLightInfo( pointLight, geometryPosition, directLight );',
+                            `getPointLightInfo( pointLight, geometryPosition, directLight );
+		directLight.color *= uIslandSurfacePointLightInfluence;`
+                        );
+                        shader.fragmentShader = shader.fragmentShader.replace(
+                            '#include <lights_fragment_begin>',
+                            pointLightReducedChunk
+                        );
+                        shader.fragmentShader = shader.fragmentShader.replace(
+                            '#include <opaque_fragment>',
+                            `${oceanLightingFragment}
+                            #include <opaque_fragment>`
+                        );
+                    };
+                    mat.needsUpdate = true;
+                }
+            });
+        }
+    });
+}
 
 function applyOceanLightingToModel(model: Group): void {
     model.traverse((child) => {
@@ -1334,6 +1571,8 @@ function applyBushFlowerColor(group: Group, color: string): void {
             if (!isBushFlowerMaterial(mat)) return;
             mat.userData.flowerColor = color;
             mat.color?.set(flowerColor);
+            mat.emissive?.set(flowerColor);
+            if ('emissiveIntensity' in mat) mat.emissiveIntensity = BUSH_FLOWER_EMISSIVE_INTENSITY;
             mat.userData.flowerColorUniform?.value.set(flowerColor);
             mat.needsUpdate = true;
         });
@@ -1357,6 +1596,8 @@ function applyBushWindShader(model: Group, flowerColor: string): void {
                     if (isFlower) {
                         mat.userData.flowerColor = flowerColor;
                         mat.color?.set(flowerColor);
+                        mat.emissive?.set(flowerColor);
+                        if ('emissiveIntensity' in mat) mat.emissiveIntensity = BUSH_FLOWER_EMISSIVE_INTENSITY;
                     }
                     mat.transparent = false;
                     mat.depthWrite = true;
@@ -1409,7 +1650,9 @@ function applyBushWindShader(model: Group, flowerColor: string): void {
                                 '#include <map_fragment>',
                                 `#include <map_fragment>
                                 float flowerLuma = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
-                                diffuseColor.rgb = uFlowerColor * max(flowerLuma, 0.42);`
+                                float flowerShade = mix(${BUSH_FLOWER_SHADE_MIN.toFixed(3)}, ${BUSH_FLOWER_SHADE_MAX.toFixed(3)}, smoothstep(0.05, 0.95, flowerLuma));
+                                vec3 recoloredFlower = uFlowerColor * flowerShade;
+                                diffuseColor.rgb = mix(diffuseColor.rgb, recoloredFlower, ${BUSH_FLOWER_COLOR_STRENGTH.toFixed(3)});`
                             );
                         }
                         shader.fragmentShader = shader.fragmentShader.replace(
@@ -1439,7 +1682,7 @@ export function Start(): void {
     loader.load(
         'models/surface/floating_island.glb',
         (gltf) => {
-            applyOceanLightingToModel(gltf.scene);
+            applyIslandSurfaceFilterShader(gltf.scene);
             // Enable shadow receiving on island meshes
             gltf.scene.traverse((child) => {
                 if ((child as any).isMesh) {
@@ -3277,6 +3520,7 @@ function setupRadioInteraction(): void {
 
 export function Update(isUnderwater = false): void {
   _updateAppleImpacts();
+  islandCampfireGroundCenterUniform.value.set(firecamp.position.x, firecamp.position.z);
 
   if (!isUnderwater) {
     // Update palm tree wind shader time

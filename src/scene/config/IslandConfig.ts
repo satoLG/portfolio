@@ -57,6 +57,21 @@ export const apple1RotY     = 0.1764;
 export const apple2RotY     = -0.9226;
 export const apple3RotY     = -0.5000;
 
+// ── Island surface grass filter ──────────────────────────────────────────────
+export const ISLAND_SURFACE_GRASS_COLOR = '#293c00'; // sRGB hex
+export const ISLAND_SURFACE_GRASS_STRENGTH = 1.0000; // 0 = original texture, 1 = full tint
+export const ISLAND_SURFACE_GRASS_GREEN_THRESHOLD = 0.0400; // green dominance needed for mask
+export const ISLAND_SURFACE_GRASS_NORMAL_THRESHOLD = 0.8100; // upward-facing normal needed
+export const ISLAND_SURFACE_GRASS_MASK_SOFTNESS = 0.2710; // feather for color/normal mask
+export const ISLAND_SURFACE_GRASS_TOP_FILL_STRENGTH = 0.3500; // fills upward top faces that miss the color mask
+export const ISLAND_SURFACE_GRASS_TOP_FILL_NORMAL_THRESHOLD = 0.5700; // lower upward-facing normal cutoff for top fill
+export const ISLAND_SURFACE_POINT_LIGHT_INFLUENCE = 0.4500; // lowers fire point-light faceting on island only
+export const ISLAND_CAMPFIRE_GROUND_COLOR = '#6b3f20'; // sRGB hex
+export const ISLAND_CAMPFIRE_GROUND_RADIUS = 0.6300;
+export const ISLAND_CAMPFIRE_GROUND_SOFTNESS = 0.4510;
+export const ISLAND_CAMPFIRE_GROUND_STRENGTH = 1.0000;
+export const ISLAND_CAMPFIRE_GROUND_NORMAL_THRESHOLD = 0.6000; // upward-facing normal needed for ground tint
+
 // ── Bush flower colors ───────────────────────────────────────────────────────
 export const bushFlowerColor      = '#f2d34f';
 export const bushRadioFlowerColor = '#f2d34f';
