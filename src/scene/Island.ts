@@ -9,7 +9,7 @@ import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPh
 import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../core/Dialog";
 import * as CoinTooltip from '../core/CoinTooltip';
 import type { DialogLine, ReplyOption } from "../core/Dialog";
-import { isBreezeActive, playPugSnoreOnce, stopPugSnore, getAudioContext, getMasterDestination } from "../core/Audio";
+import { isBreezeActive, playAppleImpactSound, playChestCloseSound, playChestOpenSound, playPugSnoreOnce, stopPugSnore } from "../core/Audio";
 import { createGrassMesh, createPerlinTexture, createShadowFloorMesh, grassColorBase, grassColorTip, type GrassUniforms } from './ProceduralGrass';
 import { camera, renderer, scene as threeScene } from "../core/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
@@ -66,7 +66,7 @@ import {
     GOLDEN_APPLE_LIGHT_DISTANCE,
     GOLDEN_APPLE_LIGHT_DECAY,
 } from './config/IslandConfig';
-import { initPhysicsWorld, addAppleBody, removeAppleBody, stepPhysics, physicsConfig, updateDebugger, registerTreeMeshes, registerExtraStaticMeshes } from './Physics';
+import { initPhysicsWorld, addAppleBody, initAppleBodyPool, removeAppleBody, stepPhysics, physicsConfig, updateDebugger, registerTreeMeshes, registerExtraStaticMeshes } from './Physics';
 import { Body } from 'cannon-es';
 
 export const island = new Group();
@@ -262,6 +262,69 @@ const _coinBounceVels:    number[] = [0, 0, 0];   // bounce spring velocity
 const _coinRaycaster = new Raycaster();
 const _coinMouse     = new Vector2();
 const _coinScreenVec = new Vector3();
+
+export function beginPrewarmVariants(): () => void {
+    const restoreFns: Array<() => void> = [];
+
+    if (apple1.children.length > 0) {
+        _applyGoldenTint(0);
+        restoreFns.push(() => _removeGoldenTint(0));
+    }
+
+    const groundSlot = _groundAppleSlots[0];
+    if (groundSlot) {
+        const wasVisible = groundSlot.group.visible;
+        const oldPos = groundSlot.group.position.clone();
+        const oldQuat = groundSlot.group.quaternion.clone();
+        const oldScale = groundSlot.group.scale.clone();
+        const oldInUse = groundSlot.inUse;
+        groundSlot.group.visible = true;
+        groundSlot.group.position.copy(apple1.position).add(_appleVisualCenterOffsets[0]);
+        groundSlot.group.scale.setScalar(appleStates[0].originalScale || 1);
+        _setGroundSlotGolden(groundSlot, true);
+        _acquireGoldenLight(groundSlot.group);
+        restoreFns.push(() => {
+            _releaseGoldenLight(groundSlot.group);
+            _setGroundSlotGolden(groundSlot, false);
+            groundSlot.group.visible = wasVisible;
+            groundSlot.group.position.copy(oldPos);
+            groundSlot.group.quaternion.copy(oldQuat);
+            groundSlot.group.scale.copy(oldScale);
+            groundSlot.inUse = oldInUse;
+        });
+    }
+
+    if (chestGlowLight) {
+        const oldIntensity = chestGlowLight.intensity;
+        chestGlowLight.intensity = sfDecorConfig.chestGlowIntensity;
+        restoreFns.push(() => { if (chestGlowLight) chestGlowLight.intensity = oldIntensity; });
+    }
+
+    const coinCfgs = [sfDecorConfig.chestCoin1, sfDecorConfig.chestCoin2, sfDecorConfig.chestCoin3];
+    for (let i = 0; i < _chestCoins.length; i++) {
+        const oldScale = _chestCoins[i].scale.clone();
+        _chestCoins[i].scale.setScalar(coinCfgs[i].scale);
+        restoreFns.push(() => _chestCoins[i]?.scale.copy(oldScale));
+    }
+
+    for (const mat of _chestRayMats) {
+        const oldOpacity = mat.opacity;
+        mat.opacity = Math.max(oldOpacity, sfDecorConfig.chestRayMaxOpacity);
+        restoreFns.push(() => { mat.opacity = oldOpacity; });
+    }
+
+    if (chestOpenAction) {
+        chestOpenAction.reset();
+        chestOpenAction.time = chestOpenAction.getClip().duration * 0.5;
+        chestOpenAction.play();
+        chestMixer?.update(0);
+        restoreFns.push(() => chestOpenAction?.stop());
+    }
+
+    return () => {
+        for (let i = restoreFns.length - 1; i >= 0; i--) restoreFns[i]();
+    };
+}
 
 export function updateChestTransform(): void {
     chest.position.set(sfDecorConfig.chest.x, sfDecorConfig.chest.y, sfDecorConfig.chest.z);
@@ -624,11 +687,26 @@ export const goldenAppleConfig = {
     lightDistance:      GOLDEN_APPLE_LIGHT_DISTANCE,
     lightDecay:        GOLDEN_APPLE_LIGHT_DECAY,
 };
-interface _GoldenMatEntry { mesh: Mesh; normalMat: MeshStandardMaterial; goldenMat: MeshStandardMaterial; blendFactor: number; }
+interface _GoldenUniformSet {
+    uGoldenColor: { value: Color };
+    uGoldenEmissive: { value: Color };
+    uGoldenEmissiveIntensity: { value: number };
+    uGoldenCutoffY: { value: number };
+    uGoldenFeather: { value: number };
+}
+interface _GoldenMatEntry {
+    mesh: Mesh;
+    normalMat: MeshStandardMaterial;
+    goldenMat: MeshStandardMaterial;
+    blendFactor: number;
+    localMinY: number;
+    localMaxY: number;
+}
 /** Pre-baked golden materials per apple (created once at load, swapped atomically). */
 const _goldenMatCache: _GoldenMatEntry[][] = [[], [], []];
 /** Per-apple bounding box (computed once at load, used for Y cutoff). */
 const _appleBBoxes: Box3[] = [];
+const _appleVisualCenterOffsets: Vector3[] = [new Vector3(), new Vector3(), new Vector3()];
 /** Track which tree apple indices are currently golden. */
 const _isGolden: boolean[] = [false, false, false];
 
@@ -657,24 +735,7 @@ const _appleImpactUp = new Vector3();
 const _appleImpactPos = new Vector3();
 
 function _playAppleImpactAudio(): void {
-    const ctx = getAudioContext();
-    const dest = getMasterDestination();
-    if (!ctx || !dest) return;
-    if (!_appleImpactBuffer) {
-        fetch('audio/overall/209012__owlstorm__fruit-impact-1.wav')
-            .then(r => r.arrayBuffer())
-            .then(ab => ctx.decodeAudioData(ab))
-            .then(buf => { _appleImpactBuffer = buf; })
-            .catch(e => console.warn('[Apple] Failed to load impact audio:', e));
-        return;
-    }
-    const gain = ctx.createGain();
-    gain.gain.value = 1.5;
-    const src = ctx.createBufferSource();
-    src.buffer = _appleImpactBuffer;
-    src.connect(gain);
-    gain.connect(dest);
-    src.start();
+    playAppleImpactSound();
 }
 
 function _getAppleImpactTexture(): CanvasTexture {
@@ -895,9 +956,65 @@ function _goldenBlendFactor(mesh: Mesh, appleIndex: number): number {
     return (cutoffY - meshMinY) / (meshMaxY - meshMinY);
 }
 
+function _meshLocalYBounds(mesh: Mesh): { minY: number; maxY: number } {
+    const geometry = mesh.geometry;
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    const bbox = geometry.boundingBox;
+    if (!bbox) return { minY: 0, maxY: 1 };
+    return { minY: bbox.min.y, maxY: bbox.max.y };
+}
+
+function _createGoldenMaterial(normalMat: MeshStandardMaterial, minY: number, maxY: number): MeshStandardMaterial {
+    const goldenMat = normalMat.clone();
+    goldenMat.color.copy(normalMat.color);
+    goldenMat.emissive.copy(normalMat.emissive);
+
+    const uniforms: _GoldenUniformSet = {
+        uGoldenColor: { value: new Color(goldenAppleConfig.color) },
+        uGoldenEmissive: { value: new Color(goldenAppleConfig.emissive) },
+        uGoldenEmissiveIntensity: { value: goldenAppleConfig.emissiveIntensity },
+        uGoldenCutoffY: { value: minY + (maxY - minY) * MathUtils.clamp(goldenAppleConfig.colorYCutoff, 0, 1) },
+        uGoldenFeather: { value: Math.max((maxY - minY) * 0.035, 0.0001) },
+    };
+
+    goldenMat.userData.goldenUniforms = uniforms;
+    goldenMat.onBeforeCompile = (shader) => {
+        Object.assign(shader.uniforms, uniforms);
+        shader.vertexShader = shader.vertexShader
+            .replace('#include <common>', '#include <common>\nvarying float vGoldenAppleLocalY;')
+            .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGoldenAppleLocalY = transformed.y;');
+        shader.fragmentShader = shader.fragmentShader
+            .replace(
+                '#include <common>',
+                '#include <common>\nuniform vec3 uGoldenColor;\nuniform vec3 uGoldenEmissive;\nuniform float uGoldenEmissiveIntensity;\nuniform float uGoldenCutoffY;\nuniform float uGoldenFeather;\nvarying float vGoldenAppleLocalY;'
+            )
+            .replace(
+                'vec3 totalEmissiveRadiance = emissive;',
+                'float goldenAppleMask = 1.0 - smoothstep(uGoldenCutoffY - uGoldenFeather, uGoldenCutoffY + uGoldenFeather, vGoldenAppleLocalY);\n\tvec3 totalEmissiveRadiance = mix(emissive, uGoldenEmissive * uGoldenEmissiveIntensity, goldenAppleMask);'
+            )
+            .replace(
+                '#include <color_fragment>',
+                '#include <color_fragment>\n\tdiffuseColor.rgb = mix(diffuseColor.rgb, uGoldenColor, goldenAppleMask);'
+            );
+    };
+    goldenMat.customProgramCacheKey = () => 'golden-apple-local-y-mask-v1';
+    return goldenMat;
+}
+
+function _refreshGoldenEntry(entry: _GoldenMatEntry, goldColor: Color, goldEmissive: Color): void {
+    const uniforms = entry.goldenMat.userData.goldenUniforms as _GoldenUniformSet | undefined;
+    const cutoff = MathUtils.clamp(goldenAppleConfig.colorYCutoff, 0, 1);
+    entry.blendFactor = cutoff;
+    if (!uniforms) return;
+    const range = Math.max(entry.localMaxY - entry.localMinY, 0.0001);
+    uniforms.uGoldenColor.value.copy(goldColor);
+    uniforms.uGoldenEmissive.value.copy(goldEmissive);
+    uniforms.uGoldenEmissiveIntensity.value = goldenAppleConfig.emissiveIntensity;
+    uniforms.uGoldenCutoffY.value = entry.localMinY + range * cutoff;
+    uniforms.uGoldenFeather.value = Math.max(range * 0.035, 0.0001);
+}
+
 function _prebakeGoldenMaterials(grp: Group, index: number): void {
-    const goldColor = new Color(goldenAppleConfig.color);
-    const goldEmissive = new Color(goldenAppleConfig.emissive);
     _goldenMatCache[index] = [];
     grp.traverse((child) => {
         if (!(child as any).isMesh) return;
@@ -905,13 +1022,9 @@ function _prebakeGoldenMaterials(grp: Group, index: number): void {
         const normalMat = mesh.material as MeshStandardMaterial;
         if (!normalMat || !normalMat.color) return;
         const t = _goldenBlendFactor(mesh, index);
-        const goldenMat = normalMat.clone();
-        if (t > 0) {
-            goldenMat.color.lerp(goldColor, t);
-            goldenMat.emissive.lerp(goldEmissive, t);
-            goldenMat.emissiveIntensity = goldenMat.emissiveIntensity * (1 - t) + goldenAppleConfig.emissiveIntensity * t;
-        }
-        _goldenMatCache[index].push({ mesh, normalMat, goldenMat, blendFactor: t });
+        const { minY, maxY } = _meshLocalYBounds(mesh);
+        const goldenMat = _createGoldenMaterial(normalMat, minY, maxY);
+        _goldenMatCache[index].push({ mesh, normalMat, goldenMat, blendFactor: t, localMinY: minY, localMaxY: maxY });
     });
 }
 
@@ -935,17 +1048,91 @@ function _removeGoldenTint(index: number): void {
     _isGolden[index] = false;
 }
 
+function _setGroundSlotGolden(slot: GroundAppleSlot, golden: boolean): void {
+    for (const entry of slot.goldenEntries) {
+        entry.mesh.material = golden ? entry.goldenMat : entry.normalMat;
+        const mat = entry.mesh.material as MeshStandardMaterial;
+        mat.transparent = false;
+        mat.opacity = 1;
+    }
+}
+
+function _createGroundAppleSlot(source: Group, treeIndex: number): GroundAppleSlot {
+    const group = source.clone(true);
+    const goldenEntries: _GoldenMatEntry[] = [];
+
+    group.traverse((child) => {
+        if (!(child as any).isMesh) return;
+        const mesh = child as Mesh;
+        if (Array.isArray(mesh.material)) {
+            mesh.material = mesh.material.map((m) => (m as MeshStandardMaterial).clone());
+        } else if (mesh.material) {
+            mesh.material = (mesh.material as MeshStandardMaterial).clone();
+        }
+        const normalMat = mesh.material as MeshStandardMaterial;
+        const t = _goldenBlendFactor(mesh, treeIndex);
+        const { minY, maxY } = _meshLocalYBounds(mesh);
+        const goldenMat = _createGoldenMaterial(normalMat, minY, maxY);
+        goldenEntries.push({ mesh, normalMat, goldenMat, blendFactor: t, localMinY: minY, localMaxY: maxY });
+    });
+
+    const bbox = new Box3().setFromObject(group);
+    const visualCenter = new Vector3();
+    bbox.getCenter(visualCenter);
+    const localOffset = visualCenter.clone().sub(group.position).divideScalar(source.scale.x || 1);
+    group.children.forEach(child => child.position.sub(localOffset));
+
+    group.visible = false;
+    group.position.set(0, physicsConfig.safetyPlaneY, 0);
+    threeScene.add(group);
+    return { group, goldenEntries, inUse: false };
+}
+
+function _initGroundAppleVisualPool(appleGroups: Group[]): void {
+    if (_groundAppleSlots.length > 0) return;
+    for (let i = 0; i < MAX_GROUND_APPLES; i++) {
+        const treeIndex = i % appleGroups.length;
+        _groundAppleSlots.push(_createGroundAppleSlot(appleGroups[treeIndex], treeIndex));
+    }
+}
+
+function _releaseGroundApple(ga: GroundApple): void {
+    if (!ga.respawnTriggered) {
+        ga.respawnTriggered = true;
+        _startTreeAppleRespawn(ga.treeIndex);
+    }
+    if (ga.isGolden) _releaseGoldenLight(ga.clone);
+    removeAppleBody(ga.physicsBody);
+    ga.slot.inUse = false;
+    ga.clone.visible = false;
+    ga.clone.position.set(0, physicsConfig.safetyPlaneY, 0);
+    ga.clone.quaternion.set(0, 0, 0, 1);
+    _setGroundSlotGolden(ga.slot, false);
+}
+
+function _acquireGroundAppleSlot(): GroundAppleSlot | null {
+    let slot = _groundAppleSlots.find(s => !s.inUse) ?? null;
+    if (slot) return slot;
+
+    const oldest = groundApples.shift();
+    if (!oldest) return null;
+    _releaseGroundApple(oldest);
+    slot = oldest.slot;
+    return slot;
+}
+
 /** Live-update all currently golden apples (called from debug GUI). */
 export function updateAllGoldenApples(): void {
     const goldColor = new Color(goldenAppleConfig.color);
     const goldEmissive = new Color(goldenAppleConfig.emissive);
     for (let i = 0; i < 3; i++) {
         for (const entry of _goldenMatCache[i]) {
-            if (entry.blendFactor <= 0) continue;
-            const t = entry.blendFactor;
-            entry.goldenMat.color.copy(entry.normalMat.color).lerp(goldColor, t);
-            entry.goldenMat.emissive.copy(entry.normalMat.emissive).lerp(goldEmissive, t);
-            entry.goldenMat.emissiveIntensity = entry.normalMat.emissiveIntensity * (1 - t) + goldenAppleConfig.emissiveIntensity * t;
+            _refreshGoldenEntry(entry, goldColor, goldEmissive);
+        }
+    }
+    for (const slot of _groundAppleSlots) {
+        for (const entry of slot.goldenEntries) {
+            _refreshGoldenEntry(entry, goldColor, goldEmissive);
         }
     }
     // Update all active pooled lights
@@ -985,6 +1172,7 @@ function _startTreeAppleRespawn(treeIndex: number): void {
 interface GroundApple {
     clone: Group;
     physicsBody: Body;
+    slot: GroundAppleSlot;
     fading: boolean;
     fadeAlpha: number;
     landed: boolean;         // true once the first collision happened
@@ -994,6 +1182,13 @@ interface GroundApple {
     isGolden: boolean;       // true if this ground clone was golden when it fell
 }
 const groundApples: GroundApple[] = [];
+
+interface GroundAppleSlot {
+    group: Group;
+    goldenEntries: _GoldenMatEntry[];
+    inUse: boolean;
+}
+const _groundAppleSlots: GroundAppleSlot[] = [];
 
 const appleRaycaster = new Raycaster();
 const appleMouse = new Vector2();
@@ -2156,9 +2351,6 @@ export function Start(): void {
             _buildChestRays();
 
             console.log('Chest loaded with ocean lighting (' + gltf.animations.length + ' animations)');
-            // Pre-fetch audio so it's ready before first click
-            _loadChestBuffer();
-
             // Load extra coins (blue, black, white) placed inside the chest.
             // coin.glb has two material primitives:
             //   "Yellow"     = outer ring + raised star (one combined mesh)
@@ -2248,8 +2440,11 @@ export function Start(): void {
                 // Cache bounding box for golden Y cutoff, then pre-bake golden materials
                 appleGroups[i].updateMatrixWorld(true);
                 _appleBBoxes[i] = new Box3().setFromObject(appleGroups[i]);
+                _appleBBoxes[i].getCenter(_appleVisualCenterOffsets[i]);
+                _appleVisualCenterOffsets[i].sub(appleGroups[i].position);
                 _prebakeGoldenMaterials(appleGroups[i], i);
             }
+            _initGroundAppleVisualPool(appleGroups);
         },
         undefined,
         (error) => { console.error('Error loading apple.glb:', error); }
@@ -2282,6 +2477,7 @@ export function Start(): void {
     // Init cannon-es physics world for falling apples (after island meshes are ready)
     waitForIslandMeshes(() => {
         initPhysicsWorld(islandMeshes, treeTrunkMeshes);
+        initAppleBodyPool(MAX_GROUND_APPLES);
     });
 }
 
@@ -2370,49 +2566,30 @@ function triggerAppleFall(index: number): void {
     const worldPos = new Vector3();
     group.getWorldPosition(worldPos);
 
-    // Clone the apple visual for the ground
-    const clone = group.clone(true);
-    // Deep-clone materials so fading the ground apple doesn't affect the tree apple
-    clone.traverse((child) => {
-        if ((child as any).isMesh) {
-            const mesh = child as Mesh;
-            if (Array.isArray(mesh.material)) {
-                mesh.material = mesh.material.map((m) => m.clone());
-            } else if (mesh.material) {
-                mesh.material = mesh.material.clone();
-            }
-        }
-    });
-    clone.position.copy(worldPos);
+    const slot = _acquireGroundAppleSlot();
+    if (!slot) return;
+    slot.inUse = true;
+
+    const clone = slot.group;
+    const visualCenter = worldPos.clone().add(_appleVisualCenterOffsets[index]);
+    clone.position.copy(visualCenter);
     clone.rotation.set(0, st.originalRotY, 0);
     clone.scale.setScalar(st.originalScale);
-    threeScene.add(clone);
-
-    // Compute the visual bounding box center of the clone (not the pivot)
-    const bbox = new Box3().setFromObject(clone);
-    const visualCenter = new Vector3();
-    bbox.getCenter(visualCenter);
-
-    // Recenter the clone so its origin is at the visual center of the fruit.
-    // This ensures physics body and visual rotate around the same point.
-    // localCenter is world-space; divide by scale to get local-space offset.
-    const s = st.originalScale;
-    const localOffset = visualCenter.clone().sub(clone.position).divideScalar(s);
-    clone.children.forEach(child => child.position.sub(localOffset));
-    clone.position.copy(visualCenter);
-    console.log(`[Apple${index}] pivot=${worldPos.y.toFixed(3)} visCenter=${visualCenter.y.toFixed(3)} bboxMin=${bbox.min.y.toFixed(3)} bboxMax=${bbox.max.y.toFixed(3)} scale=${s} localOffY=${localOffset.y.toFixed(3)}`);
+    clone.visible = true;
+    _setGroundSlotGolden(slot, _isGolden[index]);
 
     // Create physics body at the visual center of the apple fruit
     let body: Body;
     try {
         body = addAppleBody(visualCenter);
     } catch {
-        threeScene.remove(clone);
+        slot.inUse = false;
+        clone.visible = false;
         return;
     }
 
     const wasGolden = _isGolden[index];
-    const ga: GroundApple = { clone, physicsBody: body, fading: false, fadeAlpha: 1, landed: false, treeIndex: index, respawnTimer: appleRespawnDelay, respawnTriggered: false, isGolden: wasGolden };
+    const ga: GroundApple = { clone, physicsBody: body, slot, fading: false, fadeAlpha: 1, landed: false, treeIndex: index, respawnTimer: appleRespawnDelay, respawnTriggered: false, isGolden: wasGolden };
     groundApples.push(ga);
 
     // If the tree apple was golden, transfer the pooled light to the ground clone
@@ -2422,8 +2599,8 @@ function triggerAppleFall(index: number): void {
         _acquireGoldenLight(clone);
     }
 
-    // When the clone hits the surface, mark landed (for queue tracking)
-    body.addEventListener('collide', () => { ga.landed = true; });
+    // Pooled physics bodies keep one stable listener; point it at this visual.
+    (body as any).__groundApple = ga;
 
     // Evict oldest ground apples if over the limit
     let groundCount = 0;
@@ -3009,68 +3186,37 @@ const CHEST_CLOSE_SOUND_LEAD_MS = 100;
  *  1.0 = full clip; 0.6 = stop at 60% of the reversed buffer's length. */
 const CHEST_CLOSE_SOUND_CUTOFF_RATIO = 0.60;
 
-let _chestAudioBuffer: AudioBuffer | null = null;
-
-async function _loadChestBuffer(): Promise<AudioBuffer | null> {
-    const ctx = getAudioContext();
-    if (!ctx) return null;
-    if (_chestAudioBuffer) return _chestAudioBuffer;
-    try {
-        const resp = await fetch('audio/overall/771164__steprock__treasure-chest-open.mp3');
-        const arrayBuf = await resp.arrayBuffer();
-        _chestAudioBuffer = await ctx.decodeAudioData(arrayBuf);
-        return _chestAudioBuffer;
-    } catch (e) {
-        console.warn('[Chest] Failed to load chest audio:', e);
-        return null;
-    }
-}
-
-function _reverseBuffer(src: AudioBuffer, ctx: AudioContext): AudioBuffer {
-    const reversed = ctx.createBuffer(src.numberOfChannels, src.length, src.sampleRate);
-    for (let ch = 0; ch < src.numberOfChannels; ch++) {
-        const srcData = src.getChannelData(ch);
-        const dstData = reversed.getChannelData(ch);
-        for (let i = 0; i < src.length; i++) {
-            dstData[i] = srcData[src.length - 1 - i];
-        }
-    }
-    return reversed;
-}
-
 function _playChestSound(reverse: boolean): void {
-    const ctx = getAudioContext();
-    const dest = getMasterDestination();
-    if (!ctx || !dest || !_chestAudioBuffer) return;
-    const buf = reverse ? _reverseBuffer(_chestAudioBuffer, ctx) : _chestAudioBuffer;
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 500;
-    filter.Q.value = 0.5;
-    const gain = ctx.createGain();
-    gain.gain.value = 4.0;
-    const source = ctx.createBufferSource();
-    source.buffer = buf;
-    source.connect(filter);
-    filter.connect(gain);
-    gain.connect(dest);
     if (reverse) {
-        // Play only the first CHEST_CLOSE_SOUND_CUTOFF_RATIO fraction of the
-        // reversed buffer so the sound cuts off before the end of the clip.
-        const duration = buf.duration * CHEST_CLOSE_SOUND_CUTOFF_RATIO;
-        source.start(0, 0, duration);
+        playChestCloseSound(CHEST_CLOSE_SOUND_CUTOFF_RATIO);
     } else {
-        source.start();
+        playChestOpenSound();
     }
 }
 
 /** How many milliseconds after the open animation starts before the glow light fades in.
  *  Tune to match the moment the lid actually swings open. */
 const CHEST_GLOW_DELAY_MS = 700;
+let _coinRevealTimeoutId: number | null = null;
+let _coinHideTimeoutId: number | null = null;
+
+function _clearCoinRevealTimeout(): void {
+    if (_coinRevealTimeoutId === null) return;
+    clearTimeout(_coinRevealTimeoutId);
+    _coinRevealTimeoutId = null;
+}
+
+function _clearCoinHideTimeout(): void {
+    if (_coinHideTimeoutId === null) return;
+    clearTimeout(_coinHideTimeoutId);
+    _coinHideTimeoutId = null;
+}
 
 function openChest(): void {
     if (chestIsOpen || !chestOpenAction) return;
     chestIsOpen = true;
+    _clearCoinRevealTimeout();
+    _clearCoinHideTimeout();
     // Delay glow so it activates when the lid is actually open, not at the start of the animation
     _chestGlowReady = false;
     setTimeout(() => {
@@ -3081,36 +3227,43 @@ function openChest(): void {
     // Collapse any coins that may still be visible (e.g. re-open after partial close)
     for (let i = 0; i < _coinRevealTimers.length; i++) _coinRevealTimers[i] = -1;
     // Start revealing coins partway through the lid animation (not waiting for full finish)
-    const COIN_REVEAL_DELAY_MS = 800;
     const STAGGER = 0.12; // seconds between each coin pop
-    setTimeout(() => {
+    _coinRevealTimeoutId = window.setTimeout(() => {
+        _coinRevealTimeoutId = null;
         if (!chestIsOpen) return; // chest was closed before timer fired
         for (let i = 0; i < _chestCoins.length; i++) {
             _coinRevealTimers[i] = i * STAGGER;
         }
-    }, COIN_REVEAL_DELAY_MS);
+    }, Math.max(0, sfDecorConfig.chestCoinRevealDelay) * 1000);
     if (chestCloseAction) { chestCloseAction.stop(); }
     chestOpenAction.reset();
     chestOpenAction.play();
-    _loadChestBuffer().then(() => _playChestSound(false));
+    _playChestSound(false);
 }
 
 function closeChest(): void {
     if (!chestIsOpen || !chestCloseAction) return;
     chestIsOpen      = false;
+    _clearCoinRevealTimeout();
+    _clearCoinHideTimeout();
     _chestGlowReady  = false;
     _chestGlowTarget = 0;
     _selectedCoinIdx = -1;
-    // Cancel pending reveals and collapse all coins
-    for (let i = 0; i < _coinTargetScales.length; i++) {
-        _coinRevealTimers[i] = -1;
-        _coinTargetScales[i] = 0;
-    }
+    // Cancel pending reveals immediately, then keep visible coins around until
+    // the lid has closed enough for them to scale down behind it.
+    for (let i = 0; i < _coinRevealTimers.length; i++) _coinRevealTimers[i] = -1;
+    _coinHideTimeoutId = window.setTimeout(() => {
+        _coinHideTimeoutId = null;
+        if (chestIsOpen) return;
+        for (let i = 0; i < _coinTargetScales.length; i++) {
+            _coinTargetScales[i] = 0;
+        }
+    }, Math.max(0, sfDecorConfig.chestCoinHideDelay) * 1000);
     // Fire the reversed sound CHEST_CLOSE_SOUND_LEAD_MS before the animation
     // starts so the audio lines up better with the lid movement.
     // Keep chestOpenAction running (clamped at end) until the close animation
     // takes over — stopping it early snaps the chest to its default pose.
-    _loadChestBuffer().then(() => _playChestSound(true));
+    _playChestSound(true);
     const _closeAction = chestCloseAction;
     setTimeout(() => {
         if (chestIsOpen) return; // re-opened before timer fired
@@ -3556,30 +3709,8 @@ export function Update(isUnderwater = false): void {
         const st = appleStates[i];
         const grp = appleGroups[i];
 
-        // Hidden: waiting for ground clone to land before respawn kicks in
-        if (st.hidden) continue;
-
-        // Respawn spring-scale animation
-        if (st.respawning) {
-            const SPRING_K = 120;
-            const SPRING_D = 10;
-            const target = 1.0;
-            const clampedDt = Math.min(deltaTime, 0.05); // prevent overshoot on lag spikes
-            const displacement = st.respawnScale - target;
-            const springForce = -SPRING_K * displacement - SPRING_D * st.respawnVelocity;
-            st.respawnVelocity += springForce * clampedDt;
-            st.respawnScale += st.respawnVelocity * clampedDt;
-            st.respawnScale = Math.min(st.respawnScale, 1.3); // hard cap
-            grp.scale.setScalar(st.originalScale * Math.max(0, st.respawnScale));
-            if (Math.abs(displacement) < 0.005 && Math.abs(st.respawnVelocity) < 0.01) {
-                st.respawnScale = 1;
-                st.respawning = false;
-                grp.scale.setScalar(st.originalScale);
-            }
-            continue;
-        }
-
-        // Spring-damper pendulum integration
+        // Spring-damper pendulum integration. Hidden/respawning apples keep this
+        // simulation warm so they scale back in already moving naturally.
         const accX = -appleSwingStiffness * st.angleX - appleSwingDamping * st.angVelX;
         const accZ = -appleSwingStiffness * st.angleZ - appleSwingDamping * st.angVelZ;
         st.angVelX += accX * deltaTime;
@@ -3596,6 +3727,33 @@ export function Update(isUnderwater = false): void {
 
         grp.rotation.x = st.angleX + windX;
         grp.rotation.z = st.angleZ + windZ;
+
+        // Hidden: waiting for ground clone to land before respawn kicks in
+        if (st.hidden) {
+            grp.scale.setScalar(0.001);
+            continue;
+        }
+
+        // Respawn spring-scale animation
+        if (st.respawning) {
+            const SPRING_K = 120;
+            const SPRING_D = 10;
+            const target = 1.0;
+            const clampedDt = Math.min(deltaTime, 0.05); // prevent overshoot on lag spikes
+            const displacement = st.respawnScale - target;
+            const springForce = -SPRING_K * displacement - SPRING_D * st.respawnVelocity;
+            st.respawnVelocity += springForce * clampedDt;
+            st.respawnScale += st.respawnVelocity * clampedDt;
+            st.respawnScale = Math.min(st.respawnScale, 1.3); // hard cap
+            grp.scale.setScalar(st.originalScale * Math.max(0.001, st.respawnScale));
+            if (Math.abs(displacement) < 0.005 && Math.abs(st.respawnVelocity) < 0.01) {
+                st.respawnScale = 1;
+                st.respawning = false;
+                grp.scale.setScalar(st.originalScale);
+            }
+        } else {
+            grp.scale.setScalar(st.originalScale);
+        }
     }
 
     // ── Ground apples: sync physics, fade, cleanup ──────────────────────────
@@ -3634,10 +3792,8 @@ export function Update(isUnderwater = false): void {
                     ga.respawnTriggered = true;
                     _startTreeAppleRespawn(ga.treeIndex);
                 }
-                // Remove from scene and physics
-                if (ga.isGolden) _releaseGoldenLight(ga.clone);
-                removeAppleBody(ga.physicsBody);
-                threeScene.remove(ga.clone);
+                // Return visual and physics body to their pools.
+                _releaseGroundApple(ga);
                 groundApples.splice(i, 1);
             }
         }

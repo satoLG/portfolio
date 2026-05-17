@@ -1,7 +1,7 @@
 ﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setDPR, setShadowResolution, isMobile, showOcean } from "./Scene";
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
-import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, preloadUISounds, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
+import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
 import { getCameraY, setIntroProgress, enableScroll, onDescentComplete } from "./Control";
 import { beginDescent as beginCloudDescent } from "../effects/CloudSprites.ts";
 import { showWelcomeText } from "../effects/WelcomeText";
@@ -188,9 +188,9 @@ export function Start(): void {
     startButton.onclick = function() {
         // Welcome text fires 1s after click. Audio, camera descent, ocean reveal,
         // cloud descent, and all header UI wait for the second click/touch.
-        function continueAfterWelcome(): void {
+        async function continueAfterWelcome(): Promise<void> {
             // Start audio in the second user gesture so mobile browsers allow it.
-            startAudio();
+            await startAudio();
             showOcean();
             beginCloudDescent();
             // Header and music appear only once the camera finishes descending
@@ -200,11 +200,6 @@ export function Start(): void {
                 setTimeout(() => { document.body.classList.add('music-visible'); }, 500);
             });
             enableScroll();
-
-            // Defer UI sounds preload to not compete with critical audio
-            setTimeout(() => {
-                preloadUISounds();
-            }, 1000);
         }
 
         setTimeout(() => {

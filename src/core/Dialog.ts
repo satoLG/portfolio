@@ -8,7 +8,7 @@
  *   isDialogActive() → bool
  */
 
-import { getAudioContext, getCharacterDestination } from './Audio';
+import { playDialogSound } from './Audio';
 import { t, onLanguageChange } from './i18n';
 
 // ─── iOS detection (run once at module load) ──────────────────────────────────
@@ -330,9 +330,13 @@ function _hideReplyBubble(): void {
 
 // ─── Audio ────────────────────────────────────────────────────────────────────
 
-const _audioCache = new Map<string, AudioBuffer>();
+// Dialog sound buffers are preloaded centrally in Audio.ts.
 
-async function _playSound(url: string, onEnd?: () => void): Promise<void> {
+function _playSound(url: string, onEnd?: () => void): void {
+    playDialogSound(url, onEnd);
+    return;
+/*
+
     const ctx  = getAudioContext();
     const dest = getCharacterDestination();  // routes through characterGain — respects Character volume/mute
     if (!ctx || !dest) { onEnd?.(); return; }
@@ -356,6 +360,7 @@ async function _playSound(url: string, onEnd?: () => void): Promise<void> {
         console.warn('[Dialog] Audio play error:', e);
         onEnd?.();
     }
+*/
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────

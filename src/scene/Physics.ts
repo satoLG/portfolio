@@ -44,6 +44,7 @@ export const physicsConfig = {
 // ── World ────────────────────────────────────────────────────────────────────
 let world: World | null = null;
 const appleBodies: Body[] = [];
+const pooledAppleBodies: Body[] = [];
 let activeCount = 0;
 
 const groundMat = new Material('ground');
@@ -202,9 +203,7 @@ function addStaticTrimesh(mesh: Mesh, maxY?: number): void {
 }
 
 // ── Add dynamic apple body ───────────────────────────────────────────────────
-export function addAppleBody(worldPos: Vector3): Body {
-    if (!world) throw new Error('Physics world not initialized');
-
+function createAppleBody(worldPos: Vector3): Body {
     const body = new Body({
         mass: physicsConfig.appleMass,
         material: appleMat,
@@ -224,11 +223,53 @@ export function addAppleBody(worldPos: Vector3): Body {
 
     body.sleepSpeedLimit = physicsConfig.sleepSpeedLimit;
     body.sleepTimeLimit  = physicsConfig.sleepTimeLimit;
+    body.addEventListener('collide', () => {
+        const owner = (body as any).__groundApple as { landed: boolean } | null | undefined;
+        if (owner) owner.landed = true;
+    });
+    return body;
+}
+
+function resetAppleBody(body: Body, worldPos: Vector3): void {
+    body.mass = physicsConfig.appleMass;
+    body.material = appleMat;
+    body.position.set(worldPos.x, worldPos.y + physicsConfig.appleBodyYOffset, worldPos.z);
+    body.quaternion.set(0, 0, 0, 1);
+    body.velocity.setZero();
+    body.angularVelocity.setZero();
+    body.force.setZero();
+    body.torque.setZero();
+    body.linearDamping = physicsConfig.linearDamping;
+    body.angularDamping = physicsConfig.angularDamping;
+    body.sleepSpeedLimit = physicsConfig.sleepSpeedLimit;
+    body.sleepTimeLimit = physicsConfig.sleepTimeLimit;
+    body.wakeUp();
+    body.updateAABB();
+    body.updateBoundingRadius();
+}
+
+export function initAppleBodyPool(size: number): void {
+    while (pooledAppleBodies.length < size) {
+        const body = createAppleBody(new Vector3(0, physicsConfig.safetyPlaneY, 0));
+        body.sleep();
+        pooledAppleBodies.push(body);
+    }
+}
+
+export function acquireAppleBody(worldPos: Vector3): Body {
+    if (!world) throw new Error('Physics world not initialized');
+
+    const body = pooledAppleBodies.pop() ?? createAppleBody(worldPos);
+    resetAppleBody(body, worldPos);
 
     world.addBody(body);
     appleBodies.push(body);
     activeCount++;
     return body;
+}
+
+export function addAppleBody(worldPos: Vector3): Body {
+    return acquireAppleBody(worldPos);
 }
 
 // ── Remove an apple body ─────────────────────────────────────────────────────
@@ -237,6 +278,9 @@ export function removeAppleBody(body: Body): void {
     world.removeBody(body);
     const idx = appleBodies.indexOf(body);
     if (idx >= 0) { appleBodies.splice(idx, 1); activeCount--; }
+    (body as any).__groundApple = null;
+    body.sleep();
+    pooledAppleBodies.push(body);
 }
 
 // ── Step ─────────────────────────────────────────────────────────────────────

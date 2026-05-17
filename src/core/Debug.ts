@@ -1199,12 +1199,28 @@ function buildGUI(): void {
             .name('Respawn Delay (s)')
             .onChange((v: number) => Island.setAppleRespawnDelay(v));
         appleWindFolder.close();
-        appleFolder.close();
-    }
 
-    {
-        const goldenFolder = physicsFolder.addFolder('Golden Apple');
+        const goldenFolder = appleFolder.addFolder('Golden Apple');
         const liveUpdate = () => Island.updateAllGoldenApples();
+        const goldenActions = {
+            copyGoldenAppleConfig: () => {
+                const content = [
+                    `// -- Golden apple easter egg ---------------------------------------------------`,
+                    `export const GOLDEN_APPLE_INTERVAL      = ${Island.goldenAppleConfig.interval};`,
+                    `export const GOLDEN_APPLE_COLOR         = '${Island.goldenAppleConfig.color}';`,
+                    `export const GOLDEN_APPLE_EMISSIVE      = '${Island.goldenAppleConfig.emissive}';`,
+                    `export const GOLDEN_APPLE_EMISSIVE_INTENSITY = ${Island.goldenAppleConfig.emissiveIntensity.toFixed(2)};`,
+                    `export const GOLDEN_APPLE_COLOR_Y_CUTOFF    = ${Island.goldenAppleConfig.colorYCutoff.toFixed(2)};`,
+                    `export const GOLDEN_APPLE_LIGHT_COLOR       = '${Island.goldenAppleConfig.lightColor}';`,
+                    `export const GOLDEN_APPLE_LIGHT_INTENSITY   = ${Island.goldenAppleConfig.lightIntensity.toFixed(2)};`,
+                    `export const GOLDEN_APPLE_LIGHT_DISTANCE    = ${Island.goldenAppleConfig.lightDistance.toFixed(2)};`,
+                    `export const GOLDEN_APPLE_LIGHT_DECAY       = ${Island.goldenAppleConfig.lightDecay.toFixed(2)};`,
+                ].join('\n') + '\n';
+                navigator.clipboard.writeText(content).then(() => {
+                    console.log('[Debug] Golden apple config copied to clipboard!');
+                });
+            },
+        };
         goldenFolder.add(Island.goldenAppleConfig, 'interval', 1, 20, 1)
             .name('Every Nth Respawn');
         goldenFolder.addColor(Island.goldenAppleConfig, 'color')
@@ -1217,7 +1233,7 @@ function buildGUI(): void {
             .name('Emissive Intensity')
             .onChange(liveUpdate);
         goldenFolder.add(Island.goldenAppleConfig, 'colorYCutoff', 0, 1, 0.05)
-            .name('Color Y Cutoff')
+            .name('Gold Max Y')
             .onChange(liveUpdate);
         goldenFolder.addColor(Island.goldenAppleConfig, 'lightColor')
             .name('Light Color')
@@ -1231,7 +1247,10 @@ function buildGUI(): void {
         goldenFolder.add(Island.goldenAppleConfig, 'lightDecay', 0, 5, 0.1)
             .name('Light Decay')
             .onChange(liveUpdate);
-        goldenFolder.close();
+        goldenFolder.add(goldenActions, 'copyGoldenAppleConfig')
+            .name('Copy Golden Config');
+        goldenFolder.open();
+        appleFolder.close();
     }
 
     {
@@ -1701,6 +1720,8 @@ function buildGUI(): void {
                 `export const chestRayMaxOpacity = ${f(sf.chestRayMaxOpacity)};`,
                 ``,
                 `// -- Chest Coins (placed inside chest, in chest-group local space) -------------`,
+                `export const chestCoinRevealDelay = ${f(sf.chestCoinRevealDelay)};`,
+                `export const chestCoinHideDelay   = ${f(sf.chestCoinHideDelay)};`,
                 `export const chestCoin1 = { x: ${f(sf.chestCoin1.x)}, y: ${f(sf.chestCoin1.y)}, z: ${f(sf.chestCoin1.z)}, scale: ${f(sf.chestCoin1.scale)}, rx: ${f(sf.chestCoin1.rx)}, ry: ${f(sf.chestCoin1.ry)}, rz: ${f(sf.chestCoin1.rz)} };`,
                 `export const chestCoin2 = { x: ${f(sf.chestCoin2.x)}, y: ${f(sf.chestCoin2.y)}, z: ${f(sf.chestCoin2.z)}, scale: ${f(sf.chestCoin2.scale)}, rx: ${f(sf.chestCoin2.rx)}, ry: ${f(sf.chestCoin2.ry)}, rz: ${f(sf.chestCoin2.rz)} };`,
                 `export const chestCoin3 = { x: ${f(sf.chestCoin3.x)}, y: ${f(sf.chestCoin3.y)}, z: ${f(sf.chestCoin3.z)}, scale: ${f(sf.chestCoin3.scale)}, rx: ${f(sf.chestCoin3.rx)}, ry: ${f(sf.chestCoin3.ry)}, rz: ${f(sf.chestCoin3.rz)} };`,
@@ -1838,6 +1859,20 @@ function buildGUI(): void {
     chestRaysFolder.close();
     // Coins
     const chestCoinsFolder = sfChestFolder.addFolder('Coins');
+    const coinTimingProxy = {
+        get revealDelay() { return sf.chestCoinRevealDelay; },
+        set revealDelay(v: number) { sf.chestCoinRevealDelay = v; },
+        get hideDelay() { return sf.chestCoinHideDelay; },
+        set hideDelay(v: number) { sf.chestCoinHideDelay = v; },
+    };
+    const chestCoinTimingFolder = chestCoinsFolder.addFolder('Timing');
+    chestCoinTimingFolder.add(coinTimingProxy, 'revealDelay', 0, 3, 0.05)
+        .name('Reveal Delay (s)')
+        .listen();
+    chestCoinTimingFolder.add(coinTimingProxy, 'hideDelay', 0, 3, 0.05)
+        .name('Hide Delay (s)')
+        .listen();
+    chestCoinTimingFolder.open();
     const coinDefs = [
         { label: 'Coin 1 (Blue)',  cfgKey: 'chestCoin1' as const, colorKey: 'chestCoin1Color' as const },
         { label: 'Coin 2 (Black)', cfgKey: 'chestCoin2' as const, colorKey: 'chestCoin2Color' as const },
