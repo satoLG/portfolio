@@ -46,6 +46,8 @@ export const chestRayRadius     = 1.2900;
 export const chestRayMaxOpacity = 0.0000;
 
 // -- Chest Coins (placed inside chest, in chest-group local space) -------------
+export const chestCoinRevealDelay = 1.0500;
+export const chestCoinHideDelay   = 0.1500;
 export const chestCoin1 = { x: -0.5000, y: 1.1000, z: -0.5000, scale: 0.7000, rx: 0.0000, ry: 0.1300, rz: -0.3000 };
 export const chestCoin2 = { x: -0.6000, y: 1.0500, z: 0.4500, scale: 0.6500, rx: -0.6700, ry: 0.0100, rz: -0.1800 };
 export const chestCoin3 = { x: 0.5000, y: 1.2000, z: 0.6500, scale: 0.6000, rx: -0.6900, ry: -0.3000, rz: -0.4800 };

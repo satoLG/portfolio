@@ -12,7 +12,7 @@ import { oceanAbsorptionUniform, underwaterFogDistUniform, waveVelocity1Uniform,
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { timeUniform }          from "../core/Time";
 import { camera, renderer }     from "../core/Scene";
-import { getAudioContext, getMasterDestination } from "../core/Audio";
+import { playCoralHitSound } from "../core/Audio";
 import { spawnBubble }          from "../effects/Bubbles";
 import { UNDERWATER_Y_THRESHOLD } from "../effects/PostProcess";
 import * as C                   from "./config/SeaFloorConfig";
@@ -45,6 +45,8 @@ export const config = {
     chestGlowDistance:  C.chestGlowDistance,
     chestRayRadius:     C.chestRayRadius,
     chestRayMaxOpacity: C.chestRayMaxOpacity,
+    chestCoinRevealDelay: C.chestCoinRevealDelay,
+    chestCoinHideDelay:   C.chestCoinHideDelay,
     chestCoin1:         { ...C.chestCoin1 },
     chestCoin2:       { ...C.chestCoin2 },
     chestCoin3:       { ...C.chestCoin3 },
@@ -412,44 +414,8 @@ const CORAL_SOUNDS = [
     'audio/nature/underwater/321808__lloydevans09__pvc_pipe_hit_3.wav',
 ];
 
-// Cached decoded buffers (loaded lazily on first click)
-const _coralBuffers: (AudioBuffer | null)[] = [null, null, null];
-
-async function _loadCoralBuffer(idx: number): Promise<AudioBuffer | null> {
-    const ctx = getAudioContext();
-    if (!ctx) return null;
-    if (_coralBuffers[idx]) return _coralBuffers[idx];
-    try {
-        const resp = await fetch(CORAL_SOUNDS[idx]);
-        const arr = await resp.arrayBuffer();
-        _coralBuffers[idx] = await ctx.decodeAudioData(arr);
-        return _coralBuffers[idx];
-    } catch (e) {
-        console.warn(`[SeaFloorDecor] Failed to load coral sound ${idx}:`, e);
-        return null;
-    }
-}
-
-// Per-coral playback rate: coral 0 → lower (grave), coral 2 → higher (agudo)
-const CORAL_PITCH = [0.8, 1.0, 1.3];
-
 function _playCoralSound(idx: number): void {
-    const ctx = getAudioContext();
-    const dest = getMasterDestination();
-    if (!ctx || !dest || !_coralBuffers[idx]) return;
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 600;
-    filter.Q.value = 0.7;
-    const gain = ctx.createGain();
-    gain.gain.value = 0.65;
-    const source = ctx.createBufferSource();
-    source.buffer = _coralBuffers[idx]!;
-    source.playbackRate.value = CORAL_PITCH[idx];
-    source.connect(filter);
-    filter.connect(gain);
-    gain.connect(dest);
-    source.start();
+    playCoralHitSound(idx);
 }
 
 // ── Colour palette ───────────────────────────────────────────────────────────
@@ -595,7 +561,7 @@ function _onCoralClicked(idx: 0 | 1 | 2): void {
     if (!st) return;
 
     // Sound
-    _loadCoralBuffer(idx).then(() => _playCoralSound(idx));
+    _playCoralSound(idx);
 
     // Colour shift — pick next colour (palette, then wrap back to original)
     const totalSteps = COLOUR_PALETTE.length + 1; // palette + original

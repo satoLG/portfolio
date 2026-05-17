@@ -44,22 +44,46 @@ const AUDIO_PATHS = {
     pugSnore: '/audio/character/pug/freesound_community-pug-roncando-95042.mp3',
 };
 
+const INTERACTION_AUDIO_PATHS = {
+    appleImpact: 'audio/overall/209012__owlstorm__fruit-impact-1.wav',
+    chestOpen: 'audio/overall/771164__steprock__treasure-chest-open.mp3',
+    writing: '/audio/ui/335518__newagesoup__writing-short-8.wav',
+    coral: [
+        'audio/nature/underwater/321802__lloydevans09__pvc_pipe_hit_4.wav',
+        'audio/nature/underwater/321805__lloydevans09__pvc_pipe_hit_1.wav',
+        'audio/nature/underwater/321808__lloydevans09__pvc_pipe_hit_3.wav',
+    ],
+    dialog: [
+        '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
+        '/audio/character/pug/freesound_community-pug-woof-2-103762_SEGUNDA.wav',
+    ],
+};
+
 // ============================================
 // PRE-FETCH CACHE (raw ArrayBuffers fetched during loading screen, before AudioContext)
 // ============================================
 const _prefetchCache = new Map<string, ArrayBuffer>();
+const _decodedBufferCache = new Map<string, AudioBuffer>();
 let _prefetchPromise: Promise<void> | null = null;
 
 /** Pre-fetch ambient/music audio files as raw ArrayBuffers (no AudioContext needed).
  *  Called early during loading screen so ambient audio is ready when user clicks Start.
  *  UI sounds (/audio/ui/) are excluded — they are loaded by preloadUISounds() after
  *  the start click so they don't compete with GLTF model downloads during loading. */
-function prefetchAudioData(): void {
-    if (_prefetchPromise) return;
-    const paths = Object.values(AUDIO_PATHS).filter(url => !url.includes('/audio/ui/'));
+export function preloadAudioBytes(): Promise<void> {
+    if (_prefetchPromise) return _prefetchPromise;
+    const paths = Array.from(new Set([
+        ...Object.values(AUDIO_PATHS),
+        INTERACTION_AUDIO_PATHS.appleImpact,
+        INTERACTION_AUDIO_PATHS.chestOpen,
+        INTERACTION_AUDIO_PATHS.writing,
+        ...INTERACTION_AUDIO_PATHS.coral,
+        ...INTERACTION_AUDIO_PATHS.dialog,
+    ]));
     _prefetchPromise = Promise.all(
         paths.map(async (url) => {
             try {
+                if (_prefetchCache.has(url)) return;
                 const resp = await fetch(url);
                 const buf = await resp.arrayBuffer();
                 _prefetchCache.set(url, buf);
@@ -68,6 +92,7 @@ function prefetchAudioData(): void {
             }
         })
     ).then(() => {});
+    return _prefetchPromise;
 }
 
 // ============================================
@@ -85,15 +110,22 @@ interface BufferSound {
 /** Fetch and decode an audio file into an AudioBuffer.
  *  Uses pre-fetched ArrayBuffer from cache when available (eliminates network delay). */
 async function loadAudioBuffer(url: string): Promise<AudioBuffer> {
+    const decoded = _decodedBufferCache.get(url);
+    if (decoded) return decoded;
+
     const cached = _prefetchCache.get(url);
     if (cached) {
         _prefetchCache.delete(url); // free memory
-        return _audioContext!.decodeAudioData(cached);
+        const decodedBuffer = await _audioContext!.decodeAudioData(cached);
+        _decodedBufferCache.set(url, decodedBuffer);
+        return decodedBuffer;
     }
     // Fallback: fetch from network (cache miss or prefetch not done)
     const response = await fetch(url);
     const arrayBuffer = await response.arrayBuffer();
-    return _audioContext!.decodeAudioData(arrayBuffer);
+    const decodedBuffer = await _audioContext!.decodeAudioData(arrayBuffer);
+    _decodedBufferCache.set(url, decodedBuffer);
+    return decodedBuffer;
 }
 
 /**
@@ -612,8 +644,103 @@ function reverseAudioBuffer(buffer: AudioBuffer): AudioBuffer {
     return reversed;
 }
 
+function playOneShot(
+    buffer: AudioBuffer | undefined,
+    dest: AudioNode | null,
+    options: { volume: number; playbackRate?: number; lowpass?: number; duration?: number; onEnded?: () => void },
+): void {
+    const ctx = _audioContext;
+    if (!ctx || !dest || !buffer) {
+        options.onEnded?.();
+        return;
+    }
+
+    const source = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    source.buffer = buffer;
+    source.playbackRate.value = options.playbackRate ?? 1;
+    gain.gain.value = options.volume;
+
+    if (options.lowpass) {
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = options.lowpass;
+        filter.Q.value = 0.7;
+        source.connect(filter);
+        filter.connect(gain);
+    } else {
+        source.connect(gain);
+    }
+
+    gain.connect(dest);
+    if (options.onEnded) source.addEventListener('ended', options.onEnded, { once: true });
+    if (options.duration !== undefined) source.start(0, 0, options.duration);
+    else source.start();
+}
+
+let _chestReverseBuffer: AudioBuffer | null = null;
+
+async function preloadInteractionSounds(): Promise<void> {
+    await Promise.all([
+        loadAudioBuffer(INTERACTION_AUDIO_PATHS.appleImpact),
+        loadAudioBuffer(INTERACTION_AUDIO_PATHS.chestOpen),
+        ...INTERACTION_AUDIO_PATHS.coral.map(url => loadAudioBuffer(url)),
+        ...INTERACTION_AUDIO_PATHS.dialog.map(url => loadAudioBuffer(url)),
+    ]);
+    const chestBuffer = _decodedBufferCache.get(INTERACTION_AUDIO_PATHS.chestOpen);
+    if (chestBuffer && !_chestReverseBuffer) {
+        _chestReverseBuffer = reverseAudioBuffer(chestBuffer);
+    }
+}
+
+export function playAppleImpactSound(): void {
+    playOneShot(
+        _decodedBufferCache.get(INTERACTION_AUDIO_PATHS.appleImpact),
+        getMasterDestination(),
+        { volume: 1.5 },
+    );
+}
+
+export function playChestOpenSound(): void {
+    playOneShot(
+        _decodedBufferCache.get(INTERACTION_AUDIO_PATHS.chestOpen),
+        getMasterDestination(),
+        { volume: 4.0, lowpass: 500 },
+    );
+}
+
+export function playChestCloseSound(cutoffRatio = 0.6): void {
+    const buffer = _chestReverseBuffer ?? undefined;
+    playOneShot(
+        buffer,
+        getMasterDestination(),
+        { volume: 4.0, lowpass: 500, duration: buffer ? buffer.duration * cutoffRatio : undefined },
+    );
+}
+
+const CORAL_PITCH = [0.8, 1.0, 1.3];
+
+export function playCoralHitSound(idx: number): void {
+    const url = INTERACTION_AUDIO_PATHS.coral[idx];
+    if (!url) return;
+    playOneShot(
+        _decodedBufferCache.get(url),
+        getMasterDestination(),
+        { volume: 0.65, playbackRate: CORAL_PITCH[idx] ?? 1, lowpass: 600 },
+    );
+}
+
+export function playDialogSound(url: string, onEnd?: () => void): void {
+    playOneShot(
+        _decodedBufferCache.get(url),
+        getCharacterDestination(),
+        { volume: 0.85, onEnded: onEnd },
+    );
+}
+
 export async function preloadUISounds(): Promise<void> {
     if (!_audioContext || !interfaceGain) return;
+    if (uiButtonSound && uiSpinCloseSound) return;
     try {
         const [switchDayBuf, switchNightBuf, buttonBuf, bubbleExpandBuf, bubbleCollapseBuf, spinBuf] = await Promise.all([
             loadAudioBuffer(AUDIO_PATHS.uiSwitchDay),
@@ -682,7 +809,7 @@ async function initAudio(): Promise<void> {
     characterGain.connect(masterGain);
 
     // Wait for pre-fetched audio data (eliminates network delay)
-    if (_prefetchPromise) await _prefetchPromise;
+    await preloadAudioBytes();
 
     // Load and decode all nature sound buffers
     try {
@@ -726,6 +853,11 @@ async function initAudio(): Promise<void> {
                 playBufferSound(underwaterAmbSound);
             }
         }
+
+        await Promise.all([
+            preloadUISounds(),
+            preloadInteractionSounds(),
+        ]);
     } catch (e) {
         console.error('Failed to load audio buffers:', e);
     }
@@ -752,10 +884,14 @@ function setupVisibilityHandler(): void {
     });
 }
 
-export function startAudio(): void {
-    if (listenersRemoved) return;
+let _startAudioPromise: Promise<void> | null = null;
+
+export function startAudio(): Promise<void> {
+    if (listenersRemoved) return _startAudioPromise ?? Promise.resolve();
+    if (_startAudioPromise) return _startAudioPromise;
     listenersRemoved = true;
-    initAudio(); // AudioContext created synchronously (required for iOS), buffers load async
+    _startAudioPromise = initAudio(); // AudioContext created synchronously (required for iOS), buffers load async
+    return _startAudioPromise;
 }
 
 // ============================================
@@ -764,7 +900,7 @@ export function startAudio(): void {
 export function Start(): void {
     wasDay = isDayTime();
     // Begin fetching audio files early (during loading screen) so they're cached by the time user clicks Start
-    prefetchAudioData();
+    preloadAudioBytes();
 }
 
 export function Update(): void {

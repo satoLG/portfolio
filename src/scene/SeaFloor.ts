@@ -234,10 +234,13 @@ const tileCenters: { x: number; z: number }[] = [];
 const CULL_DISTANCE_SQ = 150 * 150; // tiles beyond 150 units from camera are hidden
 
 const lastTilesIndices = new Array<number>();
+let floorEnabled = false;
 
 export function Update(): void
 {
     // Distance-based tile culling — only show tiles near the camera
+    if (!floorEnabled) return;
+
     const cx = camera.position.x;
     const cz = camera.position.z;
     lastTilesIndices.length = 0;
@@ -247,14 +250,19 @@ export function Update(): void
         const dz = tc.z - cz;
         const distSq = dx * dx + dz * dz;
         const vis = distSq < CULL_DISTANCE_SQ;
-        tiles[i].visible = vis;
+        if (tiles[i].visible !== vis) tiles[i].visible = vis;
         if (vis) lastTilesIndices.push(i);
     }
 }
 
 /** Toggle visibility of all sea floor tiles (GPU-side culling for surface/underwater gating). */
 export function setVisible(visible: boolean): void {
-    for (let i = 0; i < tiles.length; i++) {
-        tiles[i].visible = visible;
+    if (floorEnabled === visible) return;
+    floorEnabled = visible;
+
+    if (!visible) {
+        for (let i = 0; i < tiles.length; i++) {
+            if (tiles[i].visible) tiles[i].visible = false;
+        }
     }
 }

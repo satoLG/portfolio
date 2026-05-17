@@ -395,6 +395,7 @@ async function prewarmGPU(): Promise<void> {
     // Wait for SeaFloorDecor models (loaded via a separate GLTFLoader,
     // not tracked by Island's LoadingManager).
     await waitForModels();
+    await Audio.preloadAudioBytes();
 
     // 1. Save visibility & camera state
     const savedVis: Array<{ obj: Object3D; vis: boolean }> = [];
@@ -404,10 +405,16 @@ async function prewarmGPU(): Promise<void> {
     });
     const savedPos = camera.position.clone();
     const savedQuat = camera.quaternion.clone();
+    const savedFov = camera.fov;
+    const restoreVariants = Island.beginPrewarmVariants();
 
     // 2. Compile every material in the scene graph (triggers onBeforeCompile
     //    hooks on SeaFloorDecor ocean lighting, kelp sway, Island wind, etc.)
     renderer.compile(scene, camera);
+    if (typeof (renderer as any).compileAsync === 'function') {
+        await (renderer as any).compileAsync(scene, camera);
+    }
+    initGpuTextures(scene);
 
     // Pre-upload the chest ray canvas textures to GPU (canvas textures require
     // initTexture — they're not uploaded by renderer.compile, only on render).
@@ -437,9 +444,6 @@ async function prewarmGPU(): Promise<void> {
     renderer.render(scene, camera);
     Ocean.surface.visible = surfaceWasVisible;
 
-    camera.position.set(0, -3, 4);
-    camera.lookAt(0, -5, -3);
-    camera.updateProjectionMatrix();
     // Briefly make a jellyfish visible so the transparent+depthWrite=false shader
     // variant compiles now. Jellyfish use a different GL program than opaque fish,
     // and visible=false causes Three.js to skip them during renderer.compile().
@@ -448,6 +452,7 @@ async function prewarmGPU(): Promise<void> {
         jellyTemplate.visible = true;
         jellyTemplate.position.set(0, -3, -3);
     }
+    await prewarmChestCorridor();
     // Exercise the full PostProcess pipeline (copyFramebufferToTexture + distortion
     // quad render) so the GPU path is warm before the user actually dives.
     // Without this the first real crossing of UNDERWATER_Y_THRESHOLD causes a
@@ -456,10 +461,12 @@ async function prewarmGPU(): Promise<void> {
     PostProcess.renderScene(renderer, scene, camera);
     PostProcess.updateUnderwaterAmount(100);                 // reset to 0 (positive Y → depth < 0)
     if (jellyTemplate) jellyTemplate.visible = false;
+    restoreVariants();
 
     // 4. Restore camera
     camera.position.copy(savedPos);
     camera.quaternion.copy(savedQuat);
+    camera.fov = savedFov;
     camera.updateProjectionMatrix();
 
     // 5. Restore visibility
@@ -469,10 +476,60 @@ async function prewarmGPU(): Promise<void> {
     MediaPlayer.preloadAllTracks();
 }
 
+function initGpuTextures(root: Object3D): void {
+    const textureKeys = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap', 'alphaMap', 'bumpMap'];
+    root.traverse((obj: any) => {
+        const raw = obj.material;
+        if (!raw) return;
+        const materials = Array.isArray(raw) ? raw : [raw];
+        for (const mat of materials) {
+            for (const key of textureKeys) {
+                const tex = mat?.[key];
+                if (tex) renderer.initTexture(tex);
+            }
+        }
+    });
+}
+
+async function prewarmChestCorridor(): Promise<void> {
+    const chestCfg = SeaFloorDecor.config.chest;
+    const target = new Vector3(chestCfg.x, chestCfg.y + 0.9, chestCfg.z);
+    const mainFov = camera.fov;
+
+    const renderAt = async (pos: Vector3, fov: number): Promise<void> => {
+        camera.position.copy(pos);
+        camera.lookAt(target);
+        camera.fov = fov;
+        camera.updateProjectionMatrix();
+        renderer.shadowMap.needsUpdate = true;
+        renderer.compile(scene, camera);
+        if (typeof (renderer as any).compileAsync === 'function') {
+            await (renderer as any).compileAsync(scene, camera);
+        }
+        PostProcess.updateUnderwaterAmount(camera.position.y);
+        PostProcess.renderScene(renderer, scene, camera);
+    };
+
+    await renderAt(new Vector3(-0.1, -6.9, 1.78), mainFov);
+    await renderAt(new Vector3(-0.1, -8.4, 1.78), mainFov);
+    await renderAt(new Vector3(-0.1, -10.0, 1.78), mainFov);
+    await renderAt(
+        new Vector3(
+            chestCfg.x,
+            chestCfg.y + SeaFloorDecor.config.chestZoomHeight,
+            chestCfg.z + SeaFloorDecor.config.chestZoomDist,
+        ),
+        SeaFloorDecor.config.chestZoomFov,
+    );
+
+    PostProcess.updateUnderwaterAmount(100);
+    renderer.getContext().finish();
+}
+
 function waitForModels(): Promise<void> {
     return new Promise<void>(resolve => {
         (function check() {
-            if (SeaFloorDecor.isLoaded()) resolve();
+            if (SeaFloorDecor.isLoaded() && Fish.isReady()) resolve();
             else setTimeout(check, 50);
         })();
     });
@@ -503,27 +560,25 @@ export function Update(): void
     // The island extends below the waterline, so keep it visible until the
     // camera is well below the surface. Wind lines are pure sky effects, so
     // hide them as soon as we cross the waterline.
-    const ISLAND_HIDE_DEPTH = -7;          // Y below which island meshes are culled
-    const deepUnderwater = camera.position.y < ISLAND_HIDE_DEPTH;
-
     if (isUnderwater) {
         // Show underwater, hide surface-only
         SeaFloor.setVisible(true);
         SeaFloorDecor.decorGroup.visible = true;
         Fish.setVisible(true);
         WindLines.windLinesGroup.visible = false;
-        // Island stays visible near the surface so the submerged portion renders
-        Island.island.visible = !deepUnderwater;
-        Island.firecamp.visible = !deepUnderwater;
-        Island.tree.visible = !deepUnderwater;
-        Island.bush.visible = !deepUnderwater;
-        Island.bushRadio.visible = !deepUnderwater;
-        Island.bushRadio2.visible = !deepUnderwater;
-        Island.bushPug.visible = !deepUnderwater;
-        Fire.fire.visible = !deepUnderwater;
-        // Hide procedural foliage when deep underwater
-        if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = !deepUnderwater;
-        if (Island.grassShadowMesh)     Island.grassShadowMesh.visible     = !deepUnderwater;
+        // Keep surface groups visibility stable while underwater. A previous
+        // depth gate flipped many objects at y=-7, which lined up with the
+        // chest approach and could cause a one-frame render-list/shadow hitch.
+        Island.island.visible = true;
+        Island.firecamp.visible = true;
+        Island.tree.visible = true;
+        Island.bush.visible = true;
+        Island.bushRadio.visible = true;
+        Island.bushRadio2.visible = true;
+        Island.bushPug.visible = true;
+        Fire.fire.visible = true;
+        if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = true;
+        if (Island.grassShadowMesh)     Island.grassShadowMesh.visible     = true;
 
         SeaFloor.Update();
         SeaFloorDecor.Update(deltaTime);

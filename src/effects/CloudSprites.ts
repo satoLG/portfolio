@@ -23,9 +23,12 @@ const CLOUD_GROUP_Z = 10;
 const CLOUD_WIDTH = 180;
 // Tweak this to keep the initial cloud sprites below the welcome Tegaki text.
 // This is a hard cap for the rotated sprite vertices, not just the sprite center.
-const CLOUD_MAX_TOP_Y = 9.25;
+const CLOUD_MAX_TOP_Y = 10;
 const CLOUD_LAYER_DEPTH = 1.7;
 const CLOUD_BASE_SIZE = 2.95;
+const CLOUD_FRONT_DROP_START = 0.1;
+const CLOUD_FRONT_DROP_END = 0.96;
+const CLOUD_FRONT_TOP_DROP = 2.35;
 
 // How fast the cloud belt drifts toward the camera before the Start click.
 const PRE_START_Z_SPEED = 0.3;
@@ -52,12 +55,12 @@ const FRONT_SHADOW_LIFT = 0.02;
 
 // Post-click lift: clouds keep masking the descent, then rise out of frame.
 const LIFT_SPEED = 6.0;
-const LIFT_HIDE_Y = 40;
+const LIFT_HIDE_Y = 80;
 const LIFT_DELAY = 1.15;
 
 // Seconds after Start before hiding rear cloud depth while the camera is inside
 // the cloud belt. Lower = rear layers disappear earlier in the descent.
-const BACK_LAYER_HIDE_TIME = 0.5;
+const BACK_LAYER_HIDE_TIME = 0.35;
 // Fraction of the rear part of each visible loop chunk hidden after that time.
 // 0.35 hides the farthest 35%; 0.6 hides much more of the cloud depth.
 const BACK_LAYER_HIDE_AMOUNT = 0.45;
@@ -68,6 +71,9 @@ const BACK_LAYER_HIDE_SOFTNESS = 0.14;
 const vertex = /* glsl */`
     uniform float chunkZ;
     uniform float loopDepth;
+    uniform float frontDropStart;
+    uniform float frontDropEnd;
+    uniform float frontTopDrop;
 
     varying vec2 vUv;
     varying float vLayerNear;
@@ -76,7 +82,9 @@ const vertex = /* glsl */`
         vUv = uv;
         vLayerNear = clamp((position.z + chunkZ + loopDepth) / loopDepth, 0.0, 1.0);
 
-        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        float frontDrop = smoothstep(frontDropStart, frontDropEnd, vLayerNear) * frontTopDrop;
+        vec3 loweredPosition = vec3(position.x, position.y - frontDrop, position.z);
+        vec4 mvPosition = modelViewMatrix * vec4(loweredPosition, 1.0);
         gl_Position = projectionMatrix * mvPosition;
     }
 `;
@@ -180,6 +188,9 @@ function createCloudMaterial(): ShaderMaterial {
             opacity: { value: 1.0 },
             chunkZ: { value: 0.0 },
             loopDepth: { value: CLOUD_LOOP_DEPTH },
+            frontDropStart: { value: CLOUD_FRONT_DROP_START },
+            frontDropEnd: { value: CLOUD_FRONT_DROP_END },
+            frontTopDrop: { value: CLOUD_FRONT_TOP_DROP },
             layerBackOpacity: { value: LAYER_BACK_OPACITY },
             layerFrontOpacity: { value: LAYER_FRONT_OPACITY },
             layerOpacityRampStart: { value: LAYER_OPACITY_RAMP_START },

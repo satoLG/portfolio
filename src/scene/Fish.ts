@@ -152,8 +152,8 @@ const jellyPool: PooledFish[] = [];      // available (inactive) night jellyfish
 const activeFish: SwimmingFish[] = [];   // in-scene swimming creatures
 let fishPoolInitialized = false;
 let jellyPoolInitialized = false;
-let spawnTimer = 0;
-let jellySpawnTimer = 0;
+let fishModelsLoaded = 0;
+let fixedLoopsInitialized = false;
 
 // Jellyfish color tints (bioluminescent night palette)
 const JELLY_COLOR_TINTS: Color[] = [
@@ -235,6 +235,7 @@ function initFishPool(): void {
         genericFishContainer.add(entry.group);
         fishPool.push(entry);
     }
+    initFixedCreatureLoops();
 }
 
 /** Build entire jellyfish pool synchronously inside the loader callback. */
@@ -246,6 +247,7 @@ function initJellyPool(): void {
         genericFishContainer.add(entry.group);
         jellyPool.push(entry);
     }
+    initFixedCreatureLoops();
 }
 
 /** No-op kept for call-site compatibility — pool is now built synchronously at load. */
@@ -314,6 +316,72 @@ function deactivateFish(index: number): void {
     activeFish.splice(index, 1);
 }
 
+function resetLoopingCreature(entry: PooledFish, progress = 0): SwimmingFish {
+    const night = entry.isJellyfish;
+    const tints = night ? JELLY_COLOR_TINTS : FISH_COLOR_TINTS;
+    const baseScale = night ? JELLYFISH_SCALE : GENERIC_FISH_SCALE;
+    const yMin = night ? JELLY_Y_MIN : GENERIC_FISH_Y_MIN;
+    const yMax = night ? JELLY_Y_MAX : GENERIC_FISH_Y_MAX;
+    const zMin = night ? JELLY_Z_MIN : GENERIC_FISH_Z_MIN;
+    const zMax = night ? JELLY_Z_MAX : GENERIC_FISH_Z_MAX;
+    const speedMin = night ? JELLY_SPEED_MIN : GENERIC_FISH_SPEED_MIN;
+    const speedMax = night ? JELLY_SPEED_MAX : GENERIC_FISH_SPEED_MAX;
+
+    const tint = tints[Math.floor(Math.random() * tints.length)];
+    for (let i = 0; i < entry.materials.length; i++) {
+        entry.materials[i].color.copy(entry.baseTintColors[i]).multiply(tint);
+        if (entry.isJellyfish) {
+            entry.materials[i].emissive.copy(tint);
+            entry.materials[i].emissiveIntensity = JELLY_EMISSIVE_INTENSITY;
+            entry.materials[i].opacity = JELLY_OPACITY;
+        }
+    }
+
+    const y = yMin + Math.random() * (yMax - yMin);
+    const z = zMin + Math.random() * (zMax - zMin);
+    const { spawnX, despawnX } = getFrustumEdgesX(z);
+    const x = despawnX + (spawnX - despawnX) * progress + Math.random() * GROUP_X_SPREAD;
+    const scaleMult = FISH_SCALE_MIN + Math.random() * (FISH_SCALE_MAX - FISH_SCALE_MIN);
+    entry.group.position.set(x, y, z);
+    entry.group.scale.setScalar(baseScale * scaleMult);
+    entry.group.rotation.x = 0;
+    entry.group.visible = genericFishContainer.visible && (isDayTime() !== entry.isJellyfish);
+
+    entry.mixer.stopAllAction();
+    if (entry.clip) {
+        const action = entry.mixer.clipAction(entry.clip);
+        action.setLoop(LoopRepeat, Infinity);
+        action.play();
+    }
+
+    return {
+        pool: entry,
+        speed: speedMin + Math.random() * (speedMax - speedMin),
+        baseY: y,
+        velocityY: 0,
+        currentTilt: 0,
+    };
+}
+
+function initFixedCreatureLoops(): void {
+    if (fixedLoopsInitialized || !fishPoolInitialized || !jellyPoolInitialized) return;
+    fixedLoopsInitialized = true;
+
+    const fishEntries = fishPool.splice(0);
+    for (let i = 0; i < fishEntries.length; i++) {
+        activeFish.push(resetLoopingCreature(fishEntries[i], i / Math.max(1, fishEntries.length)));
+    }
+
+    const jellyEntries = jellyPool.splice(0);
+    for (let i = 0; i < jellyEntries.length; i++) {
+        activeFish.push(resetLoopingCreature(jellyEntries[i], i / Math.max(1, jellyEntries.length)));
+    }
+}
+
+export function isReady(): boolean {
+    return fishModelsLoaded >= 4 && fixedLoopsInitialized;
+}
+
 export function Start(): void {
     // Register pointer tracking
     renderer.domElement.addEventListener('pointermove', onPointerMove);
@@ -330,6 +398,7 @@ export function Start(): void {
             if (gltf.animations.length > 0) {
                 clownMixer.clipAction(gltf.animations[0]).play();
             }
+            fishModelsLoaded++;
         }
     );
     
@@ -343,6 +412,7 @@ export function Start(): void {
             if (gltf.animations.length > 0) {
                 doriMixer.clipAction(gltf.animations[0]).play();
             }
+            fishModelsLoaded++;
         }
     );
 
@@ -352,6 +422,7 @@ export function Start(): void {
         (gltf) => {
             genericFishTemplate = gltf.scene;
             genericFishAnimations = gltf.animations;
+            fishModelsLoaded++;
             initFishPool();
         }
     );
@@ -362,6 +433,7 @@ export function Start(): void {
         (gltf) => {
             jellyfishTemplate = gltf.scene;
             jellyfishAnimations = gltf.animations;
+            fishModelsLoaded++;
             initJellyPool();
         }
     );
@@ -475,26 +547,13 @@ export function Update(): void {
     // Drip-feed pool creation (one entry per frame to avoid stutter)
     tickPoolCreation();
 
-    // Spawn fish (day) or jellyfish (night) with separate timers
     const night = !isDayTime();
-    if (night) {
-        jellySpawnTimer += deltaTime;
-        if (jellySpawnTimer >= JELLY_SPAWN_INTERVAL) {
-            jellySpawnTimer = 0;
-            spawnCreatures();
-        }
-    } else {
-        spawnTimer += deltaTime;
-        if (spawnTimer >= SPAWN_INTERVAL) {
-            spawnTimer = 0;
-            spawnCreatures();
-        }
-    }
 
     // Move and cull active generic fish
     for (let i = activeFish.length - 1; i >= 0; i--) {
         const fish = activeFish[i];
         const group = fish.pool.group;
+        group.visible = genericFishContainer.visible && (night === fish.pool.isJellyfish);
         fish.pool.mixer.update(deltaTime);
         group.position.x -= fish.speed * deltaTime;
 
@@ -531,7 +590,7 @@ export function Update(): void {
 
         const { despawnX } = getFrustumEdgesX(group.position.z);
         if (group.position.x < despawnX) {
-            deactivateFish(i);  // return to pool instead of leaking
+            activeFish[i] = resetLoopingCreature(fish.pool, 1);
         }
     }
 }
