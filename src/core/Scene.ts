@@ -80,6 +80,7 @@ export const cameraForward = new Vector3();
 
 // Reusable scratch vector for light direction (avoids allocation per frame)
 const _scratchLightDir = new Vector3();
+const _underwaterTransparentTargets: Object3D[] = [];
 
 // Scratch vectors for UpdateCameraRotation (eliminates 3 Vector3 allocations per frame)
 const _basisX = new Vector3();
@@ -148,6 +149,46 @@ function applyColorFilter(value: ColorFilter): void {
     }
     canvas.style.filter = filterStr;
     PhoneScreen.applyPhoneColorFilter(filterStr);
+}
+
+function getUnderwaterTransparentTargets(): Object3D[] {
+    _underwaterTransparentTargets.length = 0;
+    _underwaterTransparentTargets.push(Fish.clownFish, Fish.doriFish, Fish.genericFishContainer);
+    const bubbles = Bubbles.getRenderable();
+    if (bubbles) _underwaterTransparentTargets.push(bubbles);
+    const particles = UnderwaterParticles.getRenderable();
+    if (particles) _underwaterTransparentTargets.push(particles);
+    return _underwaterTransparentTargets;
+}
+
+function hideUnderwaterTransparents(): Array<{ obj: Object3D; vis: boolean }> {
+    const saved: Array<{ obj: Object3D; vis: boolean }> = [];
+    for (const obj of getUnderwaterTransparentTargets()) {
+        saved.push({ obj, vis: obj.visible });
+        obj.visible = false;
+    }
+    return saved;
+}
+
+function restoreVisibility(saved: Array<{ obj: Object3D; vis: boolean }>): void {
+    for (const item of saved) item.obj.visible = item.vis;
+}
+
+function renderOnlyUnderwaterTransparents(savedTargets: Array<{ obj: Object3D; vis: boolean }>): void {
+    const targetSet = new Set(savedTargets.filter(item => item.vis).map(item => item.obj));
+    if (targetSet.size === 0) return;
+
+    const savedChildren = scene.children.map(obj => ({ obj, vis: obj.visible }));
+    for (const child of scene.children) {
+        child.visible = (child as any).isLight === true || targetSet.has(child);
+    }
+
+    const prevAutoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.render(scene, camera);
+    renderer.autoClear = prevAutoClear;
+
+    restoreVisibility(savedChildren);
 }
 
 export function setShadowsEnabled(value: boolean): void
@@ -302,7 +343,6 @@ export function Start(): void
     scene.add(directionalLight);
 
     Ocean.Start();
-    scene.add(Ocean.surface);
     // Hide ocean until the user clicks Start — at the intro camera height the
     // ocean edge is barely visible and creates a distracting frame flash.
     Ocean.surface.visible = false;
@@ -411,6 +451,7 @@ async function prewarmGPU(): Promise<void> {
     // 2. Compile every material in the scene graph (triggers onBeforeCompile
     //    hooks on SeaFloorDecor ocean lighting, kelp sway, Island wind, etc.)
     renderer.compile(scene, camera);
+    Ocean.CompileSurface(renderer, camera);
     if (typeof (renderer as any).compileAsync === 'function') {
         await (renderer as any).compileAsync(scene, camera);
     }
@@ -433,6 +474,7 @@ async function prewarmGPU(): Promise<void> {
     camera.lookAt(-0.1, 7.45, -6.0);
     camera.updateProjectionMatrix();
     renderer.render(scene, camera);
+    Ocean.RenderSurface(renderer, camera);
 
     // Island-facing pass: uploads all island/tree/object textures to GPU
     // (the sky pass above looks away from the island, so nothing on it gets uploaded).
@@ -442,6 +484,7 @@ async function prewarmGPU(): Promise<void> {
     camera.lookAt(0, 0, -3.3);
     camera.updateProjectionMatrix();
     renderer.render(scene, camera);
+    Ocean.RenderSurface(renderer, camera);
     Ocean.surface.visible = surfaceWasVisible;
 
     // Briefly make a jellyfish visible so the transparent+depthWrite=false shader
@@ -458,7 +501,7 @@ async function prewarmGPU(): Promise<void> {
     // Without this the first real crossing of UNDERWATER_Y_THRESHOLD causes a
     // pipeline stall on the copyFramebufferToTexture call.
     PostProcess.updateUnderwaterAmount(camera.position.y);  // sets underwaterAmount > 0
-    PostProcess.renderScene(renderer, scene, camera);
+    PostProcess.renderScene(renderer, scene, camera, () => Ocean.RenderSurface(renderer, camera));
     PostProcess.updateUnderwaterAmount(100);                 // reset to 0 (positive Y → depth < 0)
     if (jellyTemplate) jellyTemplate.visible = false;
     restoreVariants();
@@ -507,7 +550,7 @@ async function prewarmChestCorridor(): Promise<void> {
             await (renderer as any).compileAsync(scene, camera);
         }
         PostProcess.updateUnderwaterAmount(camera.position.y);
-        PostProcess.renderScene(renderer, scene, camera);
+        PostProcess.renderScene(renderer, scene, camera, () => Ocean.RenderSurface(renderer, camera));
     };
 
     await renderAt(new Vector3(-0.1, -6.9, 1.78), mainFov);
@@ -564,7 +607,7 @@ export function Update(): void
         // Show underwater, hide surface-only
         SeaFloor.setVisible(true);
         SeaFloorDecor.decorGroup.visible = true;
-        Fish.setVisible(true);
+        Fish.setCameraVisibility(true, Island.getLowestY());
         WindLines.windLinesGroup.visible = false;
         // Keep surface groups visibility stable while underwater. A previous
         // depth gate flipped many objects at y=-7, which lined up with the
@@ -594,7 +637,7 @@ export function Update(): void
         // Show surface, hide underwater
         SeaFloor.setVisible(false);
         SeaFloorDecor.decorGroup.visible = false;
-        Fish.setVisible(false);
+        Fish.setCameraVisibility(false, Island.getLowestY());
         WindLines.windLinesGroup.visible = true;
         Island.island.visible = true;
         Island.firecamp.visible = true;
@@ -609,6 +652,7 @@ export function Update(): void
 
         Island.Update(false);
         Fire.Update();
+        Fish.Update();
         Bubbles.Update(camera.position.y);
         UnderwaterParticles.Update(camera.position.y);
     }
@@ -654,7 +698,14 @@ export function Update(): void
     // with NoBlending punches transparent holes), matching henryjeff's architecture.
     // PostProcess.renderScene wraps renderer.render() with post-processing
     // (pixelation + underwater distortion).
-    PostProcess.renderScene(renderer, scene, camera);
+    const underwaterTransparentVis = isUnderwater ? hideUnderwaterTransparents() : null;
+    PostProcess.renderScene(renderer, scene, camera, () => {
+        Ocean.RenderSurface(renderer, camera);
+        if (underwaterTransparentVis) {
+            renderOnlyUnderwaterTransparents(underwaterTransparentVis);
+            restoreVisibility(underwaterTransparentVis);
+        }
+    });
     CloudSprites.Render(renderer, camera);
 
     // Debug axes

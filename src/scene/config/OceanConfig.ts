@@ -3,15 +3,20 @@
 // Paste this entire file to replace src/scene/OceanConfig.ts
 
 // ── Foam ─────────────────────────────────────────────────────────────────────
-export const foamCenterOffset = { x: -0.0100, y: 0.0000 }; // XZ nudge on top of the auto-baked island center
-export const foamRadius       = 0.9300; // >1 pushes ring outward, <1 pulls inward
-export const foamWidth        = 0.1490; // width of the foam band
-export const foamIntensity    = 0.3300; // overall foam brightness
+export const foamCenterOffset = { x: -0.0100, y: -0.0700 }; // XZ nudge on top of the auto-baked island center
+export const foamRadius       = 0.9400; // >1 pushes ring outward, <1 pulls inward
+export const foamWidth        = 0.1610; // width of the foam band
+export const foamIntensity    = 0.4100; // overall foam brightness
 export const foamAnimSpeed    = 0.4500; // speed of animated shimmer
-export const foamEdgeNoiseAmt = 0.0000; // brightness shimmer near edge
-export const foamWobbleAmt    = 0.0600; // world-unit wobble of the foam line
-export const foamWobbleFreq   = 4.2000; // spatial frequency of the wobble
-export const foamWobbleSpeed  = 0.9700; // how fast the wobble animates
+export const foamEdgeNoiseAmt = 0.1200; // brightness shimmer near edge
+export const foamWobbleAmt    = 0.1500; // world-unit wobble of the foam line
+export const foamWobbleFreq   = 4.1000; // spatial frequency of the wobble
+export const foamWobbleSpeed  = 0.2700; // how fast the wobble animates
+export const foamLineFrequency = 13.0000;
+export const foamLineThickness = 0.0270;
+export const foamLineCount     = 1.0000;
+export const foamLineBreakup   = 0.0000;
+export const foamLineColor     = { r: 1.0000, g: 0.9200, b: 1.0000 };
 
 // ── Ocean Waves (normal-map scroll) ──────────────────────────────────────────
 export const normalMapScale    = 0.1160;
@@ -23,6 +28,17 @@ export const edgeFadeDistance  = 0.5400;
 // ── Ocean Surface ─────────────────────────────────────────────────────────────
 export const surfaceColor   = { r: 0.0000, g: 1.1800, b: 1.1700 }; // RGB tint (1,1,1 = no tint)
 export const surfaceOpacity = 0.6100;
+export const waterBlurStrength = 0.0240;
+export const waterBlurRadius   = 3.0000;
+export const waterBlurOpacity  = 0.3500;
+export const waterlineCompositeOpacity = 0.1800;
+
+// ── Waterline on objects ─────────────────────────────────────────────────────
+export const waterlineY         = 0.0050;
+export const waterlineThickness = 0.0000;
+export const waterlineSoftness  = 0.0340;
+export const waterlineColor     = { r: 1.0000, g: 0.9300, b: 1.0000 };
+export const waterlineIntensity = 0.3400;
 
 // ── Reflection ────────────────────────────────────────────────────────────────
 export const reflectionFresnelPower = 0.6500; // lower = visible at more angles

@@ -309,3 +309,68 @@ export function refreshContactMaterial(): void {
     contactMaterial.friction = physicsConfig.friction;
     contactMaterial.restitution = physicsConfig.restitution;
 }
+
+// -- Contact normals for a specific body (from the most recent step) ----------
+/**
+ * Returns outward-pointing surface normals that are pushing against `body`.
+ * Uses `world.contacts` which are populated after each `world.step()`.
+ * The returned normals point AWAY from the colliding surface, toward the body.
+ */
+export function getBodyContactNormals(body: Body): { nx: number; ny: number; nz: number }[] {
+    if (!world) return [];
+    const normals: { nx: number; ny: number; nz: number }[] = [];
+    for (const eq of world.contacts) {
+        if (eq.bi === body) {
+            // ni points from bi (apple) to bj (surface) -- outward normal is -ni
+            normals.push({ nx: -eq.ni.x, ny: -eq.ni.y, nz: -eq.ni.z });
+        } else if (eq.bj === body) {
+            // ni points from bi (surface) to bj (apple) -- outward normal is +ni
+            normals.push({ nx: eq.ni.x, ny: eq.ni.y, nz: eq.ni.z });
+        }
+    }
+    return normals;
+}
+
+// -- Inspect a body's deepest overlap and average outward normal --------------
+const _penPi = new Vec3();
+const _penPj = new Vec3();
+const _penDiff = new Vec3();
+/**
+ * Scans `world.contacts` for any contact where `body` is interpenetrating with
+ * the other body and returns the deepest overlap, plus a unit vector pointing
+ * AWAY from the surfaces (averaged across all such contacts).
+ * Returns null if the body is not overlapping anything.
+ *
+ * The caller decides what to do — nothing for transient overlaps that cannon-es
+ * will resolve on its own, or a fling for sustained overlaps that mean the body
+ * is genuinely stuck.
+ */
+export function getBodyMaxPenetration(body: Body): {
+    depth: number; nx: number; ny: number; nz: number;
+} | null {
+    if (!world) return null;
+    let maxDepth = 0;
+    let avgX = 0, avgY = 0, avgZ = 0;
+    let count = 0;
+    for (const eq of world.contacts) {
+        const isI = eq.bi === body;
+        const isJ = eq.bj === body;
+        if (!isI && !isJ) continue;
+        eq.bi.position.vadd(eq.ri, _penPi);
+        eq.bj.position.vadd(eq.rj, _penPj);
+        _penPj.vsub(_penPi, _penDiff);
+        const gap = _penDiff.dot(eq.ni);  // ni points from bi to bj
+        if (gap >= 0) continue;
+        const d = -gap;
+        if (d > maxDepth) maxDepth = d;
+        // Outward normal for `body` (away from the surface).
+        const ox = isI ? -eq.ni.x : eq.ni.x;
+        const oy = isI ? -eq.ni.y : eq.ni.y;
+        const oz = isI ? -eq.ni.z : eq.ni.z;
+        avgX += ox; avgY += oy; avgZ += oz;
+        count++;
+    }
+    if (count === 0) return null;
+    const len = Math.sqrt(avgX * avgX + avgY * avgY + avgZ * avgZ) || 1;
+    return { depth: maxDepth, nx: avgX / len, ny: avgY / len, nz: avgZ / len };
+}

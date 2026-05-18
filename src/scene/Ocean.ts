@@ -1,4 +1,4 @@
-import { BufferAttribute, BufferGeometry, Mesh, PlaneGeometry, Raycaster, Vector2 } from "three";
+import { BufferAttribute, BufferGeometry, Camera, Mesh, PlaneGeometry, Raycaster, Scene, Vector2, WebGLRenderer } from "three";
 import * as oceanMaterials from "../materials/OceanMaterial";
 import { camera } from "../core/Scene";
 import { deltaTime } from "../core/Time";
@@ -12,6 +12,7 @@ const _islandBlockers = () => [island, firecamp, tree, bush, bushRadio, bushRadi
 
 export const surface = new Mesh();
 export const volume = new Mesh();
+const overlayScene = new Scene();
 
 const oceanWidth = 400;
 const oceanDepth = 400;
@@ -79,11 +80,25 @@ export function Start(): void
 
     volume.parent = surface;
     surface.add(volume);
+    overlayScene.add(surface);
     
     surface.position.set(0, 0, -halfDepth);
     
     // Setup ripple interaction
     setupRippleInteraction();
+}
+
+export function RenderSurface(renderer: WebGLRenderer, renderCamera: Camera): void {
+    if (!surface.visible) return;
+    oceanMaterials.captureSceneColor(renderer);
+    const prevAutoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.render(overlayScene, renderCamera);
+    renderer.autoClear = prevAutoClear;
+}
+
+export function CompileSurface(renderer: WebGLRenderer, renderCamera: Camera): void {
+    renderer.compile(overlayScene, renderCamera);
 }
 
 function setupRippleInteraction(): void {

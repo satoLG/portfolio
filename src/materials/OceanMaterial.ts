@@ -1,4 +1,4 @@
-import { DoubleSide, RepeatWrapping, ShaderMaterial, Texture, TextureLoader, Uniform, Vector3, Vector2 } from "three";
+import { DataTexture, DoubleSide, FramebufferTexture, LinearFilter, RepeatWrapping, RGBAFormat, ShaderMaterial, Texture, TextureLoader, Uniform, UnsignedByteType, Vector3, Vector2, WebGLRenderer } from "three";
 import * as OceanShaders from "../shaders/OceanShaders";
 import { cameraForward } from "../core/Scene";
 import { timeUniform } from "../core/Time";
@@ -56,6 +56,11 @@ export const foamWobbleAmtUniform    = new Uniform(OceanConfig.foamWobbleAmt);
 export const foamWobbleFreqUniform   = new Uniform(OceanConfig.foamWobbleFreq);
 export const foamWobbleSpeedUniform  = new Uniform(OceanConfig.foamWobbleSpeed);
 export const foamRadiusUniform       = new Uniform(OceanConfig.foamRadius);
+export const foamLineFrequencyUniform = new Uniform(OceanConfig.foamLineFrequency);
+export const foamLineThicknessUniform = new Uniform(OceanConfig.foamLineThickness);
+export const foamLineCountUniform     = new Uniform(OceanConfig.foamLineCount);
+export const foamLineBreakupUniform   = new Uniform(OceanConfig.foamLineBreakup);
+export const foamLineColorUniform     = new Uniform(new Vector3(OceanConfig.foamLineColor.r, OceanConfig.foamLineColor.g, OceanConfig.foamLineColor.b));
 export const foamQualityUniform      = new Uniform(3); // 1=fast, 2=medium, 3=full FBM
 
 /** Set foam noise quality: 1 = single tap, 2 = 2 octaves, 3 = 3-octave FBM (default). */
@@ -72,6 +77,52 @@ export const skyReflFalloffUniform          = new Uniform(OceanConfig.skyReflFal
 // Surface appearance — independent of underwater fog
 export const surfaceColorUniform   = new Uniform(new Vector3(OceanConfig.surfaceColor.r, OceanConfig.surfaceColor.g, OceanConfig.surfaceColor.b));
 export const surfaceOpacityUniform = new Uniform(OceanConfig.surfaceOpacity);
+export const waterBlurStrengthUniform = new Uniform(OceanConfig.waterBlurStrength);
+export const waterBlurRadiusUniform   = new Uniform(OceanConfig.waterBlurRadius);
+export const waterBlurOpacityUniform  = new Uniform(OceanConfig.waterBlurOpacity);
+export const waterlineCompositeOpacityUniform = new Uniform(OceanConfig.waterlineCompositeOpacity);
+
+const fallbackSceneColor = new DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, RGBAFormat, UnsignedByteType);
+fallbackSceneColor.needsUpdate = true;
+export const sceneColorUniform = new Uniform<Texture>(fallbackSceneColor);
+export const sceneResolutionUniform = new Uniform(new Vector2(1, 1));
+let sceneColorTexture: FramebufferTexture | null = null;
+const _fbSize = new Vector2();
+const _fbOffset = new Vector2(0, 0);
+
+export const waterlineYUniform = new Uniform(OceanConfig.waterlineY);
+export const waterlineThicknessUniform = new Uniform(OceanConfig.waterlineThickness);
+export const waterlineSoftnessUniform = new Uniform(OceanConfig.waterlineSoftness);
+export const waterlineColorUniform = new Uniform(new Vector3(OceanConfig.waterlineColor.r, OceanConfig.waterlineColor.g, OceanConfig.waterlineColor.b));
+export const waterlineIntensityUniform = new Uniform(OceanConfig.waterlineIntensity);
+
+export function captureSceneColor(renderer: WebGLRenderer): void {
+    renderer.getDrawingBufferSize(_fbSize);
+    if (!sceneColorTexture || sceneColorTexture.image.width !== _fbSize.x || sceneColorTexture.image.height !== _fbSize.y) {
+        if (sceneColorTexture) sceneColorTexture.dispose();
+        sceneColorTexture = new FramebufferTexture(_fbSize.x, _fbSize.y);
+        sceneColorTexture.minFilter = LinearFilter;
+        sceneColorTexture.magFilter = LinearFilter;
+        sceneColorUniform.value = sceneColorTexture;
+        sceneResolutionUniform.value.set(_fbSize.x, _fbSize.y);
+    }
+    renderer.copyFramebufferToTexture(sceneColorTexture, _fbOffset);
+}
+
+export const waterlinePars = /*glsl*/`
+    uniform float uWaterlineY;
+    uniform float uWaterlineThickness;
+    uniform float uWaterlineSoftness;
+    uniform vec3  uWaterlineColor;
+    uniform float uWaterlineIntensity;
+`;
+
+export const waterlineFragment = /*glsl*/`
+    float waterlineDist = abs(worldPos.y - uWaterlineY);
+    float waterlineMask = 1.0 - smoothstep(uWaterlineThickness, uWaterlineThickness + uWaterlineSoftness, waterlineDist);
+    vec3 waterlineGlow = uWaterlineColor * uWaterlineIntensity;
+    outgoingLight = mix(outgoingLight, max(outgoingLight, waterlineGlow), waterlineMask);
+`;
 
 /** Call after generating the foam mask to wire the texture + bounds into the shader */
 export function setFoamMask(texture: Texture, center: { x: number; y: number }, size: { x: number; y: number }): void {
@@ -154,6 +205,7 @@ export function Start(): void
     surface.fragmentShader = OceanShaders.surfaceFragment;
     surface.side = DoubleSide;
     surface.transparent = true;
+    surface.depthWrite = false;
 
     surface.uniforms = 
     {
@@ -178,6 +230,11 @@ export function Start(): void
         _FoamWobbleFreq: foamWobbleFreqUniform,
         _FoamWobbleSpeed: foamWobbleSpeedUniform,
         _FoamRadius: foamRadiusUniform,
+        _FoamLineFrequency: foamLineFrequencyUniform,
+        _FoamLineThickness: foamLineThicknessUniform,
+        _FoamLineCount: foamLineCountUniform,
+        _FoamLineBreakup: foamLineBreakupUniform,
+        _FoamLineColor: foamLineColorUniform,
         _FoamQuality: foamQualityUniform,
         _Ripples: ripplesUniform,
         _RippleCount: rippleCountUniform,
@@ -191,6 +248,12 @@ export function Start(): void
         _SkyReflFalloff: skyReflFalloffUniform,
         _SurfaceColor: surfaceColorUniform,
         _SurfaceOpacity: surfaceOpacityUniform,
+        _SceneColor: sceneColorUniform,
+        _SceneResolution: sceneResolutionUniform,
+        _WaterBlurStrength: waterBlurStrengthUniform,
+        _WaterBlurRadius: waterBlurRadiusUniform,
+        _WaterBlurOpacity: waterBlurOpacityUniform,
+        _WaterlineCompositeOpacity: waterlineCompositeOpacityUniform,
     };
     SetSkyboxUniforms(surface);
     

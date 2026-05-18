@@ -39,6 +39,11 @@ export const surfaceFragment =
     uniform float _FoamWobbleFreq;
     uniform float _FoamWobbleSpeed;
     uniform float _FoamRadius;
+    uniform float _FoamLineFrequency;
+    uniform float _FoamLineThickness;
+    uniform float _FoamLineCount;
+    uniform float _FoamLineBreakup;
+    uniform vec3 _FoamLineColor;
     
     uniform float _Ripples[15];  // MAX_RIPPLES * 3 (x, z, time)
     uniform int _RippleCount;
@@ -53,6 +58,12 @@ export const surfaceFragment =
     uniform float _SkyReflFalloff;          // exponent on fresnelBase for sky only — sharpens near→far gradient
     uniform vec3  _SurfaceColor;            // RGB tint (1,1,1 = no tint)
     uniform float _SurfaceOpacity;          // 0 = physics-Fresnel alpha, 1 = fully opaque
+    uniform sampler2D _SceneColor;
+    uniform vec2 _SceneResolution;
+    uniform float _WaterBlurStrength;
+    uniform float _WaterBlurRadius;
+    uniform float _WaterBlurOpacity;
+    uniform float _WaterlineCompositeOpacity;
 
     varying vec2 _worldPos;
     varying vec2 _uv;
@@ -118,38 +129,48 @@ export const surfaceFragment =
             return 0.0;
         }
         
-        // Sample the mask: white (1) = island, black (0) = water
-        float mask = texture2D(_FoamMask, maskUV).r;
-        
-        // Sample neighbors to compute distance to edge (manual SDF approximation)
-        // Step size in UV = _FoamWidth converted to UV space
-        vec2 texelSize = _FoamWidth / _FoamMaskSize;
-        
-        float maskL = texture2D(_FoamMask, maskUV + vec2(-texelSize.x, 0.0)).r;
-        float maskR = texture2D(_FoamMask, maskUV + vec2( texelSize.x, 0.0)).r;
-        float maskU = texture2D(_FoamMask, maskUV + vec2(0.0,  texelSize.y)).r;
-        float maskD = texture2D(_FoamMask, maskUV + vec2(0.0, -texelSize.y)).r;
-        
-        // Edge detection: gradient magnitude (how fast the mask changes)
-        float gx = maskR - maskL;
-        float gy = maskU - maskD;
-        float edgeStrength = length(vec2(gx, gy));
-        
-        // Foam appears on the water side near the edge
-        // mask < 0.5 = water, edgeStrength > 0 = near island
-        float onWater = 1.0 - smoothstep(0.3, 0.7, mask);
-        float foam = edgeStrength * onWater;
-        
-        // Subtle animated brightness shimmer
+        float sdf = texture2D(_FoamMask, maskUV).r;
+        float signedDist = (sdf - 0.5) * 3.0;
+        float waterDist = max(0.0, -signedDist);
+        float waterSide = 1.0 - smoothstep(0.0, _FoamWidth, signedDist);
+
+        float mainLine = 1.0 - smoothstep(0.0, _FoamLineThickness, abs(signedDist));
+        mainLine *= waterSide;
+
         float t = _Time * _FoamAnimSpeed;
-        float noise = foamFbm(pos * 8.0 + t * 0.3) * 2.0 - 1.0;
-        foam += foam * noise * _FoamEdgeNoiseAmt * 10.0;
-        
-        // Soft brightness variation along the edge
-        float brightVar = 0.9 + 0.1 * sin(pos.x * 5.0 + pos.y * 3.0 + t * 0.7);
-        foam *= brightVar;
-        
+        float waveCoord = waterDist * _FoamLineFrequency - t;
+        float stripePhase = abs(fract(waveCoord) - 0.5) * 2.0;
+        float stripes = 1.0 - smoothstep(0.0, _FoamLineThickness * _FoamLineFrequency, stripePhase);
+        float lineLimit = 1.0 - smoothstep(_FoamWidth * max(_FoamLineCount, 1.0), _FoamWidth * (max(_FoamLineCount, 1.0) + 0.75), waterDist);
+        stripes *= lineLimit;
+
+        float breakup = foamFbm(pos * 7.5 + vec2(t * 0.23, -t * 0.17));
+        float keep = smoothstep(_FoamLineBreakup, 1.0, breakup);
+        stripes *= mix(1.0, keep, _FoamLineBreakup);
+
+        float shimmer = foamFbm(pos * 11.0 + t * 0.3);
+        float foam = max(mainLine, stripes);
+        foam *= 0.82 + shimmer * 0.28 + _FoamEdgeNoiseAmt * (shimmer - 0.5);
+
         return clamp(foam, 0.0, 1.0) * _FoamIntensity;
+    }
+
+    vec3 sampleBlurredScene(vec2 screenUv, vec3 normal) {
+        vec2 texel = 1.0 / max(_SceneResolution, vec2(1.0));
+        vec2 normalOffset = normal.xz * _WaterBlurStrength;
+        vec2 radius = texel * _WaterBlurRadius;
+        vec2 uv = clamp(screenUv + normalOffset, vec2(0.001), vec2(0.999));
+
+        vec3 color = texture2D(_SceneColor, uv).rgb * 0.24;
+        color += texture2D(_SceneColor, clamp(uv + vec2( radius.x, 0.0), vec2(0.001), vec2(0.999))).rgb * 0.12;
+        color += texture2D(_SceneColor, clamp(uv + vec2(-radius.x, 0.0), vec2(0.001), vec2(0.999))).rgb * 0.12;
+        color += texture2D(_SceneColor, clamp(uv + vec2(0.0,  radius.y), vec2(0.001), vec2(0.999))).rgb * 0.12;
+        color += texture2D(_SceneColor, clamp(uv + vec2(0.0, -radius.y), vec2(0.001), vec2(0.999))).rgb * 0.12;
+        color += texture2D(_SceneColor, clamp(uv + radius, vec2(0.001), vec2(0.999))).rgb * 0.07;
+        color += texture2D(_SceneColor, clamp(uv - radius, vec2(0.001), vec2(0.999))).rgb * 0.07;
+        color += texture2D(_SceneColor, clamp(uv + vec2(radius.x, -radius.y), vec2(0.001), vec2(0.999))).rgb * 0.07;
+        color += texture2D(_SceneColor, clamp(uv + vec2(-radius.x, radius.y), vec2(0.001), vec2(0.999))).rgb * 0.07;
+        return color;
     }
     
     // Calculate ripple normal perturbation and subtle foam
@@ -235,14 +256,19 @@ export const surfaceFragment =
 
             float fog = clamp(viewLen / FOG_DISTANCE + dither, 0.0, 1.0);
             surface = mix(surface, sampleFog(viewDir), fog);
-            vec3 foamColor = vec3(1.0, 1.0, 1.0);
+            vec2 screenUv = gl_FragCoord.xy / max(_SceneResolution, vec2(1.0));
+            vec3 blurredScene = sampleBlurredScene(screenUv, normal);
+            surface = mix(surface, mix(blurredScene, surface, _WaterlineCompositeOpacity), _WaterBlurOpacity * (1.0 - foam));
+
+            vec3 foamColor = _FoamLineColor;
             surface = mix(surface, foamColor, foam);
 
             // _SurfaceOpacity blends from physics-based alpha (Fresnel + fog) to full opacity.
             // At 0: transparent where Fresnel is low (looking straight down).
             // At 1: fully opaque regardless of view angle — makes reflection clearly visible.
             float physicsAlpha = max(max(reflectivity, fog), foam);
-            gl_FragColor = vec4(surface, mix(physicsAlpha, 1.0, _SurfaceOpacity) * edgeFade);
+            float blurAlpha = _WaterBlurOpacity * (1.0 - foam);
+            gl_FragColor = vec4(surface, max(mix(physicsAlpha, 1.0, _SurfaceOpacity), blurAlpha) * edgeFade);
             return;
         }
 
@@ -255,7 +281,8 @@ export const surfaceFragment =
         float reflectivity = pow2(1.0 - max(0.0, dot(viewDir, normal)));
         float t = clamp(max(reflectivity, viewLen / MAX_VIEW_DEPTH) + dither, 0.0, 1.0);
 
-        // Foam is barely visible from underwater
+        // Keep the original underwater surface path: the ceiling color comes
+        // from absorption + scene light, which matches the underwater fog.
         float underwaterFoam = foam * 0.3;
 
         if (dot(viewDir, normal) < CRITICAL_ANGLE)
