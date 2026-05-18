@@ -154,6 +154,8 @@ let fishPoolInitialized = false;
 let jellyPoolInitialized = false;
 let fishModelsLoaded = 0;
 let fixedLoopsInitialized = false;
+let underwaterView = false;
+let shallowVisibilityMinY = Number.POSITIVE_INFINITY;
 
 // Jellyfish color tints (bioluminescent night palette)
 const JELLY_COLOR_TINTS: Color[] = [
@@ -345,7 +347,7 @@ function resetLoopingCreature(entry: PooledFish, progress = 0): SwimmingFish {
     entry.group.position.set(x, y, z);
     entry.group.scale.setScalar(baseScale * scaleMult);
     entry.group.rotation.x = 0;
-    entry.group.visible = genericFishContainer.visible && (isDayTime() !== entry.isJellyfish);
+    entry.group.visible = shouldShowCreature(entry);
 
     entry.mixer.stopAllAction();
     if (entry.clip) {
@@ -361,6 +363,20 @@ function resetLoopingCreature(entry: PooledFish, progress = 0): SwimmingFish {
         velocityY: 0,
         currentTilt: 0,
     };
+}
+
+function isObjectAboveShallowCutoff(group: Group): boolean {
+    return group.position.y >= shallowVisibilityMinY;
+}
+
+function shouldShowCircleFish(group: Group): boolean {
+    return underwaterView || isObjectAboveShallowCutoff(group);
+}
+
+function shouldShowCreature(entry: PooledFish): boolean {
+    const night = !isDayTime();
+    const matchesDayNight = night === entry.isJellyfish;
+    return matchesDayNight && (underwaterView || isObjectAboveShallowCutoff(entry.group));
 }
 
 function initFixedCreatureLoops(): void {
@@ -539,6 +555,8 @@ export function Update(): void {
         islandCenter.z + Math.sin(doriAngle) * (CIRCLE_RADIUS + 0.08)
     );
     doriFish.rotation.y = -doriAngle + CIRCLE_FISH_ROTATION_OFFSET;
+    clownFish.visible = shouldShowCircleFish(clownFish);
+    doriFish.visible = shouldShowCircleFish(doriFish);
 
     // Lazy-init pools if templates loaded after Start()
     if (!fishPoolInitialized && genericFishTemplate) initFishPool();
@@ -547,13 +565,11 @@ export function Update(): void {
     // Drip-feed pool creation (one entry per frame to avoid stutter)
     tickPoolCreation();
 
-    const night = !isDayTime();
-
     // Move and cull active generic fish
     for (let i = activeFish.length - 1; i >= 0; i--) {
         const fish = activeFish[i];
         const group = fish.pool.group;
-        group.visible = genericFishContainer.visible && (night === fish.pool.isJellyfish);
+        group.visible = shouldShowCreature(fish.pool);
         fish.pool.mixer.update(deltaTime);
         group.position.x -= fish.speed * deltaTime;
 
@@ -597,7 +613,16 @@ export function Update(): void {
 
 /** Toggle visibility of all fish groups (GPU-side culling for surface/underwater gating). */
 export function setVisible(visible: boolean): void {
-    clownFish.visible = visible;
-    doriFish.visible = visible;
-    genericFishContainer.visible = visible;
+    setCameraVisibility(visible, visible ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY);
+}
+
+export function setCameraVisibility(isUnderwater: boolean, shallowMinY: number): void {
+    underwaterView = isUnderwater;
+    shallowVisibilityMinY = shallowMinY;
+    genericFishContainer.visible = true;
+    clownFish.visible = shouldShowCircleFish(clownFish);
+    doriFish.visible = shouldShowCircleFish(doriFish);
+    for (let i = 0; i < activeFish.length; i++) {
+        activeFish[i].pool.group.visible = shouldShowCreature(activeFish[i].pool);
+    }
 }

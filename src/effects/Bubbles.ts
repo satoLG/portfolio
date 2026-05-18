@@ -51,6 +51,10 @@ const _opacities = new Float32Array(BUBBLE_COUNT);
 let _opacityAttr: InstancedBufferAttribute;
 const _dummy = new Object3D();
 
+export function getRenderable(): InstancedMesh | null {
+    return _instMesh;
+}
+
 // ============================================
 // BUBBLE SHADER — Fresnel rim + transparent center (instanced)
 // instanceMatrix is injected by Three.js for InstancedMesh + ShaderMaterial

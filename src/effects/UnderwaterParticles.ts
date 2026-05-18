@@ -37,6 +37,10 @@ let currentOpacity = 0;
 let lastCamX = 0, lastCamY = 0, lastCamZ = 0;
 let firstFrame = true;
 
+export function getRenderable(): Points | null {
+    return points;
+}
+
 const vertexShader = /* glsl */`
     uniform float uOpacity;
     uniform float uSize;

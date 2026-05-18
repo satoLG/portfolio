@@ -1,7 +1,18 @@
-import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, DoubleSide, MeshBasicMaterial, Box3, MeshStandardMaterial, ShaderChunk } from "three";
+import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, DoubleSide, MeshBasicMaterial, Box3, MeshStandardMaterial, ShaderChunk, Plane } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { config as sfDecorConfig } from './SeaFloorDecor';
-import { oceanAbsorptionUniform, underwaterFogDistUniform, setFoamMask } from "../materials/OceanMaterial";
+import {
+    oceanAbsorptionUniform,
+    underwaterFogDistUniform,
+    setFoamMask,
+    waterlinePars,
+    waterlineFragment,
+    waterlineYUniform,
+    waterlineThicknessUniform,
+    waterlineSoftnessUniform,
+    waterlineColorUniform,
+    waterlineIntensityUniform,
+} from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../core/Time";
 import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../core/MediaPlayer";
@@ -66,7 +77,7 @@ import {
     GOLDEN_APPLE_LIGHT_DISTANCE,
     GOLDEN_APPLE_LIGHT_DECAY,
 } from './config/IslandConfig';
-import { initPhysicsWorld, addAppleBody, initAppleBodyPool, removeAppleBody, stepPhysics, physicsConfig, updateDebugger, registerTreeMeshes, registerExtraStaticMeshes } from './Physics';
+import { initPhysicsWorld, addAppleBody, initAppleBodyPool, removeAppleBody, stepPhysics, physicsConfig, updateDebugger, registerTreeMeshes, registerExtraStaticMeshes, getBodyContactNormals, getBodyMaxPenetration } from './Physics';
 import { Body } from 'cannon-es';
 
 export const island = new Group();
@@ -134,6 +145,11 @@ const islandMeshes: Mesh[] = [];
 const _spawnRaycaster = new Raycaster();
 const _spawnOrigin    = new Vector3();
 const _spawnDown      = new Vector3(0, -1, 0);
+let islandLowestY = islandPosition.y;
+
+export function getLowestY(): number {
+    return islandLowestY;
+}
 
 // SURFACE_EDGE_PADDING is imported from IslandConfig.ts
 
@@ -964,8 +980,48 @@ function _meshLocalYBounds(mesh: Mesh): { minY: number; maxY: number } {
     return { minY: bbox.min.y, maxY: bbox.max.y };
 }
 
+function _applyAppleWaterlineToMaterial(mat: MeshStandardMaterial): void {
+    if ((mat.userData as any).appleWaterlineApplied) return;
+    (mat.userData as any).appleWaterlineApplied = true;
+
+    const previousOnBeforeCompile = mat.onBeforeCompile;
+    mat.onBeforeCompile = (shader, rendererArg) => {
+        previousOnBeforeCompile.call(mat, shader, rendererArg);
+        shader.uniforms.uAppleWaterlineY = waterlineYUniform;
+        shader.uniforms.uAppleWaterlineThickness = _appleWaterlineThicknessUniform;
+        shader.uniforms.uAppleWaterlineSoftness = _appleWaterlineSoftnessUniform;
+        shader.uniforms.uAppleWaterlineColor = waterlineColorUniform;
+        shader.uniforms.uAppleWaterlineIntensity = _appleWaterlineIntensityUniform;
+
+        shader.vertexShader = shader.vertexShader
+            .replace(
+                '#include <common>',
+                '#include <common>\nvarying vec3 vAppleWaterlineWorldPos;'
+            )
+            .replace(
+                '#include <begin_vertex>',
+                '#include <begin_vertex>\nvec4 appleWaterlineWorldPosition = modelMatrix * vec4(transformed, 1.0);\nvAppleWaterlineWorldPos = appleWaterlineWorldPosition.xyz;'
+            );
+
+        shader.fragmentShader = shader.fragmentShader
+            .replace(
+                '#include <common>',
+                '#include <common>\nuniform float uAppleWaterlineY;\nuniform float uAppleWaterlineThickness;\nuniform float uAppleWaterlineSoftness;\nuniform vec3 uAppleWaterlineColor;\nuniform float uAppleWaterlineIntensity;\nvarying vec3 vAppleWaterlineWorldPos;'
+            )
+            .replace(
+                '#include <opaque_fragment>',
+                'float appleWaterlineDist = abs(vAppleWaterlineWorldPos.y - uAppleWaterlineY);\n\tfloat appleWaterlineMask = 1.0 - smoothstep(uAppleWaterlineThickness, uAppleWaterlineThickness + uAppleWaterlineSoftness, appleWaterlineDist);\n\toutgoingLight = mix(outgoingLight, max(outgoingLight, uAppleWaterlineColor * uAppleWaterlineIntensity), appleWaterlineMask);\n\t#include <opaque_fragment>'
+            );
+    };
+
+    const previousKey = mat.customProgramCacheKey?.bind(mat);
+    mat.customProgramCacheKey = () => `${previousKey ? previousKey() : 'standard'}-apple-waterline-v1`;
+    mat.needsUpdate = true;
+}
+
 function _createGoldenMaterial(normalMat: MeshStandardMaterial, minY: number, maxY: number): MeshStandardMaterial {
     const goldenMat = normalMat.clone();
+    (goldenMat.userData as any).appleWaterlineApplied = false;
     goldenMat.color.copy(normalMat.color);
     goldenMat.emissive.copy(normalMat.emissive);
 
@@ -998,6 +1054,7 @@ function _createGoldenMaterial(normalMat: MeshStandardMaterial, minY: number, ma
             );
     };
     goldenMat.customProgramCacheKey = () => 'golden-apple-local-y-mask-v1';
+    _applyAppleWaterlineToMaterial(goldenMat);
     return goldenMat;
 }
 
@@ -1021,6 +1078,7 @@ function _prebakeGoldenMaterials(grp: Group, index: number): void {
         const mesh = child as Mesh;
         const normalMat = mesh.material as MeshStandardMaterial;
         if (!normalMat || !normalMat.color) return;
+        _applyAppleWaterlineToMaterial(normalMat);
         const t = _goldenBlendFactor(mesh, index);
         const { minY, maxY } = _meshLocalYBounds(mesh);
         const goldenMat = _createGoldenMaterial(normalMat, minY, maxY);
@@ -1070,6 +1128,7 @@ function _createGroundAppleSlot(source: Group, treeIndex: number): GroundAppleSl
             mesh.material = (mesh.material as MeshStandardMaterial).clone();
         }
         const normalMat = mesh.material as MeshStandardMaterial;
+        _applyAppleWaterlineToMaterial(normalMat);
         const t = _goldenBlendFactor(mesh, treeIndex);
         const { minY, maxY } = _meshLocalYBounds(mesh);
         const goldenMat = _createGoldenMaterial(normalMat, minY, maxY);
@@ -1097,6 +1156,7 @@ function _initGroundAppleVisualPool(appleGroups: Group[]): void {
 }
 
 function _releaseGroundApple(ga: GroundApple): void {
+    if (_groundAppleDrag.apple === ga) _endGroundAppleDrag();
     if (!ga.respawnTriggered) {
         ga.respawnTriggered = true;
         _startTreeAppleRespawn(ga.treeIndex);
@@ -1104,6 +1164,7 @@ function _releaseGroundApple(ga: GroundApple): void {
     if (ga.isGolden) _releaseGoldenLight(ga.clone);
     removeAppleBody(ga.physicsBody);
     ga.slot.inUse = false;
+    ga.dragged = false;
     ga.clone.visible = false;
     ga.clone.position.set(0, physicsConfig.safetyPlaneY, 0);
     ga.clone.quaternion.set(0, 0, 0, 1);
@@ -1180,6 +1241,8 @@ interface GroundApple {
     respawnTimer: number;    // countdown after landing before tree apple respawns
     respawnTriggered: boolean; // true once tree respawn has been kicked off
     isGolden: boolean;       // true if this ground clone was golden when it fell
+    dragged: boolean;
+    stuckFrames: number;     // consecutive frames found penetrating a collider — triggers a fling
 }
 const groundApples: GroundApple[] = [];
 
@@ -1195,6 +1258,51 @@ const appleMouse = new Vector2();
 let isAppleHovered = false;
 const APPLE_TOUCH_RADIUS = 0.35; // world units — expand hit area on touch
 const _appleTouchScratch = new Vector3();
+const APPLE_WATERLINE_THICKNESS = 0.0015;
+const APPLE_WATERLINE_SOFTNESS = 0.006;
+const APPLE_WATERLINE_INTENSITY = 0.75;
+// Spring-damper buoyancy with gravity cancellation.
+// When submerged, gravity is counteracted so the spring alone positions the apple.
+// This ensures the equilibrium sits exactly at the target — no gravity-induced sag.
+const APPLE_BUOYANCY_K = 10;            // spring strength (gentle — gravity is cancelled, so this only handles positioning)
+const APPLE_WATER_LINEAR_DRAG = 1.8;    // per-second linear velocity damping while submerged
+const APPLE_WATER_ANGULAR_DRAG = 2.2;   // per-second angular velocity damping while submerged
+// Target offset of the apple's visual center relative to the waterline.
+// 0   = visual center exactly on waterline → roughly half the model below water.
+// <0  = center sits below waterline (more submerged).
+// >0  = center sits above waterline (rides higher).
+const APPLE_FLOAT_OFFSET = 0;
+const _appleWaterlineThicknessUniform = new Uniform(APPLE_WATERLINE_THICKNESS);
+const _appleWaterlineSoftnessUniform = new Uniform(APPLE_WATERLINE_SOFTNESS);
+const _appleWaterlineIntensityUniform = new Uniform(APPLE_WATERLINE_INTENSITY);
+const _groundAppleDragPlane = new Plane(new Vector3(0, 0, 1), 0);
+const _groundAppleDragPoint = new Vector3();
+const _groundAppleDragOffset = new Vector3();
+const _groundApplePointer = new Vector2();
+let _suppressNextAppleClick = false;
+// Drag target — the body chases this position via velocity, staying DYNAMIC so collisions work.
+const _dragTarget = new Vector3();
+let _dragTargetValid = false;
+const DRAG_CHASE_STIFFNESS = 30;  // velocity multiplier — how snappily the apple follows the pointer
+// Hard cap on chase speed. With substeps of ~1/120s the apple moves at most
+// DRAG_MAX_SPEED / 120 ≈ 0.05 m per step — small enough to never tunnel through
+// the island trimesh (whose triangles are larger than that on every side).
+const DRAG_MAX_SPEED = 6;
+const _groundAppleDrag: {
+    active: boolean;
+    pointerId: number;
+    apple: GroundApple | null;
+    moved: boolean;
+    startX: number;
+    startY: number;
+} = {
+    active: false,
+    pointerId: -1,
+    apple: null,
+    moved: false,
+    startX: 0,
+    startY: 0,
+};
 
 function _appleInTouchRadius(group: Group): boolean {
     if (!touchControls) return false;
@@ -1205,6 +1313,308 @@ function _appleInTouchRadius(group: Group): boolean {
     if (dot < 0) return false; // behind camera
     const closest = ray.origin.clone().addScaledVector(ray.direction, dot);
     return closest.distanceTo(_appleTouchScratch) < APPLE_TOUCH_RADIUS;
+}
+
+function _setAppleRayFromClient(clientX: number, clientY: number): void {
+    const rect = renderer.domElement.getBoundingClientRect();
+    _groundApplePointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    _groundApplePointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    appleRaycaster.setFromCamera(_groundApplePointer, camera);
+}
+
+function _findGroundAppleAtPointer(clientX: number, clientY: number): GroundApple | null {
+    _setAppleRayFromClient(clientX, clientY);
+    let best: { ga: GroundApple; distance: number } | null = null;
+    for (const ga of groundApples) {
+        if (ga.fading || !ga.clone.visible) continue;
+        const hits = appleRaycaster.intersectObjects(ga.clone.children, true);
+        if (hits.length > 0) {
+            if (!best || hits[0].distance < best.distance) best = { ga, distance: hits[0].distance };
+            continue;
+        }
+        if (touchControls) {
+            ga.clone.getWorldPosition(_appleTouchScratch);
+            const toApple = _appleTouchScratch.clone().sub(appleRaycaster.ray.origin);
+            const dot = toApple.dot(appleRaycaster.ray.direction);
+            if (dot < 0) continue;
+            const closest = appleRaycaster.ray.origin.clone().addScaledVector(appleRaycaster.ray.direction, dot);
+            const distance = closest.distanceTo(_appleTouchScratch);
+            if (distance < APPLE_TOUCH_RADIUS && (!best || dot < best.distance)) best = { ga, distance: dot };
+        }
+    }
+    return best?.ga ?? null;
+}
+
+function _moveDraggedAppleToClient(clientX: number, clientY: number): void {
+    if (!_groundAppleDrag.active || !_groundAppleDrag.apple) return;
+    _setAppleRayFromClient(clientX, clientY);
+    if (!appleRaycaster.ray.intersectPlane(_groundAppleDragPlane, _groundAppleDragPoint)) return;
+
+    _groundAppleDragPoint.add(_groundAppleDragOffset);
+    // Store the target — the physics pre-step will chase it via velocity.
+    _dragTarget.set(
+        _groundAppleDragPoint.x,
+        _groundAppleDragPoint.y + physicsConfig.appleBodyYOffset,
+        _groundAppleDragPoint.z
+    );
+    _dragTargetValid = true;
+}
+
+function _endGroundAppleDrag(): void {
+    if (!_groundAppleDrag.active || !_groundAppleDrag.apple) return;
+    const body = _groundAppleDrag.apple.physicsBody;
+    // Body stays DYNAMIC the whole time — just let go.
+    body.velocity.setZero();
+    body.angularVelocity.setZero();
+    body.wakeUp();
+    _groundAppleDrag.apple.dragged = false;
+    _dragTargetValid = false;
+    _suppressNextAppleClick = true;
+    window.setTimeout(() => { _suppressNextAppleClick = false; }, 250);
+    _groundAppleDrag.active = false;
+    _groundAppleDrag.pointerId = -1;
+    _groundAppleDrag.apple = null;
+    _groundAppleDrag.moved = false;
+}
+
+/**
+ * Chase the drag target via velocity. The body stays DYNAMIC so cannon-es
+ * resolves collisions normally. To guarantee the apple never penetrates any
+ * surface — top, side, or underside of the island, tree trunk, radio, etc.:
+ *   1. Cap the chase speed so a single physics substep can't tunnel through
+ *      a triangle (DRAG_MAX_SPEED / substep_rate must stay smaller than the
+ *      shallowest collider feature).
+ *   2. Project the chase velocity against the actual contact normals reported
+ *      by cannon-es from the previous step. Any component pointing INTO a
+ *      surface currently in contact is removed, so the apple slides along
+ *      that surface instead of pushing through it.
+ * No generic Y floor is imposed — the apple is free in empty space.
+ */
+function _applyDraggedAppleTarget(): void {
+    if (!_groundAppleDrag.active || !_groundAppleDrag.apple || !_dragTargetValid) return;
+    const body = _groundAppleDrag.apple.physicsBody;
+
+    // Cancel gravity while dragging so the apple doesn't sag.
+    body.velocity.y -= physicsConfig.gravity * deltaTime;
+
+    // Desired velocity to reach the target this frame.
+    let vx = (_dragTarget.x - body.position.x) * DRAG_CHASE_STIFFNESS;
+    let vy = (_dragTarget.y - body.position.y) * DRAG_CHASE_STIFFNESS;
+    let vz = (_dragTarget.z - body.position.z) * DRAG_CHASE_STIFFNESS;
+
+    // Cap magnitude — anti-tunneling.
+    const speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
+    if (speed > DRAG_MAX_SPEED) {
+        const k = DRAG_MAX_SPEED / speed;
+        vx *= k; vy *= k; vz *= k;
+    }
+
+    // Remove any inward component along surfaces the apple is currently touching.
+    // Contact normals from getBodyContactNormals point AWAY from the surface.
+    const normals = getBodyContactNormals(body);
+    for (const n of normals) {
+        const into = vx * n.nx + vy * n.ny + vz * n.nz;
+        if (into < 0) {
+            vx -= n.nx * into;
+            vy -= n.ny * into;
+            vz -= n.nz * into;
+        }
+    }
+
+    body.velocity.x = vx;
+    body.velocity.y = vy;
+    body.velocity.z = vz;
+
+    // Kill angular spin during drag for a clean feel.
+    body.angularVelocity.setZero();
+    body.wakeUp();
+}
+
+// ── Stuck-apple fling: thresholds + impulse parameters ──────────────────────
+// An apple counts as "stuck" once it has been overlapping a static collider
+// at >= STUCK_DEPTH_THRESHOLD for STUCK_FRAMES_TO_FLING consecutive frames.
+// Normal resting contact resolves within 1–2 frames, so these values catch
+// genuinely stuck apples without disturbing apples that just landed.
+const STUCK_DEPTH_THRESHOLD = 0.001;   // 1 mm — anything deeper than this is suspect
+const STUCK_FRAMES_TO_FLING = 6;       // ~100 ms at 60 fps before we eject
+const FLING_LAUNCH_SPEED = 6;          // m/s outward — pure impulse, no teleport
+const FLING_UPWARD_BIAS = 3;           // extra upward m/s so apples don't fling sideways into other geometry
+const FLING_ANGULAR_SPEED = 8;         // rad/s — adds spin so the toss looks lively
+const RESCUE_LAUNCH_SPEED = 12;        // stronger pure-velocity escape for fully-embedded bodies
+
+/** Ejects a stuck apple by applying a pure outward impulse — no teleport. The
+ *  body physically flies along the resulting velocity vector, which resolves
+ *  any shallow overlap within a frame or two through ordinary motion. */
+function _flingApple(ga: GroundApple, nx: number, ny: number, nz: number, speed: number = FLING_LAUNCH_SPEED): void {
+    const body = ga.physicsBody;
+    body.velocity.x = nx * speed;
+    body.velocity.y = ny * speed + FLING_UPWARD_BIAS;
+    body.velocity.z = nz * speed;
+    body.angularVelocity.set(
+        (Math.random() - 0.5) * FLING_ANGULAR_SPEED,
+        (Math.random() - 0.5) * FLING_ANGULAR_SPEED,
+        (Math.random() - 0.5) * FLING_ANGULAR_SPEED,
+    );
+    body.wakeUp();
+    ga.stuckFrames = 0;
+    // Break any active drag — otherwise the chase yanks the apple right back.
+    if (_groundAppleDrag.active && _groundAppleDrag.apple === ga) {
+        _endGroundAppleDrag();
+    }
+}
+
+// Dedicated raycaster + scratch vectors for the deep-overlap rescue check.
+const _rescueRaycaster = new Raycaster();
+const _rescueOrigin = new Vector3();
+const _rescueUp = new Vector3(0, 1, 0);
+const _rescueDown = new Vector3(0, -1, 0);
+const RESCUE_INSIDE_MARGIN = 0.05;   // body must be at least this far below the top to count as "inside"
+
+/**
+ * Detects an apple that ended up fully embedded inside the island trimesh
+ * (where cannon-es stops generating contacts because no triangle touches the
+ * collision spheres anymore) and pops it back onto the top surface.
+ *
+ * "Inside" = at the apple's xz position there is both island geometry ABOVE
+ * the body center and island geometry BELOW it. That excludes the legitimate
+ * case of an apple hovering in mid-air over the open ocean.
+ */
+function _rescueAppleIfInsideIsland(ga: GroundApple): void {
+    if (islandMeshes.length === 0 || ga.fading) return;
+    const body = ga.physicsBody;
+
+    // Top surface at this xz.
+    _rescueOrigin.set(body.position.x, body.position.y + 100, body.position.z);
+    _rescueRaycaster.set(_rescueOrigin, _rescueDown);
+    _rescueRaycaster.far = 200;
+    const downHits = _rescueRaycaster.intersectObjects(islandMeshes, false);
+    if (downHits.length === 0) { _rescueRaycaster.far = Infinity; return; }
+    const topY = downHits[0].point.y;
+
+    // Body is at or above the top surface — nothing to rescue.
+    if (body.position.y >= topY - RESCUE_INSIDE_MARGIN) {
+        _rescueRaycaster.far = Infinity;
+        return;
+    }
+
+    // Confirm there's also island geometry BELOW the body — otherwise the body
+    // is hanging in empty space under the island, not inside it.
+    _rescueOrigin.set(body.position.x, body.position.y - 100, body.position.z);
+    _rescueRaycaster.set(_rescueOrigin, _rescueUp);
+    _rescueRaycaster.far = 200;
+    const upHits = _rescueRaycaster.intersectObjects(islandMeshes, false);
+    _rescueRaycaster.far = Infinity;
+    if (upHits.length === 0) return;
+    const bottomY = upHits[0].point.y;
+    if (body.position.y < bottomY) return; // below the underside, in open water
+
+    // Embedded inside the island volume — apply a strong upward impulse with
+    // spin. No teleport: pure physics. The launch speed is high enough that
+    // the body crosses the remaining geometry by inertia within a few frames,
+    // arcing up and out the top surface like it was thrown.
+    _flingApple(ga, 0, 1, 0, RESCUE_LAUNCH_SPEED);
+}
+
+function _applyAppleBuoyancy(ga: GroundApple): void {
+    if (ga.dragged || ga.fading) return;
+    const body = ga.physicsBody;
+    const waterY = waterlineYUniform.value as number;
+    // Target body Y where the visual center sits APPLE_FLOAT_OFFSET above the waterline.
+    // With gravity cancelled below, the spring equilibrium sits exactly here.
+    const targetBodyY = waterY + APPLE_FLOAT_OFFSET + physicsConfig.appleBodyYOffset;
+    const submersion = targetBodyY - body.position.y;
+
+    if (submersion <= 0) return; // above water — let gravity act normally
+
+    // Cancel gravity so the spring alone determines the equilibrium position.
+    // cannon-es applies gravity during world.step(), so we pre-add the inverse.
+    body.velocity.y -= physicsConfig.gravity * deltaTime;
+
+    // Spring force pushing the apple toward the waterline target.
+    body.velocity.y += submersion * APPLE_BUOYANCY_K * deltaTime;
+
+    // Damp linear & angular motion while in water so the bobbing decays naturally.
+    const linDrag = Math.max(0, 1 - APPLE_WATER_LINEAR_DRAG * deltaTime);
+    body.velocity.x *= linDrag;
+    body.velocity.y *= linDrag;
+    body.velocity.z *= linDrag;
+    const angDrag = Math.max(0, 1 - APPLE_WATER_ANGULAR_DRAG * deltaTime);
+    body.angularVelocity.scale(angDrag, body.angularVelocity);
+
+    body.wakeUp();
+    ga.landed = true;
+}
+
+function _updateGroundApples(): void {
+    for (const ga of groundApples) _applyAppleBuoyancy(ga);
+    _applyDraggedAppleTarget();
+
+    stepPhysics(deltaTime);
+    // NOTE: do NOT re-apply drag target after stepping — that would undo
+    // cannon's collision response and cause trembling against surfaces.
+
+    // STUCK-APPLE FLING (shallow overlap): nudging an apple by depth+epsilon
+    // every frame fights gravity/drag and produces the visible trembling
+    // ("stuck and shaking 1 mm into the ground") the user reported. Instead,
+    // accumulate frames of sustained overlap; once an apple has been stuck for
+    // long enough to rule out a transient resting contact, kick it OUT with a
+    // real outward impulse so it visibly flies away rather than re-snapping.
+    for (const ga of groundApples) {
+        if (ga.fading) { ga.stuckFrames = 0; continue; }
+        const pen = getBodyMaxPenetration(ga.physicsBody);
+        if (pen && pen.depth >= STUCK_DEPTH_THRESHOLD) {
+            ga.stuckFrames++;
+            if (ga.stuckFrames >= STUCK_FRAMES_TO_FLING) {
+                _flingApple(ga, pen.nx, pen.ny, pen.nz, pen.depth);
+            }
+        } else {
+            ga.stuckFrames = 0;
+        }
+    }
+
+    // DEEP overlap rescue: a body fully inside the trimesh stops generating
+    // contacts at all (no triangle touches the sphere shell), so the fling
+    // logic above has nothing to work with. Detect this case geometrically
+    // via raycasts and eject the apple straight up from the top surface.
+    for (const ga of groundApples) _rescueAppleIfInsideIsland(ga);
+
+    updateDebugger();
+
+    for (let i = groundApples.length - 1; i >= 0; i--) {
+        const ga = groundApples[i];
+
+        const bp = ga.physicsBody.position;
+        const bq = ga.physicsBody.quaternion;
+        ga.clone.position.set(bp.x, bp.y - physicsConfig.appleBodyYOffset, bp.z);
+        ga.clone.quaternion.set(bq.x, bq.y, bq.z, bq.w);
+
+        if (ga.landed && !ga.respawnTriggered) {
+            ga.respawnTimer -= deltaTime;
+            if (ga.respawnTimer <= 0) {
+                ga.respawnTriggered = true;
+                _startTreeAppleRespawn(ga.treeIndex);
+            }
+        }
+
+        if (ga.fading) {
+            ga.fadeAlpha -= deltaTime / APPLE_RESPAWN_FADE_DURATION;
+            const alpha = Math.max(0, ga.fadeAlpha);
+            ga.clone.traverse((child) => {
+                if ((child as any).isMesh) {
+                    const mat = (child as any).material;
+                    if (mat) { mat.transparent = true; mat.opacity = alpha; }
+                }
+            });
+            if (ga.fadeAlpha <= 0) {
+                if (!ga.respawnTriggered) {
+                    ga.respawnTriggered = true;
+                    _startTreeAppleRespawn(ga.treeIndex);
+                }
+                _releaseGroundApple(ga);
+                groundApples.splice(i, 1);
+            }
+        }
+    }
 }
 export function setGrassYOffset(v: number): void {
     grassYOffset = v;
@@ -1375,6 +1785,7 @@ const oceanLightingPars = /*glsl*/`
     uniform float uFogDist;
     const float DENSITY = 0.35;
     const float FOG_DISTANCE = 600.0;
+    ${waterlinePars}
 `;
 
 const oceanLightingFragment = /*glsl*/`
@@ -1407,7 +1818,16 @@ const oceanLightingFragment = /*glsl*/`
         float uwFog = min(uwLen / uFogDist, 1.0);
         outgoingLight = mix(outgoingLight, underwaterLight * 0.3, uwFog);
     }
+    ${waterlineFragment}
 `;
+
+function bindWaterlineUniforms(shader: any): void {
+    shader.uniforms.uWaterlineY = waterlineYUniform;
+    shader.uniforms.uWaterlineThickness = waterlineThicknessUniform;
+    shader.uniforms.uWaterlineSoftness = waterlineSoftnessUniform;
+    shader.uniforms.uWaterlineColor = waterlineColorUniform;
+    shader.uniforms.uWaterlineIntensity = waterlineIntensityUniform;
+}
 
 export let islandSurfaceGrassColor = ISLAND_SURFACE_GRASS_COLOR;
 export let islandSurfaceGrassStrength = ISLAND_SURFACE_GRASS_STRENGTH;
@@ -1516,6 +1936,7 @@ function applyIslandSurfaceFilterShader(model: Group): void {
                         shader.uniforms.uAbsorption = oceanAbsorptionUniform;
                         shader.uniforms.uFogDist = underwaterFogDistUniform;
                         shader.uniforms.uSunVisibility = sunVisibilityUniform;
+                        bindWaterlineUniforms(shader);
                         shader.uniforms.uIslandSurfaceGrassColor = islandSurfaceGrassColorUniform;
                         shader.uniforms.uIslandSurfaceGrassStrength = islandSurfaceGrassStrengthUniform;
                         shader.uniforms.uIslandSurfaceGrassGreenThreshold = islandSurfaceGrassGreenThresholdUniform;
@@ -1642,6 +2063,7 @@ function applyOceanLightingToModel(model: Group): void {
                         shader.uniforms.uAbsorption = oceanAbsorptionUniform;
                         shader.uniforms.uFogDist = underwaterFogDistUniform;
                         shader.uniforms.uSunVisibility = sunVisibilityUniform;
+                        bindWaterlineUniforms(shader);
                         
                         shader.vertexShader = shader.vertexShader.replace(
                             '#include <common>',
@@ -1694,7 +2116,9 @@ function applyTreeWindShader(model: Group): void {
                         // Add ocean lighting uniforms
                         shader.uniforms.uLight = lightUniform;
                         shader.uniforms.uAbsorption = oceanAbsorptionUniform;
+                        shader.uniforms.uFogDist = underwaterFogDistUniform;
                         shader.uniforms.uSunVisibility = sunVisibilityUniform;
+                        bindWaterlineUniforms(shader);
                         // Add wind uniforms
                         shader.uniforms.uWindTime = treeWindTimeUniform;
                         shader.uniforms.uWindStrength = treeWindStrengthUniform;
@@ -1807,6 +2231,7 @@ function applyBushWindShader(model: Group, flowerColor: string): void {
                         shader.uniforms.uAbsorption = oceanAbsorptionUniform;
                         shader.uniforms.uFogDist = underwaterFogDistUniform;
                         shader.uniforms.uSunVisibility = sunVisibilityUniform;
+                        bindWaterlineUniforms(shader);
                         shader.uniforms.uWindTime = treeWindTimeUniform;
                         shader.uniforms.uWindStrength = bushWindStrengthUniform;
                         if (isFlower) {
@@ -1888,10 +2313,11 @@ export function Start(): void {
             island.add(gltf.scene);
             island.position.set(islandPosition.x, islandPosition.y, islandPosition.z);
             island.scale.setScalar(islandScale);
+            island.updateMatrixWorld(true);
+            islandLowestY = new Box3().setFromObject(island).min.y;
 
             // Populate islandMeshes synchronously so waitForIslandMeshes() unblocks
             // even if grass/clover finish loading before the next animation frame.
-            island.updateMatrixWorld(true);
             island.traverse((child) => {
                 if ((child as any).isMesh) islandMeshes.push(child as Mesh);
             });
@@ -1901,7 +2327,7 @@ export function Start(): void {
                 generateFoamMask(renderer, island);
                 const tex = getMaskTexture();
                 if (tex) {
-                    setFoamMask(tex.texture, getMaskCenter(), getMaskSize());
+                    setFoamMask(tex, getMaskCenter(), getMaskSize());
                 }
             });
             
@@ -2488,6 +2914,10 @@ function setupAppleInteraction(): void {
     const appleGroups = [apple1, apple2, apple3];
 
     const onAppleClick = (clientX: number, clientY: number) => {
+        if (_suppressNextAppleClick) {
+            _suppressNextAppleClick = false;
+            return;
+        }
         if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
         if (isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive() || isChestZoomActive()) return;
 
@@ -2523,11 +2953,64 @@ function setupAppleInteraction(): void {
     canvas.addEventListener('click', (e: MouseEvent) => { onAppleClick(e.clientX, e.clientY); });
     canvas.addEventListener('touchend', (e: TouchEvent) => {
         if (_touchWasMulti || _touchDragged) return;
+        if (_groundAppleDrag.active || _suppressNextAppleClick) return;
         if (e.changedTouches.length > 0) {
             const t = e.changedTouches[0];
             onAppleClick(t.clientX, t.clientY);
         }
     });
+
+    canvas.addEventListener('pointerdown', (e: PointerEvent) => {
+        if (_groundAppleDrag.active) return;
+        if (isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive() || isChestZoomActive()) return;
+        const ga = _findGroundAppleAtPointer(e.clientX, e.clientY);
+        if (!ga) return;
+
+        _setAppleRayFromClient(e.clientX, e.clientY);
+        _groundAppleDragPlane.set(new Vector3(0, 0, 1), -ga.clone.position.z);
+        if (!appleRaycaster.ray.intersectPlane(_groundAppleDragPlane, _groundAppleDragPoint)) return;
+
+        _groundAppleDrag.active = true;
+        _groundAppleDrag.pointerId = e.pointerId;
+        _groundAppleDrag.apple = ga;
+        _groundAppleDrag.moved = false;
+        _groundAppleDrag.startX = e.clientX;
+        _groundAppleDrag.startY = e.clientY;
+        _groundAppleDragOffset.copy(ga.clone.position).sub(_groundAppleDragPoint);
+        _groundAppleDragOffset.z = 0;
+        ga.dragged = true;
+        _dragTargetValid = false;
+
+        // Keep body DYNAMIC so collisions are respected during drag.
+        ga.physicsBody.velocity.setZero();
+        ga.physicsBody.angularVelocity.setZero();
+        ga.physicsBody.wakeUp();
+        canvas.setPointerCapture?.(e.pointerId);
+        canvas.style.cursor = 'grabbing';
+        e.preventDefault();
+    });
+
+    canvas.addEventListener('pointermove', (e: PointerEvent) => {
+        if (!_groundAppleDrag.active || e.pointerId !== _groundAppleDrag.pointerId) return;
+        const dx = e.clientX - _groundAppleDrag.startX;
+        const dy = e.clientY - _groundAppleDrag.startY;
+        if (Math.sqrt(dx * dx + dy * dy) > 3) {
+            _groundAppleDrag.moved = true;
+            _touchDragged = true;
+        }
+        _moveDraggedAppleToClient(e.clientX, e.clientY);
+        e.preventDefault();
+    });
+
+    const finishPointerDrag = (e: PointerEvent) => {
+        if (!_groundAppleDrag.active || e.pointerId !== _groundAppleDrag.pointerId) return;
+        canvas.releasePointerCapture?.(e.pointerId);
+        canvas.style.cursor = isAppleHovered ? 'pointer' : '';
+        _endGroundAppleDrag();
+        e.preventDefault();
+    };
+    canvas.addEventListener('pointerup', finishPointerDrag);
+    canvas.addEventListener('pointercancel', finishPointerDrag);
 
     canvas.addEventListener('mousemove', (e: MouseEvent) => {
         if (camera.position.y < UNDERWATER_Y_THRESHOLD) {
@@ -2589,7 +3072,7 @@ function triggerAppleFall(index: number): void {
     }
 
     const wasGolden = _isGolden[index];
-    const ga: GroundApple = { clone, physicsBody: body, slot, fading: false, fadeAlpha: 1, landed: false, treeIndex: index, respawnTimer: appleRespawnDelay, respawnTriggered: false, isGolden: wasGolden };
+    const ga: GroundApple = { clone, physicsBody: body, slot, fading: false, fadeAlpha: 1, landed: false, treeIndex: index, respawnTimer: appleRespawnDelay, respawnTriggered: false, isGolden: wasGolden, dragged: false, stuckFrames: 0 };
     groundApples.push(ga);
 
     // If the tree apple was golden, transfer the pooled light to the ground clone
@@ -3674,6 +4157,7 @@ function setupRadioInteraction(): void {
 export function Update(isUnderwater = false): void {
   _updateAppleImpacts();
   islandCampfireGroundCenterUniform.value.set(firecamp.position.x, firecamp.position.z);
+  _updateGroundApples();
 
   if (!isUnderwater) {
     // Update palm tree wind shader time
@@ -3699,10 +4183,6 @@ export function Update(isUnderwater = false): void {
     // ── Apple pendulum sway / fall / respawn ─────────────────────────────────
     const APPLE_PHASES = [0.00, 1.37, 2.71];
     const appleGroups  = [apple1, apple2, apple3];
-
-    // Step physics world (no-op when no bodies are in-flight)
-    stepPhysics(deltaTime);
-    updateDebugger();
 
     // ── Tree apples: sway + respawn spring ──────────────────────────────────
     for (let i = 0; i < 3; i++) {
@@ -3753,49 +4233,6 @@ export function Update(isUnderwater = false): void {
             }
         } else {
             grp.scale.setScalar(st.originalScale);
-        }
-    }
-
-    // ── Ground apples: sync physics, fade, cleanup ──────────────────────────
-    const appleGroupsForRespawn = [apple1, apple2, apple3];
-    for (let i = groundApples.length - 1; i >= 0; i--) {
-        const ga = groundApples[i];
-
-        // Sync clone position from physics body (both centered at visual center)
-        const bp = ga.physicsBody.position;
-        const bq = ga.physicsBody.quaternion;
-        ga.clone.position.set(bp.x, bp.y - physicsConfig.appleBodyYOffset, bp.z);
-        ga.clone.quaternion.set(bq.x, bq.y, bq.z, bq.w);
-
-        // After landing, count down the respawn delay then trigger tree apple respawn
-        if (ga.landed && !ga.respawnTriggered) {
-            ga.respawnTimer -= deltaTime;
-            if (ga.respawnTimer <= 0) {
-                ga.respawnTriggered = true;
-                _startTreeAppleRespawn(ga.treeIndex);
-            }
-        }
-
-        // Fade-out
-        if (ga.fading) {
-            ga.fadeAlpha -= deltaTime / APPLE_RESPAWN_FADE_DURATION;
-            const alpha = Math.max(0, ga.fadeAlpha);
-            ga.clone.traverse((child) => {
-                if ((child as any).isMesh) {
-                    const mat = (child as any).material;
-                    if (mat) { mat.transparent = true; mat.opacity = alpha; }
-                }
-            });
-            if (ga.fadeAlpha <= 0) {
-                // Ensure tree apple is respawned before removing ground apple
-                if (!ga.respawnTriggered) {
-                    ga.respawnTriggered = true;
-                    _startTreeAppleRespawn(ga.treeIndex);
-                }
-                // Return visual and physics body to their pools.
-                _releaseGroundApple(ga);
-                groundApples.splice(i, 1);
-            }
         }
     }
 

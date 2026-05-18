@@ -9,22 +9,24 @@ import {
     Vector3,
     LinearFilter,
     Group,
-    Mesh
+    Mesh,
+    DataTexture,
+    RedFormat,
+    UnsignedByteType,
+    ClampToEdgeWrapping,
+    Texture,
 } from "three";
 
-// ============================================
-// FOAM MASK SETTINGS (tweak these!)
-// ============================================
-export const FOAM_MASK_RESOLUTION = 256;    // Texture size — 256 is plenty for a silhouette
-export const FOAM_MASK_PADDING = 0.3;       // World-unit padding around the island bounding box
-export const FOAM_SLICE_Y = 0.0;            // Y level to slice (ocean surface level)
-// ============================================
+export const FOAM_MASK_RESOLUTION = 1024;
+export const FOAM_MASK_PADDING = 0.3;
+export const FOAM_SLICE_Y = 0.0;
+const FOAM_SDF_SPREAD_WORLD = 1.5;
 
-let maskTexture: WebGLRenderTarget | null = null;
-let maskCenter = { x: 0, y: 0 };   // World XZ center of the captured region
-let maskSize = { x: 1, y: 1 };     // World XZ extent of the captured region
+let maskRenderTarget: WebGLRenderTarget | null = null;
+let maskTexture: DataTexture | null = null;
+let maskCenter = { x: 0, y: 0 };
+let maskSize = { x: 1, y: 1 };
 
-// Reusable objects — allocated once
 const maskScene = new ThreeScene();
 const maskCamera = new OrthographicCamera(-1, 1, 1, -1, 0.01, 100);
 const whiteMat = new MeshBasicMaterial({ color: 0xffffff });
@@ -32,18 +34,64 @@ const _box = new Box3();
 const _size = new Vector3();
 const _center = new Vector3();
 
-/**
- * Render a top-down silhouette of the island group into a small render target.
- * The resulting texture is white where island exists and black (background) elsewhere.
- * The ocean shader samples this to detect edges and place foam.
- */
+const INF = 1e20;
+
+function edt1d(f: Float32Array, n: number, d: Float32Array): void {
+    const v = new Int32Array(n);
+    const z = new Float32Array(n + 1);
+    let k = 0;
+    v[0] = 0;
+    z[0] = -INF;
+    z[1] = INF;
+
+    for (let q = 1; q < n; q++) {
+        let s = 0;
+        do {
+            const vk = v[k];
+            s = ((f[q] + q * q) - (f[vk] + vk * vk)) / (2 * q - 2 * vk);
+            if (s <= z[k]) k--;
+        } while (s <= z[k]);
+        k++;
+        v[k] = q;
+        z[k] = s;
+        z[k + 1] = INF;
+    }
+
+    k = 0;
+    for (let q = 0; q < n; q++) {
+        while (z[k + 1] < q) k++;
+        const dx = q - v[k];
+        d[q] = dx * dx + f[v[k]];
+    }
+}
+
+function edt2d(featureMask: Uint8Array, width: number, height: number): Float32Array {
+    const temp = new Float32Array(width * height);
+    const dist = new Float32Array(width * height);
+    const f = new Float32Array(Math.max(width, height));
+    const d = new Float32Array(Math.max(width, height));
+
+    for (let x = 0; x < width; x++) {
+        for (let y = 0; y < height; y++) f[y] = featureMask[y * width + x] ? 0 : INF;
+        edt1d(f, height, d);
+        for (let y = 0; y < height; y++) temp[y * width + x] = d[y];
+    }
+
+    for (let y = 0; y < height; y++) {
+        const row = y * width;
+        for (let x = 0; x < width; x++) f[x] = temp[row + x];
+        edt1d(f, width, d);
+        for (let x = 0; x < width; x++) dist[row + x] = d[x];
+    }
+
+    return dist;
+}
+
 export function generateFoamMask(rendererRef: WebGLRenderer, islandGroup: Group): void {
-    // Compute world bounding box of the entire island group
     _box.setFromObject(islandGroup);
     _box.getCenter(_center);
     _box.getSize(_size);
 
-    // XZ extent with padding
     const halfW = _size.x / 2 + FOAM_MASK_PADDING;
     const halfD = _size.z / 2 + FOAM_MASK_PADDING;
 
@@ -52,8 +100,6 @@ export function generateFoamMask(rendererRef: WebGLRenderer, islandGroup: Group)
     maskSize.x = halfW * 2;
     maskSize.y = halfD * 2;
 
-    // Setup orthographic camera looking straight down (+Y → -Y)
-    // left/right = world X, top/bottom = world Z
     maskCamera.left = -halfW;
     maskCamera.right = halfW;
     maskCamera.top = halfD;
@@ -61,23 +107,16 @@ export function generateFoamMask(rendererRef: WebGLRenderer, islandGroup: Group)
     maskCamera.near = 0.01;
     maskCamera.far = _size.y + 10;
     maskCamera.position.set(_center.x, _box.max.y + 5, _center.z);
-    // Set up = +Z so that texture V increases with world +Z,
-    // matching the shader's maskUV.y = (worldZ - center) / size + 0.5
     maskCamera.up.set(0, 0, 1);
     maskCamera.lookAt(_center.x, _center.y, _center.z);
     maskCamera.updateProjectionMatrix();
 
-    // Create (or recreate) render target
-    if (maskTexture) {
-        maskTexture.dispose();
-    }
-    maskTexture = new WebGLRenderTarget(FOAM_MASK_RESOLUTION, FOAM_MASK_RESOLUTION, {
+    if (maskRenderTarget) maskRenderTarget.dispose();
+    maskRenderTarget = new WebGLRenderTarget(FOAM_MASK_RESOLUTION, FOAM_MASK_RESOLUTION, {
         minFilter: LinearFilter,
         magFilter: LinearFilter,
     });
 
-    // Clone island meshes into our mask scene with a flat white material
-    // so we get a clean silhouette regardless of the model's own materials
     maskScene.clear();
     maskScene.background = new Color(0x000000);
 
@@ -85,7 +124,6 @@ export function generateFoamMask(rendererRef: WebGLRenderer, islandGroup: Group)
         if ((child as any).isMesh) {
             const src = child as Mesh;
             const clone = new Mesh(src.geometry, whiteMat);
-            // Copy world transform
             src.updateWorldMatrix(true, false);
             clone.matrixAutoUpdate = false;
             clone.matrix.copy(src.matrixWorld);
@@ -93,7 +131,6 @@ export function generateFoamMask(rendererRef: WebGLRenderer, islandGroup: Group)
         }
     });
 
-    // Render
     const prevTarget = rendererRef.getRenderTarget();
     const prevClearColor = new Color();
     rendererRef.getClearColor(prevClearColor);
@@ -102,34 +139,58 @@ export function generateFoamMask(rendererRef: WebGLRenderer, islandGroup: Group)
 
     rendererRef.autoClearColor = true;
     rendererRef.setClearColor(0x000000, 1);
-    rendererRef.setRenderTarget(maskTexture);
+    rendererRef.setRenderTarget(maskRenderTarget);
     rendererRef.clear();
     rendererRef.render(maskScene, maskCamera);
 
-    // Restore
+    const pixels = new Uint8Array(FOAM_MASK_RESOLUTION * FOAM_MASK_RESOLUTION * 4);
+    rendererRef.readRenderTargetPixels(maskRenderTarget, 0, 0, FOAM_MASK_RESOLUTION, FOAM_MASK_RESOLUTION, pixels);
+
     rendererRef.setRenderTarget(prevTarget);
     rendererRef.setClearColor(prevClearColor, prevClearAlpha);
     rendererRef.autoClearColor = prevAutoClear;
-
-    // Cleanup clones from mask scene
     maskScene.clear();
 
-    console.log(`Foam mask generated: ${FOAM_MASK_RESOLUTION}x${FOAM_MASK_RESOLUTION}, ` +
-        `center=(${maskCenter.x.toFixed(2)}, ${maskCenter.y.toFixed(2)}), ` +
-        `size=(${maskSize.x.toFixed(2)}, ${maskSize.y.toFixed(2)})`);
+    const total = FOAM_MASK_RESOLUTION * FOAM_MASK_RESOLUTION;
+    const inside = new Uint8Array(total);
+    const outside = new Uint8Array(total);
+    for (let i = 0; i < total; i++) {
+        const isInside = pixels[i * 4] > 127;
+        inside[i] = isInside ? 1 : 0;
+        outside[i] = isInside ? 0 : 1;
+    }
+
+    const distToInside = edt2d(inside, FOAM_MASK_RESOLUTION, FOAM_MASK_RESOLUTION);
+    const distToOutside = edt2d(outside, FOAM_MASK_RESOLUTION, FOAM_MASK_RESOLUTION);
+    const sdfBytes = new Uint8Array(total);
+    const worldPerPixel = Math.max(maskSize.x, maskSize.y) / FOAM_MASK_RESOLUTION;
+
+    for (let i = 0; i < total; i++) {
+        const signedPixelDist = inside[i] ? Math.sqrt(distToOutside[i]) : -Math.sqrt(distToInside[i]);
+        const signedWorldDist = signedPixelDist * worldPerPixel;
+        const encoded = 0.5 + signedWorldDist / (FOAM_SDF_SPREAD_WORLD * 2);
+        sdfBytes[i] = Math.max(0, Math.min(255, Math.round(encoded * 255)));
+    }
+
+    if (maskTexture) maskTexture.dispose();
+    maskTexture = new DataTexture(sdfBytes, FOAM_MASK_RESOLUTION, FOAM_MASK_RESOLUTION, RedFormat, UnsignedByteType);
+    maskTexture.minFilter = LinearFilter;
+    maskTexture.magFilter = LinearFilter;
+    maskTexture.wrapS = ClampToEdgeWrapping;
+    maskTexture.wrapT = ClampToEdgeWrapping;
+    maskTexture.needsUpdate = true;
+
+    console.log(`Foam SDF generated: ${FOAM_MASK_RESOLUTION}x${FOAM_MASK_RESOLUTION}, center=(${maskCenter.x.toFixed(2)}, ${maskCenter.y.toFixed(2)}), size=(${maskSize.x.toFixed(2)}, ${maskSize.y.toFixed(2)})`);
 }
 
-/** Get the generated mask texture (null if not yet generated) */
-export function getMaskTexture(): WebGLRenderTarget | null {
+export function getMaskTexture(): Texture | null {
     return maskTexture;
 }
 
-/** World XZ center of the mask region */
 export function getMaskCenter(): { x: number; y: number } {
     return maskCenter;
 }
 
-/** World XZ size of the mask region */
 export function getMaskSize(): { x: number; y: number } {
     return maskSize;
 }

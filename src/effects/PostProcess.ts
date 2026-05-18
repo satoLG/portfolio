@@ -160,8 +160,9 @@ export function updateUnderwaterAmount(cameraY: number): void {
  * Render the scene with post-processing.
  * Renders normally first, then applies post-process pass if any effect is active.
  */
-export function renderScene(renderer: WebGLRenderer, scene: ThreeScene, camera: Camera): void {
+export function renderScene(renderer: WebGLRenderer, scene: ThreeScene, camera: Camera, afterBaseRender?: () => void): void {
     renderer.render(scene, camera);
+    if (afterBaseRender) afterBaseRender();
     
     const needsPostProcess = (underwaterAmount > 0 || pixelSize > 0);
     if (!needsPostProcess || !initialized || !framebufferTexture || !material) {
