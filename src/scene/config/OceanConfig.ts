@@ -36,7 +36,7 @@ export const waterlineCompositeOpacity = 0.1800;
 // ── Waterline on objects ─────────────────────────────────────────────────────
 export const waterlineY         = 0.0050;
 export const waterlineThickness = 0.0000;
-export const waterlineSoftness  = 0.0340;
+export const waterlineSoftness  = 0.0170;
 export const waterlineColor     = { r: 1.0000, g: 0.9300, b: 1.0000 };
 export const waterlineIntensity = 0.3400;
 
