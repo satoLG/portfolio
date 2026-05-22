@@ -1,4 +1,4 @@
-import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, DoubleSide, MeshBasicMaterial, Box3, MeshStandardMaterial, ShaderChunk, Plane } from "three";
+import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, DoubleSide, MeshBasicMaterial, Box3, MeshStandardMaterial, ShaderChunk, Plane, LinearFilter, LinearMipmapLinearFilter } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { config as sfDecorConfig } from './SeaFloorDecor';
 import {
@@ -30,10 +30,16 @@ import {
     islandPosition, firecampOffset, treeOffset, bushOffset, bushRadioOffset, bushRadio2Offset, bushPugOffset, radioOffset, swordOffset,
     pugOffset, tentOffset, dogBedOffset, littleRocksOffset, phoneOffset,
     apple1Offset, apple2Offset, apple3Offset,
+    mossRock1Offset, mossRock2aOffset, mossRock2bOffset, mossRock3aOffset, mossRock3bOffset, mossRock3cOffset,
+    dockOffset, robin1Offset, robin2Offset, foldingTrayTableOffset, tentDogBedOffset, rugRoundOffset, lanternOffset, dogBowlOffset, dogBiscuitOffset,
     islandScale, firecampScale, treeScale, bushScale, bushRadioScale, bushRadio2Scale, bushPugScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, littleRocksScale, phoneScale,
     apple1Scale, apple2Scale, apple3Scale,
+    mossRock1Scale, mossRock2aScale, mossRock2bScale, mossRock3aScale, mossRock3bScale, mossRock3cScale,
+    dockScale, robin1Scale, robin2Scale, foldingTrayTableScale, tentDogBedScale, rugRoundScale, lanternScale, dogBowlScale, dogBiscuitScale,
     treeRotY, bushRotY, bushRadioRotY, bushRadio2RotY, bushPugRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, littleRocksRot, phoneRot,
     apple1RotY, apple2RotY, apple3RotY,
+    mossRock1Rot, mossRock2aRot, mossRock2bRot, mossRock3aRot, mossRock3bRot, mossRock3cRot,
+    dockRot, robin1Rot, robin2Rot, foldingTrayTableRot, tentDogBedRot, rugRoundRot, lanternRot, dogBowlRot, dogBiscuitRot,
     ISLAND_SURFACE_GRASS_COLOR,
     ISLAND_SURFACE_GRASS_STRENGTH,
     ISLAND_SURFACE_GRASS_GREEN_THRESHOLD,
@@ -98,6 +104,30 @@ export const chest = new Group();
 export const apple1 = new Group();
 export const apple2 = new Group();
 export const apple3 = new Group();
+
+// Moss rocks — six instances scattered around the island in the water.
+// All share the apple-style waterline shader so each rock gets its own foam
+// line right where it crosses the ocean surface, independent of placement.
+export const mossRock1  = new Group();
+export const mossRock2a = new Group();
+export const mossRock2b = new Group();
+export const mossRock3a = new Group();
+export const mossRock3b = new Group();
+export const mossRock3c = new Group();
+
+// Surface props added in the visual_enhancements_2 branch.
+export const dock              = new Group();
+export const robin1            = new Group();
+export const robin2            = new Group();
+export const foldingTrayTable  = new Group();
+export const tentDogBed        = new Group();
+export const rugRound          = new Group();
+export const lantern           = new Group();
+export const dogBowl           = new Group();
+export const dogBiscuit        = new Group();
+// Animation mixers for the robins — driven each frame in Update().
+let robin1Mixer: AnimationMixer | null = null;
+let robin2Mixer: AnimationMixer | null = null;
 
 export let grassShadowMesh: Mesh | null = null;
 
@@ -2094,6 +2124,194 @@ function applyOceanLightingToModel(model: Group): void {
     });
 }
 
+/** Apply the apple-style per-object waterline shader to every standard-like
+ *  material on `model`. Same shader the (golden) apples use — produces a foam
+ *  line exactly where the mesh's world-Y crosses uWaterlineY, so the line
+ *  follows each rock independently of placement. */
+function _applyAppleWaterlineToModel(model: Group): void {
+    model.traverse((child) => {
+        if (!(child as any).isMesh) return;
+        const mesh = child as Mesh;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        mats.forEach((mat: any) => {
+            if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
+                _applyAppleWaterlineToMaterial(mat as MeshStandardMaterial);
+            }
+        });
+    });
+}
+
+/** Load a moss rock GLB, wire it up with the standard ocean lighting + the
+ *  apple-style waterline foam line, then position/scale/rotate it relative to
+ *  the island. Mirrors the loading pattern used by `little_rocks` but adds the
+ *  per-object waterline pass. */
+function _loadMossRock(
+    path: string,
+    group: Group,
+    offset: { x: number; y: number; z: number },
+    scale: number,
+    rot: { x: number; y: number; z: number },
+): void {
+    loader.load(
+        path,
+        (gltf) => {
+            applyOceanLightingToModel(gltf.scene);
+            _applyAppleWaterlineToModel(gltf.scene);
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    (child as any).receiveShadow = true;
+                }
+            });
+            group.add(gltf.scene);
+            group.position.set(
+                islandPosition.x + offset.x,
+                islandPosition.y + offset.y,
+                islandPosition.z + offset.z,
+            );
+            group.scale.setScalar(scale);
+            group.rotation.set(rot.x, rot.y, rot.z);
+            threeScene.add(group);
+            console.log(`Moss rock loaded: ${path}`);
+        },
+        undefined,
+        (err) => { console.error(`Error loading moss rock ${path}:`, err); },
+    );
+}
+
+/** Generic surface prop loader: ocean lighting + waterline + shadows + transform.
+ *  Mirrors the moss-rock loader but skips the per-object waterline shader since
+ *  most tent-interior props sit well above the waterline. */
+function _loadSurfaceProp(
+    path: string,
+    group: Group,
+    offset: { x: number; y: number; z: number },
+    scale: number,
+    rot: { x: number; y: number; z: number },
+): void {
+    loader.load(
+        path,
+        (gltf) => {
+            applyOceanLightingToModel(gltf.scene);
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    (child as any).receiveShadow = true;
+                }
+            });
+            group.add(gltf.scene);
+            group.position.set(
+                islandPosition.x + offset.x,
+                islandPosition.y + offset.y,
+                islandPosition.z + offset.z,
+            );
+            group.scale.setScalar(scale);
+            group.rotation.set(rot.x, rot.y, rot.z);
+            threeScene.add(group);
+            console.log(`Surface prop loaded: ${path}`);
+        },
+        undefined,
+        (err) => { console.error(`Error loading surface prop ${path}:`, err); },
+    );
+}
+
+/** Variant of _loadSurfaceProp that initialises an AnimationMixer and plays a
+ *  selected clip on loop. Caller receives the mixer through `onMixer` so it can
+ *  be ticked from the per-frame Update loop. An optional `onSceneSetup` callback
+ *  runs on the raw gltf scene right after the ocean-lighting pass so callers
+ *  can apply per-model material tweaks (e.g. the robin render fix). */
+function _loadAnimatedSurfaceProp(
+    path: string,
+    group: Group,
+    offset: { x: number; y: number; z: number },
+    scale: number,
+    rot: { x: number; y: number; z: number },
+    onMixer: (mixer: AnimationMixer) => void,
+    onSceneSetup?: (scene: Group) => void,
+    animationIndex = 0,
+): void {
+    loader.load(
+        path,
+        (gltf) => {
+            applyOceanLightingToModel(gltf.scene);
+            if (onSceneSetup) onSceneSetup(gltf.scene);
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    (child as any).receiveShadow = true;
+                }
+            });
+            group.add(gltf.scene);
+            group.position.set(
+                islandPosition.x + offset.x,
+                islandPosition.y + offset.y,
+                islandPosition.z + offset.z,
+            );
+            group.scale.setScalar(scale);
+            group.rotation.set(rot.x, rot.y, rot.z);
+            threeScene.add(group);
+            if (gltf.animations && gltf.animations.length > 0) {
+                const mixer = new AnimationMixer(gltf.scene);
+                const clip = gltf.animations[Math.min(animationIndex, gltf.animations.length - 1)];
+                const action = mixer.clipAction(clip);
+                action.setLoop(LoopRepeat, Infinity);
+                action.play();
+                onMixer(mixer);
+            }
+            console.log(`Animated surface prop loaded: ${path}`);
+        },
+        undefined,
+        (err) => { console.error(`Error loading animated surface prop ${path}:`, err); },
+    );
+}
+
+/** Distance-only seam fix for the robin model. The body is built as mirrored
+ *  halves that don't quite touch on the symmetry plane; the gap is sub-pixel
+ *  up close but resolves to a visible 1-px crack once the bird shrinks to a
+ *  handful of pixels on screen.
+ *
+ *  Earlier attempts and why they were dropped:
+ *    - `side = DoubleSide` → lit the interior backfaces as bright white lines.
+ *    - Vertex inflation along normals → mechanically closed the seam but
+ *      exposed white interior shells along other internal edges.
+ *
+ *  Current strategy is non-destructive — we never touch geometry or backface
+ *  rendering. The artefact is mitigated by stopping mipmap blur from eating
+ *  texture detail and alpha edges at distance:
+ *    1. `anisotropy = max` keeps UV detail sharp at oblique angles.
+ *    2. `minFilter = LinearMipmapLinearFilter` (trilinear) instead of the
+ *       default LinearMipmapNearest — smoother LOD transition, no sudden
+ *       mip-pop that exposes seams.
+ *    3. Convert any `alphaTest` to `alphaToCoverage` so silhouette edges
+ *       dither smoothly with MSAA instead of being cut off.
+ *  The geometric seam itself still exists — short of editing the GLB to weld
+ *  the symmetry vertices, that's intrinsic to the model. */
+function _fixBirdRender(model: Group): void {
+    const maxAniso = renderer.capabilities.getMaxAnisotropy?.() ?? 1;
+    model.traverse((child) => {
+        const mesh = child as Mesh;
+        if (!(mesh as any).isMesh) return;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        mats.forEach((mat: any) => {
+            if (mat.map) {
+                mat.map.anisotropy = Math.max(mat.map.anisotropy ?? 1, maxAniso);
+                mat.map.minFilter = LinearMipmapLinearFilter;
+                mat.map.magFilter = LinearFilter;
+                mat.map.needsUpdate = true;
+            }
+            if ((mat.alphaTest ?? 0) > 0 || mat.transparent) {
+                mat.opacity = 1;
+                mat.alphaTest = 0.5;
+                mat.alphaToCoverage = true;
+                mat.transparent = false;
+                mat.depthWrite = true;
+                mat.depthTest = true;
+            }
+            mat.needsUpdate = true;
+        });
+    });
+}
+
 // Apply wind animation shader to tree
 function applyTreeWindShader(model: Group): void {
     model.traverse((child) => {
@@ -2699,6 +2917,27 @@ export function Start(): void {
         undefined,
         (error) => { console.error('Error loading little rocks:', error); }
     );
+
+    // Moss rocks scattered around the island in the water. Each rock gets the
+    // apple-style waterline shader so a foam line is drawn exactly where the
+    // mesh crosses the ocean surface — independent of placement.
+    _loadMossRock('models/surface/moss_rock1.glb',  mossRock1,  mossRock1Offset,  mossRock1Scale,  mossRock1Rot);
+    _loadMossRock('models/surface/moss_rock2.glb',  mossRock2a, mossRock2aOffset, mossRock2aScale, mossRock2aRot);
+    _loadMossRock('models/surface/moss_rock2.glb',  mossRock2b, mossRock2bOffset, mossRock2bScale, mossRock2bRot);
+    _loadMossRock('models/surface/moss_rock3.glb',  mossRock3a, mossRock3aOffset, mossRock3aScale, mossRock3aRot);
+    _loadMossRock('models/surface/moss_rock3.glb',  mossRock3b, mossRock3bOffset, mossRock3bScale, mossRock3bRot);
+    _loadMossRock('models/surface/moss_rock3.glb',  mossRock3c, mossRock3cOffset, mossRock3cScale, mossRock3cRot);
+
+    // ── Extra surface props (dock, robins, tent interior) ────────────────────
+    _loadSurfaceProp('models/surface/dock.glb',                dock,             dockOffset,             dockScale,             dockRot);
+    _loadSurfaceProp('models/surface/folding_tray_table.glb',  foldingTrayTable, foldingTrayTableOffset, foldingTrayTableScale, foldingTrayTableRot);
+    _loadSurfaceProp('models/surface/dog_bed.glb',             tentDogBed,       tentDogBedOffset,       tentDogBedScale,       tentDogBedRot);
+    _loadSurfaceProp('models/surface/rug_round.glb',           rugRound,         rugRoundOffset,         rugRoundScale,         rugRoundRot);
+    _loadSurfaceProp('models/surface/lantern.glb',             lantern,          lanternOffset,          lanternScale,          lanternRot);
+    _loadSurfaceProp('models/surface/dog_bowl.glb',            dogBowl,          dogBowlOffset,          dogBowlScale,          dogBowlRot);
+    _loadSurfaceProp('models/surface/dog_biscuit.glb',         dogBiscuit,       dogBiscuitOffset,       dogBiscuitScale,       dogBiscuitRot);
+    _loadAnimatedSurfaceProp('models/surface/robin_bird.glb',  robin1, robin1Offset, robin1Scale, robin1Rot, m => { robin1Mixer = m; }, _fixBirdRender, 3);
+    _loadAnimatedSurfaceProp('models/surface/robin_bird.glb',  robin2, robin2Offset, robin2Scale, robin2Rot, m => { robin2Mixer = m; }, _fixBirdRender, 10);
 
     // Phone model — always spawned on the little rocks
     loader.load(
@@ -4321,6 +4560,11 @@ export function Update(isUnderwater = false): void {
         }
     }
     
+    // Tick robin bird animation mixers (same clamp guard as the pug).
+    const clampedDt = Math.min(deltaTime, 0.1);
+    if (robin1Mixer) robin1Mixer.update(clampedDt);
+    if (robin2Mixer) robin2Mixer.update(clampedDt);
+
     // Update pug animation mixer — clamp delta to avoid fast-forward on frame-skips
     if (pugMixer) {
         pugMixer.update(Math.min(deltaTime, 0.1));

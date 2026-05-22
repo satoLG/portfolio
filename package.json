@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/optimize-assets.cjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "generate-icons": "node scripts/generate-icons.cjs",
     "optimize-assets": "node scripts/optimize-assets.cjs",
+    "optimize-assets:force": "node scripts/optimize-assets.cjs --force",
     "webkit": "node scripts/webkit-browser.cjs"
   },
   "devDependencies": {
