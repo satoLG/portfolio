@@ -4,4 +4,4 @@ dist/
 .env
 .vscode/
 .claude/
-CLAUDE.md
+scripts/.optimize-cache.json

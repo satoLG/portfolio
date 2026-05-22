@@ -151,6 +151,21 @@ import {
     apple1,
     apple2,
     apple3,
+    mossRock1,
+    mossRock2a,
+    mossRock2b,
+    mossRock3a,
+    mossRock3b,
+    mossRock3c,
+    dock,
+    robin1,
+    robin2,
+    foldingTrayTable,
+    tentDogBed,
+    rugRound,
+    lantern,
+    dogBowl,
+    dogBiscuit,
     clusterMainPatches,
     clusterTreePatches,
     proceduralGrassMesh,
@@ -299,13 +314,22 @@ function debounce(fn: () => void, ms: number): () => void {
 // ─── object folder ──────────────────────────────────────────────────────────
 
 interface ObjOpts {
-    /** Half-width of the position sliders (default 1.5) */
+    /** Half-width of the position sliders. Ignored when smaller than
+     *  POS_RANGE_DEFAULT — caller-tightened ranges get widened automatically
+     *  so testing in the GUI is never blocked by an arbitrary cap. */
     posRange?: number;
-    /** [min, max] for the uniform scale slider. Omit to hide scale. */
+    /** [min, max] for the uniform scale slider. Omit to hide scale.
+     *  Values get widened against SCALE_RANGE_DEFAULT for the same reason. */
     scaleRange?: [number, number];
     /** Which rotation axes to expose. Omit to hide rotation. */
     rotAxes?: Array<'x' | 'y' | 'z'>;
 }
+
+// Generous defaults so every object's sliders cover anything the user might
+// want to try while iterating in the GUI. Per-call overrides can only WIDEN
+// these — never narrow them — because tight caps tend to block exploration.
+const POS_RANGE_DEFAULT = 50;
+const SCALE_RANGE_DEFAULT: [number, number] = [0.001, 20];
 
 /**
  * Builds a folder with position (X/Y/Z), optional uniform scale, and optional
@@ -317,7 +341,14 @@ function addObjectFolder(
     obj: Object3D,
     opts: ObjOpts = {},
 ) {
-    const { posRange = 1.5, scaleRange, rotAxes } = opts;
+    const posRange = Math.max(opts.posRange ?? 0, POS_RANGE_DEFAULT);
+    const scaleRange: [number, number] | undefined = opts.scaleRange
+        ? [
+            Math.min(opts.scaleRange[0], SCALE_RANGE_DEFAULT[0]),
+            Math.max(opts.scaleRange[1], SCALE_RANGE_DEFAULT[1]),
+        ]
+        : undefined;
+    const { rotAxes } = opts;
     const folder = parent.addFolder(label);
 
     // ── log helper ──
@@ -696,6 +727,21 @@ function buildGUI(): void {
                 `export const apple1Offset      = { x: ${f(apple1.position.x - ip.x)}, y: ${f(apple1.position.y - ip.y)}, z: ${f(apple1.position.z - ip.z)} };`,
                 `export const apple2Offset      = { x: ${f(apple2.position.x - ip.x)}, y: ${f(apple2.position.y - ip.y)}, z: ${f(apple2.position.z - ip.z)} };`,
                 `export const apple3Offset      = { x: ${f(apple3.position.x - ip.x)}, y: ${f(apple3.position.y - ip.y)}, z: ${f(apple3.position.z - ip.z)} };`,
+                `export const mossRock1Offset   = { x: ${f(mossRock1.position.x  - ip.x)}, y: ${f(mossRock1.position.y  - ip.y)}, z: ${f(mossRock1.position.z  - ip.z)} };`,
+                `export const mossRock2aOffset  = { x: ${f(mossRock2a.position.x - ip.x)}, y: ${f(mossRock2a.position.y - ip.y)}, z: ${f(mossRock2a.position.z - ip.z)} };`,
+                `export const mossRock2bOffset  = { x: ${f(mossRock2b.position.x - ip.x)}, y: ${f(mossRock2b.position.y - ip.y)}, z: ${f(mossRock2b.position.z - ip.z)} };`,
+                `export const mossRock3aOffset  = { x: ${f(mossRock3a.position.x - ip.x)}, y: ${f(mossRock3a.position.y - ip.y)}, z: ${f(mossRock3a.position.z - ip.z)} };`,
+                `export const mossRock3bOffset  = { x: ${f(mossRock3b.position.x - ip.x)}, y: ${f(mossRock3b.position.y - ip.y)}, z: ${f(mossRock3b.position.z - ip.z)} };`,
+                `export const mossRock3cOffset  = { x: ${f(mossRock3c.position.x - ip.x)}, y: ${f(mossRock3c.position.y - ip.y)}, z: ${f(mossRock3c.position.z - ip.z)} };`,
+                `export const dockOffset             = { x: ${f(dock.position.x             - ip.x)}, y: ${f(dock.position.y             - ip.y)}, z: ${f(dock.position.z             - ip.z)} };`,
+                `export const robin1Offset           = { x: ${f(robin1.position.x           - ip.x)}, y: ${f(robin1.position.y           - ip.y)}, z: ${f(robin1.position.z           - ip.z)} };`,
+                `export const robin2Offset           = { x: ${f(robin2.position.x           - ip.x)}, y: ${f(robin2.position.y           - ip.y)}, z: ${f(robin2.position.z           - ip.z)} };`,
+                `export const foldingTrayTableOffset = { x: ${f(foldingTrayTable.position.x - ip.x)}, y: ${f(foldingTrayTable.position.y - ip.y)}, z: ${f(foldingTrayTable.position.z - ip.z)} };`,
+                `export const tentDogBedOffset       = { x: ${f(tentDogBed.position.x       - ip.x)}, y: ${f(tentDogBed.position.y       - ip.y)}, z: ${f(tentDogBed.position.z       - ip.z)} };`,
+                `export const rugRoundOffset         = { x: ${f(rugRound.position.x         - ip.x)}, y: ${f(rugRound.position.y         - ip.y)}, z: ${f(rugRound.position.z         - ip.z)} };`,
+                `export const lanternOffset          = { x: ${f(lantern.position.x          - ip.x)}, y: ${f(lantern.position.y          - ip.y)}, z: ${f(lantern.position.z          - ip.z)} };`,
+                `export const dogBowlOffset          = { x: ${f(dogBowl.position.x          - ip.x)}, y: ${f(dogBowl.position.y          - ip.y)}, z: ${f(dogBowl.position.z          - ip.z)} };`,
+                `export const dogBiscuitOffset       = { x: ${f(dogBiscuit.position.x       - ip.x)}, y: ${f(dogBiscuit.position.y       - ip.y)}, z: ${f(dogBiscuit.position.z       - ip.z)} };`,
                 ``,
                 `// ── Scales ────────────────────────────────────────────────────────────────────`,
                 `export const islandScale      = ${f(island.scale.x)};`,
@@ -715,6 +761,21 @@ function buildGUI(): void {
                 `export const apple1Scale      = ${f(apple1.scale.x)};`,
                 `export const apple2Scale      = ${f(apple2.scale.x)};`,
                 `export const apple3Scale      = ${f(apple3.scale.x)};`,
+                `export const mossRock1Scale   = ${f(mossRock1.scale.x)};`,
+                `export const mossRock2aScale  = ${f(mossRock2a.scale.x)};`,
+                `export const mossRock2bScale  = ${f(mossRock2b.scale.x)};`,
+                `export const mossRock3aScale  = ${f(mossRock3a.scale.x)};`,
+                `export const mossRock3bScale  = ${f(mossRock3b.scale.x)};`,
+                `export const mossRock3cScale  = ${f(mossRock3c.scale.x)};`,
+                `export const dockScale             = ${f(dock.scale.x)};`,
+                `export const robin1Scale           = ${f(robin1.scale.x)};`,
+                `export const robin2Scale           = ${f(robin2.scale.x)};`,
+                `export const foldingTrayTableScale = ${f(foldingTrayTable.scale.x)};`,
+                `export const tentDogBedScale       = ${f(tentDogBed.scale.x)};`,
+                `export const rugRoundScale         = ${f(rugRound.scale.x)};`,
+                `export const lanternScale          = ${f(lantern.scale.x)};`,
+                `export const dogBowlScale          = ${f(dogBowl.scale.x)};`,
+                `export const dogBiscuitScale       = ${f(dogBiscuit.scale.x)};`,
                 ``,
                 `// ── Rotations ─────────────────────────────────────────────────────────────────`,
                 `export const treeRotY   = ${f(tree.rotation.y)};`,
@@ -732,6 +793,21 @@ function buildGUI(): void {
                 `export const apple1RotY     = ${f(apple1.rotation.y)};`,
                 `export const apple2RotY     = ${f(apple2.rotation.y)};`,
                 `export const apple3RotY     = ${f(apple3.rotation.y)};`,
+                `export const mossRock1Rot   = { x: ${f(mossRock1.rotation.x)},  y: ${f(mossRock1.rotation.y)},  z: ${f(mossRock1.rotation.z)} };`,
+                `export const mossRock2aRot  = { x: ${f(mossRock2a.rotation.x)}, y: ${f(mossRock2a.rotation.y)}, z: ${f(mossRock2a.rotation.z)} };`,
+                `export const mossRock2bRot  = { x: ${f(mossRock2b.rotation.x)}, y: ${f(mossRock2b.rotation.y)}, z: ${f(mossRock2b.rotation.z)} };`,
+                `export const mossRock3aRot  = { x: ${f(mossRock3a.rotation.x)}, y: ${f(mossRock3a.rotation.y)}, z: ${f(mossRock3a.rotation.z)} };`,
+                `export const mossRock3bRot  = { x: ${f(mossRock3b.rotation.x)}, y: ${f(mossRock3b.rotation.y)}, z: ${f(mossRock3b.rotation.z)} };`,
+                `export const mossRock3cRot  = { x: ${f(mossRock3c.rotation.x)}, y: ${f(mossRock3c.rotation.y)}, z: ${f(mossRock3c.rotation.z)} };`,
+                `export const dockRot             = { x: ${f(dock.rotation.x)},             y: ${f(dock.rotation.y)},             z: ${f(dock.rotation.z)} };`,
+                `export const robin1Rot           = { x: ${f(robin1.rotation.x)},           y: ${f(robin1.rotation.y)},           z: ${f(robin1.rotation.z)} };`,
+                `export const robin2Rot           = { x: ${f(robin2.rotation.x)},           y: ${f(robin2.rotation.y)},           z: ${f(robin2.rotation.z)} };`,
+                `export const foldingTrayTableRot = { x: ${f(foldingTrayTable.rotation.x)}, y: ${f(foldingTrayTable.rotation.y)}, z: ${f(foldingTrayTable.rotation.z)} };`,
+                `export const tentDogBedRot       = { x: ${f(tentDogBed.rotation.x)},       y: ${f(tentDogBed.rotation.y)},       z: ${f(tentDogBed.rotation.z)} };`,
+                `export const rugRoundRot         = { x: ${f(rugRound.rotation.x)},         y: ${f(rugRound.rotation.y)},         z: ${f(rugRound.rotation.z)} };`,
+                `export const lanternRot          = { x: ${f(lantern.rotation.x)},          y: ${f(lantern.rotation.y)},          z: ${f(lantern.rotation.z)} };`,
+                `export const dogBowlRot          = { x: ${f(dogBowl.rotation.x)},          y: ${f(dogBowl.rotation.y)},          z: ${f(dogBowl.rotation.z)} };`,
+                `export const dogBiscuitRot       = { x: ${f(dogBiscuit.rotation.x)},       y: ${f(dogBiscuit.rotation.y)},       z: ${f(dogBiscuit.rotation.z)} };`,
                 ``,
                 `// ── Island surface grass filter ──────────────────────────────────────────────`,
                 `export const ISLAND_SURFACE_GRASS_COLOR = '${Island.islandSurfaceGrassColor}'; // sRGB hex`,
@@ -1191,6 +1267,34 @@ function buildGUI(): void {
         campfireGroundFolder.close();
     }
     addObjectFolder(surfaceFolder, 'Little Rocks', littleRocks, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
+
+    {
+        const mossRocksFolder = surfaceFolder.addFolder('Moss Rocks');
+        addObjectFolder(mossRocksFolder, 'Moss Rock 1',    mossRock1,  { scaleRange: [0.05, 2.0], rotAxes: ['x', 'y', 'z'] });
+        addObjectFolder(mossRocksFolder, 'Moss Rock 2 A',  mossRock2a, { scaleRange: [0.05, 2.0], rotAxes: ['x', 'y', 'z'] });
+        addObjectFolder(mossRocksFolder, 'Moss Rock 2 B',  mossRock2b, { scaleRange: [0.05, 2.0], rotAxes: ['x', 'y', 'z'] });
+        addObjectFolder(mossRocksFolder, 'Moss Rock 3 A',  mossRock3a, { scaleRange: [0.05, 2.0], rotAxes: ['x', 'y', 'z'] });
+        addObjectFolder(mossRocksFolder, 'Moss Rock 3 B',  mossRock3b, { scaleRange: [0.05, 2.0], rotAxes: ['x', 'y', 'z'] });
+        addObjectFolder(mossRocksFolder, 'Moss Rock 3 C',  mossRock3c, { scaleRange: [0.05, 2.0], rotAxes: ['x', 'y', 'z'] });
+        mossRocksFolder.close();
+    }
+
+    {
+        const newPropsFolder = surfaceFolder.addFolder('New Props');
+        addObjectFolder(newPropsFolder, 'Dock',     dock,   { scaleRange: [0.05, 2.0], rotAxes: ['x', 'y', 'z'] });
+        addObjectFolder(newPropsFolder, 'Robin 1', robin1, { scaleRange: [0.02, 1.0], rotAxes: ['x', 'y', 'z'] });
+        addObjectFolder(newPropsFolder, 'Robin 2', robin2, { scaleRange: [0.02, 1.0], rotAxes: ['x', 'y', 'z'] });
+        newPropsFolder.close();
+
+        const tentFolder = surfaceFolder.addFolder('Tent Interior');
+        addObjectFolder(tentFolder, 'Folding Tray Table', foldingTrayTable, { scaleRange: [0.02, 1.0], rotAxes: ['x', 'y', 'z'] });
+        addObjectFolder(tentFolder, 'Tent Dog Bed',       tentDogBed,       { scaleRange: [0.02, 1.0], rotAxes: ['x', 'y', 'z'] });
+        addObjectFolder(tentFolder, 'Rug Round',          rugRound,         { scaleRange: [0.02, 1.0], rotAxes: ['x', 'y', 'z'] });
+        addObjectFolder(tentFolder, 'Lantern',            lantern,          { scaleRange: [0.02, 1.0], rotAxes: ['x', 'y', 'z'] });
+        addObjectFolder(tentFolder, 'Dog Bowl',           dogBowl,          { scaleRange: [0.01, 0.5], rotAxes: ['x', 'y', 'z'] });
+        addObjectFolder(tentFolder, 'Dog Biscuit',        dogBiscuit,       { scaleRange: [0.005, 0.3], rotAxes: ['x', 'y', 'z'] });
+        tentFolder.close();
+    }
 
     {
         const appleFolder = surfaceFolder.addFolder('Apple');
@@ -1821,6 +1925,29 @@ function buildGUI(): void {
                 `export const chestCoin1Color = { bodyR: ${f(sf.chestCoin1Color.bodyR)}, bodyG: ${f(sf.chestCoin1Color.bodyG)}, bodyB: ${f(sf.chestCoin1Color.bodyB)}, circleR: ${f(sf.chestCoin1Color.circleR)}, circleG: ${f(sf.chestCoin1Color.circleG)}, circleB: ${f(sf.chestCoin1Color.circleB)} };`,
                 `export const chestCoin2Color = { bodyR: ${f(sf.chestCoin2Color.bodyR)}, bodyG: ${f(sf.chestCoin2Color.bodyG)}, bodyB: ${f(sf.chestCoin2Color.bodyB)}, circleR: ${f(sf.chestCoin2Color.circleR)}, circleG: ${f(sf.chestCoin2Color.circleG)}, circleB: ${f(sf.chestCoin2Color.circleB)} };`,
                 `export const chestCoin3Color = { bodyR: ${f(sf.chestCoin3Color.bodyR)}, bodyG: ${f(sf.chestCoin3Color.bodyG)}, bodyB: ${f(sf.chestCoin3Color.bodyB)}, circleR: ${f(sf.chestCoin3Color.circleR)}, circleG: ${f(sf.chestCoin3Color.circleG)}, circleB: ${f(sf.chestCoin3Color.circleB)} };`,
+                ``,
+                `// -- Extra corals scattered around the coral rocks ----------------------------`,
+                `export const coral1Left  = { x: ${f(sf.coral1Left.x )}, y: ${f(sf.coral1Left.y )}, z: ${f(sf.coral1Left.z )}, scale: ${f(sf.coral1Left.scale )}, rx: ${f(sf.coral1Left.rx )}, ry: ${f(sf.coral1Left.ry )}, rz: ${f(sf.coral1Left.rz )}, r: ${f(sf.coral1Left.r )}, g: ${f(sf.coral1Left.g )}, b: ${f(sf.coral1Left.b )} };`,
+                `export const coral1Right = { x: ${f(sf.coral1Right.x)}, y: ${f(sf.coral1Right.y)}, z: ${f(sf.coral1Right.z)}, scale: ${f(sf.coral1Right.scale)}, rx: ${f(sf.coral1Right.rx)}, ry: ${f(sf.coral1Right.ry)}, rz: ${f(sf.coral1Right.rz)}, r: ${f(sf.coral1Right.r)}, g: ${f(sf.coral1Right.g)}, b: ${f(sf.coral1Right.b)} };`,
+                `export const coral2Left  = { x: ${f(sf.coral2Left.x )}, y: ${f(sf.coral2Left.y )}, z: ${f(sf.coral2Left.z )}, scale: ${f(sf.coral2Left.scale )}, rx: ${f(sf.coral2Left.rx )}, ry: ${f(sf.coral2Left.ry )}, rz: ${f(sf.coral2Left.rz )}, r: ${f(sf.coral2Left.r )}, g: ${f(sf.coral2Left.g )}, b: ${f(sf.coral2Left.b )} };`,
+                `export const coral2Right = { x: ${f(sf.coral2Right.x)}, y: ${f(sf.coral2Right.y)}, z: ${f(sf.coral2Right.z)}, scale: ${f(sf.coral2Right.scale)}, rx: ${f(sf.coral2Right.rx)}, ry: ${f(sf.coral2Right.ry)}, rz: ${f(sf.coral2Right.rz)}, r: ${f(sf.coral2Right.r)}, g: ${f(sf.coral2Right.g)}, b: ${f(sf.coral2Right.b)} };`,
+                ``,
+                `// -- Anemone (left of the coral rocks) ----------------------------------------`,
+                `export const anemone           = { x: ${f(sf.anemone.x)}, y: ${f(sf.anemone.y)}, z: ${f(sf.anemone.z)}, scale: ${f(sf.anemone.scale)}, rx: ${f(sf.anemone.rx)}, ry: ${f(sf.anemone.ry)}, rz: ${f(sf.anemone.rz)} };`,
+                `export const anemoneTopY       = ${f(sf.anemoneTopY)};`,
+                `export const anemoneSwayStrength  = ${f(sf.anemoneSwayStrength)};`,
+                `export const anemoneSwaySpeed     = ${f(sf.anemoneSwaySpeed)};`,
+                `export const anemoneSwayFrequency = ${f(sf.anemoneSwayFrequency)};`,
+                ``,
+                `// -- Mini clownfish swimming around the anemone -------------------------------`,
+                `export const anemoneFish1 = { x: ${f(sf.anemoneFish1.x)}, y: ${f(sf.anemoneFish1.y)}, z: ${f(sf.anemoneFish1.z)}, scale: ${f(sf.anemoneFish1.scale)}, swimRadius: ${f(sf.anemoneFish1.swimRadius)}, period: ${f(sf.anemoneFish1.period)}, phase: ${f(sf.anemoneFish1.phase)} };`,
+                `export const anemoneFish2 = { x: ${f(sf.anemoneFish2.x)}, y: ${f(sf.anemoneFish2.y)}, z: ${f(sf.anemoneFish2.z)}, scale: ${f(sf.anemoneFish2.scale)}, swimRadius: ${f(sf.anemoneFish2.swimRadius)}, period: ${f(sf.anemoneFish2.period)}, phase: ${f(sf.anemoneFish2.phase)} };`,
+                ``,
+                `// -- Starfish on the seafloor near the chest -----------------------------------`,
+                `export const starfish = { x: ${f(sf.starfish.x)}, y: ${f(sf.starfish.y)}, z: ${f(sf.starfish.z)}, scale: ${f(sf.starfish.scale)}, rx: ${f(sf.starfish.rx)}, ry: ${f(sf.starfish.ry)}, rz: ${f(sf.starfish.rz)} };`,
+                ``,
+                `// -- Crab behind the chest, slightly to the right ------------------------------`,
+                `export const crab = { x: ${f(sf.crab.x)}, y: ${f(sf.crab.y)}, z: ${f(sf.crab.z)}, scale: ${f(sf.crab.scale)}, rx: ${f(sf.crab.rx)}, ry: ${f(sf.crab.ry)}, rz: ${f(sf.crab.rz)} };`,
             ].join('\n');
             navigator.clipboard.writeText(content).then(() => {
                 console.log('[Debug] SeaFloorConfig.ts content copied to clipboard!');
@@ -1907,6 +2034,65 @@ function buildGUI(): void {
     makePlacementFolder(sfKelpFolder, 'Kelp 2', () => sf.kelp2, () => SeaFloorDecor.updateKelpTransform(1));
     makePlacementFolder(sfKelpFolder, 'Kelp 3', () => sf.kelp3, () => SeaFloorDecor.updateKelpTransform(2));
     sfKelpFolder.close();
+
+    // ── Extras (added with the new model batch) ──────────────────────────────
+    const sfExtrasFolder = sfFolder.addFolder('Extras');
+    // 4 extra corals — placement + colour
+    const extraCoralKeys = ['coral1Left', 'coral1Right', 'coral2Left', 'coral2Right'] as const;
+    const extraCoralLabels = ['Coral 1 Left', 'Coral 1 Right', 'Coral 2 Left', 'Coral 2 Right'];
+    ([0, 1, 2, 3] as const).forEach((i) => {
+        const key = extraCoralKeys[i];
+        makePlacementFolder(sfExtrasFolder, extraCoralLabels[i], () => sf[key], () => SeaFloorDecor.updateExtraCoralTransform(i));
+        const folder = sfExtrasFolder.children[sfExtrasFolder.children.length - 1] as any;
+        const colorProxy = {
+            get r() { return sf[key].r; }, set r(v: number) { sf[key].r = v; SeaFloorDecor.updateExtraCoralColor(i); },
+            get g() { return sf[key].g; }, set g(v: number) { sf[key].g = v; SeaFloorDecor.updateExtraCoralColor(i); },
+            get b() { return sf[key].b; }, set b(v: number) { sf[key].b = v; SeaFloorDecor.updateExtraCoralColor(i); },
+        };
+        folder.add(colorProxy, 'r', 0, 1, 0.01).name('Color R').listen();
+        folder.add(colorProxy, 'g', 0, 1, 0.01).name('Color G').listen();
+        folder.add(colorProxy, 'b', 0, 1, 0.01).name('Color B').listen();
+    });
+    // Anemone — placement + own sway settings
+    makePlacementFolder(sfExtrasFolder, 'Anemone', () => sf.anemone as any, () => SeaFloorDecor.updateAnemoneTransform());
+    const anemoneSwayFolder = sfExtrasFolder.addFolder('Anemone Sway (live)');
+    const anemoneSwayProxy = {
+        get topY()      { return sf.anemoneTopY;          }, set topY(v: number)      { sf.anemoneTopY          = v; },
+        get strength()  { return sf.anemoneSwayStrength;  }, set strength(v: number)  { sf.anemoneSwayStrength  = v; },
+        get speed()     { return sf.anemoneSwaySpeed;     }, set speed(v: number)     { sf.anemoneSwaySpeed     = v; },
+        get frequency() { return sf.anemoneSwayFrequency; }, set frequency(v: number) { sf.anemoneSwayFrequency = v; },
+    };
+    anemoneSwayFolder.add(anemoneSwayProxy, 'topY',      0.05, 5,   0.01).name('Tip Y (local)').listen();
+    anemoneSwayFolder.add(anemoneSwayProxy, 'strength',  0,    1,   0.005).name('Strength').listen();
+    anemoneSwayFolder.add(anemoneSwayProxy, 'speed',     0.05, 5,   0.01).name('Speed').listen();
+    anemoneSwayFolder.add(anemoneSwayProxy, 'frequency', 0.2,  15,  0.05).name('Frequency').listen();
+    anemoneSwayFolder.close();
+    // Two anemone clownfish — placement + swim params
+    const fishKeys = ['anemoneFish1', 'anemoneFish2'] as const;
+    fishKeys.forEach((key, i) => {
+        const folder = sfExtrasFolder.addFolder(`Anemone Fish ${i + 1}`);
+        const p = {
+            get x()       { return sf[key].x;          }, set x(v: number)       { sf[key].x          = v; },
+            get y()       { return sf[key].y;          }, set y(v: number)       { sf[key].y          = v; },
+            get z()       { return sf[key].z;          }, set z(v: number)       { sf[key].z          = v; },
+            get scale()   { return sf[key].scale;      }, set scale(v: number)   { sf[key].scale      = v; },
+            get swimR()   { return sf[key].swimRadius; }, set swimR(v: number)   { sf[key].swimRadius = v; },
+            get period()  { return sf[key].period;     }, set period(v: number)  { sf[key].period     = v; },
+            get phase()   { return sf[key].phase;      }, set phase(v: number)   { sf[key].phase      = v; },
+        };
+        folder.add(p, 'x',      -30, 30, 0.05).name('X (base)').listen();
+        folder.add(p, 'y',      -15, 5,  0.05).name('Y').listen();
+        folder.add(p, 'z',      -30, 30, 0.05).name('Z (base)').listen();
+        folder.add(p, 'scale',  0.001, 0.1, 0.0005).name('Scale').listen();
+        folder.add(p, 'swimR',  0,    2,   0.01).name('Swim Radius').listen();
+        folder.add(p, 'period', 0.5,  20,  0.05).name('Period (s)').listen();
+        folder.add(p, 'phase',  0,    6.3, 0.01).name('Phase').listen();
+        folder.close();
+    });
+    // Starfish + crab — straight placement
+    makePlacementFolder(sfExtrasFolder, 'Starfish', () => sf.starfish, () => SeaFloorDecor.updateStarfishTransform());
+    makePlacementFolder(sfExtrasFolder, 'Crab',     () => sf.crab,     () => SeaFloorDecor.updateCrabTransform());
+    sfExtrasFolder.close();
 
     // ── Chest ────────────────────────────────────────────────────────────────────
     makePlacementFolder(sfChestFolder, 'Placement', () => sf.chest, () => Island.updateChestTransform());

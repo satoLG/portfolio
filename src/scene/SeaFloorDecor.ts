@@ -6,8 +6,11 @@
  * Call Update(dt) every frame.
  * Add decorGroup to the Three.js scene from Scene.ts.
  */
-import { Group, Mesh, Uniform, Vector2, Vector3, Box3, Sphere } from "three";
+import { Group, Mesh, Uniform, Vector2, Vector3, Box3, Sphere, AnimationMixer, LoopRepeat } from "three";
 import { GLTFLoader }           from "three/examples/jsm/loaders/GLTFLoader";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — r137 @types declares a namespace but the module exports clone directly
+import { clone as _skeletonClone } from "three/examples/jsm/utils/SkeletonUtils";
 import {
     oceanAbsorptionUniform,
     underwaterFogDistUniform,
@@ -65,6 +68,20 @@ export const config = {
     chestCoin1Color:  { ...C.chestCoin1Color },
     chestCoin2Color:  { ...C.chestCoin2Color },
     chestCoin3Color:  { ...C.chestCoin3Color },
+    // New scattered props
+    coral1Left:  { ...C.coral1Left  },
+    coral1Right: { ...C.coral1Right },
+    coral2Left:  { ...C.coral2Left  },
+    coral2Right: { ...C.coral2Right },
+    anemone:           { ...C.anemone },
+    anemoneTopY:       C.anemoneTopY,
+    anemoneSwayStrength:  C.anemoneSwayStrength,
+    anemoneSwaySpeed:     C.anemoneSwaySpeed,
+    anemoneSwayFrequency: C.anemoneSwayFrequency,
+    anemoneFish1: { ...C.anemoneFish1 },
+    anemoneFish2: { ...C.anemoneFish2 },
+    starfish: { ...C.starfish },
+    crab:     { ...C.crab     },
 };
 
 // ── Scene group ────────────────────────────────────────────────────────────────
@@ -85,8 +102,35 @@ export const kelpTopYUniform  = new Uniform(C.kelpTopY);
 let rockTemplates: (Group | null)[] = [null, null, null];
 let coralTemplate: Group | null     = null;
 let kelpTemplate:  Group | null     = null;
+// New templates for the extra props
+let coral1Template:    Group | null = null;
+let coral2Template:    Group | null = null;
+let anemoneTemplate:   Group | null = null;
+let starfishTemplate:  Group | null = null;
+let crabTemplate:      Group | null = null;
+let clownfishTemplate: Group | null = null;
+let clownfishAnimations: import("three").AnimationClip[] = [];
+let crabAnimations:      import("three").AnimationClip[] = [];
 let loadedCount = 0;
-const TOTAL_MODELS = 5;
+const TOTAL_MODELS = 11; // 3 rocks + coral + kelp + coral1 + coral2 + anemone + starfish + crab + clownfish
+
+// Per-frame mixers + spawned references for the new props
+let crabMixer: AnimationMixer | null = null;
+let anemoneFish1Mixer: AnimationMixer | null = null;
+let anemoneFish2Mixer: AnimationMixer | null = null;
+let _anemoneGroup: Group | null = null;
+let _starfishGroup: Group | null = null;
+let _crabGroup: Group | null = null;
+let _anemoneFish1Group: Group | null = null;
+let _anemoneFish2Group: Group | null = null;
+const _extraCorals: (Group | null)[] = [null, null, null, null];  // [c1L, c1R, c2L, c2R]
+
+// Dedicated sway uniforms for the anemone — kept separate from kelp so the
+// look can be tuned independently while reusing the same shader injector.
+const anemoneTimeUniform = new Uniform(0.0);
+const anemoneSwayUniform = new Uniform(C.anemoneSwayStrength);
+const anemoneFreqUniform = new Uniform(C.anemoneSwayFrequency);
+const anemoneTopYUniform = new Uniform(C.anemoneTopY);
 
 /** True once all 5 underwater decoration GLTFs have finished loading. */
 export function isLoaded(): boolean { return loadedCount >= TOTAL_MODELS; }
@@ -189,11 +233,19 @@ function applyOceanLighting(model: Group, cacheKeySuffix = ''): void {
 // ── Kelp sway injector ────────────────────────────────────────────────────────
 /**
  * Apply the kelp sway + ocean lighting shader to every mesh in `model`.
- * All kelp instances share `sf_kelp_sway` as the cache key so the GLSL is
- * compiled only once.  Only `uKelpPhase` differs per instance (captured by
- * the closure).
+ * The four shared uniforms (time/sway/topY/freq) are passed in so the same
+ * shader injector can power both kelp instances and any other prop that wants
+ * the same vertex-distortion-on-top behaviour (e.g. the anemone).
+ * `cacheKey` lets each prop family compile its own program once.
  */
-function applyKelpSway(model: Group, phaseOffset: number): void {
+type SwayUniforms = {
+    time: Uniform<number>;
+    sway: Uniform<number>;
+    topY: Uniform<number>;
+    freq: Uniform<number>;
+};
+
+function applyKelpSway(model: Group, phaseOffset: number, uniforms: SwayUniforms = { time: kelpTimeUniform, sway: kelpSwayUniform, topY: kelpTopYUniform, freq: kelpFreqUniform }, cacheKey: string = 'sf_kelp_sway'): void {
     const phaseUniform = new Uniform(phaseOffset);  // unique per instance
 
     model.traverse((child) => {
@@ -202,13 +254,13 @@ function applyKelpSway(model: Group, phaseOffset: number): void {
         const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
         mats.forEach((mat: any) => {
             if (!(mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial || mat.isMeshBasicMaterial)) return;
-            mat.customProgramCacheKey = () => 'sf_kelp_sway';
+            mat.customProgramCacheKey = () => cacheKey;
             mat.onBeforeCompile = (shader: any) => {
                 // Uniforms
-                shader.uniforms.uKelpTime      = kelpTimeUniform;   // shared
-                shader.uniforms.uKelpSway      = kelpSwayUniform;   // shared
-                shader.uniforms.uKelpTopY      = kelpTopYUniform;   // shared
-                shader.uniforms.uKelpFreq      = kelpFreqUniform;   // shared
+                shader.uniforms.uKelpTime      = uniforms.time;     // shared per family
+                shader.uniforms.uKelpSway      = uniforms.sway;     // shared per family
+                shader.uniforms.uKelpTopY      = uniforms.topY;     // shared per family
+                shader.uniforms.uKelpFreq      = uniforms.freq;     // shared per family
                 shader.uniforms.uKelpPhase     = phaseUniform;      // per-instance
                 shader.uniforms.uLight         = lightUniform;
                 shader.uniforms.uAbsorption    = oceanAbsorptionUniform;
@@ -346,24 +398,162 @@ function spawnAll(): void {
             _kelps[i] = kelp;
         }
     }
+
+    // ── Extra props (corals around rocks, anemone, starfish, crab, fish) ────
+    _spawnExtras();
+
     _initCoralStates();
 }
+
+/** Spawn the new scattered props introduced in the visual_enhancements_2 batch.
+ *  Each prop is parented to decorGroup so the existing surface↔underwater
+ *  visibility gating already covers them. */
+function _spawnExtras(): void {
+    // Reset previously spawned references
+    for (let i = 0; i < _extraCorals.length; i++) _extraCorals[i] = null;
+    _anemoneGroup = null;
+    _starfishGroup = null;
+    _crabGroup = null;
+    _anemoneFish1Group = null;
+    _anemoneFish2Group = null;
+    crabMixer = null;
+    anemoneFish1Mixer = null;
+    anemoneFish2Mixer = null;
+
+    // Refresh anemone-specific uniforms from config (kept independent from kelp)
+    anemoneSwayUniform.value = config.anemoneSwayStrength;
+    anemoneFreqUniform.value = config.anemoneSwayFrequency;
+    anemoneTopYUniform.value = config.anemoneTopY;
+
+    // Extra corals: same shader as the main corals, individually tintable.
+    const extraCoralCfgs = [
+        { cfg: config.coral1Left,  tmpl: coral1Template, key: '_xc1l' },
+        { cfg: config.coral1Right, tmpl: coral1Template, key: '_xc1r' },
+        { cfg: config.coral2Left,  tmpl: coral2Template, key: '_xc2l' },
+        { cfg: config.coral2Right, tmpl: coral2Template, key: '_xc2r' },
+    ];
+    for (let i = 0; i < extraCoralCfgs.length; i++) {
+        const { cfg, tmpl, key } = extraCoralCfgs[i];
+        if (!tmpl) continue;
+        const g = cloneModel(tmpl);
+        applyPlacement(g, cfg);
+        applyCoralColor(g, cfg.r, cfg.g, cfg.b);
+        applyOceanLighting(g, key);
+        decorGroup.add(g);
+        _extraCorals[i] = g;
+    }
+
+    // Anemone — kelp-sway shader with its own uniforms so top fronds wave
+    // distinctly from the regular kelp.
+    if (anemoneTemplate) {
+        const g = cloneModel(anemoneTemplate);
+        applyPlacement(g, config.anemone);
+        applyKelpSway(g, 0.0, {
+            time: anemoneTimeUniform,
+            sway: anemoneSwayUniform,
+            topY: anemoneTopYUniform,
+            freq: anemoneFreqUniform,
+        }, 'sf_anemone_sway');
+        decorGroup.add(g);
+        _anemoneGroup = g;
+    }
+
+    // Starfish — static, ocean-lit, sits on the floor near the chest.
+    if (starfishTemplate) {
+        const g = cloneModel(starfishTemplate);
+        applyPlacement(g, config.starfish);
+        applyOceanLighting(g, '_starfish');
+        decorGroup.add(g);
+        _starfishGroup = g;
+    }
+
+    // Crab — same lighting + its own animation mixer driven from Update().
+    if (crabTemplate) {
+        const g = cloneModel(crabTemplate);
+        applyPlacement(g, config.crab);
+        applyOceanLighting(g, '_crab');
+        decorGroup.add(g);
+        _crabGroup = g;
+        if (crabAnimations.length > 0) {
+            crabMixer = new AnimationMixer(g);
+            const action = crabMixer.clipAction(crabAnimations[0]);
+            action.play();
+        }
+    }
+
+    // Two tiny clownfish that swim in a small circle around the anemone.
+    // Pattern mirrors the working circular clownfish in Fish.ts exactly:
+    //   - SkeletonUtils.clone (NOT Object3D.clone) so each instance has its
+    //     own skeleton — without this the AnimationMixer has nothing of its
+    //     own to drive and the model stays in the giant bind pose.
+    //   - The clone is wrapped in a parent Group; scale is applied to the
+    //     wrapper, position/rotation are animated per frame.
+    if (clownfishTemplate) {
+        const spawnFish = (cfg: { scale: number }): { wrapper: Group; mixer: AnimationMixer | null } => {
+            const scene = _skeletonClone(clownfishTemplate!) as Group;
+            applyOceanLighting(scene, '_anemfish');
+            const wrapper = new Group();
+            wrapper.add(scene);
+            wrapper.scale.setScalar(cfg.scale);
+            decorGroup.add(wrapper);
+            let mixer: AnimationMixer | null = null;
+            if (clownfishAnimations.length > 0) {
+                mixer = new AnimationMixer(scene);
+                const action = mixer.clipAction(clownfishAnimations[0]);
+                action.setLoop(LoopRepeat, Infinity);
+                action.play();
+            }
+            return { wrapper, mixer };
+        };
+        const f1 = spawnFish(config.anemoneFish1);
+        _anemoneFish1Group = f1.wrapper;
+        anemoneFish1Mixer = f1.mixer;
+        const f2 = spawnFish(config.anemoneFish2);
+        _anemoneFish2Group = f2.wrapper;
+        anemoneFish2Mixer = f2.mixer;
+    }
+}
+
+/** Re-apply transform from config to a specific extra prop (called by debug GUI). */
+export function updateExtraCoralTransform(idx: 0 | 1 | 2 | 3): void {
+    const g = _extraCorals[idx];
+    if (!g) return;
+    const cfgs = [config.coral1Left, config.coral1Right, config.coral2Left, config.coral2Right];
+    applyPlacement(g, cfgs[idx]);
+}
+export function updateExtraCoralColor(idx: 0 | 1 | 2 | 3): void {
+    const g = _extraCorals[idx];
+    if (!g) return;
+    const cfgs = [config.coral1Left, config.coral1Right, config.coral2Left, config.coral2Right];
+    const c = cfgs[idx];
+    applyCoralColor(g, c.r, c.g, c.b);
+}
+export function updateAnemoneTransform(): void { if (_anemoneGroup) applyPlacement(_anemoneGroup, config.anemone); }
+export function updateStarfishTransform(): void { if (_starfishGroup) applyPlacement(_starfishGroup, config.starfish); }
+export function updateCrabTransform(): void { if (_crabGroup) applyPlacement(_crabGroup, config.crab); }
 
 // ── GLTF loading ───────────────────────────────────────────────────────────────
 function loadModels(): void {
     const loader = new GLTFLoader();
 
-    const entries: Array<{ path: string; onLoad: (g: Group) => void }> = [
-        { path: 'models/underwater/coral_rock1.glb', onLoad: g => { rockTemplates[0] = g; } },
-        { path: 'models/underwater/coral_rock2.glb', onLoad: g => { rockTemplates[1] = g; } },
-        { path: 'models/underwater/coral_rock3.glb', onLoad: g => { rockTemplates[2] = g; } },
-        { path: 'models/underwater/coral.glb',       onLoad: g => { coralTemplate = g; } },
-        { path: 'models/underwater/kelp.glb',        onLoad: g => { kelpTemplate  = g; } },
+    type Entry = { path: string; onLoad: (gltf: { scene: Group; animations: import("three").AnimationClip[] }) => void };
+    const entries: Entry[] = [
+        { path: 'models/underwater/coral_rock1.glb', onLoad: g => { rockTemplates[0] = g.scene; } },
+        { path: 'models/underwater/coral_rock2.glb', onLoad: g => { rockTemplates[1] = g.scene; } },
+        { path: 'models/underwater/coral_rock3.glb', onLoad: g => { rockTemplates[2] = g.scene; } },
+        { path: 'models/underwater/coral.glb',       onLoad: g => { coralTemplate = g.scene; } },
+        { path: 'models/underwater/kelp.glb',        onLoad: g => { kelpTemplate  = g.scene; } },
+        { path: 'models/underwater/coral1.glb',      onLoad: g => { coral1Template    = g.scene; } },
+        { path: 'models/underwater/coral2.glb',      onLoad: g => { coral2Template    = g.scene; } },
+        { path: 'models/underwater/anemone.glb',     onLoad: g => { anemoneTemplate   = g.scene; } },
+        { path: 'models/underwater/starfish.glb',    onLoad: g => { starfishTemplate  = g.scene; } },
+        { path: 'models/underwater/crab.glb',        onLoad: g => { crabTemplate      = g.scene; crabAnimations = g.animations; } },
+        { path: 'models/underwater/clownfish.glb',   onLoad: g => { clownfishTemplate = g.scene; clownfishAnimations = g.animations; } },
     ];
 
     for (const entry of entries) {
         loader.load(entry.path, (gltf) => {
-            entry.onLoad(gltf.scene);
+            entry.onLoad(gltf as any);
             loadedCount++;
             if (loadedCount >= TOTAL_MODELS) spawnAll();
         }, undefined, (err) => {
@@ -415,7 +605,45 @@ export function Update(dt: number): void {
     kelpSwayUniform.value  = config.kelpSwayStrength;
     kelpFreqUniform.value  = config.kelpSwayFrequency;
     kelpTopYUniform.value  = config.kelpTopY;
+
+    // Anemone sway — independent time/strength/freq from the kelp.
+    anemoneTimeUniform.value += dt * config.anemoneSwaySpeed;
+    anemoneSwayUniform.value  = config.anemoneSwayStrength;
+    anemoneFreqUniform.value  = config.anemoneSwayFrequency;
+    anemoneTopYUniform.value  = config.anemoneTopY;
+
+    // Animated props
+    if (crabMixer)         crabMixer.update(dt);
+    if (anemoneFish1Mixer) anemoneFish1Mixer.update(dt);
+    if (anemoneFish2Mixer) anemoneFish2Mixer.update(dt);
+
+    // Circle each clownfish around the anemone using the same trajectory
+    // pattern as Fish.ts's main clownFish — circleAngle advances with dt,
+    // position = anemoneCenter + (cos, 0, sin) * swimRadius, rotation faces
+    // tangent. `period` controls how fast the orbit completes; `phase` and
+    // y offset stay user-tweakable from the GUI for vertical/start spread.
+    _anemoneCircleTime += dt;
+    if (_anemoneFish1Group) _updateAnemoneFishCircle(_anemoneFish1Group, config.anemoneFish1);
+    if (_anemoneFish2Group) _updateAnemoneFishCircle(_anemoneFish2Group, config.anemoneFish2);
+
     updateCoralInteraction(dt);
+}
+
+// Single shared clock for both fish — each one offsets it via cfg.phase.
+let _anemoneCircleTime = 0;
+const ANEMONE_FISH_ROTATION_OFFSET = Math.PI * 2;
+function _updateAnemoneFishCircle(wrapper: Group, cfg: { x: number; y: number; z: number; swimRadius: number; period: number; phase: number }): void {
+    // Angular speed: one full lap every `period` seconds.
+    const omega = (Math.PI * 2) / Math.max(0.5, cfg.period);
+    const angle = _anemoneCircleTime * omega + cfg.phase;
+    // Centre is the anemone in XZ; cfg.y stays the user-set vertical offset.
+    wrapper.position.set(
+        config.anemone.x + Math.cos(angle) * cfg.swimRadius,
+        cfg.y,
+        config.anemone.z + Math.sin(angle) * cfg.swimRadius,
+    );
+    // Same heading formula as Fish.ts: face tangent direction of the orbit.
+    wrapper.rotation.y = -angle + ANEMONE_FISH_ROTATION_OFFSET;
 }
 
 /** Clear all decorations and re-spawn every model using current config values. */
