@@ -28,6 +28,29 @@ const CROSSFADE_DURATION = 1.0;
 const AUDIO_CHECK_INTERVAL = 2000;
 const FADE_IN_DURATION = 2.0;  // seconds — all audio fades in over this after start
 
+// ── Intro (sky / pre-descent) audio ──────────────────────────────────────────
+// Plays from start-click until the camera begins descending. Both fade in
+// gradually from silence and fade out gradually when the descent triggers.
+const INTRO_PIANO_VOLUME       = 0.25;   // Loop volume while in sky
+const INTRO_BREEZE_VOLUME      = 0.08;   // Quieter than scene breeze on purpose
+const INTRO_BREEZE_INTERVAL    = 5;      // Seconds between breeze plays
+const INTRO_FADE_IN_DURATION   = 3.0;    // Fade-in when start clicked
+const INTRO_FADE_OUT_DURATION  = 2.5;    // Fade-out when descent begins
+export const INTRO_WRITING_VOLUME = 0.03; // Tegaki pen scratching during welcome text — read by WelcomeText.ts
+
+// ── Day-time bird tweets (played on click — see Island.ts robin interaction) ─
+const DAY_BIRD_VOLUME = 0.6;             // EASY TO TWEAK — on-click bird tweet volume
+
+// ── Night crickets loop ──────────────────────────────────────────────────────
+const CRICKETS_VOLUME       = 0.08;      // EASY TO TWEAK — very soft
+const CRICKETS_FADE_DURATION = 0;      // Day↔night crossfade
+
+// ── Scene audio reveal (camera proximity to island) ──────────────────────────
+// Scene audio is silent while camera is high above the island and ramps up
+// linearly as the camera descends past these thresholds.
+const SCENE_REVEAL_START_Y = 5.5;        // Above this Y: scene audio silent
+const SCENE_REVEAL_END_Y   = 2.5;        // Below this Y: scene audio full volume
+
 const AUDIO_PATHS = {
     water: 'audio/nature/surface/waves.mp3',
     breeze: 'audio/nature/surface/breeze.wav',
@@ -35,6 +58,10 @@ const AUDIO_PATHS = {
     underwaterAmb: 'audio/nature/underwater/366159__dcsfx__underwater-loop-amb.wav',
     underwaterBubbles: 'audio/nature/underwater/96742__robinhood76__01650-underwater-bubbles.wav',
     waterSplash: 'audio/nature/surface/274060__junggle__water-splash-11.wav',
+    introPiano: 'audio/music/320526__benpm__ambient-piano-music-3.wav',
+    dayBird1: 'audio/nature/surface/31062 Ortolan bird tweet-full.mp3',
+    dayBird2: 'audio/nature/surface/31451 Ortolan bunting bird isolated tweet-full.mp3',
+    crickets: 'audio/nature/surface/Crickets.mp3',
     uiSwitchDay: '/audio/ui/dragon-studio-light-switch-on-382714.mp3',
     uiSwitchNight: '/audio/ui/dragon-studio-light-switch-382712.mp3',
     uiButton: '/audio/ui/soundreality-button-202966.mp3',
@@ -191,6 +218,12 @@ let natureGain: GainNode | null = null;
 let interfaceGain: GainNode | null = null;
 let characterGain: GainNode | null = null;
 
+// Sub-gain nodes between natureGain and individual sound gains. Let us fade
+// the intro audio independently from the scene audio, and ramp scene audio
+// based on camera Y proximity to the island.
+let introGain: GainNode | null = null;
+let sceneRevealGain: GainNode | null = null;
+
 /** Master output node — all audio routes through this for global fade-in.
  *  External consumers (e.g. MediaPlayer) should connect here instead of ctx.destination. */
 export function getMasterDestination(): AudioNode | null {
@@ -224,6 +257,27 @@ let underwaterBubblesSound: BufferSound | null = null;
 let bubblesStopTimer: ReturnType<typeof setTimeout> | null = null;
 
 let waterSplashSound: BufferSound | null = null;
+
+// ── Intro / sky audio ────────────────────────────────────────────────────────
+let introPianoSound: BufferSound | null = null;
+let introBreezeSound: BufferSound | null = null;
+let introBreezeTimeout: ReturnType<typeof setTimeout> | null = null;
+let introPianoActive = false;
+
+// ── Day birds + night crickets ───────────────────────────────────────────────
+// Bird tweets are click-triggered from Island.ts (robin interaction). The
+// buffers stay loaded so playBirdTweet() can fire them on demand.
+let dayBirdSounds: BufferSound[] = [];
+let cricketsSound: BufferSound | null = null;
+let cricketsActive = false;
+
+// ── Scene reveal state ───────────────────────────────────────────────────────
+// Armed when descent begins. While armed, sceneRevealGain.gain is set each
+// frame from camera Y. Once it reaches ~1, the scene is considered "revealed"
+// and we stop touching the gain (so user volume changes flow through normally).
+let sceneRevealArmed = false;
+let sceneRevealComplete = false;   // true once gain has reached full
+let sceneAudioStarted = false;     // true once water/breeze/etc loops have been kicked off
 
 // ============================================
 // CHARACTER SOUNDS
@@ -417,6 +471,122 @@ function stopFireplace(): void {
 }
 
 // ============================================
+// INTRO (SKY) AUDIO — piano loop + soft scheduled breeze
+// Plays from start-click until camera descent triggers transition.
+// ============================================
+function startIntroPiano(): void {
+    if (!introPianoSound || !_audioContext || !introGain) return;
+    const ctx = _audioContext;
+    const now = ctx.currentTime;
+    introPianoActive = true;
+    // Ramp introGain from 0 to 1 (volume of individual sounds set on their gains)
+    introGain.gain.cancelScheduledValues(now);
+    introGain.gain.setValueAtTime(0, now);
+    introGain.gain.linearRampToValueAtTime(1, now + INTRO_FADE_IN_DURATION);
+    introPianoSound.gain.gain.value = INTRO_PIANO_VOLUME;
+    playBufferSound(introPianoSound);
+    scheduleIntroBreeze();
+}
+
+function scheduleIntroBreeze(): void {
+    if (introBreezeTimeout) { clearTimeout(introBreezeTimeout); introBreezeTimeout = null; }
+    if (!introPianoActive) return;
+    introBreezeTimeout = setTimeout(() => {
+        if (!introPianoActive || !introBreezeSound) return;
+        introBreezeSound.gain.gain.value = INTRO_BREEZE_VOLUME;
+        playBufferSound(introBreezeSound, {
+            onEnded: () => { if (introPianoActive) scheduleIntroBreeze(); }
+        });
+    }, INTRO_BREEZE_INTERVAL * 1000);
+}
+
+function stopIntroAudio(): void {
+    if (!introPianoActive) return;
+    introPianoActive = false;
+    if (introBreezeTimeout) { clearTimeout(introBreezeTimeout); introBreezeTimeout = null; }
+    if (!_audioContext || !introGain) return;
+    const ctx = _audioContext;
+    const now = ctx.currentTime;
+    introGain.gain.cancelScheduledValues(now);
+    introGain.gain.setValueAtTime(introGain.gain.value, now);
+    introGain.gain.linearRampToValueAtTime(0, now + INTRO_FADE_OUT_DURATION);
+    // Hard-stop the sources after the fade completes so they don't keep CPU
+    setTimeout(() => {
+        if (introPianoSound) stopBufferSound(introPianoSound);
+        if (introBreezeSound) stopBufferSound(introBreezeSound);
+    }, INTRO_FADE_OUT_DURATION * 1000 + 100);
+}
+
+/** Called from UI.ts when the camera descent begins. Fades intro audio out
+ *  and arms scene audio to fade in based on camera proximity (Audio.Update). */
+export function transitionFromIntroToScene(): void {
+    if (!audioInitialized) return;
+    stopIntroAudio();
+    sceneRevealArmed = true;
+    sceneRevealComplete = false;
+    // Start the scene loops NOW (silenced by sceneRevealGain=0). They'll be
+    // audible as the camera descends and sceneRevealGain ramps up.
+    startSceneAudio();
+}
+
+// ============================================
+// SCENE AUDIO (water, scene breeze, fireplace, birds, crickets)
+// Started by transitionFromIntroToScene. Gated by sceneRevealGain.
+// ============================================
+function startSceneAudio(): void {
+    if (sceneAudioStarted || isCurrentlyUnderwater) return;
+    sceneAudioStarted = true;
+
+    if (!natureMuted) {
+        startWaterLoop();
+        scheduleBreeze();
+        if (!isDayTime()) startFireplace();
+        if (!isDayTime()) startCrickets();
+    }
+}
+
+// ============================================
+// BIRD TWEET (on-demand — fired by clicking a robin in Island.ts)
+// ============================================
+/** Play the indexed bird tweet (0 = first robin, 1 = second). Safe to call
+ *  before audio is initialized — no-op in that case. Also no-op underwater. */
+export function playBirdTweet(index: number): void {
+    if (!audioInitialized || isCurrentlyUnderwater) return;
+    if (index < 0 || index >= dayBirdSounds.length) return;
+    const sound = dayBirdSounds[index];
+    if (!sound) return;
+    sound.gain.gain.value = DAY_BIRD_VOLUME;
+    playBufferSound(sound);
+}
+
+// ============================================
+// NIGHT CRICKETS (loop, night-time only, with day↔night fade)
+// ============================================
+function startCrickets(): void {
+    if (cricketsActive || !cricketsSound || !_audioContext) return;
+    cricketsActive = true;
+    const ctx = _audioContext;
+    const now = ctx.currentTime;
+    cricketsSound.gain.gain.cancelScheduledValues(now);
+    cricketsSound.gain.gain.setValueAtTime(0, now);
+    cricketsSound.gain.gain.linearRampToValueAtTime(CRICKETS_VOLUME, now + CRICKETS_FADE_DURATION);
+    playBufferSound(cricketsSound);
+}
+
+function stopCrickets(): void {
+    if (!cricketsActive || !cricketsSound || !_audioContext) return;
+    cricketsActive = false;
+    const ctx = _audioContext;
+    const now = ctx.currentTime;
+    cricketsSound.gain.gain.cancelScheduledValues(now);
+    cricketsSound.gain.gain.setValueAtTime(cricketsSound.gain.gain.value, now);
+    cricketsSound.gain.gain.linearRampToValueAtTime(0, now + CRICKETS_FADE_DURATION);
+    setTimeout(() => {
+        if (cricketsSound && !cricketsActive) stopBufferSound(cricketsSound);
+    }, CRICKETS_FADE_DURATION * 1000 + 100);
+}
+
+// ============================================
 // UNDERWATER TRANSITIONS
 // ============================================
 export function transitionToUnderwater(): void {
@@ -435,6 +605,7 @@ export function transitionToUnderwater(): void {
         breezeActive = false;
     }
     if (fireplaceActive) stopFireplace();
+    if (cricketsActive) stopCrickets();
     stopPugSnore();
 
     // Start underwater sounds
@@ -464,6 +635,7 @@ export function transitionToAboveWater(): void {
         }
         scheduleBreeze();
         if (!isDayTime()) startFireplace();
+        if (!isDayTime()) startCrickets();
     }
 }
 
@@ -506,14 +678,15 @@ function checkHealth(): void {
         if (waterSound2 && isBufferPlaying(waterSound2)) stopBufferSound(waterSound2);
         if (breezeSound && isBufferPlaying(breezeSound)) { stopBufferSound(breezeSound); breezeActive = false; }
         if (fireplaceSound && isBufferPlaying(fireplaceSound)) { stopBufferSound(fireplaceSound); fireplaceActive = false; }
+        if (cricketsSound && isBufferPlaying(cricketsSound)) { stopBufferSound(cricketsSound); cricketsActive = false; }
         if (_snoreActive) stopPugSnore();
         // Ensure underwater ambient is playing
         if (underwaterAmbSound && !isBufferPlaying(underwaterAmbSound)) {
             underwaterAmbSound.gain.gain.value = UNDERWATER_AMB_VOLUME;
             playBufferSound(underwaterAmbSound);
         }
-    } else {
-        // Kill leaked underwater sounds
+    } else if (sceneAudioStarted) {
+        // Kill leaked underwater sounds (only relevant after scene revealed)
         if (underwaterAmbSound && isBufferPlaying(underwaterAmbSound)) stopBufferSound(underwaterAmbSound);
         if (underwaterBubblesSound && isBufferPlaying(underwaterBubblesSound)) stopBufferSound(underwaterBubblesSound);
         // Ensure water loop is playing
@@ -525,6 +698,11 @@ function checkHealth(): void {
         if (fireplaceSound && fireplaceActive && !isBufferPlaying(fireplaceSound)) {
             fireplaceSound.gain.gain.value = FIREPLACE_VOLUME_MAX;
             playBufferSound(fireplaceSound);
+        }
+        // Ensure crickets are playing at night
+        if (cricketsSound && cricketsActive && !isBufferPlaying(cricketsSound)) {
+            cricketsSound.gain.gain.value = CRICKETS_VOLUME;
+            playBufferSound(cricketsSound);
         }
     }
 }
@@ -808,27 +986,54 @@ async function initAudio(): Promise<void> {
     characterGain.gain.value = characterMuted ? 0 : characterVolume;
     characterGain.connect(masterGain);
 
+    // Sub-buses: intro audio (sky) and scene audio (after descent reveal).
+    // Both route through natureGain so the user's nature volume/mute still applies.
+    introGain = _audioContext.createGain();
+    introGain.gain.value = 0;  // ramped up by startIntroPiano
+    introGain.connect(natureGain);
+
+    sceneRevealGain = _audioContext.createGain();
+    sceneRevealGain.gain.value = 0;  // ramped up by Audio.Update based on cameraY
+    sceneRevealGain.connect(natureGain);
+
     // Wait for pre-fetched audio data (eliminates network delay)
     await preloadAudioBytes();
 
     // Load and decode all nature sound buffers
     try {
-        const [waterBuf, breezeBuf, fireplaceBuf, underwaterAmbBuf, underwaterBubblesBuf, waterSplashBuf] = await Promise.all([
+        const [
+            waterBuf, breezeBuf, fireplaceBuf, underwaterAmbBuf, underwaterBubblesBuf, waterSplashBuf,
+            introPianoBuf, dayBird1Buf, dayBird2Buf, cricketsBuf,
+        ] = await Promise.all([
             loadAudioBuffer(AUDIO_PATHS.water),
             loadAudioBuffer(AUDIO_PATHS.breeze),
             loadAudioBuffer(AUDIO_PATHS.fireplace),
             loadAudioBuffer(AUDIO_PATHS.underwaterAmb),
             loadAudioBuffer(AUDIO_PATHS.underwaterBubbles),
             loadAudioBuffer(AUDIO_PATHS.waterSplash),
+            loadAudioBuffer(AUDIO_PATHS.introPiano),
+            loadAudioBuffer(AUDIO_PATHS.dayBird1),
+            loadAudioBuffer(AUDIO_PATHS.dayBird2),
+            loadAudioBuffer(AUDIO_PATHS.crickets),
         ]);
 
-        waterSound1 = createBufferSound(waterBuf, natureGain, { volume: WATER_VOLUME });
-        waterSound2 = createBufferSound(waterBuf, natureGain, { volume: 0 });
-        breezeSound = createBufferSound(breezeBuf, natureGain, { volume: BREEZE_VOLUME });
-        fireplaceSound = createBufferSound(fireplaceBuf, natureGain, { loop: true, volume: 0 });
-        underwaterAmbSound = createBufferSound(underwaterAmbBuf, natureGain, { loop: true, volume: UNDERWATER_AMB_VOLUME });
-        underwaterBubblesSound = createBufferSound(underwaterBubblesBuf, natureGain, { volume: TRANSITION_SFX_VOLUME });
-        waterSplashSound = createBufferSound(waterSplashBuf, natureGain, { volume: WATER_SPLASH_VOLUME });
+        // Scene sounds route through sceneRevealGain (gated by camera proximity).
+        waterSound1 = createBufferSound(waterBuf, sceneRevealGain, { volume: WATER_VOLUME });
+        waterSound2 = createBufferSound(waterBuf, sceneRevealGain, { volume: 0 });
+        breezeSound = createBufferSound(breezeBuf, sceneRevealGain, { volume: BREEZE_VOLUME });
+        fireplaceSound = createBufferSound(fireplaceBuf, sceneRevealGain, { loop: true, volume: 0 });
+        underwaterAmbSound = createBufferSound(underwaterAmbBuf, sceneRevealGain, { loop: true, volume: UNDERWATER_AMB_VOLUME });
+        underwaterBubblesSound = createBufferSound(underwaterBubblesBuf, sceneRevealGain, { volume: TRANSITION_SFX_VOLUME });
+        waterSplashSound = createBufferSound(waterSplashBuf, sceneRevealGain, { volume: WATER_SPLASH_VOLUME });
+        dayBirdSounds = [
+            createBufferSound(dayBird1Buf, sceneRevealGain, { volume: DAY_BIRD_VOLUME }),
+            createBufferSound(dayBird2Buf, sceneRevealGain, { volume: DAY_BIRD_VOLUME }),
+        ];
+        cricketsSound = createBufferSound(cricketsBuf, sceneRevealGain, { loop: true, volume: 0 });
+
+        // Intro sounds route through introGain (faded in at start, out at descent).
+        introPianoSound = createBufferSound(introPianoBuf, introGain, { loop: true, volume: INTRO_PIANO_VOLUME });
+        introBreezeSound = createBufferSound(breezeBuf, introGain, { volume: INTRO_BREEZE_VOLUME });
 
         // Load character sounds
         try {
@@ -841,17 +1046,21 @@ async function initAudio(): Promise<void> {
         // Sync day state
         wasDay = isDayTime();
 
-        // Start appropriate ambient sounds based on current state
-        if (!isCurrentlyUnderwater) {
-            startWaterLoop();
-            scheduleBreeze();
-            if (!isDayTime()) startFireplace();
-        } else {
-            // Already underwater when buffers finished loading
+        // Start intro audio (piano loop + scheduled soft breeze) — plays in the
+        // sky while the welcome text shows. Scene loops are NOT started here;
+        // they begin in transitionFromIntroToScene() when the descent triggers.
+        if (isCurrentlyUnderwater) {
+            // Edge case: user dove before audio loaded (shouldn't normally happen
+            // since dive requires scroll, which is blocked until after descent).
+            sceneAudioStarted = true;
+            sceneRevealComplete = true;
+            if (sceneRevealGain) sceneRevealGain.gain.value = 1;
             if (!natureMuted && underwaterAmbSound) {
                 underwaterAmbSound.gain.gain.value = UNDERWATER_AMB_VOLUME;
                 playBufferSound(underwaterAmbSound);
             }
+        } else if (!natureMuted) {
+            startIntroPiano();
         }
 
         await Promise.all([
@@ -903,11 +1112,25 @@ export function Start(): void {
     preloadAudioBytes();
 }
 
-export function Update(): void {
+export function Update(cameraY?: number): void {
     if (!audioInitialized) return;
 
     const isDay = isDayTime();
     const now = performance.now();
+
+    // Scene reveal — ramp sceneRevealGain from 0 to 1 as camera descends.
+    // Once the camera is below SCENE_REVEAL_END_Y the gain stays at 1 and
+    // we stop touching it so user volume sliders flow through normally.
+    if (sceneRevealArmed && !sceneRevealComplete && sceneRevealGain && cameraY !== undefined) {
+        let t = (SCENE_REVEAL_START_Y - cameraY) / (SCENE_REVEAL_START_Y - SCENE_REVEAL_END_Y);
+        if (t < 0) t = 0; else if (t > 1) t = 1;
+        sceneRevealGain.gain.value = t;
+        if (t >= 0.999) {
+            sceneRevealComplete = true;
+            sceneRevealArmed = false;
+            sceneRevealGain.gain.value = 1;
+        }
+    }
 
     // Periodic health check
     if (now - lastAudioCheck > AUDIO_CHECK_INTERVAL) {
@@ -915,10 +1138,11 @@ export function Update(): void {
         checkHealth();
     }
 
-    // Day/night fireplace transitions (only above water)
-    if (!isCurrentlyUnderwater) {
-        if (wasDay && !isDay) startFireplace();
-        if (!wasDay && isDay) stopFireplace();
+    // Day/night transitions for fireplace + night crickets (only above water,
+    // and only after scene audio has been started — no fireplace/crickets in the sky).
+    if (!isCurrentlyUnderwater && sceneAudioStarted) {
+        if (wasDay && !isDay) { startFireplace(); startCrickets(); }
+        if (!wasDay && isDay) { stopFireplace();  stopCrickets();  }
     }
 
     wasDay = isDay;

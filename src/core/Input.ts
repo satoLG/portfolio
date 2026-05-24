@@ -116,6 +116,13 @@ export let lastFullscreenChange = 0;
 let keysPressedCopy = new Array<string>();
 let pointersCopy = new Array<Pointer>();
 const mouseMovementCopy = new Vector2();
+const TOUCH_SCROLL_MULTIPLIER = 2;
+const TOUCH_FALLBACK_POINTER_FRESH_MS = 80;
+const STALE_TOUCH_RESET_MS = 4000;
+let lastTrackedTouchPointerMoveAt = -Infinity;
+let lastTouchLifecycleAt = -Infinity;
+let fallbackTouchId: number | null = null;
+let fallbackTouchY = 0;
 
 function IndexOfId(array: Pointer[], id: number): number
 {
@@ -128,6 +135,53 @@ function IndexOfId(array: Pointer[], id: number): number
     }
 
     return -1;
+}
+
+function isInteractiveSceneScrollTarget(target: EventTarget | null): boolean {
+    const el = target as HTMLElement | null;
+    if (!el) return false;
+    return !!el.closest(
+        '.settings-panel, .settings-button, .media-player, .player-container, .playlist-items, ' +
+        '.confirm-modal-overlay, .dialog-bubble, .dialog-reply, .coin-tooltip, button, input, select, textarea, a, iframe'
+    );
+}
+
+function resetFallbackTouch(): void {
+    fallbackTouchId = null;
+    fallbackTouchY = 0;
+}
+
+function markTouchLifecycle(): void {
+    lastTouchLifecycleAt = performance.now();
+}
+
+export function resetPointerState(): void {
+    for (const pointer of pointers) {
+        try { renderer.domElement.releasePointerCapture?.(pointer.id); } catch {}
+    }
+    pointers = new Array<Pointer>();
+    pointersCopy = new Array<Pointer>();
+    mouseMovement.set(0, 0);
+    mouseMovementCopy.set(0, 0);
+    resetFallbackTouch();
+}
+
+function getFallbackTouch(touches: TouchList): Touch | null {
+    if (touches.length === 0) return null;
+    if (fallbackTouchId !== null) {
+        for (let i = 0; i < touches.length; i++) {
+            if (touches[i].identifier === fallbackTouchId) return touches[i];
+        }
+    }
+    return touches[0];
+}
+
+function hasFallbackTouch(touches: TouchList): boolean {
+    if (fallbackTouchId === null) return false;
+    for (let i = 0; i < touches.length; i++) {
+        if (touches[i].identifier === fallbackTouchId) return true;
+    }
+    return false;
 }
 
 export function Start(): void
@@ -150,6 +204,7 @@ export function Start(): void
         // Menu removed - no action needed on pointer lock change
         lastPointerLockChange = time;
         keysPressed = new Array<string>();
+        resetPointerState();
     });
 
     document.addEventListener("fullscreenchange", function()
@@ -157,6 +212,7 @@ export function Start(): void
         // Fullscreen update removed - no action needed
         lastFullscreenChange = time;
         keysPressed = new Array<string>();
+        resetPointerState();
     });
 
     document.addEventListener("mousemove", function(e)
@@ -177,15 +233,57 @@ export function Start(): void
         handleScroll(e.deltaY);
     }, { passive: false });
 
+    document.addEventListener("touchstart", function(e)
+    {
+        markTouchLifecycle();
+        if (isInteractiveSceneScrollTarget(e.target)) {
+            resetFallbackTouch();
+            return;
+        }
+        const touch = getFallbackTouch(e.touches);
+        if (!touch) return;
+        fallbackTouchId = touch.identifier;
+        fallbackTouchY = touch.clientY;
+    }, { passive: true });
+
     document.addEventListener("touchmove", function(e)
     {
+        markTouchLifecycle();
         if (!isSceneScrollEnabled()) {
             e.preventDefault();
+            resetFallbackTouch();
+            return;
+        }
+
+        if (isInteractiveSceneScrollTarget(e.target) || e.touches.length === 0) {
+            resetFallbackTouch();
+            return;
+        }
+
+        const touch = getFallbackTouch(e.touches);
+        if (!touch) return;
+
+        if (fallbackTouchId === null) {
+            fallbackTouchId = touch.identifier;
+            fallbackTouchY = touch.clientY;
+            return;
+        }
+
+        const deltaY = touch.clientY - fallbackTouchY;
+        fallbackTouchY = touch.clientY;
+
+        // Pointer events are the primary path. This fallback only kicks in when
+        // Safari/iOS stops delivering them after overlays, page visibility
+        // changes, or pointer capture state gets stale.
+        if (performance.now() - lastTrackedTouchPointerMoveAt > TOUCH_FALLBACK_POINTER_FRESH_MS && deltaY !== 0) {
+            e.preventDefault();
+            handleScroll(-deltaY * TOUCH_SCROLL_MULTIPLIER);
         }
     }, { passive: false });
 
     renderer.domElement.addEventListener("pointerdown", function(e)
     {   
+        if (e.pointerType === PointerType.touch) markTouchLifecycle();
         const i = IndexOfId(pointers, e.pointerId);
         if (i < 0)
         {
@@ -201,6 +299,7 @@ export function Start(): void
 
     document.addEventListener("pointermove", function(e)
     {
+        if (e.pointerType === PointerType.touch) markTouchLifecycle();
         const i = IndexOfId(pointers, e.pointerId);
         if (i >= 0)
         {
@@ -215,11 +314,15 @@ export function Start(): void
             pointer.position.setX(e.clientX);
             pointer.position.setY(e.clientY);
             pointers[i] = pointer;
+            if (e.pointerType === PointerType.touch) {
+                lastTrackedTouchPointerMoveAt = performance.now();
+            }
         }
     });
 
     document.addEventListener("pointerup", function(e)
     {
+        if (e.pointerType === PointerType.touch) markTouchLifecycle();
         const i = IndexOfId(pointers, e.pointerId);
         if (i >= 0)
         {
@@ -231,6 +334,7 @@ export function Start(): void
 
     document.addEventListener("pointercancel", function(e)
     {
+        if (e.pointerType === PointerType.touch) markTouchLifecycle();
         const i = IndexOfId(pointers, e.pointerId);
         if (i >= 0)
         {
@@ -240,9 +344,38 @@ export function Start(): void
         }
     });
 
+    document.addEventListener("touchend", function(e)
+    {
+        markTouchLifecycle();
+        if (e.touches.length === 0) resetPointerState();
+        else if (fallbackTouchId !== null && !hasFallbackTouch(e.touches)) resetFallbackTouch();
+    }, { passive: true });
+
+    document.addEventListener("touchcancel", function(e)
+    {
+        markTouchLifecycle();
+        if (e.touches.length === 0) resetPointerState();
+        else resetFallbackTouch();
+    }, { passive: true });
+
+    window.addEventListener("blur", resetPointerState);
+    window.addEventListener("pagehide", resetPointerState);
+    window.addEventListener("focus", resetPointerState);
+    window.addEventListener("pageshow", resetPointerState);
+    document.addEventListener("visibilitychange", function()
+    {
+        resetPointerState();
+    });
+
+    window.setInterval(() => {
+        if (pointers.some(pointer => pointer.type === PointerType.touch) && performance.now() - lastTouchLifecycleAt > STALE_TOUCH_RESET_MS) {
+            resetPointerState();
+        }
+    }, 1000);
+
     document.addEventListener("pointerdown", function(e)
     {
-        (e.target as Element)?.releasePointerCapture?.(e.pointerId);
+        try { (e.target as Element)?.releasePointerCapture?.(e.pointerId); } catch {}
     })
 }
 
