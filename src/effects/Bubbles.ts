@@ -8,7 +8,7 @@ import {
     InstancedBufferAttribute,
     Object3D
 } from "three";
-import { camera, scene } from "../core/Scene";
+import { camera, scene, isMobile } from "../core/Scene";
 import { deltaTime, time } from "../core/Time";
 import { UNDERWATER_Y_THRESHOLD } from "./PostProcess";
 import { playDiveSound } from "../core/Audio";
@@ -392,17 +392,22 @@ export function Update(cameraY: number): void {
         entryBubblesRemaining -= toSpawn;
     }
 
-    // Spawn new bubbles when moving underwater
     if (isUnderwater && mouseInitialized) {
-        const dx = mousePosition.x - lastMousePosition.x;
-        const dy = mousePosition.y - lastMousePosition.y;
-        const mouseDelta = Math.sqrt(dx * dx + dy * dy);
+        // Cursor-hover bubble trail — desktop-only. On mobile the touch
+        // usually means a scroll/drag gesture, not deliberate cursor tracking,
+        // so this is disabled there. Ambient bubble groups + sound below
+        // continue on both platforms.
+        if (!isMobile) {
+            const dx = mousePosition.x - lastMousePosition.x;
+            const dy = mousePosition.y - lastMousePosition.y;
+            const mouseDelta = Math.sqrt(dx * dx + dy * dy);
 
-        if (mouseDelta > 3 && time - lastSpawnTime > BUBBLE_SPAWN_RATE) {
-            const pos = getSpawnPosition();
-            if (pos && pos.y < UNDERWATER_Y_THRESHOLD) {
-                spawnBubble(pos);
-                lastSpawnTime = time;
+            if (mouseDelta > 3 && time - lastSpawnTime > BUBBLE_SPAWN_RATE) {
+                const pos = getSpawnPosition();
+                if (pos && pos.y < UNDERWATER_Y_THRESHOLD) {
+                    spawnBubble(pos);
+                    lastSpawnTime = time;
+                }
             }
         }
 

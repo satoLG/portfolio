@@ -20,9 +20,9 @@ import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPh
 import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../core/Dialog";
 import * as CoinTooltip from '../core/CoinTooltip';
 import type { DialogLine, ReplyOption } from "../core/Dialog";
-import { isBreezeActive, playAppleImpactSound, playChestCloseSound, playChestOpenSound, playPugSnoreOnce, stopPugSnore } from "../core/Audio";
+import { isBreezeActive, playAppleImpactSound, playBirdTweet, playChestCloseSound, playChestOpenSound, playPugSnoreOnce, stopPugSnore } from "../core/Audio";
 import { createGrassMesh, createPerlinTexture, createShadowFloorMesh, grassColorBase, grassColorTip, type GrassUniforms } from './ProceduralGrass';
-import { camera, renderer, scene as threeScene } from "../core/Scene";
+import { camera, renderer, scene as threeScene, isMobile } from "../core/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
 import * as PhoneScreen from '../core/PhoneScreen';
 import { UNDERWATER_Y_THRESHOLD } from "../effects/PostProcess";
@@ -1153,9 +1153,20 @@ function _createGroundAppleSlot(source: Group, treeIndex: number): GroundAppleSl
         if (!(child as any).isMesh) return;
         const mesh = child as Mesh;
         if (Array.isArray(mesh.material)) {
-            mesh.material = mesh.material.map((m) => (m as MeshStandardMaterial).clone());
+            mesh.material = mesh.material.map((m) => {
+                const c = (m as MeshStandardMaterial).clone();
+                // Three.js Material.copy() copies userData (deep) but NOT
+                // onBeforeCompile / customProgramCacheKey. The source
+                // material had appleWaterlineApplied=true with its hooks set
+                // as own properties — the clone inherits the flag but loses
+                // the hooks. Reset the flag so the waterline injection
+                // actually runs on this clone.
+                (c.userData as any).appleWaterlineApplied = false;
+                return c;
+            });
         } else if (mesh.material) {
             mesh.material = (mesh.material as MeshStandardMaterial).clone();
+            (mesh.material.userData as any).appleWaterlineApplied = false;
         }
         const normalMat = mesh.material as MeshStandardMaterial;
         _applyAppleWaterlineToMaterial(normalMat);
@@ -1294,8 +1305,14 @@ const APPLE_WATERLINE_INTENSITY = 0.75;
 // Spring-damper buoyancy with gravity cancellation.
 // When submerged, gravity is counteracted so the spring alone positions the apple.
 // This ensures the equilibrium sits exactly at the target — no gravity-induced sag.
+// Spring stiffness kept at the original 10 — anything lower lets the apple
+// sink too deep and the recovery stalls before it reaches the surface.
 const APPLE_BUOYANCY_K = 10;            // spring strength (gentle — gravity is cancelled, so this only handles positioning)
-const APPLE_WATER_LINEAR_DRAG = 1.8;    // per-second linear velocity damping while submerged
+// Linear drag bumped (was 1.8) so the spring is closer to critically damped:
+// the bounce on water entry is roughly half what it used to be, and the
+// persistent vertical wavering after settling dies out within a fraction of
+// a second instead of pinging back and forth.
+const APPLE_WATER_LINEAR_DRAG = 5.0;    // per-second linear velocity damping while submerged
 const APPLE_WATER_ANGULAR_DRAG = 2.2;   // per-second angular velocity damping while submerged
 // Target offset of the apple's visual center relative to the waterline.
 // 0   = visual center exactly on waterline → roughly half the model below water.
@@ -1318,6 +1335,27 @@ const DRAG_CHASE_STIFFNESS = 30;  // velocity multiplier — how snappily the ap
 // DRAG_MAX_SPEED / 120 ≈ 0.05 m per step — small enough to never tunnel through
 // the island trimesh (whose triangles are larger than that on every side).
 const DRAG_MAX_SPEED = 6;
+// Preventive padding around the apple during drag. Each frame we cast short
+// rays from the body center in 14 directions; if any of them hits the island
+// surface within DRAG_ISLAND_PADDING metres, the inward velocity component
+// along that direction is removed. This stops the apple from getting close
+// enough to the trimesh to clip into it (which would leave it stuck without
+// any reported contacts for the normal-projection safeguard to grab onto).
+// TWEAK THIS: larger = more clearance, but the apple feels like it bumps an
+// invisible wall further from the island. 0.10–0.25 is a sane range.
+const DRAG_ISLAND_PADDING = 0.18;
+
+// ── Throw-on-release ─────────────────────────────────────────────────────────
+// If the cursor was moving fast at the moment the drag ended, capture the
+// recent world-space velocity of the drag target and apply it as an impulse
+// to the apple body — so a quick flick tosses the apple, while a slow release
+// just lets it drop.
+const DRAG_SAMPLE_WINDOW_MS = 100;     // look back this many ms for release velocity
+const DRAG_SAMPLE_MAX_COUNT = 12;      // ring buffer size (~200ms at 60fps)
+const THROW_VELOCITY_THRESHOLD = 1.5;  // m/s of cursor motion required to trigger a throw
+const THROW_VELOCITY_MULTIPLIER = 0.45;// scale captured velocity → body impulse (low = gentle toss)
+const THROW_MAX_SPEED = 4.5;           // clamp absurdly fast flicks
+const THROW_ANGULAR_SCALE = 0.6;       // rad/s of spin per m/s of throw speed
 const _groundAppleDrag: {
     active: boolean;
     pointerId: number;
@@ -1375,6 +1413,16 @@ function _findGroundAppleAtPointer(clientX: number, clientY: number): GroundAppl
     return best?.ga ?? null;
 }
 
+// Ring buffer of recent drag-target world positions (used by _endGroundAppleDrag
+// to derive a throw velocity on quick flicks).
+interface DragSample { x: number; y: number; z: number; t: number; }
+const _dragSamples: DragSample[] = [];
+
+function _pushDragSample(x: number, y: number, z: number): void {
+    _dragSamples.push({ x, y, z, t: performance.now() });
+    if (_dragSamples.length > DRAG_SAMPLE_MAX_COUNT) _dragSamples.shift();
+}
+
 function _moveDraggedAppleToClient(clientX: number, clientY: number): void {
     if (!_groundAppleDrag.active || !_groundAppleDrag.apple) return;
     _setAppleRayFromClient(clientX, clientY);
@@ -1388,15 +1436,65 @@ function _moveDraggedAppleToClient(clientX: number, clientY: number): void {
         _groundAppleDragPoint.z
     );
     _dragTargetValid = true;
+    // Record this position for the release-throw velocity calculation.
+    _pushDragSample(_dragTarget.x, _dragTarget.y, _dragTarget.z);
+}
+
+/** Compute the release-throw velocity from the recent sample window. Returns
+ *  null if motion was too slow (just a normal release). Otherwise returns the
+ *  scaled, clamped impulse to apply to the body. */
+function _computeReleaseThrow(): { vx: number; vy: number; vz: number; speed: number } | null {
+    if (_dragSamples.length < 2) return null;
+    const now = performance.now();
+    // Oldest sample still inside the window
+    let oldest: DragSample | null = null;
+    for (const s of _dragSamples) {
+        if (now - s.t <= DRAG_SAMPLE_WINDOW_MS) { oldest = s; break; }
+    }
+    const last = _dragSamples[_dragSamples.length - 1];
+    if (!oldest || oldest === last) return null;
+    const dt = (last.t - oldest.t) / 1000;
+    if (dt < 0.01) return null;
+    let vx = (last.x - oldest.x) / dt;
+    let vy = (last.y - oldest.y) / dt;
+    let vz = (last.z - oldest.z) / dt;
+    let speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
+    if (speed < THROW_VELOCITY_THRESHOLD) return null;
+    // Scale + clamp
+    vx *= THROW_VELOCITY_MULTIPLIER;
+    vy *= THROW_VELOCITY_MULTIPLIER;
+    vz *= THROW_VELOCITY_MULTIPLIER;
+    speed *= THROW_VELOCITY_MULTIPLIER;
+    if (speed > THROW_MAX_SPEED) {
+        const k = THROW_MAX_SPEED / speed;
+        vx *= k; vy *= k; vz *= k; speed = THROW_MAX_SPEED;
+    }
+    return { vx, vy, vz, speed };
 }
 
 function _endGroundAppleDrag(): void {
     if (!_groundAppleDrag.active || !_groundAppleDrag.apple) return;
     const body = _groundAppleDrag.apple.physicsBody;
-    // Body stays DYNAMIC the whole time — just let go.
-    body.velocity.setZero();
-    body.angularVelocity.setZero();
+
+    // Quick flick? Toss the apple along the recent motion. Otherwise just let go.
+    const throwImpulse = _computeReleaseThrow();
+    if (throwImpulse) {
+        body.velocity.x = throwImpulse.vx;
+        body.velocity.y = throwImpulse.vy;
+        body.velocity.z = throwImpulse.vz;
+        // Spin proportional to throw speed so the toss looks lively.
+        const s = throwImpulse.speed * THROW_ANGULAR_SCALE;
+        body.angularVelocity.set(
+            (Math.random() - 0.5) * s,
+            (Math.random() - 0.5) * s,
+            (Math.random() - 0.5) * s,
+        );
+    } else {
+        body.velocity.setZero();
+        body.angularVelocity.setZero();
+    }
     body.wakeUp();
+    _dragSamples.length = 0;
     _groundAppleDrag.apple.dragged = false;
     _dragTargetValid = false;
     _suppressNextAppleClick = true;
@@ -1406,6 +1504,25 @@ function _endGroundAppleDrag(): void {
     _groundAppleDrag.apple = null;
     _groundAppleDrag.moved = false;
 }
+
+// 14-direction probe grid (6 face normals + 8 cube corners). Each cast looks
+// outward from the apple's body center DRAG_ISLAND_PADDING metres; any island
+// surface hit within that range strips the inward velocity component along
+// that direction. Pre-built once at module load — no per-frame allocations.
+const _padDirs: Vector3[] = (() => {
+    const dirs: Vector3[] = [
+        new Vector3( 1, 0, 0), new Vector3(-1, 0, 0),
+        new Vector3( 0, 1, 0), new Vector3( 0,-1, 0),
+        new Vector3( 0, 0, 1), new Vector3( 0, 0,-1),
+    ];
+    const s = 1 / Math.sqrt(3);
+    for (const x of [-s, s]) for (const y of [-s, s]) for (const z of [-s, s]) {
+        dirs.push(new Vector3(x, y, z));
+    }
+    return dirs;
+})();
+const _padRaycaster = new Raycaster();
+const _padOrigin = new Vector3();
 
 /**
  * Chase the drag target via velocity. The body stays DYNAMIC so cannon-es
@@ -1418,6 +1535,12 @@ function _endGroundAppleDrag(): void {
  *      by cannon-es from the previous step. Any component pointing INTO a
  *      surface currently in contact is removed, so the apple slides along
  *      that surface instead of pushing through it.
+ *   3. PREVENTIVE padding: 14 short raycasts (DRAG_ISLAND_PADDING long) from
+ *      the body center. Any island surface within that range strips the
+ *      inward velocity component along that probe direction — so the apple
+ *      stops getting close enough to the trimesh to clip into it in the first
+ *      place. Catches gaps the contact-normal pass can't (cannon-es needs an
+ *      active contact to report a normal; this works before that point).
  * No generic Y floor is imposed — the apple is free in empty space.
  */
 function _applyDraggedAppleTarget(): void {
@@ -1437,6 +1560,28 @@ function _applyDraggedAppleTarget(): void {
     if (speed > DRAG_MAX_SPEED) {
         const k = DRAG_MAX_SPEED / speed;
         vx *= k; vy *= k; vz *= k;
+    }
+
+    // PREVENTIVE PADDING: 14 short raycasts around the body. Any island surface
+    // hit within DRAG_ISLAND_PADDING strips the outward (toward-the-surface)
+    // velocity component along that probe direction. The probes point AWAY
+    // from the body center, so an "inward toward the surface" velocity has a
+    // POSITIVE dot product with the probe direction.
+    if (islandMeshes.length > 0) {
+        _padOrigin.set(body.position.x, body.position.y, body.position.z);
+        _padRaycaster.far = DRAG_ISLAND_PADDING;
+        for (const dir of _padDirs) {
+            _padRaycaster.set(_padOrigin, dir);
+            const hits = _padRaycaster.intersectObjects(islandMeshes, false);
+            if (hits.length === 0) continue;
+            const into = vx * dir.x + vy * dir.y + vz * dir.z;
+            if (into > 0) {
+                vx -= dir.x * into;
+                vy -= dir.y * into;
+                vz -= dir.z * into;
+            }
+        }
+        _padRaycaster.far = Infinity;
     }
 
     // Remove any inward component along surfaces the apple is currently touching.
@@ -1556,6 +1701,18 @@ function _applyAppleBuoyancy(ga: GroundApple): void {
 
     if (submersion <= 0) return; // above water — let gravity act normally
 
+    // Order matters: apply drag FIRST to the existing motion, then add
+    // gravity-cancellation and the spring impulse. If drag is applied after
+    // the gravity cancel, the drag eats part of the cancel and the apple
+    // settles BELOW the waterline (the higher the drag, the deeper the sag).
+    // This split keeps the equilibrium exactly at submersion=0 regardless of
+    // drag strength, so we can tune damping freely without lowering the rest
+    // position of the apple.
+    const linDrag = Math.max(0, 1 - APPLE_WATER_LINEAR_DRAG * deltaTime);
+    body.velocity.x *= linDrag;
+    body.velocity.y *= linDrag;
+    body.velocity.z *= linDrag;
+
     // Cancel gravity so the spring alone determines the equilibrium position.
     // cannon-es applies gravity during world.step(), so we pre-add the inverse.
     body.velocity.y -= physicsConfig.gravity * deltaTime;
@@ -1563,11 +1720,6 @@ function _applyAppleBuoyancy(ga: GroundApple): void {
     // Spring force pushing the apple toward the waterline target.
     body.velocity.y += submersion * APPLE_BUOYANCY_K * deltaTime;
 
-    // Damp linear & angular motion while in water so the bobbing decays naturally.
-    const linDrag = Math.max(0, 1 - APPLE_WATER_LINEAR_DRAG * deltaTime);
-    body.velocity.x *= linDrag;
-    body.velocity.y *= linDrag;
-    body.velocity.z *= linDrag;
     const angDrag = Math.max(0, 1 - APPLE_WATER_ANGULAR_DRAG * deltaTime);
     body.angularVelocity.scale(angDrag, body.angularVelocity);
 
@@ -1594,8 +1746,17 @@ function _updateGroundApples(): void {
         const pen = getBodyMaxPenetration(ga.physicsBody);
         if (pen && pen.depth >= STUCK_DEPTH_THRESHOLD) {
             ga.stuckFrames++;
-            if (ga.stuckFrames >= STUCK_FRAMES_TO_FLING) {
-                _flingApple(ga, pen.nx, pen.ny, pen.nz, pen.depth);
+            // Dragged apples need to escape FAST — the chase keeps re-pushing
+            // them into the surface, so they only need a couple of frames of
+            // overlap to count as stuck. Idle apples use the slower threshold
+            // to avoid disturbing resting contacts that resolve naturally.
+            const framesNeeded = ga.dragged ? 2 : STUCK_FRAMES_TO_FLING;
+            if (ga.stuckFrames >= framesNeeded) {
+                // Speed scales with how deeply embedded the apple is, but never
+                // below FLING_LAUNCH_SPEED (so the toss is always decisive —
+                // pen.depth alone is millimetres and produces ~zero motion).
+                const speed = Math.max(FLING_LAUNCH_SPEED, pen.depth * 600);
+                _flingApple(ga, pen.nx, pen.ny, pen.nz, speed);
             }
         } else {
             ga.stuckFrames = 0;
@@ -3127,6 +3288,9 @@ export function Start(): void {
     // Setup pug click/hover interaction
     setupPugInteraction();
 
+    // Setup robin (bird) click/hover interaction — tap to hear them tweet
+    setupBirdInteraction();
+
     // Setup phone click/hover interaction
     setupPhoneInteraction();
 
@@ -3200,6 +3364,7 @@ function setupAppleInteraction(): void {
     });
 
     canvas.addEventListener('pointerdown', (e: PointerEvent) => {
+        if (isMobile) return;   // Apple drag is desktop-only — taps on mobile still trigger the fall click handler
         if (_groundAppleDrag.active) return;
         if (isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive() || isChestZoomActive()) return;
         const ga = _findGroundAppleAtPointer(e.clientX, e.clientY);
@@ -4391,6 +4556,144 @@ function setupRadioInteraction(): void {
             canvas.style.cursor = '';
         }
     });
+}
+
+// ============================================
+// BIRD (ROBIN) CLICK/HOVER INTERACTION
+// Click either robin to hear it tweet + emit a small burst of music-note
+// particles. Hit detection uses screen-space distance to the bird's projected
+// position so the radius stays generous regardless of camera distance.
+// ============================================
+const BIRD_CLICK_RADIUS_PX = 70;     // generous hit radius around bird centre (px)
+const BIRD_BURST_COUNT_MIN = 3;
+const BIRD_BURST_COUNT_MAX = 5;
+const _birdWorldPos = new Vector3();
+const _birdScreenPos = new Vector3();
+let isBirdHovered = false;
+let _hoveredBird: Group | null = null;
+
+/** Returns the robin nearest to (clientX, clientY) within BIRD_CLICK_RADIUS_PX,
+ *  or null if neither is hovered. Skips birds that haven't loaded yet. */
+function _findBirdAt(clientX: number, clientY: number): Group | null {
+    let closest: Group | null = null;
+    let minDist = BIRD_CLICK_RADIUS_PX;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const birds: Group[] = [robin1, robin2];
+    for (const bird of birds) {
+        if (bird.children.length === 0) continue;
+        bird.getWorldPosition(_birdWorldPos);
+        _birdScreenPos.copy(_birdWorldPos).project(camera);
+        // Skip if behind the camera (z outside [-1, 1] in NDC)
+        if (_birdScreenPos.z < -1 || _birdScreenPos.z > 1) continue;
+        const sx = (_birdScreenPos.x + 1) * 0.5 * w;
+        const sy = (1 - _birdScreenPos.y) * 0.5 * h;
+        const dx = sx - clientX;
+        const dy = sy - clientY;
+        const d  = Math.sqrt(dx * dx + dy * dy);
+        if (d < minDist) { minDist = d; closest = bird; }
+    }
+    return closest;
+}
+
+function _onBirdInteraction(clientX: number, clientY: number): void {
+    if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
+    const bird = _findBirdAt(clientX, clientY);
+    if (!bird) return;
+    const idx = bird === robin1 ? 0 : 1;
+    playBirdTweet(idx);
+    spawnBirdSoundBurst(bird);
+}
+
+function setupBirdInteraction(): void {
+    const canvas = renderer.domElement;
+    if (!canvas) return;
+
+    canvas.addEventListener('click', (e: MouseEvent) => {
+        _onBirdInteraction(e.clientX, e.clientY);
+    });
+
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (_touchWasMulti || _touchDragged) return;  // scroll gesture — skip
+        if (e.changedTouches.length === 0) return;
+        const t = e.changedTouches[0];
+        _onBirdInteraction(t.clientX, t.clientY);
+    });
+
+    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+        if (camera.position.y < UNDERWATER_Y_THRESHOLD) {
+            if (isBirdHovered) {
+                isBirdHovered = false;
+                _hoveredBird = null;
+                canvas.style.cursor = '';
+            }
+            return;
+        }
+        const bird = _findBirdAt(e.clientX, e.clientY);
+        if (bird) {
+            if (!isBirdHovered || _hoveredBird !== bird) {
+                isBirdHovered = true;
+                _hoveredBird = bird;
+                canvas.style.cursor = 'pointer';
+            }
+        } else if (isBirdHovered) {
+            isBirdHovered = false;
+            _hoveredBird = null;
+            canvas.style.cursor = '';
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (isBirdHovered) {
+            isBirdHovered = false;
+            _hoveredBird = null;
+            canvas.style.cursor = '';
+        }
+    });
+}
+
+/** Emit a small burst of music-note particles from the bird's world position.
+ *  Re-uses the existing musicNotes pool + updateMusicNotes() animation. */
+function spawnBirdSoundBurst(bird: Group): void {
+    if (noteTextures.length === 0) return;
+    const center = new Vector3();
+    bird.getWorldPosition(center);
+
+    const count = BIRD_BURST_COUNT_MIN + Math.floor(Math.random() * (BIRD_BURST_COUNT_MAX - BIRD_BURST_COUNT_MIN + 1));
+    for (let i = 0; i < count; i++) {
+        const tex = noteTextures[Math.floor(Math.random() * noteTextures.length)];
+        const mat = new SpriteMaterial({
+            map: tex,
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+            blending: AdditiveBlending,
+        });
+        const sprite = new Sprite(mat);
+        const noteSize = 0.04 + Math.random() * 0.025;   // smaller than radio notes
+        sprite.scale.set(noteSize, noteSize, 1);
+
+        // Spawn within a tiny sphere around the bird's body
+        const ang = Math.random() * Math.PI * 2;
+        const r   = 0.03 + Math.random() * 0.03;
+        sprite.position.set(
+            center.x + Math.cos(ang) * r,
+            center.y + 0.04 + Math.random() * 0.05,
+            center.z + Math.sin(ang) * r,
+        );
+
+        // Velocity: gentle outward + upward drift
+        const speed = 0.18 + Math.random() * 0.1;
+        const vx = Math.cos(ang) * speed * 0.5;
+        const vy = (0.7 + Math.random() * 0.3) * speed;
+        const vz = Math.sin(ang) * speed * 0.5;
+
+        const lifetime = 1.1 + Math.random() * 0.5;
+        const baseOpacity = 0.75;
+
+        bird.parent?.add(sprite);
+        musicNotes.push({ sprite, age: 0, lifetime, vx, vy, vz, baseOpacity });
+    }
 }
 
 export function Update(isUnderwater = false): void {

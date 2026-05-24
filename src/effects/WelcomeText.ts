@@ -1,6 +1,7 @@
 import { TegakiEngine, type TegakiBundle } from 'tegaki/core';
 import _patrickHand from '../fonts/patrick-hand/bundle';
 import { getCurrentLanguage } from '../core/i18n';
+import { INTRO_WRITING_VOLUME } from "../core/Audio";
 
 // tegaki bundles use readonly tuples that don't match the mutable TegakiBundle type.
 const patrickHand = _patrickHand as unknown as TegakiBundle;
@@ -13,13 +14,12 @@ const PLAYBACK_SPEED = 1.5;
 const FADE_OUT_DURATION = 650;
 const WELCOME_COLOR = '#e8eced36';
 const WRITING_AUDIO_SRC = '/audio/ui/335518__newagesoup__writing-short-8.wav';
-const WRITING_AUDIO_VOLUME = 0.32;
 const WRITING_AUDIO_FADE_MS = 180;
 
 function startWritingAudio(): HTMLAudioElement {
     const audio = new Audio(WRITING_AUDIO_SRC);
     audio.loop = true;
-    audio.volume = WRITING_AUDIO_VOLUME;
+    audio.volume = INTRO_WRITING_VOLUME;
     audio.play().catch(() => {
         // Some browsers may block playback if the delayed welcome starts after
         // transient user activation. The visual intro should continue normally.

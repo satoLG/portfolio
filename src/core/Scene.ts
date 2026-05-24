@@ -590,7 +590,7 @@ export function Update(): void
     Skybox.Update();
     CloudSprites.Update(camera.position.y, deltaTime, Skybox.getDayNightBlend());
     Ocean.Update();
-    Audio.Update();
+    Audio.Update(camera.position.y);
     UI.Update();
     MediaPlayer.Update();
     PostProcess.updateUnderwaterAmount(camera.position.y);

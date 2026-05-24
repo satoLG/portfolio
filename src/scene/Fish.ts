@@ -1,11 +1,11 @@
-import { Group, AnimationMixer, AnimationClip, LoopRepeat, Vector3, Color, MeshStandardMaterial, Mesh, Vector2 } from "three";
+import { Group, AnimationMixer, AnimationClip, LoopRepeat, Vector3, Color, MeshStandardMaterial, Mesh, Vector2, MathUtils } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — r137 @types declares a namespace but the module exports clone directly
 import { clone as _skeletonClone } from "three/examples/jsm/utils/SkeletonUtils";
 import { deltaTime } from "../core/Time";
 import { camera, renderer } from "../core/Scene";
-import { isDayTime } from "./Skybox";
+import { getDayNightBlend, isDayTime } from "./Skybox";
 
 // Local mobile check — avoids circular-dependency TDZ crash when importing
 // isMobile from Scene.ts (Scene imports Fish at module scope).
@@ -88,6 +88,8 @@ const JELLY_POOL_SIZE = _isMobile ? 4 : 10;              // fewer simultaneous j
 // Jellyfish bioluminescence settings
 const JELLY_EMISSIVE_INTENSITY = 2.0;    // how bright the glow is
 const JELLY_OPACITY = 0.45;              // semi-transparent (0 = invisible, 1 = opaque)
+const CREATURE_TRANSITION_HIDE_THRESHOLD = 0.025;
+const CREATURE_TRANSITION_BOUNCE = 0.16;
 
 // Fish avoidance settings
 const AVOIDANCE_RADIUS = 0.15;            // world units — how close the pointer must be to scare fish
@@ -142,6 +144,7 @@ interface PooledFish {
 interface SwimmingFish {
     pool: PooledFish;         // reference back to pool entry for recycling
     speed: number;
+    baseScale: number;
     baseY: number;
     velocityY: number;
     currentTilt: number;
@@ -156,6 +159,8 @@ let fishModelsLoaded = 0;
 let fixedLoopsInitialized = false;
 let underwaterView = false;
 let shallowVisibilityMinY = Number.POSITIVE_INFINITY;
+let previousDayNightBlend = getDayNightBlend();
+let dayNightBlendDirection = 0;
 
 // Jellyfish color tints (bioluminescent night palette)
 const JELLY_COLOR_TINTS: Color[] = [
@@ -291,6 +296,7 @@ function activatePooledFish(
     activeFish.push({
         pool: entry,
         speed,
+        baseScale: scale,
         baseY: y,
         velocityY: 0,
         currentTilt: 0,
@@ -344,8 +350,9 @@ function resetLoopingCreature(entry: PooledFish, progress = 0): SwimmingFish {
     const { spawnX, despawnX } = getFrustumEdgesX(z);
     const x = despawnX + (spawnX - despawnX) * progress + Math.random() * GROUP_X_SPREAD;
     const scaleMult = FISH_SCALE_MIN + Math.random() * (FISH_SCALE_MAX - FISH_SCALE_MIN);
+    const scale = baseScale * scaleMult;
     entry.group.position.set(x, y, z);
-    entry.group.scale.setScalar(baseScale * scaleMult);
+    entry.group.scale.setScalar(scale * getCreatureTransitionScale(entry));
     entry.group.rotation.x = 0;
     entry.group.visible = shouldShowCreature(entry);
 
@@ -359,6 +366,7 @@ function resetLoopingCreature(entry: PooledFish, progress = 0): SwimmingFish {
     return {
         pool: entry,
         speed: speedMin + Math.random() * (speedMax - speedMin),
+        baseScale: scale,
         baseY: y,
         velocityY: 0,
         currentTilt: 0,
@@ -373,10 +381,31 @@ function shouldShowCircleFish(group: Group): boolean {
     return underwaterView || isObjectAboveShallowCutoff(group);
 }
 
+function smooth01(value: number): number {
+    const t = MathUtils.clamp(value, 0, 1);
+    return t * t * (3 - 2 * t);
+}
+
+function getCreatureTransitionAmount(entry: PooledFish): number {
+    const blend = getDayNightBlend();
+    return smooth01(entry.isJellyfish ? blend : 1 - blend);
+}
+
+function getCreatureTransitionScale(entry: PooledFish): number {
+    const amount = getCreatureTransitionAmount(entry);
+    const entering =
+        (entry.isJellyfish && dayNightBlendDirection > 0) ||
+        (!entry.isJellyfish && dayNightBlendDirection < 0);
+    const bounce = entering ? Math.sin(amount * Math.PI) * CREATURE_TRANSITION_BOUNCE : 0;
+    return amount * (1 + bounce);
+}
+
+function isCreatureInCameraRange(entry: PooledFish): boolean {
+    return underwaterView || isObjectAboveShallowCutoff(entry.group);
+}
+
 function shouldShowCreature(entry: PooledFish): boolean {
-    const night = !isDayTime();
-    const matchesDayNight = night === entry.isJellyfish;
-    return matchesDayNight && (underwaterView || isObjectAboveShallowCutoff(entry.group));
+    return isCreatureInCameraRange(entry) && getCreatureTransitionAmount(entry) > CREATURE_TRANSITION_HIDE_THRESHOLD;
 }
 
 function initFixedCreatureLoops(): void {
@@ -532,6 +561,10 @@ function spawnCreatures(): void {
 }
 
 export function Update(): void {
+    const blend = getDayNightBlend();
+    dayNightBlendDirection = Math.sign(blend - previousDayNightBlend);
+    previousDayNightBlend = blend;
+
     // Update animations
     if (clownMixer) clownMixer.update(deltaTime);
     if (doriMixer) doriMixer.update(deltaTime);
@@ -569,6 +602,8 @@ export function Update(): void {
     for (let i = activeFish.length - 1; i >= 0; i--) {
         const fish = activeFish[i];
         const group = fish.pool.group;
+        const transitionScale = getCreatureTransitionScale(fish.pool);
+        group.scale.setScalar(fish.baseScale * transitionScale);
         group.visible = shouldShowCreature(fish.pool);
         fish.pool.mixer.update(deltaTime);
         group.position.x -= fish.speed * deltaTime;

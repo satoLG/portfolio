@@ -1,7 +1,7 @@
 ﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setDPR, setShadowResolution, isMobile, showOcean } from "./Scene";
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
-import { startAudio, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
+import { startAudio, transitionFromIntroToScene, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
 import { getCameraY, setIntroProgress, enableScroll, onDescentComplete } from "./Control";
 import { beginDescent as beginCloudDescent } from "../effects/CloudSprites.ts";
 import { showWelcomeText } from "../effects/WelcomeText";
@@ -186,11 +186,15 @@ export function Start(): void {
         targetProgress = progress;
     });
     startButton.onclick = function() {
-        // Welcome text fires 1s after click. Audio, camera descent, ocean reveal,
+        // Kick off audio init in this first user gesture so the intro piano +
+        // breeze loop start playing during the welcome-text moment in the sky.
+        // Browsers (especially iOS) require an AudioContext to be created from
+        // a user interaction — the click satisfies that.
+        startAudio().catch(e => console.warn('Audio start failed:', e));
+
+        // Welcome text fires 1s after click. Camera descent, ocean reveal,
         // cloud descent, and all header UI wait for the second click/touch.
         async function continueAfterWelcome(): Promise<void> {
-            // Start audio in the second user gesture so mobile browsers allow it.
-            await startAudio();
             showOcean();
             beginCloudDescent();
             // Header and music appear only once the camera finishes descending
@@ -199,6 +203,9 @@ export function Start(): void {
                 setTimeout(() => { typewriterEffect(); }, 400);
                 setTimeout(() => { document.body.classList.add('music-visible'); }, 500);
             });
+            // Fade out the intro piano/breeze and arm the scene-audio reveal
+            // (scene loops stay silent until cameraY drops past the reveal Y).
+            transitionFromIntroToScene();
             enableScroll();
         }
 
