@@ -2,7 +2,6 @@
 
 Engine modules wired together by [src/main.ts](src/main.ts). Each one exports `Start()` (init) and most also export `Update()` (per-frame). For the call order see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-> Note: the root `CLAUDE.md` historically calls this folder `scripts/`. It's `core/` now. Update planned.
 
 ## Main loop contract
 
