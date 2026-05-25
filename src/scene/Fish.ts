@@ -6,6 +6,7 @@ import { clone as _skeletonClone } from "three/examples/jsm/utils/SkeletonUtils"
 import { deltaTime } from "../core/Time";
 import { camera, renderer } from "../core/Scene";
 import { getDayNightBlend, isDayTime } from "./Skybox";
+import { jellyfishLightConfig, fishNightLightingConfig } from "./config/OceanConfig";
 
 // Local mobile check — avoids circular-dependency TDZ crash when importing
 // isMobile from Scene.ts (Scene imports Fish at module scope).
@@ -71,8 +72,8 @@ const SCREEN_MARGIN = 0.5;               // extra world units past screen edge
 
 // Jellyfish spawn settings (night mode — slower, fewer, bioluminescent)
 const JELLYFISH_SCALE = 0.001;           // base scale for jellyfish
-const JELLY_SPEED_MIN = 0.05;            // very slow drift
-const JELLY_SPEED_MAX = 0.12;            // still slow
+const JELLY_SPEED_MIN = 0.10;            // slow drift, trajectory speed
+const JELLY_SPEED_MAX = 0.24;            // slow drift, trajectory speed
 const JELLY_SPAWN_INTERVAL = 3.5;        // seconds between spawn waves
 const JELLY_SPAWN_COUNT_MIN = 1;         // min jellyfish per wave
 const JELLY_SPAWN_COUNT_MAX = 2;         // max jellyfish per wave
@@ -82,14 +83,14 @@ const JELLY_Y_MIN = -5;                  // min spawn height
 const JELLY_Y_MAX = -2.5;                // max spawn height (higher than fish)
 const JELLY_Z_MIN = -4.0;               // farthest Z
 const JELLY_Z_MAX = 0.0;                // closest Z
-const JELLY_SPEED_SPREAD = 0.02;         // speed variation
-const JELLY_POOL_SIZE = _isMobile ? 4 : 10;              // fewer simultaneous jellyfish
+const JELLY_SPEED_SPREAD = 0.04;         // speed variation
+const JELLY_POOL_SIZE = _isMobile ? 5 : 12;              // 20% more simultaneous jellyfish
 
 // Jellyfish bioluminescence settings
 const JELLY_EMISSIVE_INTENSITY = 2.0;    // how bright the glow is
 const JELLY_OPACITY = 0.45;              // semi-transparent (0 = invisible, 1 = opaque)
-const CREATURE_TRANSITION_HIDE_THRESHOLD = 0.025;
-const CREATURE_TRANSITION_BOUNCE = 0.16;
+const JELLY_VISIBILITY_THRESHOLD = 0.02;
+const MAX_FAKE_JELLY_LIGHTS = JELLY_POOL_SIZE;
 
 // Fish avoidance settings
 const AVOIDANCE_RADIUS = 0.15;            // world units — how close the pointer must be to scare fish
@@ -128,7 +129,6 @@ let genericFishAnimations: AnimationClip[] = [];
 
 // Jellyfish spawn system (night mode)
 let jellyfishTemplate: Group | null = null;
-export function getJellyfishTemplate(): Group | null { return jellyfishTemplate; }
 let jellyfishAnimations: AnimationClip[] = [];
 
 interface PooledFish {
@@ -136,9 +136,12 @@ interface PooledFish {
     scene: Group;             // the cloned skeleton scene inside the group
     materials: MeshStandardMaterial[];  // pre-cloned materials for tint reuse
     baseTintColors: Color[];  // original colors before tinting (for reset)
+    activeTintColors: Color[]; // current day/base color after random tint
+    fakeLightColor: Color;     // jellyfish-only: cached tint used for fake fish lighting
     mixer: AnimationMixer;
     clip: AnimationClip | null;
     isJellyfish: boolean;     // true = belongs to jellyPool, false = fishPool
+    actionStarted: boolean;
 }
 
 interface SwimmingFish {
@@ -159,8 +162,6 @@ let fishModelsLoaded = 0;
 let fixedLoopsInitialized = false;
 let underwaterView = false;
 let shallowVisibilityMinY = Number.POSITIVE_INFINITY;
-let previousDayNightBlend = getDayNightBlend();
-let dayNightBlendDirection = 0;
 
 // Jellyfish color tints (bioluminescent night palette)
 const JELLY_COLOR_TINTS: Color[] = [
@@ -170,6 +171,22 @@ const JELLY_COLOR_TINTS: Color[] = [
     new Color(1.2, 0.3, 0.8),   // pink
     new Color(0.5, 1.2, 1.5),   // light cyan
 ];
+
+const _fakeJellyLightPositions = Array.from({ length: MAX_FAKE_JELLY_LIGHTS }, () => new Vector3(9999, 9999, 9999));
+const _fakeJellyLightColors = Array.from({ length: MAX_FAKE_JELLY_LIGHTS }, () => new Color(0, 0, 0));
+const _fishLightUniformStates: FishLightUniformState[] = [];
+
+interface FishLightUniformState {
+    sceneLight: { value: number };
+    nightBlend: { value: number };
+    jellyVisibility: { value: number };
+    jellyIntensity: { value: number };
+    jellyInfluence: { value: number };
+    jellyRadiusSq: { value: number };
+    jellyCount: { value: number };
+    jellyPositions: { value: Vector3[] };
+    jellyColors: { value: Color[] };
+}
 
 // Pointer tracking — screen NDC coords updated each frame
 const pointerNDC = new Vector2(9999, 9999); // off-screen by default
@@ -189,6 +206,133 @@ function onPointerLeave(): void {
     pointerNDC.set(9999, 9999);
 }
 
+function getJellyVisibility(): number {
+    return smooth01(getDayNightBlend());
+}
+
+function updateFakeJellyLightUniforms(nightBlend: number, jellyVisibility: number): void {
+    const sceneLight = MathUtils.lerp(1, fishNightLightingConfig.nonJellyLightInfluence, nightBlend);
+    const jellyRadius = Math.max(0.0001, jellyfishLightConfig.distance);
+    const jellyRadiusSq = jellyRadius * jellyRadius;
+    let jellyCount = 0;
+
+    for (let i = 0; i < activeFish.length && jellyCount < MAX_FAKE_JELLY_LIGHTS; i++) {
+        const jelly = activeFish[i].pool;
+        if (!jelly.isJellyfish) continue;
+        _fakeJellyLightPositions[jellyCount].copy(jelly.group.position);
+        _fakeJellyLightColors[jellyCount].copy(jelly.fakeLightColor);
+        jellyCount++;
+    }
+    for (let i = jellyCount; i < MAX_FAKE_JELLY_LIGHTS; i++) {
+        _fakeJellyLightPositions[i].set(9999, 9999, 9999);
+        _fakeJellyLightColors[i].setRGB(0, 0, 0);
+    }
+
+    for (let i = 0; i < _fishLightUniformStates.length; i++) {
+        const state = _fishLightUniformStates[i];
+        state.sceneLight.value = sceneLight;
+        state.nightBlend.value = nightBlend;
+        state.jellyVisibility.value = underwaterView ? jellyVisibility : 0;
+        state.jellyIntensity.value = jellyfishLightConfig.intensity;
+        state.jellyInfluence.value = fishNightLightingConfig.jellyLightInfluence;
+        state.jellyRadiusSq.value = jellyRadiusSq;
+        state.jellyCount.value = jellyCount;
+    }
+}
+
+function applyFishLightShader(mat: MeshStandardMaterial): void {
+    if ((mat.userData as any).fishLightShaderApplied) return;
+    (mat.userData as any).fishLightShaderApplied = true;
+    mat.customProgramCacheKey = () => `fish-local-jelly-light-v2-${MAX_FAKE_JELLY_LIGHTS}`;
+    mat.onBeforeCompile = (shader: any) => {
+        const state: FishLightUniformState = {
+            sceneLight: { value: 1 },
+            nightBlend: { value: 0 },
+            jellyVisibility: { value: 0 },
+            jellyIntensity: { value: jellyfishLightConfig.intensity },
+            jellyInfluence: { value: fishNightLightingConfig.jellyLightInfluence },
+            jellyRadiusSq: { value: jellyfishLightConfig.distance * jellyfishLightConfig.distance },
+            jellyCount: { value: 0 },
+            jellyPositions: { value: _fakeJellyLightPositions },
+            jellyColors: { value: _fakeJellyLightColors },
+        };
+
+        shader.uniforms.uFishSceneLight = state.sceneLight;
+        shader.uniforms.uFishNightBlend = state.nightBlend;
+        shader.uniforms.uFishJellyVisibility = state.jellyVisibility;
+        shader.uniforms.uFishJellyIntensity = state.jellyIntensity;
+        shader.uniforms.uFishJellyInfluence = state.jellyInfluence;
+        shader.uniforms.uFishJellyRadiusSq = state.jellyRadiusSq;
+        shader.uniforms.uFishJellyCount = state.jellyCount;
+        shader.uniforms.uFishJellyPositions = state.jellyPositions;
+        shader.uniforms.uFishJellyColors = state.jellyColors;
+        _fishLightUniformStates.push(state);
+
+        shader.vertexShader = shader.vertexShader.replace(
+            '#include <common>',
+            `#include <common>
+            varying vec3 vFishWorldPosition;`
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+            '#include <worldpos_vertex>',
+            `#include <worldpos_vertex>
+            vFishWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;`
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <common>',
+            `#include <common>
+            #define FISH_JELLY_LIGHT_MAX ${MAX_FAKE_JELLY_LIGHTS}
+            varying vec3 vFishWorldPosition;
+            uniform float uFishSceneLight;
+            uniform float uFishNightBlend;
+            uniform float uFishJellyVisibility;
+            uniform float uFishJellyIntensity;
+            uniform float uFishJellyInfluence;
+            uniform float uFishJellyRadiusSq;
+            uniform int uFishJellyCount;
+            uniform vec3 uFishJellyPositions[FISH_JELLY_LIGHT_MAX];
+            uniform vec3 uFishJellyColors[FISH_JELLY_LIGHT_MAX];`
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <color_fragment>',
+            `#include <color_fragment>
+            diffuseColor.rgb *= uFishSceneLight;`
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <emissivemap_fragment>',
+            `#include <emissivemap_fragment>
+            vec3 fishJellyLight = vec3(0.0);
+            if (uFishJellyVisibility > 0.001 && uFishJellyInfluence > 0.001 && uFishJellyIntensity > 0.001) {
+                vec3 fishWorldNormal = normalize(inverseTransformDirection(normal, viewMatrix));
+                for (int i = 0; i < FISH_JELLY_LIGHT_MAX; i++) {
+                    if (i >= uFishJellyCount) break;
+                    vec3 toJelly = uFishJellyPositions[i] - vFishWorldPosition;
+                    float distSq = dot(toJelly, toJelly);
+                    float radial = clamp(1.0 - distSq / max(uFishJellyRadiusSq, 0.0001), 0.0, 1.0);
+                    radial = radial * radial * (3.0 - 2.0 * radial);
+                    vec3 lightDir = normalize(toJelly);
+                    float facing = clamp(dot(fishWorldNormal, lightDir) * 0.5 + 0.5, 0.0, 1.0);
+                    facing = facing * facing;
+                    fishJellyLight += uFishJellyColors[i] * radial * facing;
+                }
+                totalEmissiveRadiance += fishJellyLight * uFishJellyIntensity * uFishJellyInfluence * uFishNightBlend * uFishJellyVisibility;
+            }`
+        );
+    };
+    mat.needsUpdate = true;
+}
+
+function setJellyfishGlow(entry: PooledFish, visibility: number): void {
+    if (!entry.isJellyfish) return;
+    const renderVisibility = underwaterView ? visibility : 0;
+    const opacity = JELLY_OPACITY * renderVisibility;
+    const glowIntensity = JELLY_EMISSIVE_INTENSITY * jellyfishLightConfig.intensity * renderVisibility;
+    for (let i = 0; i < entry.materials.length; i++) {
+        entry.materials[i].opacity = opacity;
+        entry.materials[i].emissiveIntensity = glowIntensity;
+    }
+}
+
 /** Unproject pointer NDC to world position at a given Z plane */
 const _pointerWorld = new Vector3();
 const _refPoint = new Vector3();  // reusable — avoids allocation per call
@@ -204,6 +348,7 @@ function createPoolEntry(template: Group, animations: AnimationClip[], jellyfish
     const scene = _skeletonClone(template) as Group;
     const materials: MeshStandardMaterial[] = [];
     const baseTintColors: Color[] = [];
+    const activeTintColors: Color[] = [];
     scene.traverse((child) => {
         if (child instanceof Mesh && child.material) {
             const srcMat = child.material as MeshStandardMaterial;
@@ -214,10 +359,13 @@ function createPoolEntry(template: Group, animations: AnimationClip[], jellyfish
                 mat.transparent = true;
                 mat.depthWrite = false;  // transparent objects shouldn't write depth
                 mat.opacity = 0;         // invisible until activated
+            } else {
+                applyFishLightShader(mat);
             }
             child.material = mat;
             materials.push(mat);
             baseTintColors.push(mat.color.clone());
+            activeTintColors.push(mat.color.clone());
         }
     });
     const group = new Group();
@@ -229,7 +377,26 @@ function createPoolEntry(template: Group, animations: AnimationClip[], jellyfish
     const mixer = new AnimationMixer(scene);
     const clip = animations.length > 0 ? animations[0] : null;
 
-    return { group, scene, materials, baseTintColors, mixer, clip, isJellyfish: jellyfish };
+    return {
+        group,
+        scene,
+        materials,
+        baseTintColors,
+        activeTintColors,
+        fakeLightColor: new Color(1, 1, 1),
+        mixer,
+        clip,
+        isJellyfish: jellyfish,
+        actionStarted: false,
+    };
+}
+
+function ensureLoopAction(entry: PooledFish): void {
+    if (entry.actionStarted || !entry.clip) return;
+    const action = entry.mixer.clipAction(entry.clip);
+    action.setLoop(LoopRepeat, Infinity);
+    action.play();
+    entry.actionStarted = true;
 }
 
 /** Build entire fish pool synchronously inside the loader callback.
@@ -272,6 +439,7 @@ function activatePooledFish(
     // Apply tint to pre-cloned materials (reset base color first)
     for (let i = 0; i < entry.materials.length; i++) {
         entry.materials[i].color.copy(entry.baseTintColors[i]).multiply(tint);
+        entry.activeTintColors[i].copy(entry.materials[i].color);
         // Jellyfish get emissive glow matching their tint + transparency
         if (entry.isJellyfish) {
             entry.materials[i].emissive.copy(tint);
@@ -279,19 +447,15 @@ function activatePooledFish(
             entry.materials[i].opacity = JELLY_OPACITY;
         }
     }
+    entry.fakeLightColor.copy(tint);
+    setJellyfishGlow(entry, getJellyVisibility());
 
     entry.group.position.set(x, y, z);
     entry.group.scale.setScalar(scale);
     entry.group.rotation.x = 0;  // reset tilt
     entry.group.visible = true;
 
-    // Restart animation
-    entry.mixer.stopAllAction();
-    if (entry.clip) {
-        const action = entry.mixer.clipAction(entry.clip);
-        action.setLoop(LoopRepeat, Infinity);
-        action.play();
-    }
+    ensureLoopAction(entry);
 
     activeFish.push({
         pool: entry,
@@ -306,7 +470,6 @@ function activatePooledFish(
 /** Return a creature to the correct pool */
 function deactivateFish(index: number): void {
     const fish = activeFish[index];
-    fish.pool.mixer.stopAllAction();
     fish.pool.group.visible = false;
     // Reset emissive and transparency on materials
     if (fish.pool.isJellyfish) {
@@ -338,12 +501,15 @@ function resetLoopingCreature(entry: PooledFish, progress = 0): SwimmingFish {
     const tint = tints[Math.floor(Math.random() * tints.length)];
     for (let i = 0; i < entry.materials.length; i++) {
         entry.materials[i].color.copy(entry.baseTintColors[i]).multiply(tint);
+        entry.activeTintColors[i].copy(entry.materials[i].color);
         if (entry.isJellyfish) {
             entry.materials[i].emissive.copy(tint);
-            entry.materials[i].emissiveIntensity = JELLY_EMISSIVE_INTENSITY;
-            entry.materials[i].opacity = JELLY_OPACITY;
+            entry.materials[i].emissiveIntensity = 0;
+            entry.materials[i].opacity = 0;
         }
     }
+    entry.fakeLightColor.copy(tint);
+    setJellyfishGlow(entry, getJellyVisibility());
 
     const y = yMin + Math.random() * (yMax - yMin);
     const z = zMin + Math.random() * (zMax - zMin);
@@ -352,16 +518,11 @@ function resetLoopingCreature(entry: PooledFish, progress = 0): SwimmingFish {
     const scaleMult = FISH_SCALE_MIN + Math.random() * (FISH_SCALE_MAX - FISH_SCALE_MIN);
     const scale = baseScale * scaleMult;
     entry.group.position.set(x, y, z);
-    entry.group.scale.setScalar(scale * getCreatureTransitionScale(entry));
+    entry.group.scale.setScalar(scale);
     entry.group.rotation.x = 0;
     entry.group.visible = shouldShowCreature(entry);
 
-    entry.mixer.stopAllAction();
-    if (entry.clip) {
-        const action = entry.mixer.clipAction(entry.clip);
-        action.setLoop(LoopRepeat, Infinity);
-        action.play();
-    }
+    ensureLoopAction(entry);
 
     return {
         pool: entry,
@@ -386,26 +547,53 @@ function smooth01(value: number): number {
     return t * t * (3 - 2 * t);
 }
 
-function getCreatureTransitionAmount(entry: PooledFish): number {
-    const blend = getDayNightBlend();
-    return smooth01(entry.isJellyfish ? blend : 1 - blend);
-}
-
-function getCreatureTransitionScale(entry: PooledFish): number {
-    const amount = getCreatureTransitionAmount(entry);
-    const entering =
-        (entry.isJellyfish && dayNightBlendDirection > 0) ||
-        (!entry.isJellyfish && dayNightBlendDirection < 0);
-    const bounce = entering ? Math.sin(amount * Math.PI) * CREATURE_TRANSITION_BOUNCE : 0;
-    return amount * (1 + bounce);
-}
-
 function isCreatureInCameraRange(entry: PooledFish): boolean {
     return underwaterView || isObjectAboveShallowCutoff(entry.group);
 }
 
 function shouldShowCreature(entry: PooledFish): boolean {
-    return isCreatureInCameraRange(entry) && getCreatureTransitionAmount(entry) > CREATURE_TRANSITION_HIDE_THRESHOLD;
+    if (entry.isJellyfish) return true;
+    return isCreatureInCameraRange(entry);
+}
+
+export function beginJellyfishPrewarm(): () => void {
+    const savedContainerVisible = genericFishContainer.visible;
+    const savedEntries: Array<{
+        entry: PooledFish;
+        visible: boolean;
+        opacity: number[];
+        emissiveIntensity: number[];
+    }> = [];
+
+    genericFishContainer.visible = true;
+    for (let i = 0; i < activeFish.length; i++) {
+        const entry = activeFish[i].pool;
+        if (!entry.isJellyfish) continue;
+
+        savedEntries.push({
+            entry,
+            visible: entry.group.visible,
+            opacity: entry.materials.map(mat => mat.opacity),
+            emissiveIntensity: entry.materials.map(mat => mat.emissiveIntensity),
+        });
+
+        entry.group.visible = true;
+        for (let m = 0; m < entry.materials.length; m++) {
+            entry.materials[m].opacity = JELLY_OPACITY;
+            entry.materials[m].emissiveIntensity = JELLY_EMISSIVE_INTENSITY;
+        }
+    }
+
+    return () => {
+        genericFishContainer.visible = savedContainerVisible;
+        for (const saved of savedEntries) {
+            saved.entry.group.visible = saved.visible;
+            for (let i = 0; i < saved.entry.materials.length; i++) {
+                saved.entry.materials[i].opacity = saved.opacity[i];
+                saved.entry.materials[i].emissiveIntensity = saved.emissiveIntensity[i];
+            }
+        }
+    };
 }
 
 function initFixedCreatureLoops(): void {
@@ -561,9 +749,8 @@ function spawnCreatures(): void {
 }
 
 export function Update(): void {
-    const blend = getDayNightBlend();
-    dayNightBlendDirection = Math.sign(blend - previousDayNightBlend);
-    previousDayNightBlend = blend;
+    const jellyVisibility = getJellyVisibility();
+    const nightBlend = smooth01(getDayNightBlend());
 
     // Update animations
     if (clownMixer) clownMixer.update(deltaTime);
@@ -597,13 +784,14 @@ export function Update(): void {
 
     // Drip-feed pool creation (one entry per frame to avoid stutter)
     tickPoolCreation();
+    updateFakeJellyLightUniforms(nightBlend, jellyVisibility);
 
     // Move and cull active generic fish
     for (let i = activeFish.length - 1; i >= 0; i--) {
         const fish = activeFish[i];
         const group = fish.pool.group;
-        const transitionScale = getCreatureTransitionScale(fish.pool);
-        group.scale.setScalar(fish.baseScale * transitionScale);
+        group.scale.setScalar(fish.baseScale);
+        setJellyfishGlow(fish.pool, jellyVisibility);
         group.visible = shouldShowCreature(fish.pool);
         fish.pool.mixer.update(deltaTime);
         group.position.x -= fish.speed * deltaTime;

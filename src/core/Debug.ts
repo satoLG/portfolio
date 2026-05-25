@@ -281,16 +281,20 @@ import {
     setDistortion as setUnderwaterDistortion,
     setDistortionSpeed as setUnderwaterSpeed,
     setDistortionScale as setUnderwaterScale,
+    setDistortionEdgeFade as setUnderwaterEdgeFade,
 } from '../effects/PostProcess';
 import {
     distortionStrength as DISTORTION_STRENGTH,
     distortionSpeed as DISTORTION_SPEED,
     distortionScale as DISTORTION_SCALE,
+    distortionEdgeFade as DISTORTION_EDGE_FADE,
     rippleSpeed as RIPPLE_SPEED,
     rippleLifetime as RIPPLE_LIFETIME,
     rippleWidth as RIPPLE_WIDTH,
     rippleNormalStrength as RIPPLE_NORMAL_STRENGTH,
     rippleMaxClickDistance as RIPPLE_MAX_CLICK_DISTANCE,
+    jellyfishLightConfig,
+    fishNightLightingConfig,
 } from '../scene/config/OceanConfig';
 import { phoneZoomConfig, mainCameraConfig, isWebPageMode, toggleCameraMode } from './Control';
 import { mobileFov, mobileBreakpointWidth, aboveWaterBottomY as CFG_ABOVE_BOTTOM, aboveWaterBottomYMobile as CFG_ABOVE_BOTTOM_MOBILE, underwaterTopY as CFG_UNDER_TOP, underwaterTopYMobile as CFG_UNDER_TOP_MOBILE } from '../scene/config/CameraConfig';
@@ -689,6 +693,7 @@ function buildGUI(): void {
         distortion: DISTORTION_STRENGTH,
         speed:      DISTORTION_SPEED,
         scale:      DISTORTION_SCALE,
+        edgeFade:   DISTORTION_EDGE_FADE,
     };
 
     // ── Foliage color state (hoisted here so copyConfig can read it) ─────────────
@@ -971,6 +976,18 @@ function buildGUI(): void {
                 `export const distortionStrength = ${f(_fogState.distortion)};`,
                 `export const distortionSpeed    = ${f(_fogState.speed)};`,
                 `export const distortionScale    = ${f(_fogState.scale)};`,
+                `export const distortionEdgeFade = ${f(_fogState.edgeFade)};`,
+                ``,
+                `// ── Fish / Jellyfish Lighting ───────────────────────────────────────────────`,
+                `export const jellyfishLightConfig = {`,
+                `    intensity: ${f(jellyfishLightConfig.intensity)},`,
+                `    distance: ${f(jellyfishLightConfig.distance)},`,
+                `};`,
+                ``,
+                `export const fishNightLightingConfig = {`,
+                `    nonJellyLightInfluence: ${f(fishNightLightingConfig.nonJellyLightInfluence)},`,
+                `    jellyLightInfluence: ${f(fishNightLightingConfig.jellyLightInfluence)},`,
+                `};`,
                 ``,
                 `// ── Click Ripple Effect ───────────────────────────────────────────────────────`,
                 `export const rippleSpeed           = ${RIPPLE_SPEED};    // World-units/sec the ring expands (max radius = speed × lifetime)`,
@@ -992,6 +1009,18 @@ function buildGUI(): void {
     const surfFolder  = oceanFolder.addFolder('Surface Color');
     const fogFolder   = oceanFolder.addFolder('Underwater');
     const wavesFolder = oceanFolder.addFolder('Waves');
+    const oceanFishFolder = oceanFolder.addFolder('Fish');
+
+    const jellyLightFolder = oceanFishFolder.addFolder('Jellyfish Lights');
+    jellyLightFolder.add(jellyfishLightConfig, 'intensity', 0, 3, 0.01).name('Intensity').listen();
+    jellyLightFolder.add(jellyfishLightConfig, 'distance', 0.05, 5, 0.05).name('Distance').listen();
+    jellyLightFolder.close();
+
+    const fishNightFolder = oceanFishFolder.addFolder('Night Visibility');
+    fishNightFolder.add(fishNightLightingConfig, 'nonJellyLightInfluence', 0, 1, 0.01).name('Scene Light').listen();
+    fishNightFolder.add(fishNightLightingConfig, 'jellyLightInfluence', 0, 5, 0.05).name('Jelly Light').listen();
+    fishNightFolder.close();
+    oceanFishFolder.close();
 
     const skyActions = {
         copySkyConfig: () => {
@@ -1846,6 +1875,8 @@ function buildGUI(): void {
         set speed(v)     { _fogState.speed = v; setUnderwaterSpeed(v); },
         get scale()      { return _fogState.scale; },
         set scale(v)     { _fogState.scale = v; setUnderwaterScale(v); },
+        get edgeFade()   { return _fogState.edgeFade; },
+        set edgeFade(v)  { _fogState.edgeFade = v; setUnderwaterEdgeFade(v); },
     };
 
     fogFolder.add(fogProxy, 'absR',  0, 1,    0.001 ).name('Absorption R').listen();
@@ -1855,6 +1886,7 @@ function buildGUI(): void {
     fogFolder.add(fogProxy, 'distortion', 0, 0.05,  0.0001).name('Distortion Strength').listen();
     fogFolder.add(fogProxy, 'speed',      0, 5,     0.01  ).name('Distortion Speed').listen();
     fogFolder.add(fogProxy, 'scale',      0, 30,    0.1   ).name('Distortion Scale').listen();
+    fogFolder.add(fogProxy, 'edgeFade',   0, 0.2,   0.001 ).name('Distortion Edge Fade').listen();
 
     fogFolder.close();
 

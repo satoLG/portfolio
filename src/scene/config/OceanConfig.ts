@@ -52,6 +52,18 @@ export const underwaterFogDist  = 80.0000;                                  // f
 export const distortionStrength = 0.0115;
 export const distortionSpeed    = 0.6200;
 export const distortionScale    = 8.5000;
+export const distortionEdgeFade = 0.0600;
+
+// ── Fish / Jellyfish Lighting ───────────────────────────────────────────────
+export const jellyfishLightConfig = {
+    intensity: 0.3300,
+    distance: 0.7500,
+};
+
+export const fishNightLightingConfig = {
+    nonJellyLightInfluence: 0.0300,
+    jellyLightInfluence: 1.3500,
+};
 
 // ── Click Ripple Effect ───────────────────────────────────────────────────────
 export const rippleSpeed           = 0.7;    // World-units/sec the ring expands (max radius = speed × lifetime)
