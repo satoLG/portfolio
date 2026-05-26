@@ -1,7 +1,6 @@
-import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, DoubleSide, MeshBasicMaterial, Box3, MeshStandardMaterial, ShaderChunk, Plane, LinearFilter, LinearMipmapLinearFilter } from "three";
+import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, DoubleSide, MeshBasicMaterial, Box3, MeshStandardMaterial, ShaderChunk, Plane } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
-import { clone as _skeletonClone } from "three/examples/jsm/utils/SkeletonUtils";
 import { config as sfDecorConfig } from './SeaFloorDecor';
 import {
     oceanAbsorptionUniform,
@@ -22,7 +21,7 @@ import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPh
 import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../core/Dialog";
 import * as CoinTooltip from '../core/CoinTooltip';
 import type { DialogLine, ReplyOption } from "../core/Dialog";
-import { isBreezeActive, playAppleImpactSound, playBirdTweet, playChestCloseSound, playChestOpenSound, playPugSnoreOnce, stopPugSnore } from "../core/Audio";
+import { isBreezeActive, playAppleImpactSound, playChestCloseSound, playChestOpenSound, playPugSnoreOnce, stopPugSnore } from "../core/Audio";
 import { createGrassMesh, createPerlinTexture, createShadowFloorMesh, grassColorBase, grassColorTip, type GrassUniforms } from './ProceduralGrass';
 import { camera, renderer, scene as threeScene, isMobile } from "../core/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
@@ -33,15 +32,15 @@ import {
     pugOffset, tentOffset, dogBedOffset, littleRocksOffset, phoneOffset,
     apple1Offset, apple2Offset, apple3Offset,
     mossRock1Offset, mossRock2aOffset, mossRock2bOffset, mossRock3aOffset, mossRock3bOffset, mossRock3cOffset,
-    dockOffset, robin1Offset, robin2Offset, foldingTrayTableOffset, tentDogBedOffset, rugRoundOffset, lanternOffset, dogBowlOffset, dogBiscuitOffset,
+    dockOffset, foldingTrayTableOffset, tentDogBedOffset, rugRoundOffset, lanternOffset, dogBowlOffset, dogBiscuitOffset,
     islandScale, firecampScale, treeScale, bushScale, bushRadioScale, bushRadio2Scale, bushPugScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, littleRocksScale, phoneScale,
     apple1Scale, apple2Scale, apple3Scale,
     mossRock1Scale, mossRock2aScale, mossRock2bScale, mossRock3aScale, mossRock3bScale, mossRock3cScale,
-    dockScale, robin1Scale, robin2Scale, foldingTrayTableScale, tentDogBedScale, rugRoundScale, lanternScale, dogBowlScale, dogBiscuitScale,
+    dockScale, foldingTrayTableScale, tentDogBedScale, rugRoundScale, lanternScale, dogBowlScale, dogBiscuitScale,
     treeRotY, bushRotY, bushRadioRotY, bushRadio2RotY, bushPugRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, littleRocksRot, phoneRot,
     apple1RotY, apple2RotY, apple3RotY,
     mossRock1Rot, mossRock2aRot, mossRock2bRot, mossRock3aRot, mossRock3bRot, mossRock3cRot,
-    dockRot, robin1Rot, robin2Rot, foldingTrayTableRot, tentDogBedRot, rugRoundRot, lanternRot, dogBowlRot, dogBiscuitRot,
+    dockRot, foldingTrayTableRot, tentDogBedRot, rugRoundRot, lanternRot, dogBowlRot, dogBiscuitRot,
     ISLAND_SURFACE_GRASS_COLOR,
     ISLAND_SURFACE_GRASS_STRENGTH,
     ISLAND_SURFACE_GRASS_GREEN_THRESHOLD,
@@ -119,18 +118,12 @@ export const mossRock3c = new Group();
 
 // Surface props added in the visual_enhancements_2 branch.
 export const dock              = new Group();
-export const robin1            = new Group();
-export const robin2            = new Group();
 export const foldingTrayTable  = new Group();
 export const tentDogBed        = new Group();
 export const rugRound          = new Group();
 export const lantern           = new Group();
 export const dogBowl           = new Group();
 export const dogBiscuit        = new Group();
-// Animation mixers for the robins — driven each frame in Update().
-let robin1Mixer: AnimationMixer | null = null;
-let robin2Mixer: AnimationMixer | null = null;
-
 export let grassShadowMesh: Mesh | null = null;
 
 // Grass edge falloff + shadow floor — runtime-mutable, initialised from config
@@ -2444,140 +2437,6 @@ function _loadSurfaceProp(
     );
 }
 
-/** Variant of _loadSurfaceProp that initialises an AnimationMixer and plays a
- *  selected clip on loop. Caller receives the mixer through `onMixer` so it can
- *  be ticked from the per-frame Update loop. An optional `onSceneSetup` callback
- *  runs on the raw gltf scene right after the ocean-lighting pass so callers
- *  can apply per-model material tweaks (e.g. the robin render fix).
- *
- *  The loaded GLB is cached as a "template" keyed by path; subsequent calls for
- *  the same path clone the template via SkeletonUtils.clone() (deep-clones the
- *  bone hierarchy, shares geometry + materials). This halves GPU memory for
- *  props loaded multiple times (notably robin_bird, which is ~11 MB and was
- *  parsed twice). `animation` can be a clip name (preferred — survives GLB
- *  re-indexing) or a numeric index. */
-type _AnimatedTemplate = { scene: Group; animations: AnimationClip[] };
-const _animatedTemplates = new Map<string, _AnimatedTemplate>();
-const _animatedTemplatePending = new Map<string, Array<(t: _AnimatedTemplate) => void>>();
-
-function _loadAnimatedSurfaceProp(
-    path: string,
-    group: Group,
-    offset: { x: number; y: number; z: number },
-    scale: number,
-    rot: { x: number; y: number; z: number },
-    onMixer: (mixer: AnimationMixer) => void,
-    onSceneSetup?: (scene: Group) => void,
-    animation: number | string = 0,
-): void {
-    const applyTemplate = (tpl: _AnimatedTemplate) => {
-        const instanceScene = _skeletonClone(tpl.scene) as Group;
-        instanceScene.traverse((child) => {
-            if ((child as any).isMesh) {
-                child.castShadow = true;
-                (child as any).receiveShadow = true;
-            }
-        });
-        group.add(instanceScene);
-        group.position.set(
-            islandPosition.x + offset.x,
-            islandPosition.y + offset.y,
-            islandPosition.z + offset.z,
-        );
-        group.scale.setScalar(scale);
-        group.rotation.set(rot.x, rot.y, rot.z);
-        threeScene.add(group);
-        if (tpl.animations.length > 0) {
-            const mixer = new AnimationMixer(instanceScene);
-            let clip: AnimationClip | undefined;
-            if (typeof animation === 'string') {
-                clip = tpl.animations.find(a => a.name === animation);
-            }
-            if (!clip) {
-                const idx = typeof animation === 'number' ? animation : 0;
-                clip = tpl.animations[Math.min(idx, tpl.animations.length - 1)];
-            }
-            const action = mixer.clipAction(clip);
-            action.setLoop(LoopRepeat, Infinity);
-            action.play();
-            onMixer(mixer);
-        }
-    };
-
-    const cached = _animatedTemplates.get(path);
-    if (cached) { applyTemplate(cached); return; }
-
-    const pending = _animatedTemplatePending.get(path);
-    if (pending) { pending.push(applyTemplate); return; }
-
-    _animatedTemplatePending.set(path, [applyTemplate]);
-    loader.load(
-        path,
-        (gltf) => {
-            applyOceanLightingToModel(gltf.scene);
-            if (onSceneSetup) onSceneSetup(gltf.scene);
-            const tpl: _AnimatedTemplate = {
-                scene: gltf.scene as Group,
-                animations: gltf.animations || [],
-            };
-            _animatedTemplates.set(path, tpl);
-            const queue = _animatedTemplatePending.get(path) || [];
-            _animatedTemplatePending.delete(path);
-            for (const apply of queue) apply(tpl);
-            console.log(`Animated surface prop loaded once: ${path} (${queue.length} instances)`);
-        },
-        undefined,
-        (err) => { console.error(`Error loading animated surface prop ${path}:`, err); },
-    );
-}
-
-/** Distance-only seam fix for the robin model. The body is built as mirrored
- *  halves that don't quite touch on the symmetry plane; the gap is sub-pixel
- *  up close but resolves to a visible 1-px crack once the bird shrinks to a
- *  handful of pixels on screen.
- *
- *  Earlier attempts and why they were dropped:
- *    - `side = DoubleSide` → lit the interior backfaces as bright white lines.
- *    - Vertex inflation along normals → mechanically closed the seam but
- *      exposed white interior shells along other internal edges.
- *
- *  Current strategy is non-destructive — we never touch geometry or backface
- *  rendering. The artefact is mitigated by stopping mipmap blur from eating
- *  texture detail and alpha edges at distance:
- *    1. `anisotropy = max` keeps UV detail sharp at oblique angles.
- *    2. `minFilter = LinearMipmapLinearFilter` (trilinear) instead of the
- *       default LinearMipmapNearest — smoother LOD transition, no sudden
- *       mip-pop that exposes seams.
- *    3. Convert any `alphaTest` to `alphaToCoverage` so silhouette edges
- *       dither smoothly with MSAA instead of being cut off.
- *  The geometric seam itself still exists — short of editing the GLB to weld
- *  the symmetry vertices, that's intrinsic to the model. */
-function _fixBirdRender(model: Group): void {
-    const maxAniso = renderer.capabilities.getMaxAnisotropy?.() ?? 1;
-    model.traverse((child) => {
-        const mesh = child as Mesh;
-        if (!(mesh as any).isMesh) return;
-        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        mats.forEach((mat: any) => {
-            if (mat.map) {
-                mat.map.anisotropy = Math.max(mat.map.anisotropy ?? 1, maxAniso);
-                mat.map.minFilter = LinearMipmapLinearFilter;
-                mat.map.magFilter = LinearFilter;
-                mat.map.needsUpdate = true;
-            }
-            if ((mat.alphaTest ?? 0) > 0 || mat.transparent) {
-                mat.opacity = 1;
-                mat.alphaTest = 0.5;
-                mat.alphaToCoverage = true;
-                mat.transparent = false;
-                mat.depthWrite = true;
-                mat.depthTest = true;
-            }
-            mat.needsUpdate = true;
-        });
-    });
-}
-
 // Apply wind animation shader to tree
 function applyTreeWindShader(model: Group): void {
     model.traverse((child) => {
@@ -3194,7 +3053,7 @@ export function Start(): void {
     _loadMossRock('models/surface/moss_rock3.glb',  mossRock3b, mossRock3bOffset, mossRock3bScale, mossRock3bRot);
     _loadMossRock('models/surface/moss_rock3.glb',  mossRock3c, mossRock3cOffset, mossRock3cScale, mossRock3cRot);
 
-    // ── Extra surface props (dock, robins, tent interior) ────────────────────
+    // ── Extra surface props (dock, tent interior) ────────────────────────────
     _loadSurfaceProp('models/surface/dock.glb',                dock,             dockOffset,             dockScale,             dockRot);
     _loadSurfaceProp('models/surface/folding_tray_table.glb',  foldingTrayTable, foldingTrayTableOffset, foldingTrayTableScale, foldingTrayTableRot);
     _loadSurfaceProp('models/surface/dog_bed.glb',             tentDogBed,       tentDogBedOffset,       tentDogBedScale,       tentDogBedRot);
@@ -3202,8 +3061,6 @@ export function Start(): void {
     _loadSurfaceProp('models/surface/lantern.glb',             lantern,          lanternOffset,          lanternScale,          lanternRot);
     _loadSurfaceProp('models/surface/dog_bowl.glb',            dogBowl,          dogBowlOffset,          dogBowlScale,          dogBowlRot);
     _loadSurfaceProp('models/surface/dog_biscuit.glb',         dogBiscuit,       dogBiscuitOffset,       dogBiscuitScale,       dogBiscuitRot);
-    _loadAnimatedSurfaceProp('models/surface/robin_bird.glb',  robin1, robin1Offset, robin1Scale, robin1Rot, m => { robin1Mixer = m; }, _fixBirdRender, 'Robin_Bird_Idle');
-    _loadAnimatedSurfaceProp('models/surface/robin_bird.glb',  robin2, robin2Offset, robin2Scale, robin2Rot, m => { robin2Mixer = m; }, _fixBirdRender, 'Robin_Bird_Call2');
 
     // Phone model — always spawned on the little rocks
     loader.load(
@@ -3392,9 +3249,6 @@ export function Start(): void {
 
     // Setup pug click/hover interaction
     setupPugInteraction();
-
-    // Setup robin (bird) click/hover interaction — tap to hear them tweet
-    setupBirdInteraction();
 
     // Setup phone click/hover interaction
     setupPhoneInteraction();
@@ -4663,138 +4517,6 @@ function setupRadioInteraction(): void {
     });
 }
 
-// ============================================
-// BIRD (ROBIN) CLICK/HOVER INTERACTION
-// Click either robin to hear it tweet + emit a small burst of music-note
-// particles. Hit detection uses screen-space distance to the bird's projected
-// position so the radius stays generous regardless of camera distance.
-// ============================================
-const BIRD_CLICK_RADIUS_PX = 70;     // generous hit radius around bird centre (px)
-const BIRD_BURST_COUNT_MIN = 3;
-const BIRD_BURST_COUNT_MAX = 5;
-const _birdWorldPos = new Vector3();
-const _birdScreenPos = new Vector3();
-let isBirdHovered = false;
-let _hoveredBird: Group | null = null;
-
-/** Returns the robin nearest to (clientX, clientY) within BIRD_CLICK_RADIUS_PX,
- *  or null if neither is hovered. Skips birds that haven't loaded yet. */
-function _findBirdAt(clientX: number, clientY: number): Group | null {
-    let closest: Group | null = null;
-    let minDist = BIRD_CLICK_RADIUS_PX;
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    const birds: Group[] = [robin1, robin2];
-    for (const bird of birds) {
-        if (bird.children.length === 0) continue;
-        bird.getWorldPosition(_birdWorldPos);
-        _birdScreenPos.copy(_birdWorldPos).project(camera);
-        // Skip if behind the camera (z outside [-1, 1] in NDC)
-        if (_birdScreenPos.z < -1 || _birdScreenPos.z > 1) continue;
-        const sx = (_birdScreenPos.x + 1) * 0.5 * w;
-        const sy = (1 - _birdScreenPos.y) * 0.5 * h;
-        const dx = sx - clientX;
-        const dy = sy - clientY;
-        const d  = Math.sqrt(dx * dx + dy * dy);
-        if (d < minDist) { minDist = d; closest = bird; }
-    }
-    return closest;
-}
-
-function _onBirdInteraction(clientX: number, clientY: number): void {
-    if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
-    const bird = _findBirdAt(clientX, clientY);
-    if (!bird) return;
-    const idx = bird === robin1 ? 0 : 1;
-    playBirdTweet(idx);
-    spawnBirdSoundBurst(bird);
-}
-
-function setupBirdInteraction(): void {
-    const canvas = renderer.domElement;
-    if (!canvas) return;
-
-    canvas.addEventListener('click', (e: MouseEvent) => {
-        _onBirdInteraction(e.clientX, e.clientY);
-    });
-
-    canvas.addEventListener('touchend', (e: TouchEvent) => {
-        if (_touchWasMulti || _touchDragged) return;  // scroll gesture — skip
-        if (e.changedTouches.length === 0) return;
-        const t = e.changedTouches[0];
-        _onBirdInteraction(t.clientX, t.clientY);
-    });
-
-    canvas.addEventListener('mousemove', (e: MouseEvent) => {
-        if (camera.position.y < UNDERWATER_Y_THRESHOLD) {
-            if (isBirdHovered) {
-                isBirdHovered = false;
-                _hoveredBird = null;
-                canvas.style.cursor = '';
-            }
-            return;
-        }
-        const bird = _findBirdAt(e.clientX, e.clientY);
-        if (bird) {
-            if (!isBirdHovered || _hoveredBird !== bird) {
-                isBirdHovered = true;
-                _hoveredBird = bird;
-                canvas.style.cursor = 'pointer';
-            }
-        } else if (isBirdHovered) {
-            isBirdHovered = false;
-            _hoveredBird = null;
-            canvas.style.cursor = '';
-        }
-    });
-
-    canvas.addEventListener('mouseleave', () => {
-        if (isBirdHovered) {
-            isBirdHovered = false;
-            _hoveredBird = null;
-            canvas.style.cursor = '';
-        }
-    });
-}
-
-/** Emit a small burst of music-note particles from the bird's world position.
- *  Re-uses the existing musicNotes pool + updateMusicNotes() animation. */
-function spawnBirdSoundBurst(bird: Group): void {
-    if (noteTextures.length === 0) return;
-    const center = new Vector3();
-    bird.getWorldPosition(center);
-
-    const count = BIRD_BURST_COUNT_MIN + Math.floor(Math.random() * (BIRD_BURST_COUNT_MAX - BIRD_BURST_COUNT_MIN + 1));
-    for (let i = 0; i < count; i++) {
-        const tex = noteTextures[Math.floor(Math.random() * noteTextures.length)];
-        const mat = _acquireSpriteMaterial(tex);
-        const sprite = new Sprite(mat);
-        const noteSize = 0.04 + Math.random() * 0.025;   // smaller than radio notes
-        sprite.scale.set(noteSize, noteSize, 1);
-
-        // Spawn within a tiny sphere around the bird's body
-        const ang = Math.random() * Math.PI * 2;
-        const r   = 0.03 + Math.random() * 0.03;
-        sprite.position.set(
-            center.x + Math.cos(ang) * r,
-            center.y + 0.04 + Math.random() * 0.05,
-            center.z + Math.sin(ang) * r,
-        );
-
-        // Velocity: gentle outward + upward drift
-        const speed = 0.18 + Math.random() * 0.1;
-        const vx = Math.cos(ang) * speed * 0.5;
-        const vy = (0.7 + Math.random() * 0.3) * speed;
-        const vz = Math.sin(ang) * speed * 0.5;
-
-        const lifetime = 1.1 + Math.random() * 0.5;
-        const baseOpacity = 0.75;
-
-        bird.parent?.add(sprite);
-        musicNotes.push({ sprite, age: 0, lifetime, vx, vy, vz, baseOpacity });
-    }
-}
-
 export function Update(isUnderwater = false): void {
   _updateAppleImpacts();
   islandCampfireGroundCenterUniform.value.set(firecamp.position.x, firecamp.position.z);
@@ -4962,11 +4684,6 @@ export function Update(isUnderwater = false): void {
         }
     }
     
-    // Tick robin bird animation mixers (same clamp guard as the pug).
-    const clampedDt = Math.min(deltaTime, 0.1);
-    if (robin1Mixer) robin1Mixer.update(clampedDt);
-    if (robin2Mixer) robin2Mixer.update(clampedDt);
-
     // Update pug animation mixer — clamp delta to avoid fast-forward on frame-skips
     if (pugMixer) {
         pugMixer.update(Math.min(deltaTime, 0.1));

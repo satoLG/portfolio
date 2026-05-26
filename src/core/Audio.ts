@@ -38,9 +38,6 @@ const INTRO_FADE_IN_DURATION   = 3.0;    // Fade-in when start clicked
 const INTRO_FADE_OUT_DURATION  = 2.5;    // Fade-out when descent begins
 export const INTRO_WRITING_VOLUME = 0.03; // Tegaki pen scratching during welcome text — read by WelcomeText.ts
 
-// ── Day-time bird tweets (played on click — see Island.ts robin interaction) ─
-const DAY_BIRD_VOLUME = 0.6;             // EASY TO TWEAK — on-click bird tweet volume
-
 // ── Night crickets loop ──────────────────────────────────────────────────────
 const CRICKETS_VOLUME       = 0.08;      // EASY TO TWEAK — very soft
 const CRICKETS_FADE_DURATION = 0;      // Day↔night crossfade
@@ -59,8 +56,6 @@ const AUDIO_PATHS = {
     underwaterBubbles: 'audio/nature/underwater/96742__robinhood76__01650-underwater-bubbles.mp3',
     waterSplash: 'audio/nature/surface/274060__junggle__water-splash-11.mp3',
     introPiano: 'audio/music/320526__benpm__ambient-piano-music-3.mp3',
-    dayBird1: 'audio/nature/surface/31062 Ortolan bird tweet-full.mp3',
-    dayBird2: 'audio/nature/surface/31451 Ortolan bunting bird isolated tweet-full.mp3',
     crickets: 'audio/nature/surface/Crickets.mp3',
     uiSwitchDay: '/audio/ui/dragon-studio-light-switch-on-382714.mp3',
     uiSwitchNight: '/audio/ui/dragon-studio-light-switch-382712.mp3',
@@ -264,10 +259,7 @@ let introBreezeSound: BufferSound | null = null;
 let introBreezeTimeout: ReturnType<typeof setTimeout> | null = null;
 let introPianoActive = false;
 
-// ── Day birds + night crickets ───────────────────────────────────────────────
-// Bird tweets are click-triggered from Island.ts (robin interaction). The
-// buffers stay loaded so playBirdTweet() can fire them on demand.
-let dayBirdSounds: BufferSound[] = [];
+// ── Night crickets ───────────────────────────────────────────────────────────
 let cricketsSound: BufferSound | null = null;
 let cricketsActive = false;
 
@@ -553,20 +545,6 @@ function startSceneAudio(): void {
         if (!isDayTime()) startFireplace();
         if (!isDayTime()) startCrickets();
     }
-}
-
-// ============================================
-// BIRD TWEET (on-demand — fired by clicking a robin in Island.ts)
-// ============================================
-/** Play the indexed bird tweet (0 = first robin, 1 = second). Safe to call
- *  before audio is initialized — no-op in that case. Also no-op underwater. */
-export function playBirdTweet(index: number): void {
-    if (!audioInitialized || isCurrentlyUnderwater) return;
-    if (index < 0 || index >= dayBirdSounds.length) return;
-    const sound = dayBirdSounds[index];
-    if (!sound) return;
-    sound.gain.gain.value = DAY_BIRD_VOLUME;
-    playBufferSound(sound);
 }
 
 // ============================================
@@ -1013,7 +991,7 @@ async function initAudio(): Promise<void> {
     try {
         const [
             waterBuf, breezeBuf, fireplaceBuf, underwaterAmbBuf, underwaterBubblesBuf, waterSplashBuf,
-            introPianoBuf, dayBird1Buf, dayBird2Buf, cricketsBuf,
+            introPianoBuf, cricketsBuf,
         ] = await Promise.all([
             loadAudioBuffer(AUDIO_PATHS.water),
             loadAudioBuffer(AUDIO_PATHS.breeze),
@@ -1022,8 +1000,6 @@ async function initAudio(): Promise<void> {
             loadAudioBuffer(AUDIO_PATHS.underwaterBubbles),
             loadAudioBuffer(AUDIO_PATHS.waterSplash),
             loadAudioBuffer(AUDIO_PATHS.introPiano),
-            loadAudioBuffer(AUDIO_PATHS.dayBird1),
-            loadAudioBuffer(AUDIO_PATHS.dayBird2),
             loadAudioBuffer(AUDIO_PATHS.crickets),
         ]);
 
@@ -1035,10 +1011,6 @@ async function initAudio(): Promise<void> {
         underwaterAmbSound = createBufferSound(underwaterAmbBuf, sceneRevealGain, { loop: true, volume: UNDERWATER_AMB_VOLUME });
         underwaterBubblesSound = createBufferSound(underwaterBubblesBuf, sceneRevealGain, { volume: TRANSITION_SFX_VOLUME });
         waterSplashSound = createBufferSound(waterSplashBuf, sceneRevealGain, { volume: WATER_SPLASH_VOLUME });
-        dayBirdSounds = [
-            createBufferSound(dayBird1Buf, sceneRevealGain, { volume: DAY_BIRD_VOLUME }),
-            createBufferSound(dayBird2Buf, sceneRevealGain, { volume: DAY_BIRD_VOLUME }),
-        ];
         cricketsSound = createBufferSound(cricketsBuf, sceneRevealGain, { loop: true, volume: 0 });
 
         // Intro sounds route through introGain (faded in at start, out at descent).
