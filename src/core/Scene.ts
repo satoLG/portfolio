@@ -37,10 +37,14 @@ export const webglContainer = document.querySelector('#webgl') as HTMLDivElement
 export const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
 const defaultHigh = !isMobile;
 
-// Read graphics settings from localStorage (or use device-based defaults)
+// Read graphics settings from localStorage (or use device-based defaults).
+// MSAA (WebGL antialias) reserves a multi-sample backbuffer that costs ~150–250 MB
+// of VRAM at retina resolutions. We default it OFF and rely on FXAA in PostProcess
+// for edge smoothing — small per-frame cost, ~0 extra RAM. Users can opt back into
+// MSAA through the debug GUI (page reload required, since it's a context attribute).
 export let antialias = localStorage.getItem('portfolio-antialias') !== null
     ? localStorage.getItem('portfolio-antialias') === 'true'
-    : defaultHigh;
+    : false;
 export let shadowsEnabled = localStorage.getItem('portfolio-shadows') !== null
     ? localStorage.getItem('portfolio-shadows') === 'true'
     : defaultHigh;
@@ -392,9 +396,11 @@ export function Start(): void
     scene.add(Fire.fireShadowLight);
     scene.add(Fire.fireShadowLight.target);
 
-    // Initialize post-processing (underwater distortion + pixelation)
+    // Initialize post-processing (underwater distortion + pixelation + FXAA)
     PostProcess.Start(renderer);
-    
+    // FXAA replaces MSAA when antialiasing is off (the new default).
+    PostProcess.setFxaaEnabled(!antialias);
+
     // Apply saved pixel size
     if (pixelSizeValue > 0) {
         PostProcess.setPixelSize(pixelSizeValue);

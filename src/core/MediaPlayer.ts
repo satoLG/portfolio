@@ -269,6 +269,26 @@ function loadRetroWorklet(): Promise<void> {
 // Preloading system for faster song transitions
 let preloadedAudios: Map<number, HTMLAudioElement> = new Map();
 
+// Cache of pre-computed waveform peaks per track URL. Without this, wavesurfer
+// internally decodes each track's MP3 to Float32 PCM (~10× expansion, ~50-150 MB
+// per ~5 MB track) every time .load() is called, and keeps every prior track's
+// decoded data alive for the session. After 6-10 track switches that alone
+// reaches several hundred MB of unrecoverable RAM growth.
+const peaksCache = new Map<string, number[][]>();
+
+/** Pull peaks out of wavesurfer after a decode and store them so subsequent
+ *  plays of the same track skip the decode entirely. */
+function cachePeaksAfterReady(url: string): void {
+    if (!wavesurfer) return;
+    wavesurfer.once('ready', () => {
+        if (!wavesurfer) return;
+        try {
+            const exported = wavesurfer.exportPeaks({ maxLength: 1024, precision: 1000 });
+            peaksCache.set(url, exported);
+        } catch { /* ignore — non-fatal */ }
+    });
+}
+
 /** Preload all playlist tracks into browser cache via fetch() */
 export function preloadAllTracks(): void {
     for (let i = 0; i < playlist.length; i++) {
@@ -973,7 +993,9 @@ function initWavesurfer(): void {
     
     // Load first song waveform
     if (playlist.length > 0) {
-        wavesurfer.load(playlist[0].file);
+        const firstUrl = playlist[0].file;
+        wavesurfer.load(firstUrl);
+        cachePeaksAfterReady(firstUrl);
     }
 }
 
@@ -1435,8 +1457,19 @@ function loadSong(index: number, forcePlay: boolean = false): void {
     // wavesurfer.load() sets audioElement.src internally (they share the same element).
     // Let wavesurfer be the single owner of .src to avoid double-set conflicts.
     if (wavesurfer) {
+        // Drop the previous track's decoded PCM/peaks before loading the new
+        // one. Otherwise wavesurfer accumulates every played track in memory.
+        try { wavesurfer.empty(); } catch { /* fine if it wasn't loaded yet */ }
+
+        const cachedPeaks = peaksCache.get(songFile);
         try {
-            wavesurfer.load(songFile);
+            if (cachedPeaks) {
+                // Skip wavesurfer's internal decode entirely.
+                wavesurfer.load(songFile, cachedPeaks);
+            } else {
+                wavesurfer.load(songFile);
+                cachePeaksAfterReady(songFile);
+            }
         } catch {
             // Fallback if wavesurfer.load fails: set src directly
             _isLoadingNewSong = false;

@@ -143,51 +143,6 @@ export function init(glScene: ThreeScene): void {
 
     const cfg = phoneScreenConfig;
 
-    // ── Container (CSS px resolution) ────────────────────────────────────────
-    containerEl = document.createElement('div');
-    containerEl.style.width        = `${cfg.iframeWidth}px`;
-    containerEl.style.height       = `${cfg.iframeHeight}px`;
-    // containerEl.style.overflow     = 'hidden';
-    containerEl.style.borderRadius = '14px';
-    containerEl.style.background   = '#000';
-
-    // Stop clicks on the phone screen area from bubbling to the CSS3D div's
-    // zoom-out handler — only clicks OUTSIDE this container should zoom out.
-    containerEl.addEventListener('click', (e) => e.stopPropagation());
-
-    // ── Iframe ───────────────────────────────────────────────────────────────
-    iframeEl = document.createElement('iframe');
-    iframeEl.src = 'https://projects-hub-one.vercel.app/';
-    iframeEl.style.width        = cfg.iframeWidth + 'px';
-    iframeEl.style.height       = cfg.iframeHeight + 'px';
-    iframeEl.style.boxSizing    = 'border-box';
-    iframeEl.style.opacity      = '1';
-    // Brightness boost — makes it look like a lit device screen
-    // iframeEl.style.filter       = 'brightness(1.35)';
-    iframeEl.frameBorder = '0';
-    containerEl.appendChild(iframeEl);
-
-    // ── Glass overlay ────────────────────────────────────────────────────────
-    overlayEl = document.createElement('div');
-    overlayEl.style.position      = 'absolute';
-    overlayEl.style.inset         = '0';
-    overlayEl.style.pointerEvents = 'none';
-    overlayEl.style.borderRadius  = '14px';
-    updateOverlayStyle();
-    containerEl.appendChild(overlayEl);
-
-    // ── CSS3DObject ──────────────────────────────────────────────────────────
-    cssObject = new CSS3DObject(containerEl);
-    // Scale uses CSS_SCALE to keep values large enough for iOS WebKit.
-    // screenWidth * CSS_SCALE / iframeWidth ≈ 0.512 (vs original ~0.0001)
-    cssObject.scale.set(
-        cfg.screenWidth  * CSS_SCALE / cfg.iframeWidth,
-        cfg.screenHeight * CSS_SCALE / cfg.iframeHeight,
-        1,
-    );
-    cssObject.visible = true;
-    cssScene.add(cssObject);
-
     // ── Occluding plane (NoBlending — valid premultiplied alpha) ─────────────────────
     // MeshBasicMaterial ignores scene lights — always outputs (0,0,0,0) with
     // opacity:0 + NoBlending, punching a valid premultiplied-alpha transparent hole.
@@ -204,8 +159,88 @@ export function init(glScene: ThreeScene): void {
     occludingPlane.visible = false;
     _glScene.add(occludingPlane);
 
-    // Apply any effects that were requested before init() ran
-    applyPhoneColorFilter(_pendingColorFilter);
+    // NOTE: iframe + CSS3DObject creation deferred to mountIframe(); called
+    // by Control.ts when the user zooms into the phone. This keeps the heavy
+    // external page (~150–300 MB) out of RAM until needed and tears it down
+    // on zoom-out.
+}
+
+/**
+ * Create the iframe + CSS3DObject lazily. Called by Control.ts when phone
+ * zoom begins. Idempotent — does nothing if already mounted.
+ */
+export function mountIframe(): void {
+    if (!_initialized || !cssScene) return;
+    if (iframeEl) return;  // already mounted
+
+    const cfg = phoneScreenConfig;
+
+    // ── Container (CSS px resolution) ────────────────────────────────────────
+    containerEl = document.createElement('div');
+    containerEl.style.width        = `${cfg.iframeWidth}px`;
+    containerEl.style.height       = `${cfg.iframeHeight}px`;
+    containerEl.style.borderRadius = '14px';
+    containerEl.style.background   = '#000';
+    containerEl.style.filter       = _pendingColorFilter;
+
+    // Stop clicks on the phone screen area from bubbling to the CSS3D div's
+    // zoom-out handler — only clicks OUTSIDE this container should zoom out.
+    containerEl.addEventListener('click', (e) => e.stopPropagation());
+
+    // ── Iframe ───────────────────────────────────────────────────────────────
+    iframeEl = document.createElement('iframe');
+    iframeEl.src = 'https://projects-hub-one.vercel.app/';
+    iframeEl.style.width        = cfg.iframeWidth + 'px';
+    iframeEl.style.height       = cfg.iframeHeight + 'px';
+    iframeEl.style.boxSizing    = 'border-box';
+    iframeEl.style.opacity      = '1';
+    iframeEl.frameBorder = '0';
+    containerEl.appendChild(iframeEl);
+
+    // ── Glass overlay ────────────────────────────────────────────────────────
+    overlayEl = document.createElement('div');
+    overlayEl.style.position      = 'absolute';
+    overlayEl.style.inset         = '0';
+    overlayEl.style.pointerEvents = 'none';
+    overlayEl.style.borderRadius  = '14px';
+    containerEl.appendChild(overlayEl);
+    updateOverlayStyle();
+
+    // ── CSS3DObject ──────────────────────────────────────────────────────────
+    cssObject = new CSS3DObject(containerEl);
+    cssObject.scale.set(
+        cfg.screenWidth  * CSS_SCALE / cfg.iframeWidth,
+        cfg.screenHeight * CSS_SCALE / cfg.iframeHeight,
+        1,
+    );
+    cssObject.visible = _visible;
+    cssScene.add(cssObject);
+}
+
+/**
+ * Tear down the iframe + CSS3DObject. Called by Control.ts when zoom-out
+ * completes. The external page is fully unloaded; next zoom-in reloads it.
+ */
+export function unmountIframe(): void {
+    if (cssObject && cssScene) {
+        cssScene.remove(cssObject);
+        cssObject = null;
+    }
+    if (iframeEl) {
+        // Forcing src to about:blank ensures the embedded page stops scripts
+        // and frees its memory before we drop the DOM node.
+        try { iframeEl.src = 'about:blank'; } catch {}
+        iframeEl.remove();
+        iframeEl = null;
+    }
+    if (overlayEl) {
+        overlayEl.remove();
+        overlayEl = null;
+    }
+    if (containerEl) {
+        containerEl.remove();
+        containerEl = null;
+    }
 }
 
 /**
@@ -281,10 +316,6 @@ export function preRender(phoneGroup: Group, cam?: PerspectiveCamera): void {
         return;
     }
 
-    // CSS3D is always visible while phone is spawned — keeps the iframe alive
-    // and shows the screen content at all distances, not just when zoomed.
-    if (cssObject) cssObject.visible = true;
-
     // ── Store refs for click-handler raycasting ───────────────────────────────
     _phoneGroup = phoneGroup;
 
@@ -293,26 +324,28 @@ export function preRender(phoneGroup: Group, cam?: PerspectiveCamera): void {
     phoneGroup.getWorldQuaternion(_worldQuat);
 
     const cfg = phoneScreenConfig;
-
-    // CSS3DObject positioned in CSS-pixel coordinate space (scaled up)
-    cssObject!.position.set(
-        (_worldPos.x + cfg.offsetX) * CSS_SCALE,
-        (_worldPos.y + cfg.offsetY) * CSS_SCALE,
-        (_worldPos.z + cfg.offsetZ) * CSS_SCALE,
-    );
-    cssObject!.quaternion.copy(_worldQuat);
-
-    // Live-update scale in case config changed via debug GUI
-    cssObject!.scale.set(
-        cfg.screenWidth  * CSS_SCALE / cfg.iframeWidth,
-        cfg.screenHeight * CSS_SCALE / cfg.iframeHeight,
-        1,
-    );
-
-    // ── Hide CSS3D planes entirely when pixelation is active ─────────
     const zoomed = isPhoneZoomActive();
     const visible = !_pixelActive;
-    if (containerEl) containerEl.style.opacity = visible ? '1' : '0';
+
+    // CSS3DObject only exists while the iframe is mounted (zoom active).
+    if (cssObject) {
+        cssObject.visible = true;
+        cssObject.position.set(
+            (_worldPos.x + cfg.offsetX) * CSS_SCALE,
+            (_worldPos.y + cfg.offsetY) * CSS_SCALE,
+            (_worldPos.z + cfg.offsetZ) * CSS_SCALE,
+        );
+        cssObject.quaternion.copy(_worldQuat);
+
+        // Live-update scale in case config changed via debug GUI
+        cssObject.scale.set(
+            cfg.screenWidth  * CSS_SCALE / cfg.iframeWidth,
+            cfg.screenHeight * CSS_SCALE / cfg.iframeHeight,
+            1,
+        );
+
+        if (containerEl) containerEl.style.opacity = visible ? '1' : '0';
+    }
 
     // Occluding plane stays at WebGL world coordinates (decoupled from CSS_SCALE).
     if (occludingPlane) {
@@ -327,7 +360,9 @@ export function preRender(phoneGroup: Group, cam?: PerspectiveCamera): void {
             cfg.screenHeight / cfg.iframeHeight,
             1,
         );
-        occludingPlane.visible = visible;
+        // Only punch a transparent hole when the iframe is actually mounted,
+        // otherwise the user sees a transparent square on the phone screen.
+        occludingPlane.visible = visible && cssObject !== null;
     }
 }
 
