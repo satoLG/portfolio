@@ -1,5 +1,6 @@
 import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, DoubleSide, MeshBasicMaterial, Box3, MeshStandardMaterial, ShaderChunk, Plane, LinearFilter, LinearMipmapLinearFilter } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+import { clone as _skeletonClone } from "three/examples/jsm/utils/SkeletonUtils";
 import { config as sfDecorConfig } from './SeaFloorDecor';
 import {
     oceanAbsorptionUniform,
@@ -2380,7 +2381,18 @@ function _loadSurfaceProp(
  *  selected clip on loop. Caller receives the mixer through `onMixer` so it can
  *  be ticked from the per-frame Update loop. An optional `onSceneSetup` callback
  *  runs on the raw gltf scene right after the ocean-lighting pass so callers
- *  can apply per-model material tweaks (e.g. the robin render fix). */
+ *  can apply per-model material tweaks (e.g. the robin render fix).
+ *
+ *  The loaded GLB is cached as a "template" keyed by path; subsequent calls for
+ *  the same path clone the template via SkeletonUtils.clone() (deep-clones the
+ *  bone hierarchy, shares geometry + materials). This halves GPU memory for
+ *  props loaded multiple times (notably robin_bird, which is ~11 MB and was
+ *  parsed twice). `animation` can be a clip name (preferred — survives GLB
+ *  re-indexing) or a numeric index. */
+type _AnimatedTemplate = { scene: Group; animations: AnimationClip[] };
+const _animatedTemplates = new Map<string, _AnimatedTemplate>();
+const _animatedTemplatePending = new Map<string, Array<(t: _AnimatedTemplate) => void>>();
+
 function _loadAnimatedSurfaceProp(
     path: string,
     group: Group,
@@ -2389,37 +2401,63 @@ function _loadAnimatedSurfaceProp(
     rot: { x: number; y: number; z: number },
     onMixer: (mixer: AnimationMixer) => void,
     onSceneSetup?: (scene: Group) => void,
-    animationIndex = 0,
+    animation: number | string = 0,
 ): void {
+    const applyTemplate = (tpl: _AnimatedTemplate) => {
+        const instanceScene = _skeletonClone(tpl.scene) as Group;
+        instanceScene.traverse((child) => {
+            if ((child as any).isMesh) {
+                child.castShadow = true;
+                (child as any).receiveShadow = true;
+            }
+        });
+        group.add(instanceScene);
+        group.position.set(
+            islandPosition.x + offset.x,
+            islandPosition.y + offset.y,
+            islandPosition.z + offset.z,
+        );
+        group.scale.setScalar(scale);
+        group.rotation.set(rot.x, rot.y, rot.z);
+        threeScene.add(group);
+        if (tpl.animations.length > 0) {
+            const mixer = new AnimationMixer(instanceScene);
+            let clip: AnimationClip | undefined;
+            if (typeof animation === 'string') {
+                clip = tpl.animations.find(a => a.name === animation);
+            }
+            if (!clip) {
+                const idx = typeof animation === 'number' ? animation : 0;
+                clip = tpl.animations[Math.min(idx, tpl.animations.length - 1)];
+            }
+            const action = mixer.clipAction(clip);
+            action.setLoop(LoopRepeat, Infinity);
+            action.play();
+            onMixer(mixer);
+        }
+    };
+
+    const cached = _animatedTemplates.get(path);
+    if (cached) { applyTemplate(cached); return; }
+
+    const pending = _animatedTemplatePending.get(path);
+    if (pending) { pending.push(applyTemplate); return; }
+
+    _animatedTemplatePending.set(path, [applyTemplate]);
     loader.load(
         path,
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
             if (onSceneSetup) onSceneSetup(gltf.scene);
-            gltf.scene.traverse((child) => {
-                if ((child as any).isMesh) {
-                    child.castShadow = true;
-                    (child as any).receiveShadow = true;
-                }
-            });
-            group.add(gltf.scene);
-            group.position.set(
-                islandPosition.x + offset.x,
-                islandPosition.y + offset.y,
-                islandPosition.z + offset.z,
-            );
-            group.scale.setScalar(scale);
-            group.rotation.set(rot.x, rot.y, rot.z);
-            threeScene.add(group);
-            if (gltf.animations && gltf.animations.length > 0) {
-                const mixer = new AnimationMixer(gltf.scene);
-                const clip = gltf.animations[Math.min(animationIndex, gltf.animations.length - 1)];
-                const action = mixer.clipAction(clip);
-                action.setLoop(LoopRepeat, Infinity);
-                action.play();
-                onMixer(mixer);
-            }
-            console.log(`Animated surface prop loaded: ${path}`);
+            const tpl: _AnimatedTemplate = {
+                scene: gltf.scene as Group,
+                animations: gltf.animations || [],
+            };
+            _animatedTemplates.set(path, tpl);
+            const queue = _animatedTemplatePending.get(path) || [];
+            _animatedTemplatePending.delete(path);
+            for (const apply of queue) apply(tpl);
+            console.log(`Animated surface prop loaded once: ${path} (${queue.length} instances)`);
         },
         undefined,
         (err) => { console.error(`Error loading animated surface prop ${path}:`, err); },
@@ -3097,8 +3135,8 @@ export function Start(): void {
     _loadSurfaceProp('models/surface/lantern.glb',             lantern,          lanternOffset,          lanternScale,          lanternRot);
     _loadSurfaceProp('models/surface/dog_bowl.glb',            dogBowl,          dogBowlOffset,          dogBowlScale,          dogBowlRot);
     _loadSurfaceProp('models/surface/dog_biscuit.glb',         dogBiscuit,       dogBiscuitOffset,       dogBiscuitScale,       dogBiscuitRot);
-    _loadAnimatedSurfaceProp('models/surface/robin_bird.glb',  robin1, robin1Offset, robin1Scale, robin1Rot, m => { robin1Mixer = m; }, _fixBirdRender, 3);
-    _loadAnimatedSurfaceProp('models/surface/robin_bird.glb',  robin2, robin2Offset, robin2Scale, robin2Rot, m => { robin2Mixer = m; }, _fixBirdRender, 10);
+    _loadAnimatedSurfaceProp('models/surface/robin_bird.glb',  robin1, robin1Offset, robin1Scale, robin1Rot, m => { robin1Mixer = m; }, _fixBirdRender, 'Robin_Bird_Idle');
+    _loadAnimatedSurfaceProp('models/surface/robin_bird.glb',  robin2, robin2Offset, robin2Scale, robin2Rot, m => { robin2Mixer = m; }, _fixBirdRender, 'Robin_Bird_Call2');
 
     // Phone model — always spawned on the little rocks
     loader.load(
