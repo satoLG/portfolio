@@ -589,6 +589,35 @@ let lastBeatKick = 0;  // Track previous beat kick to detect rising edge
 // Pre-built note textures (3 variants, created once)
 let noteTextures: CanvasTexture[] = [];
 
+// Pool of additive-blend sprite materials shared by music notes + Z particles.
+// Both spawn paths previously allocated a fresh SpriteMaterial per particle and
+// disposed it on expiry — at 4–24 music notes/second over a long radio session
+// that's thousands of materials churned. Reusing a small pool eliminates the
+// allocation pressure and the implicit shader-program cache lookups.
+const _spriteMatPool: SpriteMaterial[] = [];
+
+function _acquireSpriteMaterial(tex: CanvasTexture): SpriteMaterial {
+    const mat = _spriteMatPool.pop();
+    if (mat) {
+        mat.map = tex;
+        mat.opacity = 0;
+        mat.rotation = 0;
+        mat.needsUpdate = true;
+        return mat;
+    }
+    return new SpriteMaterial({
+        map: tex,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: AdditiveBlending,
+    });
+}
+
+function _releaseSpriteMaterial(mat: SpriteMaterial): void {
+    _spriteMatPool.push(mat);
+}
+
 function buildNoteTextures(): void {
     if (noteTextures.length > 0) return;
     const symbols = ['\u266A', '\u266B', '\u2669'];  // ♪ ♫ ♩
@@ -4402,7 +4431,7 @@ function _registerSleepLoopListener(): void {
 function _clearPugZParticles(): void {
     for (const z of _pugZParticles) {
         z.sprite.parent?.remove(z.sprite);
-        (z.sprite.material as SpriteMaterial).dispose();
+        _releaseSpriteMaterial(z.sprite.material as SpriteMaterial);
     }
     _pugZParticles.length = 0;
     _pugZSpawnQueue.length = 0;
@@ -4721,13 +4750,7 @@ function spawnBirdSoundBurst(bird: Group): void {
     const count = BIRD_BURST_COUNT_MIN + Math.floor(Math.random() * (BIRD_BURST_COUNT_MAX - BIRD_BURST_COUNT_MIN + 1));
     for (let i = 0; i < count; i++) {
         const tex = noteTextures[Math.floor(Math.random() * noteTextures.length)];
-        const mat = new SpriteMaterial({
-            map: tex,
-            transparent: true,
-            opacity: 0,
-            depthWrite: false,
-            blending: AdditiveBlending,
-        });
+        const mat = _acquireSpriteMaterial(tex);
         const sprite = new Sprite(mat);
         const noteSize = 0.04 + Math.random() * 0.025;   // smaller than radio notes
         sprite.scale.set(noteSize, noteSize, 1);
@@ -5057,17 +5080,10 @@ export function Update(isUnderwater = false): void {
 // Spawn a music note particle along an invisible arch above the radio
 function spawnMusicNote(intensity: number): void {
     if (noteTextures.length === 0) return;
-    
+
     // Pick random note texture
     const tex = noteTextures[Math.floor(Math.random() * noteTextures.length)];
-    
-    const mat = new SpriteMaterial({
-        map: tex,
-        transparent: true,
-        opacity: 0,  // starts invisible, fades in
-        depthWrite: false,
-        blending: AdditiveBlending,
-    });
+    const mat = _acquireSpriteMaterial(tex);
     const sprite = new Sprite(mat);
     
     // Size: 0.07 - 0.12
@@ -5108,7 +5124,7 @@ function updateMusicNotes(): void {
         
         if (note.age >= note.lifetime) {
             note.sprite.parent?.remove(note.sprite);
-            (note.sprite.material as SpriteMaterial).dispose();
+            _releaseSpriteMaterial(note.sprite.material as SpriteMaterial);
             musicNotes.splice(i, 1);
             continue;
         }
@@ -5194,13 +5210,7 @@ function _spawnPugZBurst(): void {
 /** Materialise one queued Z job into a live sprite + particle entry. */
 function _spawnOneZ(job: ZSpawnJob): void {
     const i = job.burstIndex;
-    const mat = new SpriteMaterial({
-        map: _pugZTexture!,
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-        blending: AdditiveBlending,
-    });
+    const mat = _acquireSpriteMaterial(_pugZTexture!);
     const sprite = new Sprite(mat);
 
     // Grow each successive Z a little larger so the trail reads naturally
@@ -5245,7 +5255,7 @@ function _updatePugZParticles(): void {
 
         if (z.age >= z.lifetime) {
             z.sprite.parent?.remove(z.sprite);
-            (z.sprite.material as SpriteMaterial).dispose();
+            _releaseSpriteMaterial(z.sprite.material as SpriteMaterial);
             _pugZParticles.splice(i, 1);
             continue;
         }
