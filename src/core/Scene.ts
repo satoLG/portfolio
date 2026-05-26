@@ -507,16 +507,23 @@ async function prewarmGPU(): Promise<void> {
     // Briefly render the real pooled jellyfish clones with non-zero opacity so
     // their transparent shader variant and buffers are warm before the first dive.
     const restoreJellyfishPrewarm = Fish.beginJellyfishPrewarm();
-    await prewarmChestCorridor();
-    // Exercise the full PostProcess pipeline (copyFramebufferToTexture + distortion
-    // quad render) so the GPU path is warm before the user actually dives.
-    // Without this the first real crossing of UNDERWATER_Y_THRESHOLD causes a
-    // pipeline stall on the copyFramebufferToTexture call.
-    PostProcess.updateUnderwaterAmount(camera.position.y);  // sets underwaterAmount > 0
-    renderSceneFrame(true);
-    PostProcess.updateUnderwaterAmount(100);                 // reset to 0 (positive Y → depth < 0)
-    restoreJellyfishPrewarm();
-    restoreVariants();
+    try {
+        await prewarmChestCorridor();
+        // Exercise the full PostProcess pipeline (copyFramebufferToTexture + distortion
+        // quad render) so the GPU path is warm before the user actually dives.
+        // Without this the first real crossing of UNDERWATER_Y_THRESHOLD causes a
+        // pipeline stall on the copyFramebufferToTexture call.
+        PostProcess.updateUnderwaterAmount(camera.position.y);  // sets underwaterAmount > 0
+        renderSceneFrame(true);
+        PostProcess.updateUnderwaterAmount(100);                 // reset to 0 (positive Y → depth < 0)
+    } finally {
+        // The prewarm temporarily tints apple1 + groundSlot[0] golden and
+        // acquires PointLights from the pool. If the GPU work above ever
+        // throws, the restore must still run — otherwise leaked golden lights
+        // stay attached to the apples for the rest of the session.
+        restoreJellyfishPrewarm();
+        restoreVariants();
+    }
 
     // 4. Restore camera
     camera.position.copy(savedPos);

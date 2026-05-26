@@ -963,8 +963,14 @@ function _initGoldenLightPool(): void {
     }
 }
 
-/** Acquire a pooled light and attach to a group. Returns the light, or null if pool exhausted. */
+/** Acquire a pooled light and attach to a group. Returns the light, or null if pool exhausted.
+ *  Idempotent — if `owner` already holds a light, returns it without acquiring a second slot. */
 function _acquireGoldenLight(owner: Group): PointLight | null {
+    // Guard against double-acquire on the same owner — would burn a pool slot
+    // and stack two lights on the same apple.
+    for (let i = 0; i < MAX_GOLDEN_APPLES; i++) {
+        if (_goldenLightOwners[i] === owner) return _goldenLightPool[i];
+    }
     for (let i = 0; i < MAX_GOLDEN_APPLES; i++) {
         if (!_goldenLightOwners[i]) {
             const light = _goldenLightPool[i];
@@ -1147,6 +1153,11 @@ function _prebakeGoldenMaterials(grp: Group, index: number): void {
 }
 
 function _applyGoldenTint(index: number): void {
+    // Idempotent: calling twice without a matching _removeGoldenTint would
+    // acquire a second PointLight from the pool while the first is still
+    // attached to the same apple, leaking a slot and stacking glow on the
+    // same fruit. Bail out if the apple is already in the golden state.
+    if (_isGolden[index]) return;
     for (const entry of _goldenMatCache[index]) {
         entry.mesh.material = entry.goldenMat;
     }

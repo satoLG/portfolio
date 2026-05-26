@@ -1457,10 +1457,12 @@ function loadSong(index: number, forcePlay: boolean = false): void {
     // wavesurfer.load() sets audioElement.src internally (they share the same element).
     // Let wavesurfer be the single owner of .src to avoid double-set conflicts.
     if (wavesurfer) {
-        // Drop the previous track's decoded PCM/peaks before loading the new
-        // one. Otherwise wavesurfer accumulates every played track in memory.
-        try { wavesurfer.empty(); } catch { /* fine if it wasn't loaded yet */ }
-
+        // wavesurfer 7's load() internally replaces the decoded data of the
+        // previous track — supplying `peaks` short-circuits the decode entirely.
+        // We rely on that to keep at most one track's decoded PCM in memory at
+        // a time. (Calling .empty() before .load() also fires its own 'ready'
+        // event, which would consume `pendingPlayOnReady` before the real load
+        // completes — breaking the song-end auto-advance.)
         const cachedPeaks = peaksCache.get(songFile);
         try {
             if (cachedPeaks) {
