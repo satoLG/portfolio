@@ -10,20 +10,23 @@
  * it back through the post-process shader.
  */
 
-import { 
-    Mesh, 
-    PlaneGeometry, 
-    ShaderMaterial, 
-    OrthographicCamera, 
+import {
+    Mesh,
+    PlaneGeometry,
+    ShaderMaterial,
+    OrthographicCamera,
     Scene as ThreeScene,
     WebGLRenderer,
     Vector2,
     Camera,
-    FramebufferTexture,
-    LinearFilter
 } from "three";
 import { time } from "../core/Time";
 import { distortionStrength, distortionSpeed, distortionScale, distortionEdgeFade } from '../scene/config/OceanConfig';
+import {
+    sceneColorUniform,
+    sceneResolutionUniform,
+    captureSceneColor,
+} from "../materials/OceanMaterial";
 
 // ── Underwater constants ─────────────────────────────────────────────────────
 export const UNDERWATER_Y_THRESHOLD = 0.0;
@@ -37,7 +40,6 @@ const orthoCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const quadScene = new ThreeScene();
 
 let material: ShaderMaterial | null = null;
-let framebufferTexture: FramebufferTexture | null = null;
 let underwaterAmount = 0;
 let pixelSize = 0;
 let fxaaEnabled = false;
@@ -45,7 +47,12 @@ let initialized = false;
 let width = 1;
 let height = 1;
 
-const _copyOffset = new Vector2(0, 0);
+// Scene-color FBT is now owned by OceanMaterial (the only other consumer) and
+// shared with this module — saves ~58 MB of VRAM at retina resolutions vs. two
+// viewport-sized textures. Ocean captures pre-ocean state for its refraction
+// sampling; PostProcess re-captures the post-ocean+transparents state after
+// renderer.render. The texture's content swaps within the frame but each
+// consumer reads at the right moment.
 
 // ── Shaders ──────────────────────────────────────────────────────────────────
 
@@ -166,15 +173,11 @@ export function Start(renderer: WebGLRenderer): void {
     width = size.x;
     height = size.y;
 
-    framebufferTexture = new FramebufferTexture(width, height);
-    framebufferTexture.minFilter = LinearFilter;
-    framebufferTexture.magFilter = LinearFilter;
-    
     material = new ShaderMaterial({
         vertexShader,
         fragmentShader,
         uniforms: {
-            tDiffuse: { value: framebufferTexture },
+            tDiffuse: sceneColorUniform,                   // shared with OceanMaterial
             uTime: { value: 0 },
             uDistortion: { value: DISTORTION_STRENGTH },
             uSpeed: { value: DISTORTION_SPEED },
@@ -183,30 +186,24 @@ export function Start(renderer: WebGLRenderer): void {
             uAmount: { value: 0 },
             uPixelSize: { value: pixelSize },
             uFxaa: { value: fxaaEnabled ? 1.0 : 0.0 },
-            uResolution: { value: new Vector2(width, height) }
+            uResolution: sceneResolutionUniform,           // shared
         },
         depthTest: false,
         depthWrite: false
     });
-    
+
     const quad = new Mesh(new PlaneGeometry(2, 2), material);
     quadScene.add(quad);
     initialized = true;
 }
 
 export function onResize(w: number, h: number): void {
+    // The shared sceneColor FBT is owned by OceanMaterial and reallocated
+    // on demand from captureSceneColor() when the drawing-buffer size shifts,
+    // so there's nothing to recreate here. Resolution uniform is also shared
+    // (sceneResolutionUniform) and updated by Ocean's capture path.
     width = w;
     height = h;
-    if (framebufferTexture) {
-        framebufferTexture.dispose();
-        framebufferTexture = new FramebufferTexture(width, height);
-        framebufferTexture.minFilter = LinearFilter;
-        framebufferTexture.magFilter = LinearFilter;
-        if (material) {
-            material.uniforms.tDiffuse.value = framebufferTexture;
-            material.uniforms.uResolution.value.set(width, height);
-        }
-    }
 }
 
 /** Update underwater distortion amount based on camera depth. */
@@ -227,11 +224,14 @@ export function renderScene(renderer: WebGLRenderer, scene: ThreeScene, camera: 
     if (afterBaseRender) afterBaseRender();
     
     const needsPostProcess = (underwaterAmount > 0 || pixelSize > 0 || fxaaEnabled);
-    if (!needsPostProcess || !initialized || !framebufferTexture || !material) {
+    if (!needsPostProcess || !initialized || !material) {
         return;
     }
 
-    renderer.copyFramebufferToTexture(framebufferTexture, _copyOffset);
+    // Re-capture into the shared FBT after ocean + underwater transparents have
+    // drawn so the quad sees the final composed scene. This overwrites Ocean's
+    // pre-render capture, which is fine — Ocean already consumed it above.
+    captureSceneColor(renderer);
     renderer.render(quadScene, orthoCamera);
 }
 
