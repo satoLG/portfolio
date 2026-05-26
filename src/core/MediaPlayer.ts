@@ -48,7 +48,7 @@ let playlist: SongData[] = [
         cover: 'images/music/flywithme.webp'
     },
     {
-        file: 'audio/music/595751__yellowtree__late-nights-in-osaka.wav',
+        file: 'audio/music/595751__yellowtree__late-nights-in-osaka.mp3',
         name: 'Late Nights in Osaka',
         artist: 'yellowtree',
         cover: 'images/music/yellowtree.jpg'

@@ -661,9 +661,9 @@ export function respawn(): void {
 
 // Audio file mapping — one sound per coral (consistent)
 const CORAL_SOUNDS = [
-    'audio/nature/underwater/321802__lloydevans09__pvc_pipe_hit_4.wav',
-    'audio/nature/underwater/321805__lloydevans09__pvc_pipe_hit_1.wav',
-    'audio/nature/underwater/321808__lloydevans09__pvc_pipe_hit_3.wav',
+    'audio/nature/underwater/321802__lloydevans09__pvc_pipe_hit_4.mp3',
+    'audio/nature/underwater/321805__lloydevans09__pvc_pipe_hit_1.mp3',
+    'audio/nature/underwater/321808__lloydevans09__pvc_pipe_hit_3.mp3',
 ];
 
 function _playCoralSound(idx: number): void {

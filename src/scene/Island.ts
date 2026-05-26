@@ -3736,7 +3736,7 @@ function _buildSecondLevelReplies(): ReplyOption[] {
                 showDialog([
                     {
                         textKey: 'pug.reply.response.youtalk',
-                        sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
+                        sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.mp3',
                         onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
                     },
                 ], _getPugScreenPos, _onPugDialogComplete);
@@ -3755,12 +3755,12 @@ function _buildSecondLevelReplies(): ReplyOption[] {
 const PUG_DIALOG_LINES: DialogLine[] = [
     {
         textKey: 'pug.dialog.0',
-        sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
+        sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.mp3',
         onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
     },
     {
         textKey: 'pug.dialog.1',
-        sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_SEGUNDA.wav',
+        sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_SEGUNDA.mp3',
         onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
         replies: [
             {
@@ -3770,7 +3770,7 @@ const PUG_DIALOG_LINES: DialogLine[] = [
                     showDialog([
                         {
                             textKey: 'pug.reply.response.hi.day',
-                            sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
+                            sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.mp3',
                             onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
                         },
                         {

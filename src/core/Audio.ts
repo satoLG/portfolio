@@ -53,12 +53,12 @@ const SCENE_REVEAL_END_Y   = 2.5;        // Below this Y: scene audio full volum
 
 const AUDIO_PATHS = {
     water: 'audio/nature/surface/waves.mp3',
-    breeze: 'audio/nature/surface/breeze.wav',
-    fireplace: 'audio/nature/surface/fireplace.wav',
-    underwaterAmb: 'audio/nature/underwater/366159__dcsfx__underwater-loop-amb.wav',
-    underwaterBubbles: 'audio/nature/underwater/96742__robinhood76__01650-underwater-bubbles.wav',
-    waterSplash: 'audio/nature/surface/274060__junggle__water-splash-11.wav',
-    introPiano: 'audio/music/320526__benpm__ambient-piano-music-3.wav',
+    breeze: 'audio/nature/surface/breeze.mp3',
+    fireplace: 'audio/nature/surface/fireplace.opus',
+    underwaterAmb: 'audio/nature/underwater/366159__dcsfx__underwater-loop-amb.opus',
+    underwaterBubbles: 'audio/nature/underwater/96742__robinhood76__01650-underwater-bubbles.mp3',
+    waterSplash: 'audio/nature/surface/274060__junggle__water-splash-11.mp3',
+    introPiano: 'audio/music/320526__benpm__ambient-piano-music-3.mp3',
     dayBird1: 'audio/nature/surface/31062 Ortolan bird tweet-full.mp3',
     dayBird2: 'audio/nature/surface/31451 Ortolan bunting bird isolated tweet-full.mp3',
     crickets: 'audio/nature/surface/Crickets.mp3',
@@ -67,22 +67,22 @@ const AUDIO_PATHS = {
     uiButton: '/audio/ui/soundreality-button-202966.mp3',
     uiBubbleExpand: '/audio/ui/universfield-bubble-pop-293342.mp3',
     uiBubbleCollapse: '/audio/ui/universfield-bubble-pop-06-351337.mp3',
-    uiSpin: '/audio/ui/712916__greyfeather__spinning-a-crank-fast.wav',
+    uiSpin: '/audio/ui/712916__greyfeather__spinning-a-crank-fast.mp3',
     pugSnore: '/audio/character/pug/freesound_community-pug-roncando-95042.mp3',
 };
 
 const INTERACTION_AUDIO_PATHS = {
-    appleImpact: 'audio/overall/209012__owlstorm__fruit-impact-1.wav',
+    appleImpact: 'audio/overall/209012__owlstorm__fruit-impact-1.mp3',
     chestOpen: 'audio/overall/771164__steprock__treasure-chest-open.mp3',
-    writing: '/audio/ui/335518__newagesoup__writing-short-8.wav',
+    writing: '/audio/ui/335518__newagesoup__writing-short-8.mp3',
     coral: [
-        'audio/nature/underwater/321802__lloydevans09__pvc_pipe_hit_4.wav',
-        'audio/nature/underwater/321805__lloydevans09__pvc_pipe_hit_1.wav',
-        'audio/nature/underwater/321808__lloydevans09__pvc_pipe_hit_3.wav',
+        'audio/nature/underwater/321802__lloydevans09__pvc_pipe_hit_4.mp3',
+        'audio/nature/underwater/321805__lloydevans09__pvc_pipe_hit_1.mp3',
+        'audio/nature/underwater/321808__lloydevans09__pvc_pipe_hit_3.mp3',
     ],
     dialog: [
-        '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
-        '/audio/character/pug/freesound_community-pug-woof-2-103762_SEGUNDA.wav',
+        '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.mp3',
+        '/audio/character/pug/freesound_community-pug-woof-2-103762_SEGUNDA.mp3',
     ],
 };
 
