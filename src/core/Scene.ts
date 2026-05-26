@@ -191,6 +191,17 @@ function renderOnlyUnderwaterTransparents(savedTargets: Array<{ obj: Object3D; v
     restoreVisibility(savedChildren);
 }
 
+function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
+    const underwaterTransparentVis = useUnderwaterTransparentPass ? hideUnderwaterTransparents() : null;
+    PostProcess.renderScene(renderer, scene, camera, () => {
+        Ocean.RenderSurface(renderer, camera);
+        if (underwaterTransparentVis) {
+            renderOnlyUnderwaterTransparents(underwaterTransparentVis);
+            restoreVisibility(underwaterTransparentVis);
+        }
+    });
+}
+
 export function setShadowsEnabled(value: boolean): void
 {
     shadowsEnabled = value;
@@ -487,23 +498,18 @@ async function prewarmGPU(): Promise<void> {
     Ocean.RenderSurface(renderer, camera);
     Ocean.surface.visible = surfaceWasVisible;
 
-    // Briefly make a jellyfish visible so the transparent+depthWrite=false shader
-    // variant compiles now. Jellyfish use a different GL program than opaque fish,
-    // and visible=false causes Three.js to skip them during renderer.compile().
-    const jellyTemplate = Fish.getJellyfishTemplate();
-    if (jellyTemplate) {
-        jellyTemplate.visible = true;
-        jellyTemplate.position.set(0, -3, -3);
-    }
+    // Briefly render the real pooled jellyfish clones with non-zero opacity so
+    // their transparent shader variant and buffers are warm before the first dive.
+    const restoreJellyfishPrewarm = Fish.beginJellyfishPrewarm();
     await prewarmChestCorridor();
     // Exercise the full PostProcess pipeline (copyFramebufferToTexture + distortion
     // quad render) so the GPU path is warm before the user actually dives.
     // Without this the first real crossing of UNDERWATER_Y_THRESHOLD causes a
     // pipeline stall on the copyFramebufferToTexture call.
     PostProcess.updateUnderwaterAmount(camera.position.y);  // sets underwaterAmount > 0
-    PostProcess.renderScene(renderer, scene, camera, () => Ocean.RenderSurface(renderer, camera));
+    renderSceneFrame(true);
     PostProcess.updateUnderwaterAmount(100);                 // reset to 0 (positive Y → depth < 0)
-    if (jellyTemplate) jellyTemplate.visible = false;
+    restoreJellyfishPrewarm();
     restoreVariants();
 
     // 4. Restore camera
@@ -550,7 +556,7 @@ async function prewarmChestCorridor(): Promise<void> {
             await (renderer as any).compileAsync(scene, camera);
         }
         PostProcess.updateUnderwaterAmount(camera.position.y);
-        PostProcess.renderScene(renderer, scene, camera, () => Ocean.RenderSurface(renderer, camera));
+        renderSceneFrame(camera.position.y < 0);
     };
 
     await renderAt(new Vector3(-0.1, -6.9, 1.78), mainFov);
@@ -698,14 +704,7 @@ export function Update(): void
     // with NoBlending punches transparent holes), matching henryjeff's architecture.
     // PostProcess.renderScene wraps renderer.render() with post-processing
     // (pixelation + underwater distortion).
-    const underwaterTransparentVis = isUnderwater ? hideUnderwaterTransparents() : null;
-    PostProcess.renderScene(renderer, scene, camera, () => {
-        Ocean.RenderSurface(renderer, camera);
-        if (underwaterTransparentVis) {
-            renderOnlyUnderwaterTransparents(underwaterTransparentVis);
-            restoreVisibility(underwaterTransparentVis);
-        }
-    });
+    renderSceneFrame(isUnderwater);
     CloudSprites.Render(renderer, camera);
 
     // Debug axes

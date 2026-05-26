@@ -23,13 +23,14 @@ import {
     LinearFilter
 } from "three";
 import { time } from "../core/Time";
-import { distortionStrength, distortionSpeed, distortionScale } from '../scene/config/OceanConfig';
+import { distortionStrength, distortionSpeed, distortionScale, distortionEdgeFade } from '../scene/config/OceanConfig';
 
 // ── Underwater constants ─────────────────────────────────────────────────────
 export const UNDERWATER_Y_THRESHOLD = 0.0;
 const DISTORTION_STRENGTH = distortionStrength;
 const DISTORTION_SPEED    = distortionSpeed;
 const DISTORTION_SCALE    = distortionScale;
+const DISTORTION_EDGE_FADE = distortionEdgeFade;
 
 // ── Internals ────────────────────────────────────────────────────────────────
 const orthoCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -61,6 +62,7 @@ const fragmentShader = /* glsl */`
     uniform float uDistortion;
     uniform float uSpeed;
     uniform float uScale;
+    uniform float uEdgeFade;
     uniform float uAmount;
     uniform float uPixelSize;
     uniform vec2 uResolution;
@@ -82,8 +84,10 @@ const fragmentShader = /* glsl */`
                   + cos(uv.x * uScale * 1.4    + t * 0.6 + 2.7)  * 0.25
                   + cos(uv.x * uScale * 2.6    + t * 1.1 + 5.2)  * 0.15
                    ) * uDistortion * 0.7 * uAmount;
-        uv.x += dx;
-        uv.y += dy;
+        float edgeDistance = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+        float edgeFade = uEdgeFade <= 0.0 ? 1.0 : smoothstep(0.0, uEdgeFade, edgeDistance);
+        uv.x += dx * edgeFade;
+        uv.y += dy * edgeFade;
 
         // Clamp to tiny inset to avoid edge-smear from sampler clamping.
         uv = clamp(uv, vec2(0.001), vec2(0.999));
@@ -119,6 +123,7 @@ export function Start(renderer: WebGLRenderer): void {
             uDistortion: { value: DISTORTION_STRENGTH },
             uSpeed: { value: DISTORTION_SPEED },
             uScale: { value: DISTORTION_SCALE },
+            uEdgeFade: { value: DISTORTION_EDGE_FADE },
             uAmount: { value: 0 },
             uPixelSize: { value: pixelSize },
             uResolution: { value: new Vector2(width, height) }
@@ -185,6 +190,10 @@ export function setDistortionSpeed(v: number): void {
 
 export function setDistortionScale(v: number): void {
     if (material) material.uniforms.uScale.value = v;
+}
+
+export function setDistortionEdgeFade(v: number): void {
+    if (material) material.uniforms.uEdgeFade.value = v;
 }
 
 // ── GPU prewarm ──────────────────────────────────────────────────────────────
