@@ -160,7 +160,7 @@ let frontChunkDuringDescent: Mesh | null = null;
 export function Start(): void {
     cloudSpritesScene.add(cloudSpritesGroup);
 
-    const texture = new TextureLoader().load("/images/cloud10.png");
+    const texture = new TextureLoader().load("/images/cloud10.webp");
     texture.magFilter = LinearFilter;
     texture.minFilter = LinearMipmapLinearFilter;
     textureMap = texture;

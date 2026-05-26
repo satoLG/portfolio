@@ -2305,8 +2305,14 @@ function _applyAppleWaterlineToModel(model: Group): void {
 
 /** Load a moss rock GLB, wire it up with the standard ocean lighting + the
  *  apple-style waterline foam line, then position/scale/rotate it relative to
- *  the island. Mirrors the loading pattern used by `little_rocks` but adds the
- *  per-object waterline pass. */
+ *  the island. The first call per path loads the GLB; subsequent calls with
+ *  the same path clone the cached scene (geometry + materials shared, ocean
+ *  lighting + waterline shader injection only happens once). `moss_rock2.glb`
+ *  is currently used by 2 instances and `moss_rock3.glb` by 3 instances —
+ *  without the cache each instance held its own GPU upload. */
+const _mossRockTemplates = new Map<string, Group>();
+const _mossRockPending = new Map<string, Array<(s: Group) => void>>();
+
 function _loadMossRock(
     path: string,
     group: Group,
@@ -2314,27 +2320,42 @@ function _loadMossRock(
     scale: number,
     rot: { x: number; y: number; z: number },
 ): void {
+    const place = (template: Group) => {
+        const instance = template.clone(true);
+        instance.traverse((child) => {
+            if ((child as any).isMesh) {
+                child.castShadow = true;
+                (child as any).receiveShadow = true;
+            }
+        });
+        group.add(instance);
+        group.position.set(
+            islandPosition.x + offset.x,
+            islandPosition.y + offset.y,
+            islandPosition.z + offset.z,
+        );
+        group.scale.setScalar(scale);
+        group.rotation.set(rot.x, rot.y, rot.z);
+        threeScene.add(group);
+    };
+
+    const cached = _mossRockTemplates.get(path);
+    if (cached) { place(cached); return; }
+
+    const pending = _mossRockPending.get(path);
+    if (pending) { pending.push(place); return; }
+
+    _mossRockPending.set(path, [place]);
     loader.load(
         path,
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
             _applyAppleWaterlineToModel(gltf.scene);
-            gltf.scene.traverse((child) => {
-                if ((child as any).isMesh) {
-                    child.castShadow = true;
-                    (child as any).receiveShadow = true;
-                }
-            });
-            group.add(gltf.scene);
-            group.position.set(
-                islandPosition.x + offset.x,
-                islandPosition.y + offset.y,
-                islandPosition.z + offset.z,
-            );
-            group.scale.setScalar(scale);
-            group.rotation.set(rot.x, rot.y, rot.z);
-            threeScene.add(group);
-            console.log(`Moss rock loaded: ${path}`);
+            _mossRockTemplates.set(path, gltf.scene as Group);
+            const queue = _mossRockPending.get(path) || [];
+            _mossRockPending.delete(path);
+            for (const apply of queue) apply(gltf.scene as Group);
+            console.log(`Moss rock loaded once: ${path} (${queue.length} instances)`);
         },
         undefined,
         (err) => { console.error(`Error loading moss rock ${path}:`, err); },

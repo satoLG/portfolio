@@ -510,10 +510,20 @@ function stopIntroAudio(): void {
     introGain.gain.cancelScheduledValues(now);
     introGain.gain.setValueAtTime(introGain.gain.value, now);
     introGain.gain.linearRampToValueAtTime(0, now + INTRO_FADE_OUT_DURATION);
-    // Hard-stop the sources after the fade completes so they don't keep CPU
+    // Hard-stop the sources after the fade completes so they don't keep CPU,
+    // then drop the intro-only AudioBuffer references so the decoded PCM can be
+    // GC'd. The intro piano never plays again after the descent — keeping its
+    // ~1 MB AudioBuffer alive for the rest of the session is wasted memory.
     setTimeout(() => {
-        if (introPianoSound) stopBufferSound(introPianoSound);
-        if (introBreezeSound) stopBufferSound(introBreezeSound);
+        if (introPianoSound) {
+            stopBufferSound(introPianoSound);
+            introPianoSound = null;
+        }
+        if (introBreezeSound) {
+            stopBufferSound(introBreezeSound);
+            introBreezeSound = null;
+        }
+        _decodedBufferCache.delete(AUDIO_PATHS.introPiano);
     }, INTRO_FADE_OUT_DURATION * 1000 + 100);
 }
 
