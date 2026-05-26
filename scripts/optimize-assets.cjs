@@ -1,6 +1,7 @@
 /**
  * optimize-assets.cjs
- * Optimizes GLB models (dedup, prune, weld) and converts large PNG textures to WebP.
+ * Optimizes GLB models (dedup, prune, weld, meshopt) and converts large PNG
+ * textures to WebP.
  *
  * Usage:
  *   node scripts/optimize-assets.cjs           — only re-optimize changed files (cached)
@@ -12,11 +13,12 @@
  * stays fast on incremental builds.
  *
  * What it does:
- *   1. GLBs in public/models/: dedup + prune + weld via @gltf-transform.
- *      (quantize is intentionally excluded — it reduces UV precision enough
- *       to break colormap-based models like pug, gold_chest, etc.)
- *      No Draco/Meshopt compression — runtime GLTFLoader has no decoder
- *       registered, so compressed files would fail to load.
+ *   1. GLBs in public/models/: weld + dedup + prune via @gltf-transform.
+ *      EXT_meshopt_compression encoding ('medium' level) is applied to files
+ *      large enough to benefit and not in MESHOPT_EXCLUDE — the runtime
+ *      GLTFLoaders are wired with MeshoptDecoder so the encoded files load
+ *      transparently. (Pug + gold_chest are excluded because their colormap
+ *      shading is sensitive to the UV quantization meshopt applies.)
  *   2. PNGs > 10KB in public/images/: converted to WebP alongside originals.
  */
 
@@ -64,6 +66,16 @@ const CENTER_GEOMETRY_FILES = new Set([
     path.join('models', 'underwater', 'coral2.glb'),
 ]);
 
+// Meshopt encoding quantizes vertex attributes (incl. UVs) — colormap-shaded
+// models that read texels by exact UV can show banding/seams after compression.
+// Skip those. Tiny GLBs are also skipped — the EXT_meshopt header overhead
+// can outweigh the saving on a few-KB asset.
+const MESHOPT_EXCLUDE = new Set([
+    path.join('models', 'character', 'pug.glb'),
+    path.join('models', 'overall', 'gold_chest.glb'),
+]);
+const MESHOPT_MIN_SIZE = 80 * 1024;
+
 // Recenter every primitive in the doc so its bounding-box center is at (0,0,0).
 // Idempotent — re-centering an already-centered mesh is a no-op.
 async function centerGeometryInPlace(doc) {
@@ -108,9 +120,18 @@ async function centerGeometryInPlace(doc) {
 async function optimizeGLBs(cache) {
     const { NodeIO }     = await import('@gltf-transform/core');
     const { ALL_EXTENSIONS } = await import('@gltf-transform/extensions');
-    const { dedup, prune, weld } = await import('@gltf-transform/functions');
+    const { dedup, prune, weld, meshopt } = await import('@gltf-transform/functions');
+    const { MeshoptEncoder, MeshoptDecoder } = await import('meshoptimizer');
 
-    const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
+    await MeshoptEncoder.ready;
+    await MeshoptDecoder.ready;
+
+    const io = new NodeIO()
+        .registerExtensions(ALL_EXTENSIONS)
+        .registerDependencies({
+            'meshopt.encoder': MeshoptEncoder,
+            'meshopt.decoder': MeshoptDecoder,
+        });
     const modelsDir = path.join(PUBLIC, 'models');
 
     const glbFiles = [];
@@ -157,13 +178,23 @@ async function optimizeGLBs(cache) {
             await centerGeometryInPlace(doc);
         }
 
+        // Apply Meshopt compression at the end so the EXT_meshopt header lives
+        // on a fully-pruned doc. The runtime GLTFLoader is wired with
+        // MeshoptDecoder, so .glb files with EXT_meshopt_compression load
+        // transparently.
+        const meshoptApplied = !MESHOPT_EXCLUDE.has(rel) && before >= MESHOPT_MIN_SIZE;
+        if (meshoptApplied) {
+            await doc.transform(meshopt({ encoder: MeshoptEncoder, level: 'medium' }));
+        }
+
         await io.write(file, doc);
 
         const after = fs.statSync(file).size;
         totalAfter += after;
 
         const saved = ((1 - after / before) * 100).toFixed(1);
-        console.log(`  ${rel}  ${(before / 1024).toFixed(0)}KB → ${(after / 1024).toFixed(0)}KB  (${saved}% saved)`);
+        const tag = meshoptApplied ? ' [meshopt]' : '';
+        console.log(`  ${rel}  ${(before / 1024).toFixed(0)}KB → ${(after / 1024).toFixed(0)}KB  (${saved}% saved)${tag}`);
 
         recordOptimized(cache, file);
     }

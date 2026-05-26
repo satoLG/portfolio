@@ -1,5 +1,6 @@
 import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, DoubleSide, MeshBasicMaterial, Box3, MeshStandardMaterial, ShaderChunk, Plane, LinearFilter, LinearMipmapLinearFilter } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { clone as _skeletonClone } from "three/examples/jsm/utils/SkeletonUtils";
 import { config as sfDecorConfig } from './SeaFloorDecor';
 import {
@@ -685,6 +686,11 @@ export function getLoadingProgress(): number {
 }
 
 const loader = new GLTFLoader(loadingManager);
+// EXT_meshopt_compression decoder — required for the GLBs that the prebuild
+// script (scripts/optimize-assets.cjs) re-encoded with Meshopt. Without this
+// they'd fail to load. Decoder is shared globally and awaits its own .ready
+// promise internally.
+loader.setMeshoptDecoder(MeshoptDecoder);
 
 // Placement constants are imported from IslandConfig.ts — edit that file or
 // use the debug panel's "Copy Config" button to regenerate it.

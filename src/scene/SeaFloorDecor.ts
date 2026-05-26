@@ -8,6 +8,7 @@
  */
 import { Group, Mesh, Uniform, Vector2, Vector3, Box3, Sphere, AnimationMixer, LoopRepeat } from "three";
 import { GLTFLoader }           from "three/examples/jsm/loaders/GLTFLoader";
+import { MeshoptDecoder }       from "three/examples/jsm/libs/meshopt_decoder.module.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — r137 @types declares a namespace but the module exports clone directly
 import { clone as _skeletonClone } from "three/examples/jsm/utils/SkeletonUtils";
@@ -535,6 +536,7 @@ export function updateCrabTransform(): void { if (_crabGroup) applyPlacement(_cr
 // ── GLTF loading ───────────────────────────────────────────────────────────────
 function loadModels(): void {
     const loader = new GLTFLoader();
+    loader.setMeshoptDecoder(MeshoptDecoder);
 
     type Entry = { path: string; onLoad: (gltf: { scene: Group; animations: import("three").AnimationClip[] }) => void };
     const entries: Entry[] = [
