@@ -281,11 +281,17 @@ const peaksCache = new Map<string, number[][]>();
 function cachePeaksAfterReady(url: string): void {
     if (!wavesurfer) return;
     wavesurfer.once('ready', () => {
-        if (!wavesurfer) return;
-        try {
-            const exported = wavesurfer.exportPeaks({ maxLength: 1024, precision: 1000 });
-            peaksCache.set(url, exported);
-        } catch { /* ignore — non-fatal */ }
+        const ws = wavesurfer;
+        if (!ws) return;
+        // Defer off the current animation frame. exportPeaks() scans all decoded
+        // PCM samples (O(millions)) and can block the main thread for 10-30 ms —
+        // enough to drop a frame if 'ready' fires during a camera zoom animation.
+        setTimeout(() => {
+            try {
+                const exported = ws.exportPeaks({ maxLength: 1024, precision: 1000 });
+                peaksCache.set(url, exported);
+            } catch { /* ignore — non-fatal */ }
+        }, 0);
     });
 }
 
