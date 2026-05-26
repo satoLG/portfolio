@@ -65,7 +65,7 @@ let _spriteFrame     = 0;
 let _spriteFrameTime = 0;
 
 function createFireSprite(): Sprite {
-    _fireSpriteTex = new TextureLoader().load('images/fire_spritesheet.png');
+    _fireSpriteTex = new TextureLoader().load('images/fire_spritesheet.webp');
     _fireSpriteTex.colorSpace  = SRGBColorSpace;
     _fireSpriteTex.wrapS       = RepeatWrapping;
     _fireSpriteTex.wrapT       = RepeatWrapping;

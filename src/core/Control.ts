@@ -6,6 +6,7 @@ import { spotLightDistance, spotLightDistanceUniform } from "../materials/OceanM
 import { islandPosition as cfgIslandPos, radioOffset as cfgRadioOffset, radioRotY as cfgRadioRotY, pugOffset as cfgPugOffset, pugRotY as cfgPugRotY, phoneOffset as cfgPhoneOffset } from '../scene/config/IslandConfig';
 import { defaultCameraX, defaultCameraZ, defaultFov, mobileFov, mobileBreakpointWidth, aboveWaterBottomY as cfgAboveWaterBottomY, aboveWaterBottomYMobile as cfgAboveWaterBottomYMobile, underwaterTopY as cfgUnderwaterTopY, underwaterTopYMobile as cfgUnderwaterTopYMobile } from '../scene/config/CameraConfig';
 import { phoneZoomHeight, phoneZoomTilt, phoneZoomPitch, phoneZoomFov } from '../scene/config/PhoneConfig';
+import { mountIframe as mountPhoneIframe, unmountIframe as unmountPhoneIframe } from './PhoneScreen';
 import { config as sfDecorConfig } from '../scene/SeaFloorDecor';
 
 const baseMoveSpeed = 10;
@@ -262,6 +263,9 @@ export function zoomToPhone(): void {
     if (phoneZoomActive || radioZoomActive || pugZoomActive || chestZoomActive || isUnderwater) return;
     saveAndStartZoom();
     phoneZoomActive = true;
+    // Mount the iframe lazily so the external page (~150-300 MB) is only loaded
+    // while the user is actually viewing it.
+    mountPhoneIframe();
 }
 
 // Zoom out from phone
@@ -270,6 +274,9 @@ export function zoomOutFromPhone(): void {
     phoneZoomActive = false;
     // Don't snap zoomTetha — let the normal-mode damp smoothly return it to 0
     targetY = savedTargetY;
+    // Tear down the iframe so its memory + scripts are released.
+    // The next zoom-in reloads it fresh (~1-2 s).
+    unmountPhoneIframe();
 }
 
 // Zoom camera to focus on chest (underwater)
@@ -291,7 +298,7 @@ function forceExitZoom(): void {
     _zoomScrollAttempts = 0;
     if (radioZoomActive) { radioZoomActive = false; targetY = savedTargetY; }
     if (pugZoomActive)   { pugZoomActive = false;   targetY = savedTargetY; }
-    if (phoneZoomActive) { phoneZoomActive = false;  targetY = savedTargetY; }
+    if (phoneZoomActive) { phoneZoomActive = false;  targetY = savedTargetY; unmountPhoneIframe(); }
     if (chestZoomActive) { chestZoomActive = false;  targetY = savedTargetY; }
 }
 

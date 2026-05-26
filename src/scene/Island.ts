@@ -1,5 +1,6 @@
 import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, DoubleSide, MeshBasicMaterial, Box3, MeshStandardMaterial, ShaderChunk, Plane, LinearFilter, LinearMipmapLinearFilter } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+import { clone as _skeletonClone } from "three/examples/jsm/utils/SkeletonUtils";
 import { config as sfDecorConfig } from './SeaFloorDecor';
 import {
     oceanAbsorptionUniform,
@@ -588,6 +589,35 @@ let lastBeatKick = 0;  // Track previous beat kick to detect rising edge
 // Pre-built note textures (3 variants, created once)
 let noteTextures: CanvasTexture[] = [];
 
+// Pool of additive-blend sprite materials shared by music notes + Z particles.
+// Both spawn paths previously allocated a fresh SpriteMaterial per particle and
+// disposed it on expiry — at 4–24 music notes/second over a long radio session
+// that's thousands of materials churned. Reusing a small pool eliminates the
+// allocation pressure and the implicit shader-program cache lookups.
+const _spriteMatPool: SpriteMaterial[] = [];
+
+function _acquireSpriteMaterial(tex: CanvasTexture): SpriteMaterial {
+    const mat = _spriteMatPool.pop();
+    if (mat) {
+        mat.map = tex;
+        mat.opacity = 0;
+        mat.rotation = 0;
+        mat.needsUpdate = true;
+        return mat;
+    }
+    return new SpriteMaterial({
+        map: tex,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: AdditiveBlending,
+    });
+}
+
+function _releaseSpriteMaterial(mat: SpriteMaterial): void {
+    _spriteMatPool.push(mat);
+}
+
 function buildNoteTextures(): void {
     if (noteTextures.length > 0) return;
     const symbols = ['\u266A', '\u266B', '\u2669'];  // ♪ ♫ ♩
@@ -933,8 +963,14 @@ function _initGoldenLightPool(): void {
     }
 }
 
-/** Acquire a pooled light and attach to a group. Returns the light, or null if pool exhausted. */
+/** Acquire a pooled light and attach to a group. Returns the light, or null if pool exhausted.
+ *  Idempotent — if `owner` already holds a light, returns it without acquiring a second slot. */
 function _acquireGoldenLight(owner: Group): PointLight | null {
+    // Guard against double-acquire on the same owner — would burn a pool slot
+    // and stack two lights on the same apple.
+    for (let i = 0; i < MAX_GOLDEN_APPLES; i++) {
+        if (_goldenLightOwners[i] === owner) return _goldenLightPool[i];
+    }
     for (let i = 0; i < MAX_GOLDEN_APPLES; i++) {
         if (!_goldenLightOwners[i]) {
             const light = _goldenLightPool[i];
@@ -1117,6 +1153,11 @@ function _prebakeGoldenMaterials(grp: Group, index: number): void {
 }
 
 function _applyGoldenTint(index: number): void {
+    // Idempotent: calling twice without a matching _removeGoldenTint would
+    // acquire a second PointLight from the pool while the first is still
+    // attached to the same apple, leaking a slot and stacking glow on the
+    // same fruit. Bail out if the apple is already in the golden state.
+    if (_isGolden[index]) return;
     for (const entry of _goldenMatCache[index]) {
         entry.mesh.material = entry.goldenMat;
     }
@@ -2304,8 +2345,14 @@ function _applyAppleWaterlineToModel(model: Group): void {
 
 /** Load a moss rock GLB, wire it up with the standard ocean lighting + the
  *  apple-style waterline foam line, then position/scale/rotate it relative to
- *  the island. Mirrors the loading pattern used by `little_rocks` but adds the
- *  per-object waterline pass. */
+ *  the island. The first call per path loads the GLB; subsequent calls with
+ *  the same path clone the cached scene (geometry + materials shared, ocean
+ *  lighting + waterline shader injection only happens once). `moss_rock2.glb`
+ *  is currently used by 2 instances and `moss_rock3.glb` by 3 instances —
+ *  without the cache each instance held its own GPU upload. */
+const _mossRockTemplates = new Map<string, Group>();
+const _mossRockPending = new Map<string, Array<(s: Group) => void>>();
+
 function _loadMossRock(
     path: string,
     group: Group,
@@ -2313,27 +2360,42 @@ function _loadMossRock(
     scale: number,
     rot: { x: number; y: number; z: number },
 ): void {
+    const place = (template: Group) => {
+        const instance = template.clone(true);
+        instance.traverse((child) => {
+            if ((child as any).isMesh) {
+                child.castShadow = true;
+                (child as any).receiveShadow = true;
+            }
+        });
+        group.add(instance);
+        group.position.set(
+            islandPosition.x + offset.x,
+            islandPosition.y + offset.y,
+            islandPosition.z + offset.z,
+        );
+        group.scale.setScalar(scale);
+        group.rotation.set(rot.x, rot.y, rot.z);
+        threeScene.add(group);
+    };
+
+    const cached = _mossRockTemplates.get(path);
+    if (cached) { place(cached); return; }
+
+    const pending = _mossRockPending.get(path);
+    if (pending) { pending.push(place); return; }
+
+    _mossRockPending.set(path, [place]);
     loader.load(
         path,
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
             _applyAppleWaterlineToModel(gltf.scene);
-            gltf.scene.traverse((child) => {
-                if ((child as any).isMesh) {
-                    child.castShadow = true;
-                    (child as any).receiveShadow = true;
-                }
-            });
-            group.add(gltf.scene);
-            group.position.set(
-                islandPosition.x + offset.x,
-                islandPosition.y + offset.y,
-                islandPosition.z + offset.z,
-            );
-            group.scale.setScalar(scale);
-            group.rotation.set(rot.x, rot.y, rot.z);
-            threeScene.add(group);
-            console.log(`Moss rock loaded: ${path}`);
+            _mossRockTemplates.set(path, gltf.scene as Group);
+            const queue = _mossRockPending.get(path) || [];
+            _mossRockPending.delete(path);
+            for (const apply of queue) apply(gltf.scene as Group);
+            console.log(`Moss rock loaded once: ${path} (${queue.length} instances)`);
         },
         undefined,
         (err) => { console.error(`Error loading moss rock ${path}:`, err); },
@@ -2380,7 +2442,18 @@ function _loadSurfaceProp(
  *  selected clip on loop. Caller receives the mixer through `onMixer` so it can
  *  be ticked from the per-frame Update loop. An optional `onSceneSetup` callback
  *  runs on the raw gltf scene right after the ocean-lighting pass so callers
- *  can apply per-model material tweaks (e.g. the robin render fix). */
+ *  can apply per-model material tweaks (e.g. the robin render fix).
+ *
+ *  The loaded GLB is cached as a "template" keyed by path; subsequent calls for
+ *  the same path clone the template via SkeletonUtils.clone() (deep-clones the
+ *  bone hierarchy, shares geometry + materials). This halves GPU memory for
+ *  props loaded multiple times (notably robin_bird, which is ~11 MB and was
+ *  parsed twice). `animation` can be a clip name (preferred — survives GLB
+ *  re-indexing) or a numeric index. */
+type _AnimatedTemplate = { scene: Group; animations: AnimationClip[] };
+const _animatedTemplates = new Map<string, _AnimatedTemplate>();
+const _animatedTemplatePending = new Map<string, Array<(t: _AnimatedTemplate) => void>>();
+
 function _loadAnimatedSurfaceProp(
     path: string,
     group: Group,
@@ -2389,37 +2462,63 @@ function _loadAnimatedSurfaceProp(
     rot: { x: number; y: number; z: number },
     onMixer: (mixer: AnimationMixer) => void,
     onSceneSetup?: (scene: Group) => void,
-    animationIndex = 0,
+    animation: number | string = 0,
 ): void {
+    const applyTemplate = (tpl: _AnimatedTemplate) => {
+        const instanceScene = _skeletonClone(tpl.scene) as Group;
+        instanceScene.traverse((child) => {
+            if ((child as any).isMesh) {
+                child.castShadow = true;
+                (child as any).receiveShadow = true;
+            }
+        });
+        group.add(instanceScene);
+        group.position.set(
+            islandPosition.x + offset.x,
+            islandPosition.y + offset.y,
+            islandPosition.z + offset.z,
+        );
+        group.scale.setScalar(scale);
+        group.rotation.set(rot.x, rot.y, rot.z);
+        threeScene.add(group);
+        if (tpl.animations.length > 0) {
+            const mixer = new AnimationMixer(instanceScene);
+            let clip: AnimationClip | undefined;
+            if (typeof animation === 'string') {
+                clip = tpl.animations.find(a => a.name === animation);
+            }
+            if (!clip) {
+                const idx = typeof animation === 'number' ? animation : 0;
+                clip = tpl.animations[Math.min(idx, tpl.animations.length - 1)];
+            }
+            const action = mixer.clipAction(clip);
+            action.setLoop(LoopRepeat, Infinity);
+            action.play();
+            onMixer(mixer);
+        }
+    };
+
+    const cached = _animatedTemplates.get(path);
+    if (cached) { applyTemplate(cached); return; }
+
+    const pending = _animatedTemplatePending.get(path);
+    if (pending) { pending.push(applyTemplate); return; }
+
+    _animatedTemplatePending.set(path, [applyTemplate]);
     loader.load(
         path,
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
             if (onSceneSetup) onSceneSetup(gltf.scene);
-            gltf.scene.traverse((child) => {
-                if ((child as any).isMesh) {
-                    child.castShadow = true;
-                    (child as any).receiveShadow = true;
-                }
-            });
-            group.add(gltf.scene);
-            group.position.set(
-                islandPosition.x + offset.x,
-                islandPosition.y + offset.y,
-                islandPosition.z + offset.z,
-            );
-            group.scale.setScalar(scale);
-            group.rotation.set(rot.x, rot.y, rot.z);
-            threeScene.add(group);
-            if (gltf.animations && gltf.animations.length > 0) {
-                const mixer = new AnimationMixer(gltf.scene);
-                const clip = gltf.animations[Math.min(animationIndex, gltf.animations.length - 1)];
-                const action = mixer.clipAction(clip);
-                action.setLoop(LoopRepeat, Infinity);
-                action.play();
-                onMixer(mixer);
-            }
-            console.log(`Animated surface prop loaded: ${path}`);
+            const tpl: _AnimatedTemplate = {
+                scene: gltf.scene as Group,
+                animations: gltf.animations || [],
+            };
+            _animatedTemplates.set(path, tpl);
+            const queue = _animatedTemplatePending.get(path) || [];
+            _animatedTemplatePending.delete(path);
+            for (const apply of queue) apply(tpl);
+            console.log(`Animated surface prop loaded once: ${path} (${queue.length} instances)`);
         },
         undefined,
         (err) => { console.error(`Error loading animated surface prop ${path}:`, err); },
@@ -3097,8 +3196,8 @@ export function Start(): void {
     _loadSurfaceProp('models/surface/lantern.glb',             lantern,          lanternOffset,          lanternScale,          lanternRot);
     _loadSurfaceProp('models/surface/dog_bowl.glb',            dogBowl,          dogBowlOffset,          dogBowlScale,          dogBowlRot);
     _loadSurfaceProp('models/surface/dog_biscuit.glb',         dogBiscuit,       dogBiscuitOffset,       dogBiscuitScale,       dogBiscuitRot);
-    _loadAnimatedSurfaceProp('models/surface/robin_bird.glb',  robin1, robin1Offset, robin1Scale, robin1Rot, m => { robin1Mixer = m; }, _fixBirdRender, 3);
-    _loadAnimatedSurfaceProp('models/surface/robin_bird.glb',  robin2, robin2Offset, robin2Scale, robin2Rot, m => { robin2Mixer = m; }, _fixBirdRender, 10);
+    _loadAnimatedSurfaceProp('models/surface/robin_bird.glb',  robin1, robin1Offset, robin1Scale, robin1Rot, m => { robin1Mixer = m; }, _fixBirdRender, 'Robin_Bird_Idle');
+    _loadAnimatedSurfaceProp('models/surface/robin_bird.glb',  robin2, robin2Offset, robin2Scale, robin2Rot, m => { robin2Mixer = m; }, _fixBirdRender, 'Robin_Bird_Call2');
 
     // Phone model — always spawned on the little rocks
     loader.load(
@@ -3698,7 +3797,7 @@ function _buildSecondLevelReplies(): ReplyOption[] {
                 showDialog([
                     {
                         textKey: 'pug.reply.response.youtalk',
-                        sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
+                        sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.mp3',
                         onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
                     },
                 ], _getPugScreenPos, _onPugDialogComplete);
@@ -3717,12 +3816,12 @@ function _buildSecondLevelReplies(): ReplyOption[] {
 const PUG_DIALOG_LINES: DialogLine[] = [
     {
         textKey: 'pug.dialog.0',
-        sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
+        sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.mp3',
         onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
     },
     {
         textKey: 'pug.dialog.1',
-        sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_SEGUNDA.wav',
+        sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_SEGUNDA.mp3',
         onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
         replies: [
             {
@@ -3732,7 +3831,7 @@ const PUG_DIALOG_LINES: DialogLine[] = [
                     showDialog([
                         {
                             textKey: 'pug.reply.response.hi.day',
-                            sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.wav',
+                            sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.mp3',
                             onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
                         },
                         {
@@ -4343,7 +4442,7 @@ function _registerSleepLoopListener(): void {
 function _clearPugZParticles(): void {
     for (const z of _pugZParticles) {
         z.sprite.parent?.remove(z.sprite);
-        (z.sprite.material as SpriteMaterial).dispose();
+        _releaseSpriteMaterial(z.sprite.material as SpriteMaterial);
     }
     _pugZParticles.length = 0;
     _pugZSpawnQueue.length = 0;
@@ -4662,13 +4761,7 @@ function spawnBirdSoundBurst(bird: Group): void {
     const count = BIRD_BURST_COUNT_MIN + Math.floor(Math.random() * (BIRD_BURST_COUNT_MAX - BIRD_BURST_COUNT_MIN + 1));
     for (let i = 0; i < count; i++) {
         const tex = noteTextures[Math.floor(Math.random() * noteTextures.length)];
-        const mat = new SpriteMaterial({
-            map: tex,
-            transparent: true,
-            opacity: 0,
-            depthWrite: false,
-            blending: AdditiveBlending,
-        });
+        const mat = _acquireSpriteMaterial(tex);
         const sprite = new Sprite(mat);
         const noteSize = 0.04 + Math.random() * 0.025;   // smaller than radio notes
         sprite.scale.set(noteSize, noteSize, 1);
@@ -4998,17 +5091,10 @@ export function Update(isUnderwater = false): void {
 // Spawn a music note particle along an invisible arch above the radio
 function spawnMusicNote(intensity: number): void {
     if (noteTextures.length === 0) return;
-    
+
     // Pick random note texture
     const tex = noteTextures[Math.floor(Math.random() * noteTextures.length)];
-    
-    const mat = new SpriteMaterial({
-        map: tex,
-        transparent: true,
-        opacity: 0,  // starts invisible, fades in
-        depthWrite: false,
-        blending: AdditiveBlending,
-    });
+    const mat = _acquireSpriteMaterial(tex);
     const sprite = new Sprite(mat);
     
     // Size: 0.07 - 0.12
@@ -5049,7 +5135,7 @@ function updateMusicNotes(): void {
         
         if (note.age >= note.lifetime) {
             note.sprite.parent?.remove(note.sprite);
-            (note.sprite.material as SpriteMaterial).dispose();
+            _releaseSpriteMaterial(note.sprite.material as SpriteMaterial);
             musicNotes.splice(i, 1);
             continue;
         }
@@ -5135,13 +5221,7 @@ function _spawnPugZBurst(): void {
 /** Materialise one queued Z job into a live sprite + particle entry. */
 function _spawnOneZ(job: ZSpawnJob): void {
     const i = job.burstIndex;
-    const mat = new SpriteMaterial({
-        map: _pugZTexture!,
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-        blending: AdditiveBlending,
-    });
+    const mat = _acquireSpriteMaterial(_pugZTexture!);
     const sprite = new Sprite(mat);
 
     // Grow each successive Z a little larger so the trail reads naturally
@@ -5186,7 +5266,7 @@ function _updatePugZParticles(): void {
 
         if (z.age >= z.lifetime) {
             z.sprite.parent?.remove(z.sprite);
-            (z.sprite.material as SpriteMaterial).dispose();
+            _releaseSpriteMaterial(z.sprite.material as SpriteMaterial);
             _pugZParticles.splice(i, 1);
             continue;
         }

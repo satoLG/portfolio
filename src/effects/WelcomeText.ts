@@ -13,7 +13,7 @@ const PLAYBACK_SPEED = 1.5;
 
 const FADE_OUT_DURATION = 650;
 const WELCOME_COLOR = '#e8eced36';
-const WRITING_AUDIO_SRC = '/audio/ui/335518__newagesoup__writing-short-8.wav';
+const WRITING_AUDIO_SRC = '/audio/ui/335518__newagesoup__writing-short-8.mp3';
 const WRITING_AUDIO_FADE_MS = 180;
 
 function startWritingAudio(): HTMLAudioElement {
