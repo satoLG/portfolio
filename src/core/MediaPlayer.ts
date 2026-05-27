@@ -281,11 +281,17 @@ const peaksCache = new Map<string, number[][]>();
 function cachePeaksAfterReady(url: string): void {
     if (!wavesurfer) return;
     wavesurfer.once('ready', () => {
-        if (!wavesurfer) return;
-        try {
-            const exported = wavesurfer.exportPeaks({ maxLength: 1024, precision: 1000 });
-            peaksCache.set(url, exported);
-        } catch { /* ignore — non-fatal */ }
+        const ws = wavesurfer;
+        if (!ws) return;
+        // Defer off the current animation frame. exportPeaks() scans all decoded
+        // PCM samples (O(millions)) and can block the main thread for 10-30 ms —
+        // enough to drop a frame if 'ready' fires during a camera zoom animation.
+        setTimeout(() => {
+            try {
+                const exported = ws.exportPeaks({ maxLength: 1024, precision: 1000 });
+                peaksCache.set(url, exported);
+            } catch { /* ignore — non-fatal */ }
+        }, 0);
     });
 }
 
@@ -1079,7 +1085,7 @@ function startAnalyserAnimation(): void {
 
 function drawAnalyser(): void {
     if (!analyserCtx || !analyserCanvas) { analyserAnimId = 0; return; }
-    
+
     // Keep canvas sized to container
     const parent = analyserCanvas.parentElement;
     if (parent) {
@@ -1093,8 +1099,14 @@ function drawAnalyser(): void {
     const { width, height } = analyserCanvas;
     if (width === 0 || height === 0) { analyserAnimId = requestAnimationFrame(drawAnalyser); return; }
 
+    // Skip canvas work while the player is expanding/collapsing. The player is
+    // behind a CSS scale(0→1) transition so nothing is visible yet, and the
+    // 64-bar canvas draw competes with the Three.js render loop for frame budget
+    // during the camera zoom — causing the sustained stutter the pug zoom avoids.
+    if (isAnimating) { analyserAnimId = requestAnimationFrame(drawAnalyser); return; }
+
     analyserCtx.clearRect(0, 0, width, height);
-    
+
     // Get playback progress (0-1)
     let progress = 0;
     if (wavesurfer) {
@@ -1102,14 +1114,13 @@ function drawAnalyser(): void {
         if (dur > 0) progress = wavesurfer.getCurrentTime() / dur;
     }
     const cursorX = progress * width;
-    
-    // If not playing or no analyser, draw idle bars with progress
+
     const bufferLength = analyserNode ? analyserNode.frequencyBinCount : 64;
     // Reuse typed array across frames — only reallocate if size changed
     if (!analyserDataArray || analyserDataArray.length !== bufferLength) {
         analyserDataArray = new Uint8Array(bufferLength);
     }
-    
+
     if (isPlaying && analyserNode) {
         analyserNode.getByteFrequencyData(analyserDataArray);
         // Compute average intensity from frequency data (0-1)
@@ -1117,21 +1128,20 @@ function drawAnalyser(): void {
         let sum = 0;
         let weightSum = 0;
         for (let i = 0; i < bufferLength; i++) {
-            const weight = i < bufferLength * 0.25 ? 2.0 : 1.0;  // Bass bins get 2x weight
+            const weight = i < bufferLength * 0.25 ? 2.0 : 1.0;
             sum += analyserDataArray[i] * weight;
             weightSum += 255 * weight;
         }
         const rawIntensity = sum / weightSum;
-        
+
         // Asymmetric smoothing: fast attack, slow release
         const smooth = rawIntensity > _musicIntensity ? INTENSITY_ATTACK : INTENSITY_RELEASE;
         _musicIntensity += (rawIntensity - _musicIntensity) * smooth;
-        
+
         // Beat detection: compare raw against slow-moving history
         const jump = rawIntensity - _intensityHistory;
         _intensityHistory += (rawIntensity - _intensityHistory) * HISTORY_SMOOTH;
         if (jump > BEAT_THRESHOLD) {
-            // Scale kick by how big the jump is (capped at 1)
             _beatKick = Math.min(1, jump / 0.25);
         } else {
             _beatKick *= BEAT_DECAY;
@@ -1141,44 +1151,95 @@ function drawAnalyser(): void {
         for (let i = 0; i < bufferLength; i++) {
             analyserDataArray[i] = 8 + Math.sin(i * 0.3 + Date.now() * 0.001) * 6;
         }
-        // Decay everything when not playing
         _musicIntensity *= 0.95;
         _beatKick *= BEAT_DECAY;
     }
 
     const gap = 1;
     const barWidth = (width - gap * (bufferLength - 1)) / bufferLength;
+    const radius = Math.min(barWidth / 2, 2);
+    const minBarH = 2;
 
-    for (let i = 0; i < bufferLength; i++) {
-        const value = analyserDataArray[i] / 255;
-        const minBarH = 2;
-        const barHeight = minBarH + value * (height - minBarH) * 0.85;
-        const x = i * (barWidth + gap);
-        const barCenter = x + barWidth / 2;
-        
-        // Played portion is bright red, unplayed is dim white
-        if (barCenter <= cursorX) {
-            const alpha = isPlaying ? (0.4 + value * 0.6) : 0.35;
-            analyserCtx.fillStyle = `rgba(229, 57, 53, ${alpha.toFixed(2)})`;
-        } else {
-            const alpha = isPlaying ? (0.1 + value * 0.25) : 0.12;
-            analyserCtx.fillStyle = `rgba(255, 255, 255, ${alpha.toFixed(2)})`;
+    if (isPlaying) {
+        // Playing: two passes — one fillStyle per pass (no per-bar string allocs).
+        // Use globalAlpha for per-bar intensity; no rgba template strings or toFixed().
+        analyserCtx.fillStyle = '#e53935';
+        for (let i = 0; i < bufferLength; i++) {
+            const value = analyserDataArray[i] / 255;
+            const x = i * (barWidth + gap);
+            if (x + barWidth * 0.5 > cursorX) continue;
+            const barHeight = minBarH + value * (height - minBarH) * 0.85;
+            const y = height - barHeight;
+            analyserCtx.globalAlpha = 0.4 + value * 0.6;
+            analyserCtx.beginPath();
+            analyserCtx.moveTo(x + radius, y);
+            analyserCtx.lineTo(x + barWidth - radius, y);
+            analyserCtx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
+            analyserCtx.lineTo(x + barWidth, height);
+            analyserCtx.lineTo(x, height);
+            analyserCtx.lineTo(x, y + radius);
+            analyserCtx.quadraticCurveTo(x, y, x + radius, y);
+            analyserCtx.fill();
         }
-        
-        // Draw bars from bottom, rounded
-        const y = height - barHeight;
-        const radius = Math.min(barWidth / 2, 2);
+        analyserCtx.fillStyle = '#ffffff';
+        for (let i = 0; i < bufferLength; i++) {
+            const value = analyserDataArray[i] / 255;
+            const x = i * (barWidth + gap);
+            if (x + barWidth * 0.5 <= cursorX) continue;
+            const barHeight = minBarH + value * (height - minBarH) * 0.85;
+            const y = height - barHeight;
+            analyserCtx.globalAlpha = 0.1 + value * 0.25;
+            analyserCtx.beginPath();
+            analyserCtx.moveTo(x + radius, y);
+            analyserCtx.lineTo(x + barWidth - radius, y);
+            analyserCtx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
+            analyserCtx.lineTo(x + barWidth, height);
+            analyserCtx.lineTo(x, height);
+            analyserCtx.lineTo(x, y + radius);
+            analyserCtx.quadraticCurveTo(x, y, x + radius, y);
+            analyserCtx.fill();
+        }
+        analyserCtx.globalAlpha = 1.0;
+    } else {
+        // Idle: fixed alpha per group — build compound paths and call fill() once
+        // per color (2 fill() calls total vs. 64 before).
+        analyserCtx.fillStyle = 'rgba(229,57,53,0.35)';
         analyserCtx.beginPath();
-        analyserCtx.moveTo(x + radius, y);
-        analyserCtx.lineTo(x + barWidth - radius, y);
-        analyserCtx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
-        analyserCtx.lineTo(x + barWidth, height);
-        analyserCtx.lineTo(x, height);
-        analyserCtx.lineTo(x, y + radius);
-        analyserCtx.quadraticCurveTo(x, y, x + radius, y);
+        for (let i = 0; i < bufferLength; i++) {
+            const value = analyserDataArray[i] / 255;
+            const x = i * (barWidth + gap);
+            if (x + barWidth * 0.5 > cursorX) continue;
+            const barHeight = minBarH + value * (height - minBarH) * 0.85;
+            const y = height - barHeight;
+            analyserCtx.moveTo(x + radius, y);
+            analyserCtx.lineTo(x + barWidth - radius, y);
+            analyserCtx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
+            analyserCtx.lineTo(x + barWidth, height);
+            analyserCtx.lineTo(x, height);
+            analyserCtx.lineTo(x, y + radius);
+            analyserCtx.quadraticCurveTo(x, y, x + radius, y);
+        }
+        analyserCtx.fill();
+
+        analyserCtx.fillStyle = 'rgba(255,255,255,0.12)';
+        analyserCtx.beginPath();
+        for (let i = 0; i < bufferLength; i++) {
+            const value = analyserDataArray[i] / 255;
+            const x = i * (barWidth + gap);
+            if (x + barWidth * 0.5 <= cursorX) continue;
+            const barHeight = minBarH + value * (height - minBarH) * 0.85;
+            const y = height - barHeight;
+            analyserCtx.moveTo(x + radius, y);
+            analyserCtx.lineTo(x + barWidth - radius, y);
+            analyserCtx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
+            analyserCtx.lineTo(x + barWidth, height);
+            analyserCtx.lineTo(x, height);
+            analyserCtx.lineTo(x, y + radius);
+            analyserCtx.quadraticCurveTo(x, y, x + radius, y);
+        }
         analyserCtx.fill();
     }
-    
+
     // Draw cursor line
     if (progress > 0 && progress < 1) {
         analyserCtx.fillStyle = '#e53935';
