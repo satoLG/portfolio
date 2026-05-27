@@ -581,7 +581,8 @@ export function transitionToUnderwater(): void {
     if (!audioInitialized || isCurrentlyUnderwater) return;
     isCurrentlyUnderwater = true;
 
-    // Stop above-water sounds
+    // Phase 1 (this frame): stop above-water sounds. stopBufferSound is cheap
+    // (just .stop() + .disconnect() on existing source nodes).
     if (waterCrossfadeTimer) { clearTimeout(waterCrossfadeTimer); waterCrossfadeTimer = null; }
     if (waterSound1) stopBufferSound(waterSound1);
     if (waterSound2) stopBufferSound(waterSound2);
@@ -596,35 +597,44 @@ export function transitionToUnderwater(): void {
     if (cricketsActive) stopCrickets();
     stopPugSnore();
 
-    // Start underwater sounds
-    if (!natureMuted) {
-        if (underwaterAmbSound) {
-            underwaterAmbSound.gain.gain.value = UNDERWATER_AMB_VOLUME;
-            playBufferSound(underwaterAmbSound);
+    // Phase 2 (next frame): start the new sources. Deferring isolates
+    // createBufferSource + connect + .start(0) from the same frame that
+    // already does the visibility-gate flip, PostProcess activation and the
+    // entry bubble burst — that frame is the stutter window.
+    requestAnimationFrame(() => {
+        if (!isCurrentlyUnderwater) return;  // user already crossed back up
+        if (!natureMuted) {
+            if (underwaterAmbSound) {
+                underwaterAmbSound.gain.gain.value = UNDERWATER_AMB_VOLUME;
+                playBufferSound(underwaterAmbSound);
+            }
+            playBubbleClip();
         }
-        playBubbleClip();
-    }
+    });
 }
 
 export function transitionToAboveWater(): void {
     if (!audioInitialized || !isCurrentlyUnderwater) return;
     isCurrentlyUnderwater = false;
 
-    // Stop underwater sounds
+    // Phase 1 (this frame): stop underwater sources.
     if (bubblesStopTimer) { clearTimeout(bubblesStopTimer); bubblesStopTimer = null; }
     if (underwaterAmbSound) stopBufferSound(underwaterAmbSound);
     if (underwaterBubblesSound) stopBufferSound(underwaterBubblesSound);
 
-    // Resume above-water sounds
-    if (!natureMuted) {
-        if (activeWaterSound) {
-            activeWaterSound.gain.gain.value = WATER_VOLUME;
-            playWaterAndSchedule(activeWaterSound);
+    // Phase 2 (next frame): resume above-water sources off the crossing frame.
+    requestAnimationFrame(() => {
+        if (isCurrentlyUnderwater) return;  // user already crossed back down
+        if (!natureMuted) {
+            if (activeWaterSound) {
+                activeWaterSound.gain.gain.value = WATER_VOLUME;
+                playWaterAndSchedule(activeWaterSound);
+            }
+            scheduleBreeze();
+            if (!isDayTime()) startFireplace();
+            if (!isDayTime()) startCrickets();
         }
-        scheduleBreeze();
-        if (!isDayTime()) startFireplace();
-        if (!isDayTime()) startCrickets();
-    }
+    });
 }
 
 /** Play bubble SFX for BUBBLE_SFX_DURATION ms (clip is longer, we cut it short) */

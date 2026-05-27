@@ -8,6 +8,7 @@ import { deltaTime } from "../core/Time";
 import { camera, renderer } from "../core/Scene";
 import { getDayNightBlend, isDayTime } from "./Skybox";
 import { jellyfishLightConfig, fishNightLightingConfig } from "./config/OceanConfig";
+import { defaultCameraZ, defaultFov, mobileFov } from "./config/CameraConfig";
 
 // Local mobile check — avoids circular-dependency TDZ crash when importing
 // isMobile from Scene.ts (Scene imports Fish at module scope).
@@ -77,12 +78,21 @@ const JELLY_Y_MIN = -8.5;                // min Y of scattered area (deeper than
 const JELLY_Y_MAX = -4.5;                // max Y of scattered area
 const JELLY_Z_MIN = -4.0;                // farthest Z
 const JELLY_Z_MAX = 0.0;                 // closest Z
-const JELLY_X_MIN = -3.5;                // left edge of scatter area
-const JELLY_X_MAX = 3.5;                 // right edge of scatter area
-const JELLY_POOL_SIZE = _isMobile ? 5 : 12;
+const JELLY_POOL_SIZE = _isMobile ? 6 : 10;
 const JELLY_FLOAT_AMPLITUDE = 0.18;      // vertical bob amplitude (world units)
 const JELLY_FLOAT_SPEED_MIN = 0.35;      // rad/s
 const JELLY_FLOAT_SPEED_MAX = 0.75;      // rad/s
+// Static X scatter is fitted to the device frustum at each jelly's Z so all
+// spawned jellies are guaranteed to be visible — the previous hardcoded ±3.5
+// range was wider than the mobile frustum, causing most jellies to spawn off
+// the right/left of the screen.
+const JELLY_X_FRUSTUM_FRACTION = 0.85;   // keep a small margin from screen edges
+const _jellyHalfFovRad = ((_isMobile ? mobileFov : defaultFov) * Math.PI / 180) * 0.5;
+const _jellyTanHalfFov = Math.tan(_jellyHalfFovRad);
+function getJellyXHalfWidth(jellyZ: number): number {
+    const depth = Math.max(0.5, defaultCameraZ - jellyZ);
+    return depth * _jellyTanHalfFov * JELLY_X_FRUSTUM_FRACTION;
+}
 
 // Jellyfish bioluminescence settings
 const JELLY_EMISSIVE_INTENSITY = 2.0;    // how bright the glow is
@@ -514,11 +524,13 @@ function resetLoopingCreature(entry: PooledFish, progress = 0): SwimmingFish {
     const scale = baseScale * scaleMult;
 
     if (jelly) {
-        // Stationary scatter: random X/Y/Z anywhere in the jelly volume,
-        // independent of the camera frustum or wave system.
-        const x = JELLY_X_MIN + Math.random() * (JELLY_X_MAX - JELLY_X_MIN);
+        // Stationary scatter: random Y/Z anywhere in the jelly volume; X is
+        // sampled from the current device's frustum at the picked Z so every
+        // jelly is guaranteed to be on-screen regardless of mobile vs desktop.
         const y = JELLY_Y_MIN + Math.random() * (JELLY_Y_MAX - JELLY_Y_MIN);
         const z = JELLY_Z_MIN + Math.random() * (JELLY_Z_MAX - JELLY_Z_MIN);
+        const xHalf = getJellyXHalfWidth(z);
+        const x = (Math.random() * 2 - 1) * xHalf;
         entry.group.position.set(x, y, z);
         entry.group.scale.setScalar(scale);
         entry.group.rotation.x = 0;
