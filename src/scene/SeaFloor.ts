@@ -198,7 +198,7 @@ export function Start(): void
                     const worldZ = z + tileZ * tileSize;
 
                     vertices[i] = (worldX - halfSize) * scale + floorOffsetX;
-                    vertices[i + 1] = heights[worldZ * worldSize1 + worldX] * scale - 10;
+                    vertices[i + 1] = heights[worldZ * worldSize1 + worldX] * scale - 14;
                     vertices[i + 2] = (worldZ - halfSize) * scale + floorOffsetZ;
 
                     const j = ((tileZ * tileSize + z) * worldSize1 + tileX * tileSize + x) * 3;

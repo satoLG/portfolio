@@ -38,7 +38,7 @@ const aboveWaterBottomY = window.innerWidth <= mobileBreakpointWidth ? cfgAboveW
 
 // UNDERWATER zone
 const underwaterTopY = window.innerWidth <= mobileBreakpointWidth ? cfgUnderwaterTopYMobile : cfgUnderwaterTopY;   // Top limit underwater (avoid looking at surface from below)
-const underwaterBottomY = -8;   // Bottom camera position (near sea floor)
+const underwaterBottomY = -12;  // Bottom camera position (near sea floor)
 
 // Dead zone: camera must not rest between aboveWaterBottomY and underwaterTopY
 const deadZoneTop = aboveWaterBottomY;   // 1

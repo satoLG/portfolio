@@ -51,8 +51,8 @@ function _doriLag(angle: number): number {
 
 // Generic fish spawn settings
 const GENERIC_FISH_SCALE = 0.03;
-const GENERIC_FISH_Y_MIN = -5;           // min spawn height
-const GENERIC_FISH_Y_MAX = -3;           // max spawn height
+const GENERIC_FISH_Y_MIN = -7;           // min spawn height
+const GENERIC_FISH_Y_MAX = -5;           // max spawn height
 const GENERIC_FISH_Z_MIN = -4.0;         // farthest Z from camera
 const GENERIC_FISH_Z_MAX = 0.0;         // closest Z to camera
 const GENERIC_FISH_SPEED_MIN = 0.3;      // slowest swim speed
@@ -71,21 +71,18 @@ const FISH_SCALE_MIN = 0.8;              // min scale multiplier
 const FISH_SCALE_MAX = 1.2;              // max scale multiplier
 const SCREEN_MARGIN = 0.5;               // extra world units past screen edge
 
-// Jellyfish spawn settings (night mode — slower, fewer, bioluminescent)
+// Jellyfish settings — scattered static positions with gentle vertical bob
 const JELLYFISH_SCALE = 0.001;           // base scale for jellyfish
-const JELLY_SPEED_MIN = 0.10;            // slow drift, trajectory speed
-const JELLY_SPEED_MAX = 0.24;            // slow drift, trajectory speed
-const JELLY_SPAWN_INTERVAL = 3.5;        // seconds between spawn waves
-const JELLY_SPAWN_COUNT_MIN = 1;         // min jellyfish per wave
-const JELLY_SPAWN_COUNT_MAX = 2;         // max jellyfish per wave
-const JELLY_GROUP_SIZE_MIN = 1;          // usually solo
-const JELLY_GROUP_SIZE_MAX = 1;          // usually solo
-const JELLY_Y_MIN = -5;                  // min spawn height
-const JELLY_Y_MAX = -2.5;                // max spawn height (higher than fish)
-const JELLY_Z_MIN = -4.0;               // farthest Z
-const JELLY_Z_MAX = 0.0;                // closest Z
-const JELLY_SPEED_SPREAD = 0.04;         // speed variation
-const JELLY_POOL_SIZE = _isMobile ? 5 : 12;              // 20% more simultaneous jellyfish
+const JELLY_Y_MIN = -8.5;                // min Y of scattered area (deeper than fish)
+const JELLY_Y_MAX = -4.5;                // max Y of scattered area
+const JELLY_Z_MIN = -4.0;                // farthest Z
+const JELLY_Z_MAX = 0.0;                 // closest Z
+const JELLY_X_MIN = -3.5;                // left edge of scatter area
+const JELLY_X_MAX = 3.5;                 // right edge of scatter area
+const JELLY_POOL_SIZE = _isMobile ? 5 : 12;
+const JELLY_FLOAT_AMPLITUDE = 0.18;      // vertical bob amplitude (world units)
+const JELLY_FLOAT_SPEED_MIN = 0.35;      // rad/s
+const JELLY_FLOAT_SPEED_MAX = 0.75;      // rad/s
 
 // Jellyfish bioluminescence settings
 const JELLY_EMISSIVE_INTENSITY = 2.0;    // how bright the glow is
@@ -153,6 +150,10 @@ interface SwimmingFish {
     baseY: number;
     velocityY: number;
     currentTilt: number;
+    // Jellyfish-only: stationary vertical bob
+    floatPhase: number;       // current phase of the sin bob (rad)
+    floatSpeed: number;       // rad/s
+    floatAmp: number;         // world units
 }
 
 const fishPool: PooledFish[] = [];       // available (inactive) day fish
@@ -165,13 +166,12 @@ let fixedLoopsInitialized = false;
 let underwaterView = false;
 let shallowVisibilityMinY = Number.POSITIVE_INFINITY;
 
-// Jellyfish color tints (bioluminescent night palette)
+// Jellyfish color tints — uniform light-blue palette (tiny variation for life)
 const JELLY_COLOR_TINTS: Color[] = [
-    new Color(0.3, 0.8, 1.5),   // bioluminescent blue
-    new Color(0.8, 0.2, 1.5),   // purple glow
-    new Color(0.2, 1.5, 0.8),   // cyan-green
-    new Color(1.2, 0.3, 0.8),   // pink
-    new Color(0.5, 1.2, 1.5),   // light cyan
+    new Color(0.55, 0.85, 1.35),
+    new Color(0.50, 0.90, 1.40),
+    new Color(0.60, 0.88, 1.30),
+    new Color(0.52, 0.82, 1.45),
 ];
 
 const _fakeJellyLightPositions = Array.from({ length: MAX_FAKE_JELLY_LIGHTS }, () => new Vector3(9999, 9999, 9999));
@@ -466,6 +466,9 @@ function activatePooledFish(
         baseY: y,
         velocityY: 0,
         currentTilt: 0,
+        floatPhase: 0,
+        floatSpeed: 0,
+        floatAmp: 0,
     });
 }
 
@@ -490,15 +493,9 @@ function deactivateFish(index: number): void {
 }
 
 function resetLoopingCreature(entry: PooledFish, progress = 0): SwimmingFish {
-    const night = entry.isJellyfish;
-    const tints = night ? JELLY_COLOR_TINTS : FISH_COLOR_TINTS;
-    const baseScale = night ? JELLYFISH_SCALE : GENERIC_FISH_SCALE;
-    const yMin = night ? JELLY_Y_MIN : GENERIC_FISH_Y_MIN;
-    const yMax = night ? JELLY_Y_MAX : GENERIC_FISH_Y_MAX;
-    const zMin = night ? JELLY_Z_MIN : GENERIC_FISH_Z_MIN;
-    const zMax = night ? JELLY_Z_MAX : GENERIC_FISH_Z_MAX;
-    const speedMin = night ? JELLY_SPEED_MIN : GENERIC_FISH_SPEED_MIN;
-    const speedMax = night ? JELLY_SPEED_MAX : GENERIC_FISH_SPEED_MAX;
+    const jelly = entry.isJellyfish;
+    const tints = jelly ? JELLY_COLOR_TINTS : FISH_COLOR_TINTS;
+    const baseScale = jelly ? JELLYFISH_SCALE : GENERIC_FISH_SCALE;
 
     const tint = tints[Math.floor(Math.random() * tints.length)];
     for (let i = 0; i < entry.materials.length; i++) {
@@ -513,12 +510,45 @@ function resetLoopingCreature(entry: PooledFish, progress = 0): SwimmingFish {
     entry.fakeLightColor.copy(tint);
     setJellyfishGlow(entry, getJellyVisibility());
 
+    const scaleMult = FISH_SCALE_MIN + Math.random() * (FISH_SCALE_MAX - FISH_SCALE_MIN);
+    const scale = baseScale * scaleMult;
+
+    if (jelly) {
+        // Stationary scatter: random X/Y/Z anywhere in the jelly volume,
+        // independent of the camera frustum or wave system.
+        const x = JELLY_X_MIN + Math.random() * (JELLY_X_MAX - JELLY_X_MIN);
+        const y = JELLY_Y_MIN + Math.random() * (JELLY_Y_MAX - JELLY_Y_MIN);
+        const z = JELLY_Z_MIN + Math.random() * (JELLY_Z_MAX - JELLY_Z_MIN);
+        entry.group.position.set(x, y, z);
+        entry.group.scale.setScalar(scale);
+        entry.group.rotation.x = 0;
+        entry.group.visible = shouldShowCreature(entry);
+        ensureLoopAction(entry);
+
+        return {
+            pool: entry,
+            speed: 0,
+            baseScale: scale,
+            baseY: y,
+            velocityY: 0,
+            currentTilt: 0,
+            floatPhase: Math.random() * Math.PI * 2,
+            floatSpeed: JELLY_FLOAT_SPEED_MIN + Math.random() * (JELLY_FLOAT_SPEED_MAX - JELLY_FLOAT_SPEED_MIN),
+            floatAmp: JELLY_FLOAT_AMPLITUDE * (0.7 + Math.random() * 0.6),
+        };
+    }
+
+    const yMin = GENERIC_FISH_Y_MIN;
+    const yMax = GENERIC_FISH_Y_MAX;
+    const zMin = GENERIC_FISH_Z_MIN;
+    const zMax = GENERIC_FISH_Z_MAX;
+    const speedMin = GENERIC_FISH_SPEED_MIN;
+    const speedMax = GENERIC_FISH_SPEED_MAX;
+
     const y = yMin + Math.random() * (yMax - yMin);
     const z = zMin + Math.random() * (zMax - zMin);
     const { spawnX, despawnX } = getFrustumEdgesX(z);
     const x = despawnX + (spawnX - despawnX) * progress + Math.random() * GROUP_X_SPREAD;
-    const scaleMult = FISH_SCALE_MIN + Math.random() * (FISH_SCALE_MAX - FISH_SCALE_MIN);
-    const scale = baseScale * scaleMult;
     entry.group.position.set(x, y, z);
     entry.group.scale.setScalar(scale);
     entry.group.rotation.x = 0;
@@ -533,6 +563,9 @@ function resetLoopingCreature(entry: PooledFish, progress = 0): SwimmingFish {
         baseY: y,
         velocityY: 0,
         currentTilt: 0,
+        floatPhase: 0,
+        floatSpeed: 0,
+        floatAmp: 0,
     };
 }
 
@@ -698,58 +731,6 @@ function getFrustumEdgesX(z: number): { spawnX: number; despawnX: number } {
     return { spawnX: rightX, despawnX: leftX };
 }
 
-function spawnCreatures(): void {
-    const night = !isDayTime();
-    const pool = night ? jellyPool : fishPool;
-    const initialized = night ? jellyPoolInitialized : fishPoolInitialized;
-    if (!initialized || pool.length === 0) return;
-
-    const tints = night ? JELLY_COLOR_TINTS : FISH_COLOR_TINTS;
-    const baseScale = night ? JELLYFISH_SCALE : GENERIC_FISH_SCALE;
-    const yMin = night ? JELLY_Y_MIN : GENERIC_FISH_Y_MIN;
-    const yMax = night ? JELLY_Y_MAX : GENERIC_FISH_Y_MAX;
-    const zMin = night ? JELLY_Z_MIN : GENERIC_FISH_Z_MIN;
-    const zMax = night ? JELLY_Z_MAX : GENERIC_FISH_Z_MAX;
-    const speedMin = night ? JELLY_SPEED_MIN : GENERIC_FISH_SPEED_MIN;
-    const speedMax = night ? JELLY_SPEED_MAX : GENERIC_FISH_SPEED_MAX;
-    const speedSpread = night ? JELLY_SPEED_SPREAD : GROUP_SPEED_SPREAD;
-    const countMin = night ? JELLY_SPAWN_COUNT_MIN : SPAWN_COUNT_MIN;
-    const countMax = night ? JELLY_SPAWN_COUNT_MAX : SPAWN_COUNT_MAX;
-    const grpMin = night ? JELLY_GROUP_SIZE_MIN : GROUP_SIZE_MIN;
-    const grpMax = night ? JELLY_GROUP_SIZE_MAX : GROUP_SIZE_MAX;
-
-    const count = countMin + Math.floor(Math.random() * (countMax - countMin + 1));
-
-    const range = yMax - yMin;
-    const slotSize = range / count;
-    const maxJitter = Math.max(0, (slotSize - FISH_MIN_Y_GAP) * 0.5);
-
-    for (let n = 0; n < count; n++) {
-        if (pool.length === 0) return;
-
-        const slotCenter = yMin + slotSize * (n + 0.5);
-        const baseY = slotCenter + (Math.random() * 2 - 1) * maxJitter;
-        const baseZ = zMin + Math.random() * (zMax - zMin);
-        const baseSpeed = speedMin + Math.random() * (speedMax - speedMin);
-
-        const tint = tints[Math.floor(Math.random() * tints.length)];
-        const groupSize = grpMin + Math.floor(Math.random() * (grpMax - grpMin + 1));
-
-        for (let g = 0; g < groupSize; g++) {
-            if (pool.length === 0) return;
-
-            const y = baseY + (Math.random() * 2 - 1) * GROUP_Y_SPREAD;
-            const z = baseZ + (Math.random() * 2 - 1) * GROUP_Z_SPREAD;
-            const speed = baseSpeed + (Math.random() * 2 - 1) * speedSpread;
-            const scaleMult = FISH_SCALE_MIN + Math.random() * (FISH_SCALE_MAX - FISH_SCALE_MIN);
-            const { spawnX } = getFrustumEdgesX(z);
-            const x = spawnX + Math.random() * GROUP_X_SPREAD;
-
-            activatePooledFish(tint, x, y, z, speed, baseScale * scaleMult, night);
-        }
-    }
-}
-
 export function Update(): void {
     const jellyVisibility = getJellyVisibility();
     const nightBlend = smooth01(getDayNightBlend());
@@ -788,7 +769,7 @@ export function Update(): void {
     tickPoolCreation();
     updateFakeJellyLightUniforms(nightBlend, jellyVisibility);
 
-    // Move and cull active generic fish
+    // Move and cull active creatures
     for (let i = activeFish.length - 1; i >= 0; i--) {
         const fish = activeFish[i];
         const group = fish.pool.group;
@@ -796,6 +777,16 @@ export function Update(): void {
         setJellyfishGlow(fish.pool, jellyVisibility);
         group.visible = shouldShowCreature(fish.pool);
         fish.pool.mixer.update(deltaTime);
+
+        if (fish.pool.isJellyfish) {
+            // Stationary jellyfish: no horizontal motion, no pointer avoidance,
+            // no despawn. Just a gentle vertical bob around baseY while the
+            // skeleton animation continues to loop in the mixer above.
+            fish.floatPhase += fish.floatSpeed * deltaTime;
+            group.position.y = fish.baseY + Math.sin(fish.floatPhase) * fish.floatAmp;
+            continue;
+        }
+
         group.position.x -= fish.speed * deltaTime;
 
         // Pointer avoidance
