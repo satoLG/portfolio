@@ -558,8 +558,10 @@ export const triplanarFragment =
 
         // Caustic light on underwater surfaces
         float caustic = caustics(_worldPos.xz);
-        // Depth attenuation: caustics fade on very deep surfaces
-        float depthFade = clamp(1.0 + _worldPos.y * 0.08, 0.0, 1.0);
+        // Depth attenuation: caustics fade on very deep surfaces.
+        // Slope chosen so caustics still reach the sea floor at Y≈-14
+        // (full fade at Y≈-20).
+        float depthFade = clamp(1.0 + _worldPos.y * 0.05, 0.0, 1.0);
         // Distance fade: caustics only visible near the camera
         float distFade = 1.0 - clamp(viewLen / CAUSTIC_DISTANCE, 0.0, 1.0);
         distFade *= distFade; // quadratic falloff for smooth fade

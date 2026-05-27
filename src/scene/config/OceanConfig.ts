@@ -61,7 +61,9 @@ export const jellyfishLightConfig = {
 };
 
 export const fishNightLightingConfig = {
-    nonJellyLightInfluence: 0.0300,
+    // Mantém os peixes como silhuetas tênues à noite — só ganham cor real
+    // quando entram no raio de luz de uma água-viva (uFishJellyLight no shader).
+    nonJellyLightInfluence: 0.0800,
     jellyLightInfluence: 1.3500,
 };
 

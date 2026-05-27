@@ -30,8 +30,8 @@ export const BUBBLE_SPREAD = 0.25;        // Random spread at spawn
 export const AMBIENT_BUBBLE_INTERVAL = 1.4;   // Seconds between ambient bubble groups
 export const AMBIENT_BUBBLE_GROUP_SIZE = 6;    // Bubbles per ambient group
 export const AMBIENT_SOUND_INTERVAL = 10.0;   // Seconds between bubble sounds
-export const ENTRY_BUBBLE_COUNT = 60;          // Total bubbles to spawn when entering water
-const ENTRY_BUBBLE_PER_FRAME = 12;                // Bubbles to spawn per frame (stagger the burst)
+export const ENTRY_BUBBLE_COUNT = 24;          // Total bubbles to spawn when entering water
+const ENTRY_BUBBLE_PER_FRAME = 6;                 // Bubbles to spawn per frame (stagger the burst)
 // ============================================
 
 // Per-bubble CPU-side state (no Three.js objects — just numbers)
