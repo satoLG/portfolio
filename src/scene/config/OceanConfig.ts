@@ -61,7 +61,10 @@ export const jellyfishLightConfig = {
 };
 
 export const fishNightLightingConfig = {
-    nonJellyLightInfluence: 0.0300,
+    // Bumped from 0.03 → 0.22: with the old design generic fish only spawned
+    // at day, so a near-black night value was harmless. Now that they're
+    // always present a 3% multiplier left them effectively invisible at night.
+    nonJellyLightInfluence: 0.2200,
     jellyLightInfluence: 1.3500,
 };
 
