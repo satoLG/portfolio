@@ -67,6 +67,20 @@ export const scene = new Scene();
 export const camera = new PerspectiveCamera();
 export const staticCamera = new PerspectiveCamera();
 
+// Debug hooks — `__diag()` in the console returns a snapshot of the
+// renderer/scene state. Comparing snapshots before and after a transition
+// shows what's being uploaded/compiled at runtime (= stutter source).
+(window as any).__r = renderer;
+(window as any).__scene = scene;
+(window as any).__diag = () => ({
+    programs: renderer.info.programs?.length ?? 0,
+    geometries: renderer.info.memory.geometries,
+    textures: renderer.info.memory.textures,
+    calls: renderer.info.render.calls,
+    pointLights: scene.children.filter(c => (c as any).isPointLight).length,
+    fish: Fish.getDiagState(),
+});
+
 // Single shared CSS3DRenderer + scene — one preserve-3d container matches Henry
 export const cssRenderer = new CSS3DRenderer();
 export const cssScene = new Scene();

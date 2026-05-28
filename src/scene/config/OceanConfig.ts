@@ -55,16 +55,12 @@ export const distortionScale    = 8.5000;
 export const distortionEdgeFade = 0.0600;
 
 // ── Fish / Jellyfish Lighting ───────────────────────────────────────────────
+// Drives the per-jellyfish PointLight (candela-ish intensity + reach in world
+// units). Material recompiles are avoided by keeping light *count* constant —
+// only the values below change at runtime.
 export const jellyfishLightConfig = {
-    intensity: 0.3300,
-    distance: 0.7500,
-};
-
-export const fishNightLightingConfig = {
-    // Mantém os peixes como silhuetas tênues à noite — só ganham cor real
-    // quando entram no raio de luz de uma água-viva (uFishJellyLight no shader).
-    nonJellyLightInfluence: 0.0800,
-    jellyLightInfluence: 1.3500,
+    intensity: 3.0000,
+    distance: 1.5000,
 };
 
 // ── Click Ripple Effect ───────────────────────────────────────────────────────
