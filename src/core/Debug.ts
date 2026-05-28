@@ -292,7 +292,6 @@ import {
     rippleNormalStrength as RIPPLE_NORMAL_STRENGTH,
     rippleMaxClickDistance as RIPPLE_MAX_CLICK_DISTANCE,
     jellyfishLightConfig,
-    fishNightLightingConfig,
 } from '../scene/config/OceanConfig';
 import { phoneZoomConfig, mainCameraConfig, isWebPageMode, toggleCameraMode } from './Control';
 import { mobileFov, mobileBreakpointWidth, aboveWaterBottomY as CFG_ABOVE_BOTTOM, aboveWaterBottomYMobile as CFG_ABOVE_BOTTOM_MOBILE, underwaterTopY as CFG_UNDER_TOP, underwaterTopYMobile as CFG_UNDER_TOP_MOBILE } from '../scene/config/CameraConfig';
@@ -976,11 +975,6 @@ function buildGUI(): void {
                 `    distance: ${f(jellyfishLightConfig.distance)},`,
                 `};`,
                 ``,
-                `export const fishNightLightingConfig = {`,
-                `    nonJellyLightInfluence: ${f(fishNightLightingConfig.nonJellyLightInfluence)},`,
-                `    jellyLightInfluence: ${f(fishNightLightingConfig.jellyLightInfluence)},`,
-                `};`,
-                ``,
                 `// ── Click Ripple Effect ───────────────────────────────────────────────────────`,
                 `export const rippleSpeed           = ${RIPPLE_SPEED};    // World-units/sec the ring expands (max radius = speed × lifetime)`,
                 `export const rippleLifetime        = ${RIPPLE_LIFETIME};    // Seconds before the wave fully fades out`,
@@ -1004,14 +998,9 @@ function buildGUI(): void {
     const oceanFishFolder = oceanFolder.addFolder('Fish');
 
     const jellyLightFolder = oceanFishFolder.addFolder('Jellyfish Lights');
-    jellyLightFolder.add(jellyfishLightConfig, 'intensity', 0, 3, 0.01).name('Intensity').listen();
+    jellyLightFolder.add(jellyfishLightConfig, 'intensity', 0, 10, 0.05).name('Intensity').listen();
     jellyLightFolder.add(jellyfishLightConfig, 'distance', 0.05, 5, 0.05).name('Distance').listen();
     jellyLightFolder.close();
-
-    const fishNightFolder = oceanFishFolder.addFolder('Night Visibility');
-    fishNightFolder.add(fishNightLightingConfig, 'nonJellyLightInfluence', 0, 1, 0.01).name('Scene Light').listen();
-    fishNightFolder.add(fishNightLightingConfig, 'jellyLightInfluence', 0, 5, 0.05).name('Jelly Light').listen();
-    fishNightFolder.close();
     oceanFishFolder.close();
 
     const skyActions = {
