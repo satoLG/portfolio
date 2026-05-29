@@ -25,6 +25,17 @@ export const waveVelocity1     = { x: 0.0330, y: -0.0100 };
 export const waveVelocity2     = { x: -0.0270, y: -0.0180 };
 export const edgeFadeDistance  = 0.5400;
 
+// ── Surface Vertex Displacement (near-camera swell) ──────────────────────────
+// Real geometry waves applied ONLY to the strip of ocean in front of the camera
+// — amplitude fades to 0 with distance so it fuses seamlessly with the flat
+// surface. Gives the waterline a wavy silhouette when entering/exiting the water.
+export const surfaceWaveAmplitude   = 0.0800; // max vertical displacement (world units) near the camera
+export const surfaceWaveLength      = 6.0000; // wavelength in world units (keep ≥ ~4× vertex spacing)
+export const surfaceWaveSpeed       = 0.6000; // animation speed of the swell
+export const surfaceWaveRange       = 18.0000; // XZ distance from camera over which the waves fade to flat
+export const surfaceWaveForwardBias = 0.6000; // 0 = full radial ring around camera, 1 = only directly ahead
+export const surfaceWaveSteepness   = 0.5000; // blend of the cross wave layer — adds choppiness
+
 // ── Ocean Surface ─────────────────────────────────────────────────────────────
 export const surfaceColor   = { r: 0.0000, g: 1.1800, b: 1.1700 }; // RGB tint (1,1,1 = no tint)
 export const surfaceOpacity = 0.6100;

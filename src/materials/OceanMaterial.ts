@@ -43,6 +43,14 @@ export const waveVelocity2Uniform     = new Uniform({ x: OceanConfig.waveVelocit
 
 export const edgeFadeDistanceUniform = new Uniform(OceanConfig.edgeFadeDistance);
 
+// Near-camera vertex displacement (surface swell) — see OceanConfig for meaning
+export const surfaceWaveAmplitudeUniform   = new Uniform(OceanConfig.surfaceWaveAmplitude);
+export const surfaceWaveLengthUniform      = new Uniform(OceanConfig.surfaceWaveLength);
+export const surfaceWaveSpeedUniform       = new Uniform(OceanConfig.surfaceWaveSpeed);
+export const surfaceWaveRangeUniform       = new Uniform(OceanConfig.surfaceWaveRange);
+export const surfaceWaveForwardBiasUniform = new Uniform(OceanConfig.surfaceWaveForwardBias);
+export const surfaceWaveSteepnessUniform   = new Uniform(OceanConfig.surfaceWaveSteepness);
+
 // Foam mask — generated at runtime from island silhouette
 export const foamMaskUniform         = new Uniform(null as Texture | null);         // Top-down silhouette texture
 export const foamMaskCenterUniform   = new Uniform(new Vector2(0.0, 0.0));          // World XZ center — overwritten by setFoamMask()
@@ -218,6 +226,13 @@ export function Start(): void
         _WaveVelocity1: waveVelocity1Uniform,
         _WaveVelocity2: waveVelocity2Uniform,
         _EdgeFadeDistance: edgeFadeDistanceUniform,
+        _CameraForward: new Uniform(cameraForward),
+        _SurfaceWaveAmplitude: surfaceWaveAmplitudeUniform,
+        _SurfaceWaveLength: surfaceWaveLengthUniform,
+        _SurfaceWaveSpeed: surfaceWaveSpeedUniform,
+        _SurfaceWaveRange: surfaceWaveRangeUniform,
+        _SurfaceWaveForwardBias: surfaceWaveForwardBiasUniform,
+        _SurfaceWaveSteepness: surfaceWaveSteepnessUniform,
         _FoamMask: foamMaskUniform,
         _FoamMaskCenter: foamMaskCenterUniform,
         _FoamMaskSize: foamMaskSizeUniform,

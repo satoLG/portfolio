@@ -241,6 +241,12 @@ import {
     waveVelocity1Uniform,
     waveVelocity2Uniform,
     edgeFadeDistanceUniform,
+    surfaceWaveAmplitudeUniform,
+    surfaceWaveLengthUniform,
+    surfaceWaveSpeedUniform,
+    surfaceWaveRangeUniform,
+    surfaceWaveForwardBiasUniform,
+    surfaceWaveSteepnessUniform,
     surfaceColorUniform,
     surfaceOpacityUniform,
     reflectionFresnelPowerUniform,
@@ -940,6 +946,14 @@ function buildGUI(): void {
                 `export const waveVelocity2     = { x: ${f(vel2.x)}, y: ${f(vel2.y)} };`,
                 `export const edgeFadeDistance  = ${f(edgeFadeDistanceUniform.value as number)};`,
                 ``,
+                `// ── Surface Vertex Displacement (near-camera swell) ──────────────────────────`,
+                `export const surfaceWaveAmplitude   = ${f(surfaceWaveAmplitudeUniform.value as number)}; // max vertical displacement (world units) near the camera`,
+                `export const surfaceWaveLength      = ${f(surfaceWaveLengthUniform.value as number)}; // wavelength in world units (keep ≥ ~4× vertex spacing)`,
+                `export const surfaceWaveSpeed       = ${f(surfaceWaveSpeedUniform.value as number)}; // animation speed of the swell`,
+                `export const surfaceWaveRange       = ${f(surfaceWaveRangeUniform.value as number)}; // XZ distance from camera over which the waves fade to flat`,
+                `export const surfaceWaveForwardBias = ${f(surfaceWaveForwardBiasUniform.value as number)}; // 0 = full radial ring around camera, 1 = only directly ahead`,
+                `export const surfaceWaveSteepness   = ${f(surfaceWaveSteepnessUniform.value as number)}; // blend of the cross wave layer — adds choppiness`,
+                ``,
                 `// ── Ocean Surface ─────────────────────────────────────────────────────────────`,
                 `export const surfaceColor   = { r: ${f(sc.x)}, g: ${f(sc.y)}, b: ${f(sc.z)} }; // RGB tint (1,1,1 = no tint)`,
                 `export const surfaceOpacity = ${f(surfaceOpacityUniform.value as number)};`,
@@ -1603,6 +1617,18 @@ function buildGUI(): void {
         set vel2y(v)     { waveVelocity2Uniform.value.y = v; },
         get edgeFade()   { return edgeFadeDistanceUniform.value as number; },
         set edgeFade(v)  { edgeFadeDistanceUniform.value = v; },
+        get dispAmp()    { return surfaceWaveAmplitudeUniform.value as number; },
+        set dispAmp(v)   { surfaceWaveAmplitudeUniform.value = v; },
+        get dispLen()    { return surfaceWaveLengthUniform.value as number; },
+        set dispLen(v)   { surfaceWaveLengthUniform.value = v; },
+        get dispSpeed()  { return surfaceWaveSpeedUniform.value as number; },
+        set dispSpeed(v) { surfaceWaveSpeedUniform.value = v; },
+        get dispRange()  { return surfaceWaveRangeUniform.value as number; },
+        set dispRange(v) { surfaceWaveRangeUniform.value = v; },
+        get dispFwd()    { return surfaceWaveForwardBiasUniform.value as number; },
+        set dispFwd(v)   { surfaceWaveForwardBiasUniform.value = v; },
+        get dispSteep()  { return surfaceWaveSteepnessUniform.value as number; },
+        set dispSteep(v) { surfaceWaveSteepnessUniform.value = v; },
     };
 
     wavesFolder.add(wavesProxy, 'nmScale',    0, 1,    0.001).name('NormalMap Scale').listen();
@@ -1612,6 +1638,14 @@ function buildGUI(): void {
     wavesFolder.add(wavesProxy, 'vel2x',   -0.5, 0.5,  0.001).name('Wave2 Vel X').listen();
     wavesFolder.add(wavesProxy, 'vel2y',   -0.5, 0.5,  0.001).name('Wave2 Vel Y').listen();
     wavesFolder.add(wavesProxy, 'edgeFade', 0,   5,    0.01 ).name('Edge Fade Distance').listen();
+
+    // Near-camera vertex displacement (real geometry swell ahead of the camera)
+    wavesFolder.add(wavesProxy, 'dispAmp',   0,   0.4,  0.001).name('Displace Amplitude').listen();
+    wavesFolder.add(wavesProxy, 'dispLen',   0.5, 30,   0.1  ).name('Displace Wavelength').listen();
+    wavesFolder.add(wavesProxy, 'dispSpeed', 0,   3,    0.01 ).name('Displace Speed').listen();
+    wavesFolder.add(wavesProxy, 'dispRange', 1,   80,   0.5  ).name('Displace Range').listen();
+    wavesFolder.add(wavesProxy, 'dispFwd',   0,   1,    0.01 ).name('Forward Bias').listen();
+    wavesFolder.add(wavesProxy, 'dispSteep', 0,   1,    0.01 ).name('Displace Steepness').listen();
 
     wavesFolder.close();
 
