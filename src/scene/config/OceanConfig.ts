@@ -56,6 +56,13 @@ export const edgeFoamIntensity = 0.4200;  // overall brightness of the depth-int
 export const edgeFoamUnderwaterMul = 0.3500;  // dimming factor for the same effect with camera below water (silvery refraction sheen)
 export const edgeFoamColor     = { r: 1.0000, g: 0.9700, b: 1.0000 };
 
+// Mobile-only anti-flicker for the edge foam. iOS often gives only a 16-bit scene
+// depth, so the contact line on far geometry (back rocks) flickers. These are
+// applied only on mobile (desktop renders identically). Tune on-device.
+export const edgeFoamDepthGuard = 0.4000;   // dead-band strength (× view-distance² × 1e-4); higher = more flicker suppression
+export const edgeFoamFadeStart  = 28.0000;  // view distance (world units) where edge foam begins fading out
+export const edgeFoamFadeEnd    = 70.0000;  // view distance (world units) where edge foam is fully gone
+
 // ── Reflection ────────────────────────────────────────────────────────────────
 export const reflectionFresnelPower = 0.6500; // lower = visible at more angles
 export const reflectionFloor        = 0.2200; // minimum reflectivity at any angle

@@ -276,6 +276,10 @@ import {
     edgeFoamIntensityUniform,
     edgeFoamUnderwaterMulUniform,
     edgeFoamColorUniform,
+    edgeFoamMobileUniform,
+    edgeFoamDepthGuardUniform,
+    edgeFoamFadeStartUniform,
+    edgeFoamFadeEndUniform,
     underwaterFogDistUniform,
 } from '../materials/OceanMaterial';
 import * as WindLines from '../effects/WindLines';
@@ -976,6 +980,13 @@ function buildGUI(): void {
                 `export const edgeFoamIntensity = ${f(edgeFoamIntensityUniform.value as number)};  // overall brightness of the depth-intersection foam`,
                 `export const edgeFoamUnderwaterMul = ${f(edgeFoamUnderwaterMulUniform.value as number)};  // dimming factor for the same effect with camera below water (silvery refraction sheen)`,
                 `export const edgeFoamColor     = { r: ${f(efc.x)}, g: ${f(efc.y)}, b: ${f(efc.z)} };`,
+                ``,
+                `// Mobile-only anti-flicker for the edge foam. iOS often gives only a 16-bit scene`,
+                `// depth, so the contact line on far geometry (back rocks) flickers. These are`,
+                `// applied only on mobile (desktop renders identically). Tune on-device.`,
+                `export const edgeFoamDepthGuard = ${f(edgeFoamDepthGuardUniform.value as number)};   // dead-band strength (× view-distance² × 1e-4); higher = more flicker suppression`,
+                `export const edgeFoamFadeStart  = ${f(edgeFoamFadeStartUniform.value as number)};  // view distance (world units) where edge foam begins fading out`,
+                `export const edgeFoamFadeEnd    = ${f(edgeFoamFadeEndUniform.value as number)};  // view distance (world units) where edge foam is fully gone`,
                 ``,
                 `// ── Reflection ────────────────────────────────────────────────────────────────`,
                 `export const reflectionFresnelPower = ${f(reflectionFresnelPowerUniform.value as number)}; // lower = visible at more angles`,
@@ -1771,6 +1782,16 @@ function buildGUI(): void {
         set colorG(v)   { edgeFoamColorUniform.value.y = v; },
         get colorB()    { return edgeFoamColorUniform.value.z; },
         set colorB(v)   { edgeFoamColorUniform.value.z = v; },
+        // Mobile-only anti-flicker. `mobile` flag is auto-set per device; expose it
+        // so a desktop session can preview the mobile path while calibrating.
+        get mobile()      { return (edgeFoamMobileUniform.value as number) > 0.5; },
+        set mobile(v)     { edgeFoamMobileUniform.value = v ? 1 : 0; },
+        get depthGuard()  { return edgeFoamDepthGuardUniform.value as number; },
+        set depthGuard(v) { edgeFoamDepthGuardUniform.value = v; },
+        get fadeStart()   { return edgeFoamFadeStartUniform.value as number; },
+        set fadeStart(v)  { edgeFoamFadeStartUniform.value = v; },
+        get fadeEnd()     { return edgeFoamFadeEndUniform.value as number; },
+        set fadeEnd(v)    { edgeFoamFadeEndUniform.value = v; },
     };
     edgeFoamFolder.add(edgeFoamProxy, 'width', 0, 2, 0.01).name('Width (world units)').listen();
     edgeFoamFolder.add(edgeFoamProxy, 'intensity', 0, 3, 0.01).name('Intensity (above water)').listen();
@@ -1778,6 +1799,10 @@ function buildGUI(): void {
     edgeFoamFolder.add(edgeFoamProxy, 'colorR', 0, 2, 0.01).name('Color R').listen();
     edgeFoamFolder.add(edgeFoamProxy, 'colorG', 0, 2, 0.01).name('Color G').listen();
     edgeFoamFolder.add(edgeFoamProxy, 'colorB', 0, 2, 0.01).name('Color B').listen();
+    edgeFoamFolder.add(edgeFoamProxy, 'mobile').name('Mobile anti-flicker (preview)').listen();
+    edgeFoamFolder.add(edgeFoamProxy, 'depthGuard', 0, 3, 0.01).name('· Depth guard (mobile)').listen();
+    edgeFoamFolder.add(edgeFoamProxy, 'fadeStart', 0, 120, 1).name('· Fade start (mobile)').listen();
+    edgeFoamFolder.add(edgeFoamProxy, 'fadeEnd', 0, 200, 1).name('· Fade end (mobile)').listen();
     edgeFoamFolder.close();
 
     // ── Wind Lines ────────────────────────────────────────────────────────────

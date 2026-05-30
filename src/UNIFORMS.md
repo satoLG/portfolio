@@ -72,6 +72,8 @@ Lines [47-65](src/materials/OceanMaterial.ts#L47). All other `foam*Uniform` entr
 ### Edge foam (depth-intersection foam on the ocean side)
 `sceneDepthUniform`, `cameraNearUniform`, `cameraFarUniform`, `edgeFoamWidthUniform`, `edgeFoamIntensityUniform`, `edgeFoamColorUniform` — declared in [OceanMaterial.ts](src/materials/OceanMaterial.ts). The depth texture is filled each frame by [SceneDepth.ts](src/effects/SceneDepth.ts) via a `MeshDepthMaterial` override pass; the ocean fragment shader linearizes both `gl_FragCoord.z` and the sampled scene depth and brightens fragments where the difference is below `edgeFoamWidth`.
 
+`edgeFoamMobileUniform`, `edgeFoamDepthGuardUniform`, `edgeFoamFadeStartUniform`, `edgeFoamFadeEndUniform` — declared in [OceanMaterial.ts](src/materials/OceanMaterial.ts). Mobile-only anti-flicker for the edge foam: `edgeFoamMobileUniform` is `1` on mobile / `0` on desktop (auto-detected at module load). On mobile, `edgeFoamDepthGuard` lifts the depth-intersection threshold above the (often 16-bit on iOS) depth buffer's noise floor — scaled by view-distance² — and `edgeFoamFadeStart`/`edgeFoamFadeEnd` fade the foam out on far geometry where precision is worst. On desktop the whole block is a no-op, so rendering is bit-identical to before.
+
 ### Ripples (mouse + apple impact)
 `ripplesUniform`, `rippleCountUniform`, `rippleSpeedUniform`, `rippleLifetimeUniform`, `rippleWidthUniform`, `rippleNormalStrengthUniform` — lines [148-153](src/materials/OceanMaterial.ts#L148).
 

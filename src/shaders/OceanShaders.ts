@@ -122,6 +122,16 @@ export const surfaceFragment =
     uniform float _EdgeFoamIntensity;
     uniform float _EdgeFoamUnderwaterMul;  // dim factor for camera-below-water (refractive sheen vs surface foam)
     uniform vec3  _EdgeFoamColor;
+    // Mobile-only anti-flicker tuning. _EdgeFoamMobile is 0.0 on desktop (where
+    // the scene depth is a clean 24-bit buffer) so the whole block below is a
+    // no-op and desktop stays bit-identical. On mobile (often a 16-bit depth
+    // fallback on iOS) it (1) lifts the foam threshold above the depth-precision
+    // noise floor and (2) fades the foam out on far geometry where that noise is
+    // worst — killing the contact-line flicker on the back rocks.
+    uniform float _EdgeFoamMobile;      // 0 = desktop (off), 1 = mobile (on)
+    uniform float _EdgeFoamDepthGuard;  // dead-band strength; scales with view distance²
+    uniform float _EdgeFoamFadeStart;   // view distance where edge foam starts fading
+    uniform float _EdgeFoamFadeEnd;     // view distance where edge foam is fully gone
 
     varying vec2 _worldPos;
     varying vec2 _uv;
@@ -231,10 +241,26 @@ export const surfaceFragment =
         float sceneLinear = linearizeDepthBuffer(sceneDepth, _CameraNear, _CameraFar);
         float oceanLinear = linearizeDepthBuffer(gl_FragCoord.z, _CameraNear, _CameraFar);
         float depthDiff = sceneLinear - oceanLinear;
-        // Negative diff means the opaque object is in front of this ocean
-        // fragment (e.g. peering through a rock). Treat as no foam.
-        if (depthDiff <= 0.0) return 0.0;
-        return 1.0 - smoothstep(0.0, _EdgeFoamWidth, depthDiff);
+
+        // (1) Depth-precision dead-band. The hyperbolic depth buffer's
+        // quantization noise grows with view distance (~z²), so on mobile the
+        // contact line sits right in the noise and flips on/off each frame.
+        // Lift the threshold by a distance-scaled guard band. guard == 0 on
+        // desktop, so the comparison reduces to the original depthDiff <= 0.0.
+        float guard = _EdgeFoamMobile * _EdgeFoamDepthGuard * oceanLinear * oceanLinear * 0.0001;
+
+        // Negative (or sub-guard) diff means the opaque object is in front of /
+        // coplanar-within-noise of this ocean fragment. Treat as no foam.
+        if (depthDiff <= guard) return 0.0;
+        float foam = 1.0 - smoothstep(guard, guard + _EdgeFoamWidth, depthDiff);
+
+        // (2) Distance fade: drop edge foam on far geometry (the back rocks)
+        // where depth precision is worst. mix(...,_EdgeFoamMobile) keeps it a
+        // pure no-op on desktop.
+        float distFade = 1.0 - smoothstep(_EdgeFoamFadeStart, _EdgeFoamFadeEnd, oceanLinear);
+        foam *= mix(1.0, distFade, _EdgeFoamMobile);
+
+        return foam;
     }
 
     vec3 sampleBlurredScene(vec2 screenUv, vec3 normal) {
