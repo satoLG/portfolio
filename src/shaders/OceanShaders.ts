@@ -225,9 +225,14 @@ export const surfaceFragment =
     }
 
     // Linearize a [0,1] depth-buffer value to positive view-space distance.
-    // Standard perspective formula. Returns positive distance for ergonomics.
+    // The naive form (near*far)/(far - depth*(far-near)) subtracts two large
+    // near-equal numbers in the denominator for distant fragments (depth≈1),
+    // which loses almost all precision in fragment mediump — the case on iOS,
+    // where it makes the back-rock contact line jitter ±0.1u between frames.
+    // Algebraically identical refactor that keeps the small term small:
+    //   far - depth*(far-near)  ==  far*(1.0-depth) + depth*near
     float linearizeDepthBuffer(float depth, float near, float far) {
-        return (near * far) / (far - depth * (far - near));
+        return (near * far) / (far * (1.0 - depth) + depth * near);
     }
 
     // Industry-standard intersection foam: where the ocean fragment is close in
@@ -242,21 +247,20 @@ export const surfaceFragment =
         float oceanLinear = linearizeDepthBuffer(gl_FragCoord.z, _CameraNear, _CameraFar);
         float depthDiff = sceneLinear - oceanLinear;
 
-        // (1) Depth-precision dead-band. The hyperbolic depth buffer's
-        // quantization noise grows with view distance (~z²), so on mobile the
-        // contact line sits right in the noise and flips on/off each frame.
-        // Lift the threshold by a distance-scaled guard band. guard == 0 on
-        // desktop, so the comparison reduces to the original depthDiff <= 0.0.
-        float guard = _EdgeFoamMobile * _EdgeFoamDepthGuard * oceanLinear * oceanLinear * 0.0001;
+        // Mobile-only dead-band: a flat world-unit threshold that lifts the foam
+        // start above whatever residual depth-precision noise survives the
+        // refactored linearization. guard == 0 on desktop, so the test reduces
+        // to the original depthDiff <= 0.0 and the band starts at 0.
+        float guard = _EdgeFoamMobile * _EdgeFoamDepthGuard;
 
-        // Negative (or sub-guard) diff means the opaque object is in front of /
-        // coplanar-within-noise of this ocean fragment. Treat as no foam.
+        // Diff below the guard means the opaque surface is in front of / within
+        // depth noise of this ocean fragment. Treat as no foam.
         if (depthDiff <= guard) return 0.0;
         float foam = 1.0 - smoothstep(guard, guard + _EdgeFoamWidth, depthDiff);
 
-        // (2) Distance fade: drop edge foam on far geometry (the back rocks)
-        // where depth precision is worst. mix(...,_EdgeFoamMobile) keeps it a
-        // pure no-op on desktop.
+        // Mobile-only distance fade: optionally drop edge foam beyond a chosen
+        // view distance. Defaults are set wide so all the island's rocks (≈4–8u)
+        // keep their foam; tighten on-device only if a far object still flickers.
         float distFade = 1.0 - smoothstep(_EdgeFoamFadeStart, _EdgeFoamFadeEnd, oceanLinear);
         foam *= mix(1.0, distFade, _EdgeFoamMobile);
 

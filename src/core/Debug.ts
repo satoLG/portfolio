@@ -984,8 +984,8 @@ function buildGUI(): void {
                 `// Mobile-only anti-flicker for the edge foam. iOS often gives only a 16-bit scene`,
                 `// depth, so the contact line on far geometry (back rocks) flickers. These are`,
                 `// applied only on mobile (desktop renders identically). Tune on-device.`,
-                `export const edgeFoamDepthGuard = ${f(edgeFoamDepthGuardUniform.value as number)};   // dead-band strength (× view-distance² × 1e-4); higher = more flicker suppression`,
-                `export const edgeFoamFadeStart  = ${f(edgeFoamFadeStartUniform.value as number)};  // view distance (world units) where edge foam begins fading out`,
+                `export const edgeFoamDepthGuard = ${f(edgeFoamDepthGuardUniform.value as number)};   // dead-band in WORLD UNITS: foam starts this far past the contact; raise to kill residual flicker`,
+                `export const edgeFoamFadeStart  = ${f(edgeFoamFadeStartUniform.value as number)};   // view distance (world units) where edge foam begins fading out (island rocks sit ≈4–8u away)`,
                 `export const edgeFoamFadeEnd    = ${f(edgeFoamFadeEndUniform.value as number)};  // view distance (world units) where edge foam is fully gone`,
                 ``,
                 `// ── Reflection ────────────────────────────────────────────────────────────────`,
@@ -1800,9 +1800,9 @@ function buildGUI(): void {
     edgeFoamFolder.add(edgeFoamProxy, 'colorG', 0, 2, 0.01).name('Color G').listen();
     edgeFoamFolder.add(edgeFoamProxy, 'colorB', 0, 2, 0.01).name('Color B').listen();
     edgeFoamFolder.add(edgeFoamProxy, 'mobile').name('Mobile anti-flicker (preview)').listen();
-    edgeFoamFolder.add(edgeFoamProxy, 'depthGuard', 0, 3, 0.01).name('· Depth guard (mobile)').listen();
-    edgeFoamFolder.add(edgeFoamProxy, 'fadeStart', 0, 120, 1).name('· Fade start (mobile)').listen();
-    edgeFoamFolder.add(edgeFoamProxy, 'fadeEnd', 0, 200, 1).name('· Fade end (mobile)').listen();
+    edgeFoamFolder.add(edgeFoamProxy, 'depthGuard', 0, 0.5, 0.005).name('· Depth guard (mobile, world u.)').listen();
+    edgeFoamFolder.add(edgeFoamProxy, 'fadeStart', 0, 30, 0.5).name('· Fade start (mobile)').listen();
+    edgeFoamFolder.add(edgeFoamProxy, 'fadeEnd', 0, 40, 0.5).name('· Fade end (mobile)').listen();
     edgeFoamFolder.close();
 
     // ── Wind Lines ────────────────────────────────────────────────────────────
