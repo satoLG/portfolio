@@ -17,13 +17,6 @@ import {
     underwaterFogDistUniform,
     waveVelocity1Uniform,
     waveVelocity2Uniform,
-    waterlinePars,
-    waterlineFragment,
-    waterlineYUniform,
-    waterlineThicknessUniform,
-    waterlineSoftnessUniform,
-    waterlineColorUniform,
-    waterlineIntensityUniform,
 } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { timeUniform }          from "../core/Time";
@@ -144,7 +137,6 @@ const oceanLightingPars = /*glsl*/`
     uniform float uFogDist;
     const float DENSITY        = 0.35;
     const float FOG_DISTANCE   = 600.0;
-    ${waterlinePars}
 `;
 
 const oceanLightingFragment = /*glsl*/`
@@ -170,16 +162,7 @@ const oceanLightingFragment = /*glsl*/`
         float uwFog = min(uwLen / uFogDist, 1.0);
         outgoingLight = mix(outgoingLight, uwLight * 0.3, uwFog);
     }
-    ${waterlineFragment}
 `;
-
-function bindWaterlineUniforms(shader: any): void {
-    shader.uniforms.uWaterlineY = waterlineYUniform;
-    shader.uniforms.uWaterlineThickness = waterlineThicknessUniform;
-    shader.uniforms.uWaterlineSoftness = waterlineSoftnessUniform;
-    shader.uniforms.uWaterlineColor = waterlineColorUniform;
-    shader.uniforms.uWaterlineIntensity = waterlineIntensityUniform;
-}
 
 // ── Ocean lighting injector ────────────────────────────────────────────────────
 /**
@@ -201,7 +184,6 @@ function applyOceanLighting(model: Group, cacheKeySuffix = ''): void {
                 shader.uniforms.uAbsorption     = oceanAbsorptionUniform;
                 shader.uniforms.uFogDist        = underwaterFogDistUniform;
                 shader.uniforms.uSunVisibility  = sunVisibilityUniform;
-                bindWaterlineUniforms(shader);
                 shader.uniforms.uTime           = timeUniform;
                 shader.uniforms.uWaveVelocity1  = waveVelocity1Uniform;
                 shader.uniforms.uWaveVelocity2  = waveVelocity2Uniform;
@@ -267,7 +249,6 @@ function applyKelpSway(model: Group, phaseOffset: number, uniforms: SwayUniforms
                 shader.uniforms.uAbsorption    = oceanAbsorptionUniform;
                 shader.uniforms.uFogDist       = underwaterFogDistUniform;
                 shader.uniforms.uSunVisibility = sunVisibilityUniform;
-                bindWaterlineUniforms(shader);
                 shader.uniforms.uTime          = timeUniform;
                 shader.uniforms.uWaveVelocity1 = waveVelocity1Uniform;
                 shader.uniforms.uWaveVelocity2 = waveVelocity2Uniform;

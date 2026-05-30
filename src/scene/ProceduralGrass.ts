@@ -30,13 +30,6 @@ import {
     Color,
 } from "three";
 import { GRASS_COLOR_BASE, GRASS_COLOR_TIP } from './config/IslandConfig';
-import {
-    waterlineYUniform,
-    waterlineThicknessUniform,
-    waterlineSoftnessUniform,
-    waterlineColorUniform,
-    waterlineIntensityUniform,
-} from '../materials/OceanMaterial';
 
 // ─── Perlin noise generation (CPU, for DataTexture) ────────────────────────
 
@@ -442,11 +435,6 @@ export function createGrassMaterial(
         shader.uniforms.uAbsorption     = uniforms.uAbsorption;
         shader.uniforms.uFogDist        = uniforms.uFogDist;
         shader.uniforms.uSunVisibility  = uniforms.uSunVisibility;
-        shader.uniforms.uWaterlineY = waterlineYUniform;
-        shader.uniforms.uWaterlineThickness = waterlineThicknessUniform;
-        shader.uniforms.uWaterlineSoftness = waterlineSoftnessUniform;
-        shader.uniforms.uWaterlineColor = waterlineColorUniform;
-        shader.uniforms.uWaterlineIntensity = waterlineIntensityUniform;
 
         // ── Vertex shader: add attributes + wind + mouse ──────────────
         shader.vertexShader = shader.vertexShader.replace(

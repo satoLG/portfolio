@@ -15,6 +15,8 @@ import * as Bubbles from "../effects/Bubbles.ts";
 import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
 import * as WindLines from "../effects/WindLines.ts";
 import * as CloudSprites from "../effects/CloudSprites.ts";
+import * as SceneDepth from "../effects/SceneDepth.ts";
+import { sceneDepthUniform, updateSceneDepthCamera } from "../materials/OceanMaterial";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
@@ -210,6 +212,15 @@ function renderOnlyUnderwaterTransparents(savedTargets: Array<{ obj: Object3D; v
 }
 
 function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
+    // Pre-pass: capture opaque scene depth into SceneDepth's depth target so
+    // the ocean shader can do depth-intersection foam in this frame. Must run
+    // AFTER per-frame visibility gating (already set above us in Update) and
+    // BEFORE the main scene render — the override material is a cheap
+    // MeshDepthMaterial so the cost is just vertex pipeline + depth write.
+    SceneDepth.capture(renderer, scene, camera);
+    sceneDepthUniform.value = SceneDepth.getDepthTexture();
+    updateSceneDepthCamera(camera);
+
     const underwaterTransparentVis = useUnderwaterTransparentPass ? hideUnderwaterTransparents() : null;
     PostProcess.renderScene(renderer, scene, camera, () => {
         Ocean.RenderSurface(renderer, camera);
@@ -334,6 +345,7 @@ export function Start(): void
         const buf = new Vector2();
         renderer.getDrawingBufferSize(buf);
         PostProcess.onResize(buf.x, buf.y);
+        SceneDepth.onResize(buf.x, buf.y);
         cssRenderer.setSize(w, h);
     }
 
@@ -412,6 +424,9 @@ export function Start(): void
 
     // Initialize post-processing (underwater distortion + pixelation + FXAA)
     PostProcess.Start(renderer);
+    // Allocate the depth-capture target — used by the ocean shader for
+    // depth-intersection foam.
+    SceneDepth.Start(renderer);
     // FXAA replaces MSAA when antialiasing is off (the new default).
     PostProcess.setFxaaEnabled(!antialias);
 
@@ -496,6 +511,9 @@ async function prewarmGPU(): Promise<void> {
 
     // Compile the post-process quad (underwater distortion + pixelation)
     PostProcess.prewarm(renderer);
+    // Compile the depth-override shader path so the first frame's depth-pre-pass
+    // doesn't hitch.
+    SceneDepth.prewarm(renderer, scene, camera);
 
     // 3. Warm render — forces geometry VBO uploads and texture GPU transfers.
     //    Two passes: surface + underwater so both frustum regions are covered.

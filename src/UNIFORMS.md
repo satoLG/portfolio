@@ -39,6 +39,17 @@ All uniforms here are shared with island objects that need ocean-aware lighting 
 | `waveVelocity1Uniform` / `waveVelocity2Uniform` | [41-42](src/materials/OceanMaterial.ts#L41) | Two scrolling layers, different directions. |
 | `edgeFadeDistanceUniform` | [44](src/materials/OceanMaterial.ts#L44) | Distance over which ocean alpha fades to 0 at horizon. |
 
+### Surface vertex displacement (near-camera swell)
+Real geometry waves applied only to the strip ahead of the camera (vertex shader); amplitude fades to flat with distance + behind the camera. Read by the `surface` material's vertex shader. `_CameraForward` reuses the shared `cameraForward` Vector3 from [core/Scene.ts](src/core/Scene.ts).
+| Uniform | Line | Purpose |
+|---|---|---|
+| `surfaceWaveAmplitudeUniform` | [47](src/materials/OceanMaterial.ts#L47) | Max vertical vertex displacement near the camera. |
+| `surfaceWaveLengthUniform` | [48](src/materials/OceanMaterial.ts#L48) | Wavelength (world units) of the displacement. |
+| `surfaceWaveSpeedUniform` | [49](src/materials/OceanMaterial.ts#L49) | Animation speed of the swell. |
+| `surfaceWaveRangeUniform` | [50](src/materials/OceanMaterial.ts#L50) | XZ distance from camera over which displacement fades to flat. |
+| `surfaceWaveForwardBiasUniform` | [51](src/materials/OceanMaterial.ts#L51) | 0 = radial ring around camera, 1 = only ahead of camera heading. |
+| `surfaceWaveSteepnessUniform` | [52](src/materials/OceanMaterial.ts#L52) | Cross-wave layer blend — adds choppiness. |
+
 ### Foam (island silhouette mask + animated lines)
 `foamMaskUniform`, `foamMaskCenterUniform`, `foamMaskSizeUniform` — texture + UV window. The mask itself is generated at runtime by [effects/FoamMask.ts](src/effects/FoamMask.ts).
 Lines [47-65](src/materials/OceanMaterial.ts#L47). All other `foam*Uniform` entries are runtime-tweakable foam appearance.
@@ -55,9 +66,11 @@ Lines [47-65](src/materials/OceanMaterial.ts#L47). All other `foam*Uniform` entr
 | `sceneColorUniform` | [87](src/materials/OceanMaterial.ts#L87) | `FramebufferTexture` of the main scene render — sampled by ocean fragment for refraction/blur. |
 | `sceneResolutionUniform` | [88](src/materials/OceanMaterial.ts#L88) | Pixel size of the captured framebuffer. |
 
-### Waterline (shared with grass + apple)
-`waterlineYUniform`, `waterlineThicknessUniform`, `waterlineSoftnessUniform`, `waterlineColorUniform`, `waterlineIntensityUniform` — lines [93-97](src/materials/OceanMaterial.ts#L93).
-**Also imported by [ProceduralGrass.ts](src/scene/ProceduralGrass.ts) and Island.ts apple waterline injection** so all three (grass tips, apples bobbing, ocean surface) share one wet-line.
+### Waterline Y (apple buoyancy)
+`waterlineYUniform` — the canonical sea level. Read by `_applyAppleBuoyancy` in [Island.ts](src/scene/Island.ts) to position floating apples. The visible foam at the water-object intersection is now drawn by the ocean shader's depth-intersection pass (see Edge Foam below) — no per-object waterline glow.
+
+### Edge foam (depth-intersection foam on the ocean side)
+`sceneDepthUniform`, `cameraNearUniform`, `cameraFarUniform`, `edgeFoamWidthUniform`, `edgeFoamIntensityUniform`, `edgeFoamColorUniform` — declared in [OceanMaterial.ts](src/materials/OceanMaterial.ts). The depth texture is filled each frame by [SceneDepth.ts](src/effects/SceneDepth.ts) via a `MeshDepthMaterial` override pass; the ocean fragment shader linearizes both `gl_FragCoord.z` and the sampled scene depth and brightens fragments where the difference is below `edgeFoamWidth`.
 
 ### Ripples (mouse + apple impact)
 `ripplesUniform`, `rippleCountUniform`, `rippleSpeedUniform`, `rippleLifetimeUniform`, `rippleWidthUniform`, `rippleNormalStrengthUniform` — lines [148-153](src/materials/OceanMaterial.ts#L148).

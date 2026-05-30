@@ -1,21 +1,70 @@
-export const surfaceVertex = 
+export const surfaceVertex =
 /*glsl*/`
     #include <ocean>
+
+    uniform vec3  _CameraForward;
+    uniform float _SurfaceWaveAmplitude;
+    uniform float _SurfaceWaveLength;
+    uniform float _SurfaceWaveSpeed;
+    uniform float _SurfaceWaveRange;
+    uniform float _SurfaceWaveForwardBias;
+    uniform float _SurfaceWaveSteepness;
 
     varying vec2 _worldPos;
     varying vec2 _uv;
     varying float _elevation;
-    varying vec4 vReflCoord;
+    varying vec3 _waveNormal;
 
     void main()
     {
         vec4 worldPos = modelMatrix * vec4(position, 1.0);
-        
+
+        // ── Near-camera vertex displacement ──────────────────────────────────
+        // Only the strip of ocean in front of the camera is bumped; amplitude
+        // fades to 0 with distance + behind the camera, so the swell fuses
+        // seamlessly with the rest of the flat surface.
+        vec2 toCam = worldPos.xz - cameraPosition.xz;
+        float camDist = length(toCam);
+        float distMask = 1.0 - smoothstep(0.0, _SurfaceWaveRange, camDist);
+
+        // Forward bias: restrict bumps to what's ahead of the camera's heading.
+        vec2 fwd = normalize(_CameraForward.xz + vec2(1e-5));
+        float facing = dot(normalize(toCam + vec2(1e-5)), fwd);
+        float fwdMask = mix(1.0, smoothstep(-0.15, 0.55, facing), _SurfaceWaveForwardBias);
+
+        float mask = distMask * fwdMask;
+
         float elevation = 0.0;
-        
+        _waveNormal = vec3(0.0);
+
+        if (mask > 0.001 && _SurfaceWaveAmplitude > 0.0) {
+            float k = 6.2831853 / max(_SurfaceWaveLength, 0.01);
+            vec2 dir1 = normalize(_WaveVelocity1 + vec2(1e-5));
+            vec2 dir2 = normalize(_WaveVelocity2 + vec2(1e-5));
+            float t = _Time * _SurfaceWaveSpeed;
+
+            float phase1 = dot(worldPos.xz, dir1) * k + t;
+            float phase2 = dot(worldPos.xz, dir2) * (k * 1.3) - t * 0.85;
+
+            float crossWave = _SurfaceWaveSteepness * 0.6;
+            float h = sin(phase1) + crossWave * sin(phase2);
+            float amp = _SurfaceWaveAmplitude * mask;
+            elevation = h * amp;
+
+            // Analytic gradient → tangent-space normal offset. The fragment
+            // builds normals in a z-up space then swizzles .xzy to world, so
+            // (-dH/dx, -dH/dz, 0) maps to the correct world tilt.
+            vec2 grad = dir1 * (k * cos(phase1))
+                      + dir2 * (k * 1.3 * crossWave * cos(phase2));
+            grad *= amp;
+            _waveNormal = vec3(-grad.x, -grad.y, 0.0);
+        }
+
+        worldPos.y += elevation;
+
         _worldPos = worldPos.xz;
         _uv = _worldPos * _NormalMapScale;
-        _elevation = elevation;
+        _elevation = worldPos.y;
         gl_Position = projectionMatrix * viewMatrix * worldPos;
     }
 `;
@@ -65,9 +114,19 @@ export const surfaceFragment =
     uniform float _WaterBlurOpacity;
     uniform float _WaterlineCompositeOpacity;
 
+    // Depth-intersection foam — opaque scene depth captured pre-ocean by SceneDepth.ts
+    uniform sampler2D _SceneDepth;
+    uniform float _CameraNear;
+    uniform float _CameraFar;
+    uniform float _EdgeFoamWidth;
+    uniform float _EdgeFoamIntensity;
+    uniform float _EdgeFoamUnderwaterMul;  // dim factor for camera-below-water (refractive sheen vs surface foam)
+    uniform vec3  _EdgeFoamColor;
+
     varying vec2 _worldPos;
     varying vec2 _uv;
     varying float _elevation;
+    varying vec3 _waveNormal;  // tangent-space tilt from near-camera vertex displacement
 
     float calcEdgeFade(vec2 pos) {
         float distFromNearEdge = -pos.y;
@@ -155,6 +214,29 @@ export const surfaceFragment =
         return clamp(foam, 0.0, 1.0) * _FoamIntensity;
     }
 
+    // Linearize a [0,1] depth-buffer value to positive view-space distance.
+    // Standard perspective formula. Returns positive distance for ergonomics.
+    float linearizeDepthBuffer(float depth, float near, float far) {
+        return (near * far) / (far - depth * (far - near));
+    }
+
+    // Industry-standard intersection foam: where the ocean fragment is close in
+    // view-space to an opaque scene fragment, brighten with foam. Works
+    // regardless of object shape/slope/geometry density because it lives on
+    // the (wave-displaced) ocean surface and reads the actual scene depth.
+    float calcEdgeFoam(vec2 screenUv) {
+        float sceneDepth = texture2D(_SceneDepth, screenUv).x;
+        // Skybox / cleared background reads as 1.0 — no opaque object here.
+        if (sceneDepth >= 0.9999) return 0.0;
+        float sceneLinear = linearizeDepthBuffer(sceneDepth, _CameraNear, _CameraFar);
+        float oceanLinear = linearizeDepthBuffer(gl_FragCoord.z, _CameraNear, _CameraFar);
+        float depthDiff = sceneLinear - oceanLinear;
+        // Negative diff means the opaque object is in front of this ocean
+        // fragment (e.g. peering through a rock). Treat as no foam.
+        if (depthDiff <= 0.0) return 0.0;
+        return 1.0 - smoothstep(0.0, _EdgeFoamWidth, depthDiff);
+    }
+
     vec3 sampleBlurredScene(vec2 screenUv, vec3 normal) {
         vec2 texel = 1.0 / max(_SceneResolution, vec2(1.0));
         vec2 normalOffset = normal.xz * _WaterBlurStrength;
@@ -238,9 +320,17 @@ export const surfaceFragment =
         normal *= _NormalMapStrength;
         normal += vec3(0.0, 0.0, 1.0);
         normal += rippleNormalOffset;  // Add ripple normal perturbation
+        normal += _waveNormal;         // Add near-camera vertex-displacement tilt
         normal = normalize(normal).xzy;
 
         sampleDither(gl_FragCoord.xy);
+
+        // Depth-intersection foam computed once and shared by both above-water
+        // and underwater paths. Underwater it reads as a dim silvery sheen — the
+        // physical effect when looking up at the surface meeting a rock, where
+        // refraction concentrates light at the boundary.
+        vec2 screenUv = gl_FragCoord.xy / max(_SceneResolution, vec2(1.0));
+        float edgeFoamRaw = calcEdgeFoam(screenUv);
 
         if (cameraPosition.y > _elevation)
         {
@@ -256,17 +346,22 @@ export const surfaceFragment =
 
             float fog = clamp(viewLen / FOG_DISTANCE + dither, 0.0, 1.0);
             surface = mix(surface, sampleFog(viewDir), fog);
-            vec2 screenUv = gl_FragCoord.xy / max(_SceneResolution, vec2(1.0));
+            float edgeFoam = edgeFoamRaw * _EdgeFoamIntensity;
             vec3 blurredScene = sampleBlurredScene(screenUv, normal);
             surface = mix(surface, mix(blurredScene, surface, _WaterlineCompositeOpacity), _WaterBlurOpacity * (1.0 - foam));
 
             vec3 foamColor = _FoamLineColor;
             surface = mix(surface, foamColor, foam);
+            // Edge foam paints the actual water-object contact line, regardless
+            // of object shape — uses a brighten-only mix so it sits on top of
+            // whatever surface tint/refraction is already there.
+            surface = mix(surface, max(surface, _EdgeFoamColor), clamp(edgeFoam, 0.0, 1.0));
 
             // _SurfaceOpacity blends from physics-based alpha (Fresnel + fog) to full opacity.
             // At 0: transparent where Fresnel is low (looking straight down).
             // At 1: fully opaque regardless of view angle — makes reflection clearly visible.
-            float physicsAlpha = max(max(reflectivity, fog), foam);
+            float combinedFoam = max(foam, edgeFoam);
+            float physicsAlpha = max(max(reflectivity, fog), combinedFoam);
             float blurAlpha = _WaterBlurOpacity * (1.0 - foam);
             gl_FragColor = vec4(surface, max(mix(physicsAlpha, 1.0, _SurfaceOpacity), blurAlpha) * edgeFade);
             return;
@@ -283,7 +378,11 @@ export const surfaceFragment =
 
         // Keep the original underwater surface path: the ceiling color comes
         // from absorption + scene light, which matches the underwater fog.
-        float underwaterFoam = foam * 0.3;
+        // Depth-intersection foam contributes a dim refraction sheen where the
+        // surface meets opaque geometry above — multiplied by both the
+        // configured intensity and the underwater dim factor.
+        float underwaterEdgeFoam = edgeFoamRaw * _EdgeFoamIntensity * _EdgeFoamUnderwaterMul;
+        float underwaterFoam = clamp(foam * 0.3 + underwaterEdgeFoam, 0.0, 1.0);
 
         if (dot(viewDir, normal) < CRITICAL_ANGLE)
         {
@@ -291,15 +390,15 @@ export const surfaceFragment =
             sampleY = r.y * (MAX_VIEW_DEPTH - viewLen);
             vec3 rColor = exp((sampleY - MAX_VIEW_DEPTH_DENSITY) * _Absorption);
             rColor *= _Light;
-            
-            vec3 foamColor = vec3(1.0, 1.0, 1.0);
+
+            vec3 foamColor = _EdgeFoamColor;
             vec3 finalColor = mix(mix(rColor, light, t), foamColor, underwaterFoam);
 
             gl_FragColor = vec4(finalColor, max(edgeFade, underwaterFoam));
             return;
         }
-        
-        vec3 foamColor = vec3(1.0, 1.0, 1.0);
+
+        vec3 foamColor = _EdgeFoamColor;
         vec3 finalColor = mix(light, foamColor, underwaterFoam);
 
         gl_FragColor = vec4(finalColor, max(t * edgeFade, underwaterFoam));
