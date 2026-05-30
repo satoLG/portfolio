@@ -66,9 +66,11 @@ Lines [47-65](src/materials/OceanMaterial.ts#L47). All other `foam*Uniform` entr
 | `sceneColorUniform` | [87](src/materials/OceanMaterial.ts#L87) | `FramebufferTexture` of the main scene render — sampled by ocean fragment for refraction/blur. |
 | `sceneResolutionUniform` | [88](src/materials/OceanMaterial.ts#L88) | Pixel size of the captured framebuffer. |
 
-### Waterline (shared with grass + apple)
-`waterlineYUniform`, `waterlineThicknessUniform`, `waterlineSoftnessUniform`, `waterlineColorUniform`, `waterlineIntensityUniform` — lines [93-97](src/materials/OceanMaterial.ts#L93).
-**Also imported by [ProceduralGrass.ts](src/scene/ProceduralGrass.ts) and Island.ts apple waterline injection** so all three (grass tips, apples bobbing, ocean surface) share one wet-line.
+### Waterline Y (apple buoyancy)
+`waterlineYUniform` — the canonical sea level. Read by `_applyAppleBuoyancy` in [Island.ts](src/scene/Island.ts) to position floating apples. The visible foam at the water-object intersection is now drawn by the ocean shader's depth-intersection pass (see Edge Foam below) — no per-object waterline glow.
+
+### Edge foam (depth-intersection foam on the ocean side)
+`sceneDepthUniform`, `cameraNearUniform`, `cameraFarUniform`, `edgeFoamWidthUniform`, `edgeFoamIntensityUniform`, `edgeFoamColorUniform` — declared in [OceanMaterial.ts](src/materials/OceanMaterial.ts). The depth texture is filled each frame by [SceneDepth.ts](src/effects/SceneDepth.ts) via a `MeshDepthMaterial` override pass; the ocean fragment shader linearizes both `gl_FragCoord.z` and the sampled scene depth and brightens fragments where the difference is below `edgeFoamWidth`.
 
 ### Ripples (mouse + apple impact)
 `ripplesUniform`, `rippleCountUniform`, `rippleSpeedUniform`, `rippleLifetimeUniform`, `rippleWidthUniform`, `rippleNormalStrengthUniform` — lines [148-153](src/materials/OceanMaterial.ts#L148).

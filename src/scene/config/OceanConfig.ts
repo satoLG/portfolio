@@ -6,7 +6,7 @@
 export const foamCenterOffset = { x: -0.0100, y: -0.0700 }; // XZ nudge on top of the auto-baked island center
 export const foamRadius       = 0.9400; // >1 pushes ring outward, <1 pulls inward
 export const foamWidth        = 0.1610; // width of the foam band
-export const foamIntensity    = 0.4100; // overall foam brightness
+export const foamIntensity    = 0.0800; // overall foam brightness
 export const foamAnimSpeed    = 0.4500; // speed of animated shimmer
 export const foamEdgeNoiseAmt = 0.1200; // brightness shimmer near edge
 export const foamWobbleAmt    = 0.1500; // world-unit wobble of the foam line
@@ -29,12 +29,12 @@ export const edgeFadeDistance  = 0.5400;
 // Real geometry waves applied ONLY to the strip of ocean in front of the camera
 // — amplitude fades to 0 with distance so it fuses seamlessly with the flat
 // surface. Gives the waterline a wavy silhouette when entering/exiting the water.
-export const surfaceWaveAmplitude   = 0.0800; // max vertical displacement (world units) near the camera
-export const surfaceWaveLength      = 6.0000; // wavelength in world units (keep ≥ ~4× vertex spacing)
+export const surfaceWaveAmplitude   = 0.0500; // max vertical displacement (world units) near the camera
+export const surfaceWaveLength      = 3.7000; // wavelength in world units (keep ≥ ~4× vertex spacing)
 export const surfaceWaveSpeed       = 0.6000; // animation speed of the swell
 export const surfaceWaveRange       = 18.0000; // XZ distance from camera over which the waves fade to flat
 export const surfaceWaveForwardBias = 0.6000; // 0 = full radial ring around camera, 1 = only directly ahead
-export const surfaceWaveSteepness   = 0.5000; // blend of the cross wave layer — adds choppiness
+export const surfaceWaveSteepness   = 0.3900; // blend of the cross wave layer — adds choppiness
 
 // ── Ocean Surface ─────────────────────────────────────────────────────────────
 export const surfaceColor   = { r: 0.0000, g: 1.1800, b: 1.1700 }; // RGB tint (1,1,1 = no tint)
@@ -44,12 +44,17 @@ export const waterBlurRadius   = 3.0000;
 export const waterBlurOpacity  = 0.3500;
 export const waterlineCompositeOpacity = 0.1800;
 
-// ── Waterline on objects ─────────────────────────────────────────────────────
+// ── Waterline (Y is used by apple buoyancy physics) ──────────────────────────
 export const waterlineY         = 0.0050;
-export const waterlineThickness = 0.0000;
-export const waterlineSoftness  = 0.0170;
-export const waterlineColor     = { r: 1.0000, g: 0.9300, b: 1.0000 };
-export const waterlineIntensity = 0.3400;
+
+// ── Edge-foam (ocean-side depth intersection foam) ──────────────────────────
+// Industry-standard "intersection foam": the ocean shader reads the opaque
+// scene depth and brightens fragments where the ocean grazes geometry behind
+// it. Fully independent from the SDF foam ring around the island silhouette.
+export const edgeFoamWidth     = 0.1400;  // world-space distance over which foam fades to nothing
+export const edgeFoamIntensity = 0.4200;  // overall brightness of the depth-intersection foam
+export const edgeFoamUnderwaterMul = 0.3500;  // dimming factor for the same effect with camera below water (silvery refraction sheen)
+export const edgeFoamColor     = { r: 1.0000, g: 0.9700, b: 1.0000 };
 
 // ── Reflection ────────────────────────────────────────────────────────────────
 export const reflectionFresnelPower = 0.6500; // lower = visible at more angles

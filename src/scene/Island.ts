@@ -6,13 +6,7 @@ import {
     oceanAbsorptionUniform,
     underwaterFogDistUniform,
     setFoamMask,
-    waterlinePars,
-    waterlineFragment,
     waterlineYUniform,
-    waterlineThicknessUniform,
-    waterlineSoftnessUniform,
-    waterlineColorUniform,
-    waterlineIntensityUniform,
 } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../core/Time";
@@ -1045,48 +1039,8 @@ function _meshLocalYBounds(mesh: Mesh): { minY: number; maxY: number } {
     return { minY: bbox.min.y, maxY: bbox.max.y };
 }
 
-function _applyAppleWaterlineToMaterial(mat: MeshStandardMaterial): void {
-    if ((mat.userData as any).appleWaterlineApplied) return;
-    (mat.userData as any).appleWaterlineApplied = true;
-
-    const previousOnBeforeCompile = mat.onBeforeCompile;
-    mat.onBeforeCompile = (shader, rendererArg) => {
-        previousOnBeforeCompile.call(mat, shader, rendererArg);
-        shader.uniforms.uAppleWaterlineY = waterlineYUniform;
-        shader.uniforms.uAppleWaterlineThickness = _appleWaterlineThicknessUniform;
-        shader.uniforms.uAppleWaterlineSoftness = _appleWaterlineSoftnessUniform;
-        shader.uniforms.uAppleWaterlineColor = waterlineColorUniform;
-        shader.uniforms.uAppleWaterlineIntensity = _appleWaterlineIntensityUniform;
-
-        shader.vertexShader = shader.vertexShader
-            .replace(
-                '#include <common>',
-                '#include <common>\nvarying vec3 vAppleWaterlineWorldPos;'
-            )
-            .replace(
-                '#include <begin_vertex>',
-                '#include <begin_vertex>\nvec4 appleWaterlineWorldPosition = modelMatrix * vec4(transformed, 1.0);\nvAppleWaterlineWorldPos = appleWaterlineWorldPosition.xyz;'
-            );
-
-        shader.fragmentShader = shader.fragmentShader
-            .replace(
-                '#include <common>',
-                '#include <common>\nuniform float uAppleWaterlineY;\nuniform float uAppleWaterlineThickness;\nuniform float uAppleWaterlineSoftness;\nuniform vec3 uAppleWaterlineColor;\nuniform float uAppleWaterlineIntensity;\nvarying vec3 vAppleWaterlineWorldPos;'
-            )
-            .replace(
-                '#include <opaque_fragment>',
-                'float appleWaterlineDist = abs(vAppleWaterlineWorldPos.y - uAppleWaterlineY);\n\tfloat appleWaterlineMask = 1.0 - smoothstep(uAppleWaterlineThickness, uAppleWaterlineThickness + uAppleWaterlineSoftness, appleWaterlineDist);\n\toutgoingLight = mix(outgoingLight, max(outgoingLight, uAppleWaterlineColor * uAppleWaterlineIntensity), appleWaterlineMask);\n\t#include <opaque_fragment>'
-            );
-    };
-
-    const previousKey = mat.customProgramCacheKey?.bind(mat);
-    mat.customProgramCacheKey = () => `${previousKey ? previousKey() : 'standard'}-apple-waterline-v1`;
-    mat.needsUpdate = true;
-}
-
 function _createGoldenMaterial(normalMat: MeshStandardMaterial, minY: number, maxY: number): MeshStandardMaterial {
     const goldenMat = normalMat.clone();
-    (goldenMat.userData as any).appleWaterlineApplied = false;
     goldenMat.color.copy(normalMat.color);
     goldenMat.emissive.copy(normalMat.emissive);
 
@@ -1119,7 +1073,6 @@ function _createGoldenMaterial(normalMat: MeshStandardMaterial, minY: number, ma
             );
     };
     goldenMat.customProgramCacheKey = () => 'golden-apple-local-y-mask-v1';
-    _applyAppleWaterlineToMaterial(goldenMat);
     return goldenMat;
 }
 
@@ -1143,7 +1096,6 @@ function _prebakeGoldenMaterials(grp: Group, index: number): void {
         const mesh = child as Mesh;
         const normalMat = mesh.material as MeshStandardMaterial;
         if (!normalMat || !normalMat.color) return;
-        _applyAppleWaterlineToMaterial(normalMat);
         const t = _goldenBlendFactor(mesh, index);
         const { minY, maxY } = _meshLocalYBounds(mesh);
         const goldenMat = _createGoldenMaterial(normalMat, minY, maxY);
@@ -1193,23 +1145,11 @@ function _createGroundAppleSlot(source: Group, treeIndex: number): GroundAppleSl
         if (!(child as any).isMesh) return;
         const mesh = child as Mesh;
         if (Array.isArray(mesh.material)) {
-            mesh.material = mesh.material.map((m) => {
-                const c = (m as MeshStandardMaterial).clone();
-                // Three.js Material.copy() copies userData (deep) but NOT
-                // onBeforeCompile / customProgramCacheKey. The source
-                // material had appleWaterlineApplied=true with its hooks set
-                // as own properties — the clone inherits the flag but loses
-                // the hooks. Reset the flag so the waterline injection
-                // actually runs on this clone.
-                (c.userData as any).appleWaterlineApplied = false;
-                return c;
-            });
+            mesh.material = mesh.material.map((m) => (m as MeshStandardMaterial).clone());
         } else if (mesh.material) {
             mesh.material = (mesh.material as MeshStandardMaterial).clone();
-            (mesh.material.userData as any).appleWaterlineApplied = false;
         }
         const normalMat = mesh.material as MeshStandardMaterial;
-        _applyAppleWaterlineToMaterial(normalMat);
         const t = _goldenBlendFactor(mesh, treeIndex);
         const { minY, maxY } = _meshLocalYBounds(mesh);
         const goldenMat = _createGoldenMaterial(normalMat, minY, maxY);
@@ -1339,9 +1279,6 @@ const appleMouse = new Vector2();
 let isAppleHovered = false;
 const APPLE_TOUCH_RADIUS = 0.35; // world units — expand hit area on touch
 const _appleTouchScratch = new Vector3();
-const APPLE_WATERLINE_THICKNESS = 0.0015;
-const APPLE_WATERLINE_SOFTNESS = 0.006;
-const APPLE_WATERLINE_INTENSITY = 0.75;
 // Spring-damper buoyancy with gravity cancellation.
 // When submerged, gravity is counteracted so the spring alone positions the apple.
 // This ensures the equilibrium sits exactly at the target — no gravity-induced sag.
@@ -1359,9 +1296,6 @@ const APPLE_WATER_ANGULAR_DRAG = 2.2;   // per-second angular velocity damping w
 // <0  = center sits below waterline (more submerged).
 // >0  = center sits above waterline (rides higher).
 const APPLE_FLOAT_OFFSET = 0;
-const _appleWaterlineThicknessUniform = new Uniform(APPLE_WATERLINE_THICKNESS);
-const _appleWaterlineSoftnessUniform = new Uniform(APPLE_WATERLINE_SOFTNESS);
-const _appleWaterlineIntensityUniform = new Uniform(APPLE_WATERLINE_INTENSITY);
 const _groundAppleDragPlane = new Plane(new Vector3(0, 0, 1), 0);
 const _groundAppleDragPoint = new Vector3();
 const _groundAppleDragOffset = new Vector3();
@@ -2016,7 +1950,6 @@ const oceanLightingPars = /*glsl*/`
     uniform float uFogDist;
     const float DENSITY = 0.35;
     const float FOG_DISTANCE = 600.0;
-    ${waterlinePars}
 `;
 
 const oceanLightingFragment = /*glsl*/`
@@ -2024,7 +1957,7 @@ const oceanLightingFragment = /*glsl*/`
     vec3 viewVec = worldPos - cameraPosition;
     float viewLen = length(viewVec);
     vec3 viewDir = viewVec / viewLen;
-    
+
     if (worldPos.y > 0.0) {
         float fogStartLen = viewLen;
         if (cameraPosition.y < 0.0) {
@@ -2049,16 +1982,8 @@ const oceanLightingFragment = /*glsl*/`
         float uwFog = min(uwLen / uFogDist, 1.0);
         outgoingLight = mix(outgoingLight, underwaterLight * 0.3, uwFog);
     }
-    ${waterlineFragment}
 `;
 
-function bindWaterlineUniforms(shader: any): void {
-    shader.uniforms.uWaterlineY = waterlineYUniform;
-    shader.uniforms.uWaterlineThickness = waterlineThicknessUniform;
-    shader.uniforms.uWaterlineSoftness = waterlineSoftnessUniform;
-    shader.uniforms.uWaterlineColor = waterlineColorUniform;
-    shader.uniforms.uWaterlineIntensity = waterlineIntensityUniform;
-}
 
 export let islandSurfaceGrassColor = ISLAND_SURFACE_GRASS_COLOR;
 export let islandSurfaceGrassStrength = ISLAND_SURFACE_GRASS_STRENGTH;
@@ -2167,7 +2092,6 @@ function applyIslandSurfaceFilterShader(model: Group): void {
                         shader.uniforms.uAbsorption = oceanAbsorptionUniform;
                         shader.uniforms.uFogDist = underwaterFogDistUniform;
                         shader.uniforms.uSunVisibility = sunVisibilityUniform;
-                        bindWaterlineUniforms(shader);
                         shader.uniforms.uIslandSurfaceGrassColor = islandSurfaceGrassColorUniform;
                         shader.uniforms.uIslandSurfaceGrassStrength = islandSurfaceGrassStrengthUniform;
                         shader.uniforms.uIslandSurfaceGrassGreenThreshold = islandSurfaceGrassGreenThresholdUniform;
@@ -2294,7 +2218,6 @@ function applyOceanLightingToModel(model: Group): void {
                         shader.uniforms.uAbsorption = oceanAbsorptionUniform;
                         shader.uniforms.uFogDist = underwaterFogDistUniform;
                         shader.uniforms.uSunVisibility = sunVisibilityUniform;
-                        bindWaterlineUniforms(shader);
                         
                         shader.vertexShader = shader.vertexShader.replace(
                             '#include <common>',
@@ -2325,30 +2248,14 @@ function applyOceanLightingToModel(model: Group): void {
     });
 }
 
-/** Apply the apple-style per-object waterline shader to every standard-like
- *  material on `model`. Same shader the (golden) apples use — produces a foam
- *  line exactly where the mesh's world-Y crosses uWaterlineY, so the line
- *  follows each rock independently of placement. */
-function _applyAppleWaterlineToModel(model: Group): void {
-    model.traverse((child) => {
-        if (!(child as any).isMesh) return;
-        const mesh = child as Mesh;
-        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        mats.forEach((mat: any) => {
-            if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial) {
-                _applyAppleWaterlineToMaterial(mat as MeshStandardMaterial);
-            }
-        });
-    });
-}
-
-/** Load a moss rock GLB, wire it up with the standard ocean lighting + the
- *  apple-style waterline foam line, then position/scale/rotate it relative to
- *  the island. The first call per path loads the GLB; subsequent calls with
- *  the same path clone the cached scene (geometry + materials shared, ocean
- *  lighting + waterline shader injection only happens once). `moss_rock2.glb`
- *  is currently used by 2 instances and `moss_rock3.glb` by 3 instances —
- *  without the cache each instance held its own GPU upload. */
+/** Load a moss rock GLB, wire it up with the standard ocean lighting, then
+ *  position/scale/rotate it relative to the island. Edge foam is handled
+ *  ocean-side via depth-intersection (see SceneDepth + OceanShaders). The
+ *  first call per path loads the GLB; subsequent calls with the same path
+ *  clone the cached scene (geometry + materials shared, shader injection only
+ *  happens once). `moss_rock2.glb` is currently used by 2 instances and
+ *  `moss_rock3.glb` by 3 instances — without the cache each instance held its
+ *  own GPU upload. */
 const _mossRockTemplates = new Map<string, Group>();
 const _mossRockPending = new Map<string, Array<(s: Group) => void>>();
 
@@ -2389,7 +2296,6 @@ function _loadMossRock(
         path,
         (gltf) => {
             applyOceanLightingToModel(gltf.scene);
-            _applyAppleWaterlineToModel(gltf.scene);
             _mossRockTemplates.set(path, gltf.scene as Group);
             const queue = _mossRockPending.get(path) || [];
             _mossRockPending.delete(path);
@@ -2461,7 +2367,6 @@ function applyTreeWindShader(model: Group): void {
                         shader.uniforms.uAbsorption = oceanAbsorptionUniform;
                         shader.uniforms.uFogDist = underwaterFogDistUniform;
                         shader.uniforms.uSunVisibility = sunVisibilityUniform;
-                        bindWaterlineUniforms(shader);
                         // Add wind uniforms
                         shader.uniforms.uWindTime = treeWindTimeUniform;
                         shader.uniforms.uWindStrength = treeWindStrengthUniform;
@@ -2574,7 +2479,6 @@ function applyBushWindShader(model: Group, flowerColor: string): void {
                         shader.uniforms.uAbsorption = oceanAbsorptionUniform;
                         shader.uniforms.uFogDist = underwaterFogDistUniform;
                         shader.uniforms.uSunVisibility = sunVisibilityUniform;
-                        bindWaterlineUniforms(shader);
                         shader.uniforms.uWindTime = treeWindTimeUniform;
                         shader.uniforms.uWindStrength = bushWindStrengthUniform;
                         if (isFlower) {
