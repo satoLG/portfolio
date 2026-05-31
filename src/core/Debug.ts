@@ -202,6 +202,16 @@ import {
     islandCampfireGroundSoftness,
     islandCampfireGroundStrength,
     islandCampfireGroundNormalThreshold,
+    islandRockMatchColor,
+    islandRockMatchStrength,
+    islandRockMatchSaturation,
+    islandRockMatchBrightness,
+    islandRockMatchColorTint,
+    setIslandRockMatchColor,
+    setIslandRockMatchStrength,
+    setIslandRockMatchSaturation,
+    setIslandRockMatchBrightness,
+    setIslandRockMatchColorTint,
     setIslandSurfaceGrassColor,
     setIslandSurfaceGrassStrength,
     setIslandSurfaceGrassGreenThreshold,
@@ -832,6 +842,13 @@ function buildGUI(): void {
                 `export const ISLAND_CAMPFIRE_GROUND_STRENGTH = ${Island.islandCampfireGroundStrength.toFixed(4)};`,
                 `export const ISLAND_CAMPFIRE_GROUND_NORMAL_THRESHOLD = ${Island.islandCampfireGroundNormalThreshold.toFixed(4)}; // upward-facing normal needed for ground tint`,
                 ``,
+                `// ── Island rock-match color grade ─────────────────────────────────────────────`,
+                `export const ISLAND_ROCK_MATCH_COLOR = '${Island.islandRockMatchColor}'; // sRGB hex — target rock tint`,
+                `export const ISLAND_ROCK_MATCH_STRENGTH = ${Island.islandRockMatchStrength.toFixed(4)}; // overall blend on rock areas (0 = off)`,
+                `export const ISLAND_ROCK_MATCH_SATURATION = ${Island.islandRockMatchSaturation.toFixed(4)}; // 1 = keep original saturation, 0 = grayscale`,
+                `export const ISLAND_ROCK_MATCH_BRIGHTNESS = ${Island.islandRockMatchBrightness.toFixed(4)}; // 1 = keep, >1 lifts the dark underside`,
+                `export const ISLAND_ROCK_MATCH_COLOR_TINT = ${Island.islandRockMatchColorTint.toFixed(4)}; // how much the target color tints (0..1)`,
+                ``,
                 `// ── Bush flower colors ───────────────────────────────────────────────────────`,
                 `export const bushFlowerColor      = '${Island.bushFlowerConfig.main}';`,
                 `export const bushRadioFlowerColor = '${Island.bushFlowerConfig.radio}';`,
@@ -1320,6 +1337,40 @@ function buildGUI(): void {
             .listen()
             .onChange((v: number) => setIslandCampfireGroundNormalThreshold(v));
         campfireGroundFolder.close();
+    }
+
+    {
+        const rockMatchFolder = islandFolder.addFolder('Rock Match Filter');
+        const rockMatchProxy = {
+            color: islandRockMatchColor,
+            strength: islandRockMatchStrength,
+            saturation: islandRockMatchSaturation,
+            brightness: islandRockMatchBrightness,
+            colorTint: islandRockMatchColorTint,
+        };
+        rockMatchFolder.addColor(rockMatchProxy, 'color')
+            .name('Target Color')
+            .onChange((v: string) => {
+                rockMatchProxy.color = v;
+                setIslandRockMatchColor(v);
+            });
+        rockMatchFolder.add(rockMatchProxy, 'strength', 0, 1, 0.01)
+            .name('Strength')
+            .listen()
+            .onChange((v: number) => setIslandRockMatchStrength(v));
+        rockMatchFolder.add(rockMatchProxy, 'saturation', 0, 1, 0.01)
+            .name('Saturation')
+            .listen()
+            .onChange((v: number) => setIslandRockMatchSaturation(v));
+        rockMatchFolder.add(rockMatchProxy, 'brightness', 0, 2, 0.01)
+            .name('Brightness')
+            .listen()
+            .onChange((v: number) => setIslandRockMatchBrightness(v));
+        rockMatchFolder.add(rockMatchProxy, 'colorTint', 0, 1, 0.01)
+            .name('Color Tint')
+            .listen()
+            .onChange((v: number) => setIslandRockMatchColorTint(v));
+        rockMatchFolder.close();
     }
     addObjectFolder(surfaceFolder, 'Little Rocks', littleRocks, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
 

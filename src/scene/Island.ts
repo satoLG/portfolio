@@ -48,6 +48,11 @@ import {
     ISLAND_CAMPFIRE_GROUND_SOFTNESS,
     ISLAND_CAMPFIRE_GROUND_STRENGTH,
     ISLAND_CAMPFIRE_GROUND_NORMAL_THRESHOLD,
+    ISLAND_ROCK_MATCH_COLOR,
+    ISLAND_ROCK_MATCH_STRENGTH,
+    ISLAND_ROCK_MATCH_SATURATION,
+    ISLAND_ROCK_MATCH_BRIGHTNESS,
+    ISLAND_ROCK_MATCH_COLOR_TINT,
     bushFlowerColor, bushRadioFlowerColor, bushRadio2FlowerColor, bushPugFlowerColor,
     GRASS_COUNT  as GRASS_COUNT_CFG,
     SURFACE_EDGE_PADDING,
@@ -2013,6 +2018,11 @@ export let islandCampfireGroundRadius = ISLAND_CAMPFIRE_GROUND_RADIUS;
 export let islandCampfireGroundSoftness = ISLAND_CAMPFIRE_GROUND_SOFTNESS;
 export let islandCampfireGroundStrength = ISLAND_CAMPFIRE_GROUND_STRENGTH;
 export let islandCampfireGroundNormalThreshold = ISLAND_CAMPFIRE_GROUND_NORMAL_THRESHOLD;
+export let islandRockMatchColor = ISLAND_ROCK_MATCH_COLOR;
+export let islandRockMatchStrength = ISLAND_ROCK_MATCH_STRENGTH;
+export let islandRockMatchSaturation = ISLAND_ROCK_MATCH_SATURATION;
+export let islandRockMatchBrightness = ISLAND_ROCK_MATCH_BRIGHTNESS;
+export let islandRockMatchColorTint = ISLAND_ROCK_MATCH_COLOR_TINT;
 
 const islandSurfaceGrassColorUniform = new Uniform(new Color(islandSurfaceGrassColor));
 const islandSurfaceGrassStrengthUniform = new Uniform(islandSurfaceGrassStrength);
@@ -2028,6 +2038,36 @@ const islandCampfireGroundSoftnessUniform = new Uniform(islandCampfireGroundSoft
 const islandCampfireGroundStrengthUniform = new Uniform(islandCampfireGroundStrength);
 const islandCampfireGroundNormalThresholdUniform = new Uniform(islandCampfireGroundNormalThreshold);
 const islandCampfireGroundCenterUniform = new Uniform(new Vector2());
+const islandRockMatchColorUniform = new Uniform(new Color(islandRockMatchColor));
+const islandRockMatchStrengthUniform = new Uniform(islandRockMatchStrength);
+const islandRockMatchSaturationUniform = new Uniform(islandRockMatchSaturation);
+const islandRockMatchBrightnessUniform = new Uniform(islandRockMatchBrightness);
+const islandRockMatchColorTintUniform = new Uniform(islandRockMatchColorTint);
+
+export function setIslandRockMatchColor(color: string): void {
+    islandRockMatchColor = color;
+    islandRockMatchColorUniform.value.set(color);
+}
+
+export function setIslandRockMatchStrength(v: number): void {
+    islandRockMatchStrength = MathUtils.clamp(v, 0, 1);
+    islandRockMatchStrengthUniform.value = islandRockMatchStrength;
+}
+
+export function setIslandRockMatchSaturation(v: number): void {
+    islandRockMatchSaturation = MathUtils.clamp(v, 0, 1);
+    islandRockMatchSaturationUniform.value = islandRockMatchSaturation;
+}
+
+export function setIslandRockMatchBrightness(v: number): void {
+    islandRockMatchBrightness = MathUtils.clamp(v, 0, 2);
+    islandRockMatchBrightnessUniform.value = islandRockMatchBrightness;
+}
+
+export function setIslandRockMatchColorTint(v: number): void {
+    islandRockMatchColorTint = MathUtils.clamp(v, 0, 1);
+    islandRockMatchColorTintUniform.value = islandRockMatchColorTint;
+}
 
 export function setIslandSurfaceGrassColor(color: string): void {
     islandSurfaceGrassColor = color;
@@ -2121,6 +2161,11 @@ function applyIslandSurfaceFilterShader(model: Group): void {
                         shader.uniforms.uIslandCampfireGroundStrength = islandCampfireGroundStrengthUniform;
                         shader.uniforms.uIslandCampfireGroundNormalThreshold = islandCampfireGroundNormalThresholdUniform;
                         shader.uniforms.uIslandCampfireGroundCenter = islandCampfireGroundCenterUniform;
+                        shader.uniforms.uIslandRockMatchColor = islandRockMatchColorUniform;
+                        shader.uniforms.uIslandRockMatchStrength = islandRockMatchStrengthUniform;
+                        shader.uniforms.uIslandRockMatchSaturation = islandRockMatchSaturationUniform;
+                        shader.uniforms.uIslandRockMatchBrightness = islandRockMatchBrightnessUniform;
+                        shader.uniforms.uIslandRockMatchColorTint = islandRockMatchColorTintUniform;
 
                         shader.vertexShader = shader.vertexShader.replace(
                             '#include <common>',
@@ -2157,6 +2202,11 @@ function applyIslandSurfaceFilterShader(model: Group): void {
                             uniform float uIslandCampfireGroundStrength;
                             uniform float uIslandCampfireGroundNormalThreshold;
                             uniform vec2 uIslandCampfireGroundCenter;
+                            uniform vec3 uIslandRockMatchColor;
+                            uniform float uIslandRockMatchStrength;
+                            uniform float uIslandRockMatchSaturation;
+                            uniform float uIslandRockMatchBrightness;
+                            uniform float uIslandRockMatchColorTint;
                             ${oceanLightingPars}`
                         );
                         shader.fragmentShader = shader.fragmentShader.replace(
@@ -2183,6 +2233,16 @@ function applyIslandSurfaceFilterShader(model: Group): void {
                             float islandSurfaceLuma = dot(islandSurfaceSample, vec3(0.299, 0.587, 0.114));
                             vec3 islandTintedGrass = uIslandSurfaceGrassColor * max(islandSurfaceLuma, 0.22);
                             diffuseColor.rgb = mix(diffuseColor.rgb, islandTintedGrass, islandGrassMask);
+
+                            // Rock-match grade: nudge the non-grass (rock/underside) tones toward
+                            // the standalone rock models' palette so the island bottom blends in.
+                            float islandRockMask = (1.0 - islandGrassMask) * uIslandRockMatchStrength;
+                            float islandRockLuma = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+                            vec3 islandRockGraded = mix(vec3(islandRockLuma), diffuseColor.rgb, uIslandRockMatchSaturation);
+                            islandRockGraded *= uIslandRockMatchBrightness;
+                            vec3 islandRockTint = uIslandRockMatchColor * max(islandRockLuma, 0.08);
+                            islandRockGraded = mix(islandRockGraded, islandRockTint, uIslandRockMatchColorTint);
+                            diffuseColor.rgb = mix(diffuseColor.rgb, islandRockGraded, islandRockMask);
 
                             float islandCampfireDist = distance(vWorldPosition.xz, uIslandCampfireGroundCenter);
                             float islandCampfireInner = max(uIslandCampfireGroundRadius - uIslandCampfireGroundSoftness, 0.0);
