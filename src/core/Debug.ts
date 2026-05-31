@@ -207,11 +207,17 @@ import {
     islandRockMatchSaturation,
     islandRockMatchBrightness,
     islandRockMatchColorTint,
+    islandRockMatchGreenThreshold,
+    islandRockMatchGreenStrength,
+    islandRockMatchGreenColor,
     setIslandRockMatchColor,
     setIslandRockMatchStrength,
     setIslandRockMatchSaturation,
     setIslandRockMatchBrightness,
     setIslandRockMatchColorTint,
+    setIslandRockMatchGreenThreshold,
+    setIslandRockMatchGreenStrength,
+    setIslandRockMatchGreenColor,
     setIslandSurfaceGrassColor,
     setIslandSurfaceGrassStrength,
     setIslandSurfaceGrassGreenThreshold,
@@ -848,6 +854,9 @@ function buildGUI(): void {
                 `export const ISLAND_ROCK_MATCH_SATURATION = ${Island.islandRockMatchSaturation.toFixed(4)}; // 1 = keep original saturation, 0 = grayscale`,
                 `export const ISLAND_ROCK_MATCH_BRIGHTNESS = ${Island.islandRockMatchBrightness.toFixed(4)}; // 1 = keep, >1 lifts the dark underside`,
                 `export const ISLAND_ROCK_MATCH_COLOR_TINT = ${Island.islandRockMatchColorTint.toFixed(4)}; // how much the target color tints (0..1)`,
+                `export const ISLAND_ROCK_MATCH_GREEN_THRESHOLD = ${Island.islandRockMatchGreenThreshold.toFixed(4)}; // green dominance to treat a pixel as moss`,
+                `export const ISLAND_ROCK_MATCH_GREEN_STRENGTH = ${Island.islandRockMatchGreenStrength.toFixed(4)}; // tint applied to underside moss (protected from gray)`,
+                `export const ISLAND_ROCK_MATCH_GREEN_COLOR = '${Island.islandRockMatchGreenColor}'; // sRGB hex — underside moss tint (matches surface grass)`,
                 ``,
                 `// ── Bush flower colors ───────────────────────────────────────────────────────`,
                 `export const bushFlowerColor      = '${Island.bushFlowerConfig.main}';`,
@@ -1370,6 +1379,25 @@ function buildGUI(): void {
             .name('Color Tint')
             .listen()
             .onChange((v: number) => setIslandRockMatchColorTint(v));
+        const rockMatchGreenProxy = {
+            greenColor: islandRockMatchGreenColor,
+            greenThreshold: islandRockMatchGreenThreshold,
+            greenStrength: islandRockMatchGreenStrength,
+        };
+        rockMatchFolder.addColor(rockMatchGreenProxy, 'greenColor')
+            .name('Moss Color')
+            .onChange((v: string) => {
+                rockMatchGreenProxy.greenColor = v;
+                setIslandRockMatchGreenColor(v);
+            });
+        rockMatchFolder.add(rockMatchGreenProxy, 'greenThreshold', -0.2, 0.5, 0.005)
+            .name('Moss Threshold')
+            .listen()
+            .onChange((v: number) => setIslandRockMatchGreenThreshold(v));
+        rockMatchFolder.add(rockMatchGreenProxy, 'greenStrength', 0, 1, 0.01)
+            .name('Moss Strength')
+            .listen()
+            .onChange((v: number) => setIslandRockMatchGreenStrength(v));
         rockMatchFolder.close();
     }
     addObjectFolder(surfaceFolder, 'Little Rocks', littleRocks, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
