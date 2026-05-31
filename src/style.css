@@ -971,7 +971,8 @@ body.day-mode .playlist-item.drag-over {
     height: var(--fill-level);
     background: rgba(64, 164, 255, 1);
     border-radius: 0 0 50px 50px;
-    transition: height 0.15s ease-out;
+    /* Mild overshoot ease gives the rising water level a buoyant settle */
+    transition: height 0.35s cubic-bezier(0.22, 1.2, 0.36, 1);
     overflow: visible;
     animation: water-bob 2s ease-in-out infinite;
 }
@@ -1005,6 +1006,29 @@ body.day-mode .playlist-item.drag-over {
 #start-button .wave-svg {
     width: 100%;
     height: 100%;
+    /* Vertical buoyancy bob — composes with the wrapper's horizontal scroll.
+       Each layer overrides the timing below so they drift up/down out of sync. */
+    animation: wave-buoy 2.3s ease-in-out infinite;
+    will-change: transform;
+}
+
+#start-button .wave-back-1 .wave-svg {
+    animation: wave-buoy 2.8s ease-in-out infinite;
+    animation-delay: -0.6s;
+}
+
+#start-button .wave-back-2 .wave-svg {
+    animation: wave-buoy 3.4s ease-in-out infinite;
+    animation-delay: -1.2s;
+}
+
+/* Buoyant settle: lift, slight overshoot back down, then ease to rest */
+@keyframes wave-buoy {
+    0%   { transform: translateY(0); }
+    35%  { transform: translateY(-3px); }
+    60%  { transform: translateY(1px); }
+    80%  { transform: translateY(-1px); }
+    100% { transform: translateY(0); }
 }
 
 #start-button .wave {
@@ -1021,15 +1045,16 @@ body.day-mode .playlist-item.drag-over {
 
 /* Back wave layers — raised a few px so only their crests peek above the main wave.
    Their flat bases stay hidden behind the opaque front fill, so they read as
-   natural waves sitting further back. Each runs a different timing to stand apart. */
+   natural waves sitting further back. Scroll directions alternate per layer
+   (front →, back-1 ←, back-2 →) and each runs a different timing to stand apart. */
 #start-button .wave-back-1 {
     top: -19px;
-    animation: wave-scroll 4.5s linear infinite;
+    animation: wave-scroll-reverse 4.5s linear infinite;
 }
 
 #start-button .wave-back-2 {
     top: -22px;
-    animation: wave-scroll-reverse 6s linear infinite;
+    animation: wave-scroll 6s linear infinite;
 }
 
 @keyframes wave-scroll-reverse {
