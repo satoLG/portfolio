@@ -89,8 +89,16 @@ export function Start(): void {
     const startButton = document.createElement("button");
     startButton.id = "start-button";
     startButton.disabled = true; // Disabled until loading complete
+    // Wave path: gentle sine ridge spanning the 800-wide viewBox, closed down to the bottom
+    let wavePath = "M0 8";
+    for (let x = 20; x <= 800; x += 20) wavePath += x === 20 ? " Q 10 3, 20 8" : ` T ${x} 8`;
+    wavePath += " V 20 H 0 Z";
+    const waveSvg = (cls: string) =>
+        `<svg class="wave-svg" viewBox="0 0 800 20" preserveAspectRatio="none"><path class="wave ${cls}" d="${wavePath}"/></svg>`;
     startButton.innerHTML = `
         <div class="water-fill">
+            <div class="wave-wrapper wave-back-2">${waveSvg('wave-b2')}</div>
+            <div class="wave-wrapper wave-back-1">${waveSvg('wave-b1')}</div>
             <div class="wave-wrapper">
                 <svg class="wave-svg" viewBox="0 0 800 20" preserveAspectRatio="none">
                     <path class="wave wave2" d="M0 8 Q 10 3, 20 8 T 40 8 T 60 8 T 80 8 T 100 8 T 120 8 T 140 8 T 160 8 T 180 8 T 200 8 T 220 8 T 240 8 T 260 8 T 280 8 T 300 8 T 320 8 T 340 8 T 360 8 T 380 8 T 400 8 T 420 8 T 440 8 T 460 8 T 480 8 T 500 8 T 520 8 T 540 8 T 560 8 T 580 8 T 600 8 T 620 8 T 640 8 T 660 8 T 680 8 T 700 8 T 720 8 T 740 8 T 760 8 T 780 8 T 800 8 V 20 H 0 Z"/>
@@ -130,9 +138,11 @@ export function Start(): void {
         const effectiveTarget = Math.min(targetProgress, timeProgress + (targetProgress * 0.3));
         
         if (displayedProgress < effectiveTarget) {
-            // Smooth increment
+            // Always climb toward the target at a steady, capped speed so even a big
+            // jump (e.g. 30 -> 100) animates upward instead of snapping into place.
             const diff = effectiveTarget - displayedProgress;
-            const increment = Math.max(0.005, diff * 0.08);
+            const MAX_STEP = 0.012; // cap: ~1.4s to fill the whole bar at 60fps
+            const increment = Math.max(0.0035, Math.min(MAX_STEP, diff * 0.1));
             displayedProgress = Math.min(displayedProgress + increment, effectiveTarget);
         }
         
