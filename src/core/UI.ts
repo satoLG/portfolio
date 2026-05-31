@@ -138,9 +138,11 @@ export function Start(): void {
         const effectiveTarget = Math.min(targetProgress, timeProgress + (targetProgress * 0.3));
         
         if (displayedProgress < effectiveTarget) {
-            // Smooth increment
+            // Always climb toward the target at a steady, capped speed so even a big
+            // jump (e.g. 30 -> 100) animates upward instead of snapping into place.
             const diff = effectiveTarget - displayedProgress;
-            const increment = Math.max(0.005, diff * 0.08);
+            const MAX_STEP = 0.012; // cap: ~1.4s to fill the whole bar at 60fps
+            const increment = Math.max(0.0035, Math.min(MAX_STEP, diff * 0.1));
             displayedProgress = Math.min(displayedProgress + increment, effectiveTarget);
         }
         
