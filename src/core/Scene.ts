@@ -477,7 +477,26 @@ export function Start(): void
 // the loading overlay is still visible.  Trades a brief loading-screen pause
 // for zero runtime stutter on first interaction.
 
+// Unified loading-bar progress (0–1). The bar reflects the download of ALL
+// model subsystems — Island, SeaFloorDecor and Fish — which load in parallel
+// via separate GLTFLoaders. Previously the bar tracked only Island, so it hit
+// 90% the instant Island finished and then sat there, invisibly, while the
+// underwater models kept downloading + the GPU prewarm ran — which read as a
+// freeze at 90%. Downloads fill 0–90%; the GPU prewarm pass owns the last 10%.
+let _prewarmComplete = false;
+
+export function getStartupProgress(): number {
+    if (_prewarmComplete) return 1;
+    // Weighted by rough asset heft — Island is the bulk of the bytes.
+    const download =
+        Island.getDownloadFraction()       * 0.55 +
+        SeaFloorDecor.getDownloadFraction() * 0.30 +
+        Fish.getDownloadFraction()          * 0.15;
+    return Math.min(download, 1) * 0.9;
+}
+
 async function prewarmGPU(): Promise<void> {
+  try {
     // Wait for SeaFloorDecor models (loaded via a separate GLTFLoader,
     // not tracked by Island's LoadingManager).
     await waitForModels();
@@ -561,21 +580,31 @@ async function prewarmGPU(): Promise<void> {
             restoreJellyfishPrewarm();
         }
     } finally {
+        // Undo the variant prewarm FIRST. beginPrewarmVariants() captured each
+        // object's visibility AFTER the traverse above forced everything to
+        // visible=true, so its own restore would wrongly re-show objects that
+        // were hidden pre-prewarm (e.g. the golden ground-apple slot, which then
+        // floats underwater). The savedVis loop below holds the true pre-prewarm
+        // values and must have the final say, so it runs last.
+        restoreVariants();
+
         // 4. Restore camera
         camera.position.copy(savedPos);
         camera.quaternion.copy(savedQuat);
         camera.fov = savedFov;
         camera.updateProjectionMatrix();
 
-        // 5. Restore visibility
+        // 5. Restore visibility (authoritative — runs last)
         for (const { obj, vis } of savedVis) obj.visible = vis;
-
-        // The variant prewarm tints apple1 + groundSlot[0] golden; always undo it.
-        restoreVariants();
     }
 
     // 6. Preload all music tracks into browser cache (non-blocking)
     MediaPlayer.preloadAllTracks();
+  } finally {
+    // Always drive the bar to 100%, even if the prewarm above threw — a
+    // first-interaction hitch is far better than a permanent freeze at 90%.
+    _prewarmComplete = true;
+  }
 }
 
 function initGpuTextures(root: Object3D): void {
@@ -633,7 +662,7 @@ async function prewarmChestCorridor(): Promise<void> {
 // drop, hung request, failed pool template), proceed with prewarm anyway after
 // this cap so the bar can reach 100% and the scene becomes interactive. A
 // missing fish or coral is far better than a permanent freeze at 90%.
-const PREWARM_MODEL_WAIT_TIMEOUT_MS = 20000;
+const PREWARM_MODEL_WAIT_TIMEOUT_MS = 12000;
 
 function waitForModels(): Promise<void> {
     return new Promise<void>(resolve => {

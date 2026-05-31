@@ -630,7 +630,12 @@ function buildNoteTextures(): void {
 // Loading manager for progress tracking
 const loadingManager = new LoadingManager();
 let loadingProgress = 0;
+let _islandDownloadFraction = 0; // raw 0–1 download progress of Island's own GLBs
 let onLoadingProgress: ((progress: number) => void) | null = null;
+
+/** 0–1 download progress of the Island's GLBs — feeds the unified loading bar
+ *  in Scene.getStartupProgress(). Reaches 1 when the manager's onLoad fires. */
+export function getDownloadFraction(): number { return _islandDownloadFraction; }
 
 // Optional async callback that runs AFTER all models load but BEFORE
 // reporting 100% (used by Scene.ts to pre-compile shaders on the GPU).
@@ -642,8 +647,9 @@ export function setOnLoadCallback(cb: () => Promise<void>): void {
 }
 
 loadingManager.onProgress = (_url, loaded, total) => {
+    _islandDownloadFraction = total > 0 ? loaded / total : 0;
     // Reserve the last 10% of the progress bar for the GPU prewarm pass.
-    loadingProgress = (loaded / total) * 0.9;
+    loadingProgress = _islandDownloadFraction * 0.9;
     if (onLoadingProgress) {
         onLoadingProgress(loadingProgress);
     }
@@ -663,6 +669,7 @@ loadingManager.onLoad = async () => {
         // first interaction has an un-warmed hitch instead of a hard freeze.
         console.error('[Island] GPU prewarm failed; entering scene without full prewarm:', err);
     } finally {
+        _islandDownloadFraction = 1;
         loadingProgress = 1;
         if (onLoadingProgress) {
             onLoadingProgress(1);

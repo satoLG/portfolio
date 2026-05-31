@@ -714,6 +714,13 @@ export function isReady(): boolean {
     return fishModelsLoaded >= 4 && fixedLoopsInitialized;
 }
 
+/** 0–1 download progress. fishModelsLoaded advances on both success and
+ *  failure (see onLoadError) so it always reaches 1 — feeds the unified
+ *  loading bar in Scene.getStartupProgress(). */
+export function getDownloadFraction(): number {
+    return Math.min(fishModelsLoaded / 4, 1);
+}
+
 /** Debug snapshot — used by `window.__diag()` to inspect fish state. */
 export function getDiagState() {
     let visibleFish = 0, visibleJellies = 0, nanX = 0;
