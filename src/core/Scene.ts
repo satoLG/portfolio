@@ -477,7 +477,26 @@ export function Start(): void
 // the loading overlay is still visible.  Trades a brief loading-screen pause
 // for zero runtime stutter on first interaction.
 
+// Unified loading-bar progress (0–1). The bar reflects the download of ALL
+// model subsystems — Island, SeaFloorDecor and Fish — which load in parallel
+// via separate GLTFLoaders. Previously the bar tracked only Island, so it hit
+// 90% the instant Island finished and then sat there, invisibly, while the
+// underwater models kept downloading + the GPU prewarm ran — which read as a
+// freeze at 90%. Downloads fill 0–90%; the GPU prewarm pass owns the last 10%.
+let _prewarmComplete = false;
+
+export function getStartupProgress(): number {
+    if (_prewarmComplete) return 1;
+    // Weighted by rough asset heft — Island is the bulk of the bytes.
+    const download =
+        Island.getDownloadFraction()       * 0.55 +
+        SeaFloorDecor.getDownloadFraction() * 0.30 +
+        Fish.getDownloadFraction()          * 0.15;
+    return Math.min(download, 1) * 0.9;
+}
+
 async function prewarmGPU(): Promise<void> {
+  try {
     // Wait for SeaFloorDecor models (loaded via a separate GLTFLoader,
     // not tracked by Island's LoadingManager).
     await waitForModels();
@@ -494,80 +513,98 @@ async function prewarmGPU(): Promise<void> {
     const savedFov = camera.fov;
     const restoreVariants = Island.beginPrewarmVariants();
 
-    // 2. Compile every material in the scene graph (triggers onBeforeCompile
-    //    hooks on SeaFloorDecor ocean lighting, kelp sway, Island wind, etc.)
-    renderer.compile(scene, camera);
-    Ocean.CompileSurface(renderer, camera);
-    if (typeof (renderer as any).compileAsync === 'function') {
-        await (renderer as any).compileAsync(scene, camera);
-    }
-    initGpuTextures(scene);
-
-    // Pre-upload the chest ray canvas textures to GPU (canvas textures require
-    // initTexture — they're not uploaded by renderer.compile, only on render).
-    for (const mat of Island.getChestRayMats()) {
-        if (mat.map) renderer.initTexture(mat.map);
-    }
-
-    // Compile the post-process quad (underwater distortion + pixelation)
-    PostProcess.prewarm(renderer);
-    // Compile the depth-override shader path so the first frame's depth-pre-pass
-    // doesn't hitch.
-    SceneDepth.prewarm(renderer, scene, camera);
-
-    // 3. Warm render — forces geometry VBO uploads and texture GPU transfers.
-    //    Two passes: surface + underwater so both frustum regions are covered.
-    //    Surface pass: camera at intro start position, tilted upward (matching
-    //    the intro tilt) so only sky is visible — no ocean edge flash.
-    camera.position.set(-0.1, 6.05, 1.78);
-    camera.lookAt(-0.1, 7.45, -6.0);
-    camera.updateProjectionMatrix();
-    renderer.render(scene, camera);
-    Ocean.RenderSurface(renderer, camera);
-
-    // Island-facing pass: uploads all island/tree/object textures to GPU
-    // (the sky pass above looks away from the island, so nothing on it gets uploaded).
-    const surfaceWasVisible = Ocean.surface.visible;
-    Ocean.surface.visible = true;
-    camera.position.set(0, 3.5, 0);
-    camera.lookAt(0, 0, -3.3);
-    camera.updateProjectionMatrix();
-    renderer.render(scene, camera);
-    Ocean.RenderSurface(renderer, camera);
-    Ocean.surface.visible = surfaceWasVisible;
-
-    // Briefly render the real pooled jellyfish clones with non-zero opacity so
-    // their transparent shader variant and buffers are warm before the first dive.
-    const restoreJellyfishPrewarm = Fish.beginJellyfishPrewarm();
+    // Steps 2-3 do heavy GPU work that can throw (driver hiccup, lost context,
+    // compileAsync rejection). Wrap everything so the camera/visibility/variant
+    // state is ALWAYS restored — otherwise a thrown prewarm leaves the camera
+    // displaced and the scene's visibility gate corrupted, so the scene that
+    // appears after the loading screen is broken rather than just un-warmed.
     try {
-        await prewarmChestCorridor();
-        // Exercise the full PostProcess pipeline (copyFramebufferToTexture + distortion
-        // quad render) so the GPU path is warm before the user actually dives.
-        // Without this the first real crossing of UNDERWATER_Y_THRESHOLD causes a
-        // pipeline stall on the copyFramebufferToTexture call.
-        PostProcess.updateUnderwaterAmount(camera.position.y);  // sets underwaterAmount > 0
-        renderSceneFrame(true);
-        PostProcess.updateUnderwaterAmount(100);                 // reset to 0 (positive Y → depth < 0)
+        // 2. Compile every material in the scene graph (triggers onBeforeCompile
+        //    hooks on SeaFloorDecor ocean lighting, kelp sway, Island wind, etc.)
+        renderer.compile(scene, camera);
+        Ocean.CompileSurface(renderer, camera);
+        if (typeof (renderer as any).compileAsync === 'function') {
+            await (renderer as any).compileAsync(scene, camera);
+        }
+        initGpuTextures(scene);
+
+        // Pre-upload the chest ray canvas textures to GPU (canvas textures require
+        // initTexture — they're not uploaded by renderer.compile, only on render).
+        for (const mat of Island.getChestRayMats()) {
+            if (mat.map) renderer.initTexture(mat.map);
+        }
+
+        // Compile the post-process quad (underwater distortion + pixelation)
+        PostProcess.prewarm(renderer);
+        // Compile the depth-override shader path so the first frame's depth-pre-pass
+        // doesn't hitch.
+        SceneDepth.prewarm(renderer, scene, camera);
+
+        // 3. Warm render — forces geometry VBO uploads and texture GPU transfers.
+        //    Two passes: surface + underwater so both frustum regions are covered.
+        //    Surface pass: camera at intro start position, tilted upward (matching
+        //    the intro tilt) so only sky is visible — no ocean edge flash.
+        camera.position.set(-0.1, 6.05, 1.78);
+        camera.lookAt(-0.1, 7.45, -6.0);
+        camera.updateProjectionMatrix();
+        renderer.render(scene, camera);
+        Ocean.RenderSurface(renderer, camera);
+
+        // Island-facing pass: uploads all island/tree/object textures to GPU
+        // (the sky pass above looks away from the island, so nothing on it gets uploaded).
+        const surfaceWasVisible = Ocean.surface.visible;
+        Ocean.surface.visible = true;
+        camera.position.set(0, 3.5, 0);
+        camera.lookAt(0, 0, -3.3);
+        camera.updateProjectionMatrix();
+        renderer.render(scene, camera);
+        Ocean.RenderSurface(renderer, camera);
+        Ocean.surface.visible = surfaceWasVisible;
+
+        // Briefly render the real pooled jellyfish clones with non-zero opacity so
+        // their transparent shader variant and buffers are warm before the first dive.
+        const restoreJellyfishPrewarm = Fish.beginJellyfishPrewarm();
+        try {
+            await prewarmChestCorridor();
+            // Exercise the full PostProcess pipeline (copyFramebufferToTexture + distortion
+            // quad render) so the GPU path is warm before the user actually dives.
+            // Without this the first real crossing of UNDERWATER_Y_THRESHOLD causes a
+            // pipeline stall on the copyFramebufferToTexture call.
+            PostProcess.updateUnderwaterAmount(camera.position.y);  // sets underwaterAmount > 0
+            renderSceneFrame(true);
+            PostProcess.updateUnderwaterAmount(100);                 // reset to 0 (positive Y → depth < 0)
+        } finally {
+            // The prewarm temporarily acquires PointLights from the pool. If the
+            // GPU work above ever throws, the restore must still run — otherwise
+            // leaked golden lights stay attached to the apples for the session.
+            restoreJellyfishPrewarm();
+        }
     } finally {
-        // The prewarm temporarily tints apple1 + groundSlot[0] golden and
-        // acquires PointLights from the pool. If the GPU work above ever
-        // throws, the restore must still run — otherwise leaked golden lights
-        // stay attached to the apples for the rest of the session.
-        restoreJellyfishPrewarm();
+        // Undo the variant prewarm FIRST. beginPrewarmVariants() captured each
+        // object's visibility AFTER the traverse above forced everything to
+        // visible=true, so its own restore would wrongly re-show objects that
+        // were hidden pre-prewarm (e.g. the golden ground-apple slot, which then
+        // floats underwater). The savedVis loop below holds the true pre-prewarm
+        // values and must have the final say, so it runs last.
         restoreVariants();
+
+        // 4. Restore camera
+        camera.position.copy(savedPos);
+        camera.quaternion.copy(savedQuat);
+        camera.fov = savedFov;
+        camera.updateProjectionMatrix();
+
+        // 5. Restore visibility (authoritative — runs last)
+        for (const { obj, vis } of savedVis) obj.visible = vis;
     }
-
-    // 4. Restore camera
-    camera.position.copy(savedPos);
-    camera.quaternion.copy(savedQuat);
-    camera.fov = savedFov;
-    camera.updateProjectionMatrix();
-
-    // 5. Restore visibility
-    for (const { obj, vis } of savedVis) obj.visible = vis;
 
     // 6. Preload all music tracks into browser cache (non-blocking)
     MediaPlayer.preloadAllTracks();
+  } finally {
+    // Always drive the bar to 100%, even if the prewarm above threw — a
+    // first-interaction hitch is far better than a permanent freeze at 90%.
+    _prewarmComplete = true;
+  }
 }
 
 function initGpuTextures(root: Object3D): void {
@@ -620,11 +657,29 @@ async function prewarmChestCorridor(): Promise<void> {
     renderer.getContext().finish();
 }
 
+// Safety net: never block the loading screen forever waiting on underwater
+// models. If a SeaFloorDecor/Fish asset stalls or fails to settle (network
+// drop, hung request, failed pool template), proceed with prewarm anyway after
+// this cap so the bar can reach 100% and the scene becomes interactive. A
+// missing fish or coral is far better than a permanent freeze at 90%.
+const PREWARM_MODEL_WAIT_TIMEOUT_MS = 12000;
+
 function waitForModels(): Promise<void> {
     return new Promise<void>(resolve => {
+        const startedAt = performance.now();
         (function check() {
-            if (SeaFloorDecor.isLoaded() && Fish.isReady()) resolve();
-            else setTimeout(check, 50);
+            if (SeaFloorDecor.isLoaded() && Fish.isReady()) {
+                resolve();
+            } else if (performance.now() - startedAt >= PREWARM_MODEL_WAIT_TIMEOUT_MS) {
+                console.warn(
+                    '[Scene] Prewarm proceeding before all underwater models were ready ' +
+                    `(timed out after ${PREWARM_MODEL_WAIT_TIMEOUT_MS}ms). ` +
+                    `SeaFloorDecor.isLoaded=${SeaFloorDecor.isLoaded()} Fish.isReady=${Fish.isReady()}`,
+                );
+                resolve();
+            } else {
+                setTimeout(check, 50);
+            }
         })();
     });
 }

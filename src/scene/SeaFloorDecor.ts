@@ -129,6 +129,11 @@ const anemoneTopYUniform = new Uniform(C.anemoneTopY);
 /** True once all 5 underwater decoration GLTFs have finished loading. */
 export function isLoaded(): boolean { return loadedCount >= TOTAL_MODELS; }
 
+/** 0–1 download progress. Counts both successes and failures (the load error
+ *  callback also bumps loadedCount) so it always reaches 1, even if an asset
+ *  404s — feeds the unified loading bar in Scene.getStartupProgress(). */
+export function getDownloadFraction(): number { return Math.min(loadedCount / TOTAL_MODELS, 1); }
+
 // ── GLSL snippets (identical to Island.ts) ────────────────────────────────────
 const oceanLightingPars = /*glsl*/`
     uniform vec3  uLight;

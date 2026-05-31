@@ -1,4 +1,4 @@
-﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setDPR, setShadowResolution, isMobile, showOcean } from "./Scene";
+﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setDPR, setShadowResolution, isMobile, showOcean, getStartupProgress } from "./Scene";
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
 import { startAudio, transitionFromIntroToScene, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
@@ -130,6 +130,12 @@ export function Start(): void {
 
     // Animation loop for smooth progress
     function animateProgress() {
+        // Poll the unified startup progress every frame. It blends the download
+        // of ALL model subsystems (Island + SeaFloorDecor + Fish, 0–90%) plus the
+        // GPU prewarm pass (last 10%), so the bar keeps moving while underwater
+        // assets download instead of stalling invisibly at 90%.
+        targetProgress = getStartupProgress();
+
         const elapsed = performance.now() - startTime;
         const timeProgress = Math.min(elapsed / minAnimationDuration, 1);
         
@@ -190,10 +196,11 @@ export function Start(): void {
     // Start animation loop
     requestAnimationFrame(animateProgress);
     
-    // Track loading progress
+    // Mirror progress into Control for the intro descent. targetProgress itself
+    // is driven by polling getStartupProgress() in animateProgress above (it
+    // accounts for all model loaders, not just Island's).
     setLoadingCallback((progress: number) => {
         setIntroProgress(progress);
-        targetProgress = progress;
     });
     startButton.onclick = function() {
         // Kick off audio init in this first user gesture so the intro piano +
