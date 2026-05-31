@@ -122,16 +122,14 @@ export const surfaceFragment =
     uniform float _EdgeFoamIntensity;
     uniform float _EdgeFoamUnderwaterMul;  // dim factor for camera-below-water (refractive sheen vs surface foam)
     uniform vec3  _EdgeFoamColor;
-    // Mobile-only anti-flicker tuning. _EdgeFoamMobile is 0.0 on desktop (where
-    // the scene depth is a clean 24-bit buffer) so the whole block below is a
-    // no-op and desktop stays bit-identical. On mobile (often a 16-bit depth
-    // fallback on iOS) it (1) lifts the foam threshold above the depth-precision
-    // noise floor and (2) fades the foam out on far geometry where that noise is
-    // worst — killing the contact-line flicker on the back rocks.
-    uniform float _EdgeFoamMobile;      // 0 = desktop (off), 1 = mobile (on)
-    uniform float _EdgeFoamDepthGuard;  // dead-band strength; scales with view distance²
-    uniform float _EdgeFoamFadeStart;   // view distance where edge foam starts fading
-    uniform float _EdgeFoamFadeEnd;     // view distance where edge foam is fully gone
+    // Edge foam fades out by WORLD Z (not camera distance) so the contact line
+    // stays put while the foam disappears toward the back of the scene. The
+    // ocean's world Z runs +Z (camera/front) → -Z (back rocks). Desktop uses a
+    // far threshold (effectively keeps all foam); mobile cuts in front of the
+    // back rocks (≈ z -4.7) where the 16-bit/mediump depth precision makes the
+    // contact line flicker. Values are picked per-device in OceanMaterial.ts.
+    uniform float _EdgeFoamFadeStartZ;  // world Z at/above which foam is full strength
+    uniform float _EdgeFoamFadeEndZ;    // world Z (further back) at/below which foam is gone
 
     varying vec2 _worldPos;
     varying vec2 _uv;
@@ -239,7 +237,7 @@ export const surfaceFragment =
     // view-space to an opaque scene fragment, brighten with foam. Works
     // regardless of object shape/slope/geometry density because it lives on
     // the (wave-displaced) ocean surface and reads the actual scene depth.
-    float calcEdgeFoam(vec2 screenUv) {
+    float calcEdgeFoam(vec2 screenUv, float worldZ) {
         float sceneDepth = texture2D(_SceneDepth, screenUv).x;
         // Skybox / cleared background reads as 1.0 — no opaque object here.
         if (sceneDepth >= 0.9999) return 0.0;
@@ -247,22 +245,17 @@ export const surfaceFragment =
         float oceanLinear = linearizeDepthBuffer(gl_FragCoord.z, _CameraNear, _CameraFar);
         float depthDiff = sceneLinear - oceanLinear;
 
-        // Mobile-only dead-band: a flat world-unit threshold that lifts the foam
-        // start above whatever residual depth-precision noise survives the
-        // refactored linearization. guard == 0 on desktop, so the test reduces
-        // to the original depthDiff <= 0.0 and the band starts at 0.
-        float guard = _EdgeFoamMobile * _EdgeFoamDepthGuard;
+        // Contact line, unchanged from the original: foam starts exactly where
+        // the ocean meets opaque geometry (depthDiff > 0).
+        if (depthDiff <= 0.0) return 0.0;
+        float foam = 1.0 - smoothstep(0.0, _EdgeFoamWidth, depthDiff);
 
-        // Diff below the guard means the opaque surface is in front of / within
-        // depth noise of this ocean fragment. Treat as no foam.
-        if (depthDiff <= guard) return 0.0;
-        float foam = 1.0 - smoothstep(guard, guard + _EdgeFoamWidth, depthDiff);
-
-        // Mobile-only distance fade: optionally drop edge foam beyond a chosen
-        // view distance. Defaults are set wide so all the island's rocks (≈4–8u)
-        // keep their foam; tighten on-device only if a far object still flickers.
-        float distFade = 1.0 - smoothstep(_EdgeFoamFadeStart, _EdgeFoamFadeEnd, oceanLinear);
-        foam *= mix(1.0, distFade, _EdgeFoamMobile);
+        // World-Z fade: kill the foam gradually toward the back of the scene
+        // (more negative Z) so it never reaches the flicker-prone back rocks on
+        // mobile, without a hard cut. Independent of camera distance — the cut
+        // line stays fixed in the world. smoothstep is reversed because Z
+        // decreases toward the back: full at/above FadeStartZ, gone at FadeEndZ.
+        foam *= smoothstep(_EdgeFoamFadeEndZ, _EdgeFoamFadeStartZ, worldZ);
 
         return foam;
     }
@@ -360,7 +353,8 @@ export const surfaceFragment =
         // physical effect when looking up at the surface meeting a rock, where
         // refraction concentrates light at the boundary.
         vec2 screenUv = gl_FragCoord.xy / max(_SceneResolution, vec2(1.0));
-        float edgeFoamRaw = calcEdgeFoam(screenUv);
+        // _worldPos.y is the ocean fragment's world Z (varying = worldPos.xz).
+        float edgeFoamRaw = calcEdgeFoam(screenUv, _worldPos.y);
 
         if (cameraPosition.y > _elevation)
         {

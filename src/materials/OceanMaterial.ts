@@ -115,16 +115,17 @@ export const edgeFoamIntensityUniform = new Uniform(OceanConfig.edgeFoamIntensit
 export const edgeFoamUnderwaterMulUniform = new Uniform(OceanConfig.edgeFoamUnderwaterMul);
 export const edgeFoamColorUniform  = new Uniform(new Vector3(OceanConfig.edgeFoamColor.r, OceanConfig.edgeFoamColor.g, OceanConfig.edgeFoamColor.b));
 
-// ── Mobile-only edge-foam anti-flicker ────────────────────────────────────────
-// iOS/Safari WebGL frequently downgrades the scene DepthTexture to 16-bit, so the
-// depth-intersection foam on far geometry (back rocks) flickers on the contact
-// line. These tune a distance-scaled dead-band + a far-distance fade. The flag is
-// 1 only on mobile, so desktop renders bit-identically (the shader block no-ops).
+// ── Edge-foam world-Z fade (device-specific) ──────────────────────────────────
+// The depth-intersection foam flickers on the back rocks on iOS (16-bit/mediump
+// depth precision). Rather than a hard cut, fade the foam out by WORLD Z so the
+// contact line stays put while the foam vanishes toward the back of the scene.
+// The ocean's world Z runs +Z (front/camera) → -Z (back rocks). The island's
+// front rocks sit at z ≈ -1.9..-2.6, the flicker-prone back rocks at z ≈ -4.7..-5.6.
+// Desktop pushes the fade far back (keeps all foam); mobile fades it out before
+// the back rocks so they never get foam. Tunable per-device in OceanConfig.
 const _isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
-export const edgeFoamMobileUniform     = new Uniform(_isMobile ? 1 : 0);
-export const edgeFoamDepthGuardUniform = new Uniform(OceanConfig.edgeFoamDepthGuard);
-export const edgeFoamFadeStartUniform  = new Uniform(OceanConfig.edgeFoamFadeStart);
-export const edgeFoamFadeEndUniform    = new Uniform(OceanConfig.edgeFoamFadeEnd);
+export const edgeFoamFadeStartZUniform = new Uniform(_isMobile ? OceanConfig.edgeFoamFadeStartZMobile : OceanConfig.edgeFoamFadeStartZDesktop);
+export const edgeFoamFadeEndZUniform   = new Uniform(_isMobile ? OceanConfig.edgeFoamFadeEndZMobile : OceanConfig.edgeFoamFadeEndZDesktop);
 
 /** Each frame, push the camera's current near/far into the shader uniforms so
  *  the depth linearization in `calcEdgeFoam` stays correct after any FOV /
@@ -294,10 +295,8 @@ export function Start(): void
         _EdgeFoamIntensity: edgeFoamIntensityUniform,
         _EdgeFoamUnderwaterMul: edgeFoamUnderwaterMulUniform,
         _EdgeFoamColor: edgeFoamColorUniform,
-        _EdgeFoamMobile: edgeFoamMobileUniform,
-        _EdgeFoamDepthGuard: edgeFoamDepthGuardUniform,
-        _EdgeFoamFadeStart: edgeFoamFadeStartUniform,
-        _EdgeFoamFadeEnd: edgeFoamFadeEndUniform,
+        _EdgeFoamFadeStartZ: edgeFoamFadeStartZUniform,
+        _EdgeFoamFadeEndZ: edgeFoamFadeEndZUniform,
     };
     SetSkyboxUniforms(surface);
     
