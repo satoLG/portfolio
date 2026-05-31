@@ -212,6 +212,16 @@ function renderOnlyUnderwaterTransparents(savedTargets: Array<{ obj: Object3D; v
 }
 
 function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
+    // Hide the underwater transparents (fish, bubbles, particles) BEFORE the
+    // depth pre-pass. The pre-pass uses scene.overrideMaterial = MeshDepthMaterial,
+    // which forces depthWrite=true and so OVERRIDES these objects' own
+    // depthWrite=false — they'd otherwise write depth into the foam depth target
+    // while floating in open water. The edge foam reads that depth as "ocean
+    // meeting an object" and paints stray foam wherever a bubble/particle/fish
+    // drifts, flickering even with the camera still and worst on the first dive
+    // (the entry bubble burst). They are re-rendered separately after the ocean.
+    const underwaterTransparentVis = useUnderwaterTransparentPass ? hideUnderwaterTransparents() : null;
+
     // Pre-pass: capture opaque scene depth into SceneDepth's depth target so
     // the ocean shader can do depth-intersection foam in this frame. Must run
     // AFTER per-frame visibility gating (already set above us in Update) and
@@ -221,7 +231,6 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     sceneDepthUniform.value = SceneDepth.getDepthTexture();
     updateSceneDepthCamera(camera);
 
-    const underwaterTransparentVis = useUnderwaterTransparentPass ? hideUnderwaterTransparents() : null;
     PostProcess.renderScene(renderer, scene, camera, () => {
         Ocean.RenderSurface(renderer, camera);
         if (underwaterTransparentVis) {
