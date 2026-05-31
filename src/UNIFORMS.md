@@ -72,6 +72,8 @@ Lines [47-65](src/materials/OceanMaterial.ts#L47). All other `foam*Uniform` entr
 ### Edge foam (depth-intersection foam on the ocean side)
 `sceneDepthUniform`, `cameraNearUniform`, `cameraFarUniform`, `edgeFoamWidthUniform`, `edgeFoamIntensityUniform`, `edgeFoamColorUniform` — declared in [OceanMaterial.ts](src/materials/OceanMaterial.ts). The depth texture is filled each frame by [SceneDepth.ts](src/effects/SceneDepth.ts) via a `MeshDepthMaterial` override pass; the ocean fragment shader linearizes both `gl_FragCoord.z` and the sampled scene depth and brightens fragments where the difference is below `edgeFoamWidth`.
 
+`edgeFoamFadeStartZUniform`, `edgeFoamFadeEndZUniform` — declared in [OceanMaterial.ts](src/materials/OceanMaterial.ts). Fade the edge foam out by **world Z** (not camera distance) so the contact line stays fixed while the foam vanishes toward the back of the scene. Foam is full strength at/above `FadeStartZ` and fully gone at/below `FadeEndZ` (Z decreases toward the back). Values are picked per-device at module load from `OceanConfig` (`edgeFoamFadeStartZDesktop`/`Mobile` + `…EndZDesktop`/`Mobile`): desktop pushes the fade far behind the scene (keeps all foam, no visible cut); mobile fades the foam out in front of the flicker-prone back rocks. The depth linearization in `calcEdgeFoam` was also refactored to `far*(1-depth)+depth*near` (algebraically identical, but avoids catastrophic cancellation on iOS mediump).
+
 ### Ripples (mouse + apple impact)
 `ripplesUniform`, `rippleCountUniform`, `rippleSpeedUniform`, `rippleLifetimeUniform`, `rippleWidthUniform`, `rippleNormalStrengthUniform` — lines [148-153](src/materials/OceanMaterial.ts#L148).
 

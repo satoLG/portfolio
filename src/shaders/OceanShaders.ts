@@ -122,6 +122,14 @@ export const surfaceFragment =
     uniform float _EdgeFoamIntensity;
     uniform float _EdgeFoamUnderwaterMul;  // dim factor for camera-below-water (refractive sheen vs surface foam)
     uniform vec3  _EdgeFoamColor;
+    // Edge foam fades out by WORLD Z (not camera distance) so the contact line
+    // stays put while the foam disappears toward the back of the scene. The
+    // ocean's world Z runs +Z (camera/front) → -Z (back rocks). Desktop uses a
+    // far threshold (effectively keeps all foam); mobile cuts in front of the
+    // back rocks (≈ z -4.7) where the 16-bit/mediump depth precision makes the
+    // contact line flicker. Values are picked per-device in OceanMaterial.ts.
+    uniform float _EdgeFoamFadeStartZ;  // world Z at/above which foam is full strength
+    uniform float _EdgeFoamFadeEndZ;    // world Z (further back) at/below which foam is gone
 
     varying vec2 _worldPos;
     varying vec2 _uv;
@@ -215,26 +223,41 @@ export const surfaceFragment =
     }
 
     // Linearize a [0,1] depth-buffer value to positive view-space distance.
-    // Standard perspective formula. Returns positive distance for ergonomics.
+    // The naive form (near*far)/(far - depth*(far-near)) subtracts two large
+    // near-equal numbers in the denominator for distant fragments (depth≈1),
+    // which loses almost all precision in fragment mediump — the case on iOS,
+    // where it makes the back-rock contact line jitter ±0.1u between frames.
+    // Algebraically identical refactor that keeps the small term small:
+    //   far - depth*(far-near)  ==  far*(1.0-depth) + depth*near
     float linearizeDepthBuffer(float depth, float near, float far) {
-        return (near * far) / (far - depth * (far - near));
+        return (near * far) / (far * (1.0 - depth) + depth * near);
     }
 
     // Industry-standard intersection foam: where the ocean fragment is close in
     // view-space to an opaque scene fragment, brighten with foam. Works
     // regardless of object shape/slope/geometry density because it lives on
     // the (wave-displaced) ocean surface and reads the actual scene depth.
-    float calcEdgeFoam(vec2 screenUv) {
+    float calcEdgeFoam(vec2 screenUv, float worldZ) {
         float sceneDepth = texture2D(_SceneDepth, screenUv).x;
         // Skybox / cleared background reads as 1.0 — no opaque object here.
         if (sceneDepth >= 0.9999) return 0.0;
         float sceneLinear = linearizeDepthBuffer(sceneDepth, _CameraNear, _CameraFar);
         float oceanLinear = linearizeDepthBuffer(gl_FragCoord.z, _CameraNear, _CameraFar);
         float depthDiff = sceneLinear - oceanLinear;
-        // Negative diff means the opaque object is in front of this ocean
-        // fragment (e.g. peering through a rock). Treat as no foam.
+
+        // Contact line, unchanged from the original: foam starts exactly where
+        // the ocean meets opaque geometry (depthDiff > 0).
         if (depthDiff <= 0.0) return 0.0;
-        return 1.0 - smoothstep(0.0, _EdgeFoamWidth, depthDiff);
+        float foam = 1.0 - smoothstep(0.0, _EdgeFoamWidth, depthDiff);
+
+        // World-Z fade: kill the foam gradually toward the back of the scene
+        // (more negative Z) so it never reaches the flicker-prone back rocks on
+        // mobile, without a hard cut. Independent of camera distance — the cut
+        // line stays fixed in the world. smoothstep is reversed because Z
+        // decreases toward the back: full at/above FadeStartZ, gone at FadeEndZ.
+        foam *= smoothstep(_EdgeFoamFadeEndZ, _EdgeFoamFadeStartZ, worldZ);
+
+        return foam;
     }
 
     vec3 sampleBlurredScene(vec2 screenUv, vec3 normal) {
@@ -330,7 +353,8 @@ export const surfaceFragment =
         // physical effect when looking up at the surface meeting a rock, where
         // refraction concentrates light at the boundary.
         vec2 screenUv = gl_FragCoord.xy / max(_SceneResolution, vec2(1.0));
-        float edgeFoamRaw = calcEdgeFoam(screenUv);
+        // _worldPos.y is the ocean fragment's world Z (varying = worldPos.xz).
+        float edgeFoamRaw = calcEdgeFoam(screenUv, _worldPos.y);
 
         if (cameraPosition.y > _elevation)
         {

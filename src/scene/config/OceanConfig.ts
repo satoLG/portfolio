@@ -56,6 +56,19 @@ export const edgeFoamIntensity = 0.4200;  // overall brightness of the depth-int
 export const edgeFoamUnderwaterMul = 0.3500;  // dimming factor for the same effect with camera below water (silvery refraction sheen)
 export const edgeFoamColor     = { r: 1.0000, g: 0.9700, b: 1.0000 };
 
+// Edge-foam world-Z fade. The depth-intersection foam flickers on the back rocks
+// on iOS (mediump/16-bit depth precision). Instead of a hard cut, fade the foam
+// out by WORLD Z so the contact line stays put while the foam vanishes toward the
+// back of the scene. Ocean world Z runs +Z (front/camera) → -Z (back). Front
+// rocks sit at z ≈ -1.9..-2.6; flicker-prone back rocks at z ≈ -4.7..-5.6.
+// Foam is full strength at/above FadeStartZ and fully gone at/below FadeEndZ.
+// Desktop: pushed far back so all foam is kept. Mobile: fades out before the
+// back rocks so they never receive foam. Tune on-device.
+export const edgeFoamFadeStartZDesktop = -40.0000; // desktop: full strength up to here (effectively everything)
+export const edgeFoamFadeEndZDesktop   = -60.0000; // desktop: gone here (far beyond the scene → no visible cut)
+export const edgeFoamFadeStartZMobile  = -3.0000;  // mobile: full strength in front of this (keeps front rocks at z≈-2)
+export const edgeFoamFadeEndZMobile    = -4.2000;  // mobile: gone by here (before back rocks at z≈-4.7)
+
 // ── Reflection ────────────────────────────────────────────────────────────────
 export const reflectionFresnelPower = 0.6500; // lower = visible at more angles
 export const reflectionFloor        = 0.2200; // minimum reflectivity at any angle
