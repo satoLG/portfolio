@@ -330,7 +330,11 @@ export function Start(): void
     staticCamera.updateProjectionMatrix();
     staticCamera.position.set(0, 0, 0);
 
-    function onViewportResize() {
+    const _resizeBuf = new Vector2();
+    let _lastViewportW = getViewportWidth();
+    let _resizeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function applyViewportResize() {
         const w = getViewportWidth();
         const h = getViewportHeight();
 
@@ -342,11 +346,42 @@ export function Start(): void
         staticCamera.updateProjectionMatrix();
 
         // Underwater needs the actual pixel-buffer dimensions, not CSS dimensions
-        const buf = new Vector2();
-        renderer.getDrawingBufferSize(buf);
-        PostProcess.onResize(buf.x, buf.y);
-        SceneDepth.onResize(buf.x, buf.y);
+        renderer.getDrawingBufferSize(_resizeBuf);
+        PostProcess.onResize(_resizeBuf.x, _resizeBuf.y);
+        SceneDepth.onResize(_resizeBuf.x, _resizeBuf.y);
         cssRenderer.setSize(w, h);
+
+        _lastViewportW = w;
+    }
+
+    function onViewportResize() {
+        const w = getViewportWidth();
+
+        // On mobile, scrolling collapses/expands the browser URL bar, firing a
+        // BURST of resize events that change only the height. Each one resizes the
+        // drawing buffer and reallocates the depth + scene-color FBOs. The
+        // underwater edge foam samples scene depth in screen space, so this churn
+        // makes it flicker — stray foam over open water, real foam dropping out —
+        // and it only settles once scrolling stops. When the width is unchanged
+        // (i.e. NOT a real rotation/layout change) we debounce: keep the drawing
+        // buffer stable during the burst and reallocate once, after it ends. The
+        // canvas may stretch by the URL-bar height for a moment; that is far less
+        // jarring than the foam flicker and self-corrects the instant scroll stops.
+        if (isMobile && w === _lastViewportW) {
+            if (_resizeDebounceTimer !== null) clearTimeout(_resizeDebounceTimer);
+            _resizeDebounceTimer = setTimeout(() => {
+                _resizeDebounceTimer = null;
+                applyViewportResize();
+            }, 250);
+            return;
+        }
+
+        // Width changed (orientation / layout) or desktop — apply immediately.
+        if (_resizeDebounceTimer !== null) {
+            clearTimeout(_resizeDebounceTimer);
+            _resizeDebounceTimer = null;
+        }
+        applyViewportResize();
     }
 
     window.onresize = onViewportResize;
