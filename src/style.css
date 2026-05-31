@@ -1019,6 +1019,34 @@ body.day-mode .playlist-item.drag-over {
     fill: rgba(64, 164, 255, 1);
 }
 
+/* Back wave layers — raised a few px so only their crests peek above the main wave.
+   Their flat bases stay hidden behind the opaque front fill, so they read as
+   natural waves sitting further back. Each runs a different timing to stand apart. */
+#start-button .wave-back-1 {
+    top: -19px;
+    animation: wave-scroll 4.5s linear infinite;
+}
+
+#start-button .wave-back-2 {
+    top: -22px;
+    animation: wave-scroll-reverse 6s linear infinite;
+}
+
+@keyframes wave-scroll-reverse {
+    from { transform: translateX(-20%); }
+    to   { transform: translateX(0); }
+}
+
+/* Back wave colors borrow the two darker particle-burst blues (PARTICLE_BLUES[1..2]).
+   Fixed in both day and night — the day/night overrides only touch .wave1/.wave2. */
+#start-button .wave-b1 {
+    fill: #2b7cd4;
+}
+
+#start-button .wave-b2 {
+    fill: #1a5faa;
+}
+
 /* Loading percentage text */
 #start-button .loading-percent {
     position: relative;
