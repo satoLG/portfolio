@@ -114,8 +114,10 @@ export const surfaceFragment =
     uniform float _WaterBlurOpacity;
     uniform float _WaterlineCompositeOpacity;
 
-    // Depth-intersection foam — opaque scene depth captured pre-ocean by SceneDepth.ts
-    uniform sampler2D _SceneDepth;
+    // Depth-intersection foam — opaque scene depth captured pre-ocean by SceneDepth.ts.
+    // highp: the sampled depth lives near 1.0, where mediump (the iOS default for
+    // samplers) quantizes catastrophically and makes the contact line flicker.
+    uniform highp sampler2D _SceneDepth;
     uniform float _CameraNear;
     uniform float _CameraFar;
     uniform float _EdgeFoamWidth;
@@ -242,7 +244,14 @@ export const surfaceFragment =
         // Skybox / cleared background reads as 1.0 — no opaque object here.
         if (sceneDepth >= 0.9999) return 0.0;
         float sceneLinear = linearizeDepthBuffer(sceneDepth, _CameraNear, _CameraFar);
-        float oceanLinear = linearizeDepthBuffer(gl_FragCoord.z, _CameraNear, _CameraFar);
+        // Ocean eye-depth analytically, NOT from gl_FragCoord.z. The depth-buffer
+        // value is mediump/16-bit near the contact line on mobile, so deriving
+        // oceanLinear from it injected per-frame jitter into depthDiff exactly
+        // where foam peaks (depthDiff≈0) → the flicker. The ocean fragment's world
+        // position is already known in full precision via the varyings, so its
+        // view-space Z (perpendicular eye depth, same space as sceneLinear) is
+        // exact and stable. _worldPos = worldPos.xz, _elevation = worldPos.y.
+        float oceanLinear = -(viewMatrix * vec4(_worldPos.x, _elevation, _worldPos.y, 1.0)).z;
         float depthDiff = sceneLinear - oceanLinear;
 
         // Contact line, unchanged from the original: foam starts exactly where
