@@ -115,11 +115,11 @@ export const ISLAND_CAMPFIRE_GROUND_NORMAL_THRESHOLD = 0.6000; // upward-facing 
 // Pushes the island's non-grass (rock/underside) tones toward the standalone
 // rock models' palette. Applied with the inverse of the grass mask, so grass
 // stays untouched. All values live-tweakable in debug GUI → "Rock Match Filter".
-export const ISLAND_ROCK_MATCH_COLOR = '#7e837c'; // sRGB hex — target rock tint
-export const ISLAND_ROCK_MATCH_STRENGTH = 0.6500; // overall blend on rock areas (0 = off)
-export const ISLAND_ROCK_MATCH_SATURATION = 0.7000; // 1 = keep original saturation, 0 = grayscale
-export const ISLAND_ROCK_MATCH_BRIGHTNESS = 1.1200; // 1 = keep, >1 lifts the dark underside
-export const ISLAND_ROCK_MATCH_COLOR_TINT = 0.4000; // how much the target color tints (0..1)
+export const ISLAND_ROCK_MATCH_COLOR = '#97a09a'; // sRGB hex — target rock tint (light cool gray)
+export const ISLAND_ROCK_MATCH_STRENGTH = 1.0000; // overall blend on rock areas (0 = off)
+export const ISLAND_ROCK_MATCH_SATURATION = 0.5000; // 1 = keep original saturation, 0 = grayscale
+export const ISLAND_ROCK_MATCH_BRIGHTNESS = 1.2200; // 1 = keep, >1 lifts the dark underside
+export const ISLAND_ROCK_MATCH_COLOR_TINT = 0.5000; // how much the target color tints (0..1)
 
 // ── Bush flower colors ───────────────────────────────────────────────────────
 export const bushFlowerColor      = '#f2d34f';
