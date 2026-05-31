@@ -746,6 +746,17 @@ export function Start(): void {
     renderer.domElement.addEventListener('pointerleave', onPointerLeave);
     renderer.domElement.addEventListener('pointerup', onPointerLeave);
 
+    // A failed load must still advance fishModelsLoaded — otherwise the
+    // loading-screen prewarm (Scene.waitForModels) can hang forever at 90%
+    // waiting on a count that never completes. Better to start with a fish
+    // missing than to freeze. (A failed pool *template* still leaves
+    // isReady() false because its pool can't init — the waitForModels timeout
+    // is the backstop for that case.)
+    const onLoadError = (path: string) => (err: unknown) => {
+        console.error(`[Fish] Failed to load ${path}:`, err);
+        fishModelsLoaded++;
+    };
+
     // Load clown fish
     loader.load(
         'models/underwater/clownfish.glb',
@@ -757,9 +768,11 @@ export function Start(): void {
                 clownMixer.clipAction(gltf.animations[0]).play();
             }
             fishModelsLoaded++;
-        }
+        },
+        undefined,
+        onLoadError('models/underwater/clownfish.glb'),
     );
-    
+
     // Load dori fish
     loader.load(
         'models/underwater/dorifish.glb',
@@ -771,7 +784,9 @@ export function Start(): void {
                 doriMixer.clipAction(gltf.animations[0]).play();
             }
             fishModelsLoaded++;
-        }
+        },
+        undefined,
+        onLoadError('models/underwater/dorifish.glb'),
     );
 
     // Load generic fish template (day)
@@ -782,7 +797,9 @@ export function Start(): void {
             genericFishAnimations = gltf.animations;
             fishModelsLoaded++;
             initFishPool();
-        }
+        },
+        undefined,
+        onLoadError('models/underwater/genericfish.glb'),
     );
 
     // Load jellyfish template (night)
@@ -793,7 +810,9 @@ export function Start(): void {
             jellyfishAnimations = gltf.animations;
             fishModelsLoaded++;
             initJellyPool();
-        }
+        },
+        undefined,
+        onLoadError('models/underwater/jellyfish.glb'),
     );
 
 }

@@ -653,12 +653,20 @@ loadingManager.onLoad = async () => {
     // All Island models downloaded.  Run the prewarm callback (if registered)
     // before signalling 100% — this compiles shaders + uploads geometry while
     // the loading overlay is still visible.
-    if (_onLoadCallback) {
-        await _onLoadCallback();
-    }
-    loadingProgress = 1;
-    if (onLoadingProgress) {
-        onLoadingProgress(1);
+    try {
+        if (_onLoadCallback) {
+            await _onLoadCallback();
+        }
+    } catch (err) {
+        // A failed prewarm must NOT trap the loading bar at 90% forever. Log it
+        // and still report 100% so the user can enter the scene — at worst the
+        // first interaction has an un-warmed hitch instead of a hard freeze.
+        console.error('[Island] GPU prewarm failed; entering scene without full prewarm:', err);
+    } finally {
+        loadingProgress = 1;
+        if (onLoadingProgress) {
+            onLoadingProgress(1);
+        }
     }
 };
 
