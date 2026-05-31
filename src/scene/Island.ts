@@ -2287,7 +2287,7 @@ function applyIslandSurfaceFilterShader(model: Group): void {
                             // Underside moss: tint the green that the top-grass mask missed toward a
                             // moss color so it reads green (matching the surface grass), not gray.
                             float islandUnderGreenMask = islandAnyGreenMask * (1.0 - islandGrassMask) * uIslandRockMatchGreenStrength;
-                            vec3 islandUnderGreenTint = uIslandRockMatchGreenColor * max(islandSurfaceLuma, 0.18);
+                            vec3 islandUnderGreenTint = uIslandRockMatchGreenColor * max(islandSurfaceLuma, 0.45);
                             diffuseColor.rgb = mix(diffuseColor.rgb, islandUnderGreenTint, islandUnderGreenMask);
 
                             float islandCampfireDist = distance(vWorldPosition.xz, uIslandCampfireGroundCenter);

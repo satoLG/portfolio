@@ -124,7 +124,7 @@ export const ISLAND_ROCK_MATCH_BRIGHTNESS = 0.8000; // 1 = keep, <1 darkens towa
 export const ISLAND_ROCK_MATCH_COLOR_TINT = 0.5500; // how much the target color tints (0..1)
 export const ISLAND_ROCK_MATCH_GREEN_THRESHOLD = 0.0400; // green dominance to treat a pixel as moss
 export const ISLAND_ROCK_MATCH_GREEN_STRENGTH = 0.8500; // tint applied to underside moss (protected from gray)
-export const ISLAND_ROCK_MATCH_GREEN_COLOR = '#293c00'; // sRGB hex — underside moss tint (matches surface grass)
+export const ISLAND_ROCK_MATCH_GREEN_COLOR = '#5c8a30'; // sRGB hex — underside moss tint (vivid moss green, like the rocks)
 
 // ── Bush flower colors ───────────────────────────────────────────────────────
 export const bushFlowerColor      = '#f2d34f';
