@@ -25,7 +25,7 @@ export const mossRock2aOffset  = { x: -1.8000, y: 0.4500, z: -2.0000 };
 export const mossRock2bOffset  = { x: 1.1100, y: 0.4500, z: -1.4000 };
 export const mossRock3aOffset  = { x: -1.3350, y: 0.6650, z: 0.7200 };
 export const mossRock3bOffset  = { x: -0.5500, y: 0.2750, z: 1.0000 };
-export const mossRock3cOffset  = { x: 0.1870, y: 0.6650, z: 1.4420 };
+export const mossRock3cOffset  = { x: 0.1870, y: 0.7130, z: 1.4420 };
 export const dockOffset             = { x: 1.0300, y: 0.7500, z: 1.1500 };
 export const foldingTrayTableOffset = { x: 0.6870, y: 0.9800, z: -0.5800 };
 export const tentDogBedOffset       = { x: 0.3100, y: 1.0800, z: -0.3000 };
@@ -87,7 +87,7 @@ export const mossRock2aRot  = { x: 0.0000, y: 1.8664, z: 0.0000 };
 export const mossRock2bRot  = { x: 0.0000, y: -3.1416, z: 0.0000 };
 export const mossRock3aRot  = { x: 0.5914, y: 2.6204, z: 0.0000 };
 export const mossRock3bRot  = { x: 0.4174, y: -3.1416, z: 0.0000 };
-export const mossRock3cRot  = { x: 0.1274, y: -2.5966, z: 0.0000 };
+export const mossRock3cRot  = { x: 0.3594, y: -2.5966, z: 0.1274 };
 export const dockRot             = { x: 0.0000,             y: -0.7416,             z: 0.0000 };
 export const foldingTrayTableRot = { x: 1.5764, y: -0.1046, z: 0.3014 };
 export const tentDogBedRot       = { x: 0.0000,       y: 1.9244,       z: 0.0000 };
@@ -112,19 +112,14 @@ export const ISLAND_CAMPFIRE_GROUND_STRENGTH = 1.0000;
 export const ISLAND_CAMPFIRE_GROUND_NORMAL_THRESHOLD = 0.6000; // upward-facing normal needed for ground tint
 
 // ── Island rock-match color grade ─────────────────────────────────────────────
-// Pushes the island's non-grass STONE (rock/underside) tones toward the standalone
-// rock models' palette: darker, slightly cool/blue-gray. Green moss is detected
-// separately (any facing) and excluded from the gray grade, then tinted toward a
-// moss color so underside green stays green instead of going gray.
-// All values live-tweakable in debug GUI → "Rock Match Filter".
-export const ISLAND_ROCK_MATCH_COLOR = '#6f7a82'; // sRGB hex — target rock tint (cool blue-gray)
-export const ISLAND_ROCK_MATCH_STRENGTH = 1.0000; // overall blend on stone areas (0 = off)
+export const ISLAND_ROCK_MATCH_COLOR = '#006080'; // sRGB hex — target rock tint
+export const ISLAND_ROCK_MATCH_STRENGTH = 1.0000; // overall blend on rock areas (0 = off)
 export const ISLAND_ROCK_MATCH_SATURATION = 0.4500; // 1 = keep original saturation, 0 = grayscale
-export const ISLAND_ROCK_MATCH_BRIGHTNESS = 0.8000; // 1 = keep, <1 darkens toward the darker rocks
+export const ISLAND_ROCK_MATCH_BRIGHTNESS = 0.8000; // 1 = keep, >1 lifts the dark underside
 export const ISLAND_ROCK_MATCH_COLOR_TINT = 0.5500; // how much the target color tints (0..1)
-export const ISLAND_ROCK_MATCH_GREEN_THRESHOLD = 0.0400; // green dominance to treat a pixel as moss
-export const ISLAND_ROCK_MATCH_GREEN_STRENGTH = 0.7500; // tint applied to underside moss (protected from gray)
-export const ISLAND_ROCK_MATCH_GREEN_COLOR = '#4f5e39'; // sRGB hex — underside moss tint (muted olive moss, like the rocks)
+export const ISLAND_ROCK_MATCH_GREEN_THRESHOLD = -0.0150; // green dominance to treat a pixel as moss
+export const ISLAND_ROCK_MATCH_GREEN_STRENGTH = 0.7100; // tint applied to underside moss (protected from gray)
+export const ISLAND_ROCK_MATCH_GREEN_COLOR = '#862d2d'; // sRGB hex — underside moss tint (matches surface grass)
 
 // ── Bush flower colors ───────────────────────────────────────────────────────
 export const bushFlowerColor      = '#f2d34f';
