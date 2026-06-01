@@ -18,6 +18,7 @@ import {
     Vector3
 } from "three";
 import { deltaTime, time } from "../core/Time";
+import { isMobile } from "../core/Scene";
 import { isDayTime } from "./Skybox";
 import { FIRE_LIGHT_INTENSITY, FIRE_LIGHT_RANGE, FIRE_LIGHT_DECAY, FIRE_LIGHT_FLICKER } from "./config/IslandConfig";
 
@@ -73,7 +74,12 @@ let _spriteFrame     = 0;
 let _spriteFrameTime = 0;
 
 function createFireSprite(): Sprite {
-    _fireSpriteTex = new TextureLoader().load('images/fire_spritesheet.webp');
+    // PNG spritesheet, resolution-adaptive: mobile loads the half-res sheet
+    // (~4MB VRAM), desktop the full-res original (sharper fire up close). Both
+    // share the same 9x6 grid, so the UV sampling below is identical.
+    _fireSpriteTex = new TextureLoader().load(
+        isMobile ? 'images/fire_spritesheet_mobile.png' : 'images/fire_spritesheet.png'
+    );
     _fireSpriteTex.colorSpace  = SRGBColorSpace;
     _fireSpriteTex.wrapS       = RepeatWrapping;
     _fireSpriteTex.wrapT       = RepeatWrapping;
