@@ -36,6 +36,14 @@ fireShadowLight.shadow.bias = 0.0005;
 fireShadowLight.shadow.normalBias = 0.02;
 fireShadowLight.shadow.radius = 2;
 fireShadowLight.shadow.blurSamples = 8;
+// This is the scene's second VSM shadow map (depth render + blur pass) and it
+// runs every frame. Its content is almost entirely static (logs, props) — the
+// only animated caster under the cone is the slowly-breathing pug. So don't
+// re-render it every frame: switch off per-light auto-update and let Scene.ts
+// flag needsUpdate on a throttle. Light intensity/color flicker is unaffected
+// (VSM stores depth moments, not radiance), so the warm flicker still animates.
+fireShadowLight.shadow.autoUpdate = false;
+fireShadowLight.shadow.needsUpdate = true; // render once so the shadow exists from frame 0
 
 const FIRE_SCALE = 0.2;
 const FIRE_HEIGHT_OFFSET = -0.01;
