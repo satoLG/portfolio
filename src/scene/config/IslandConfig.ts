@@ -111,6 +111,21 @@ export const ISLAND_CAMPFIRE_GROUND_SOFTNESS = 0.4510;
 export const ISLAND_CAMPFIRE_GROUND_STRENGTH = 1.0000;
 export const ISLAND_CAMPFIRE_GROUND_NORMAL_THRESHOLD = 0.6000; // upward-facing normal needed for ground tint
 
+// ── Island rock-match color grade ─────────────────────────────────────────────
+// Pushes the island's non-grass STONE (rock/underside) tones toward the standalone
+// rock models' palette: darker, slightly cool/blue-gray. Green moss is detected
+// separately (any facing) and excluded from the gray grade, then tinted toward a
+// moss color so underside green stays green instead of going gray.
+// All values live-tweakable in debug GUI → "Rock Match Filter".
+export const ISLAND_ROCK_MATCH_COLOR = '#6f7a82'; // sRGB hex — target rock tint (cool blue-gray)
+export const ISLAND_ROCK_MATCH_STRENGTH = 1.0000; // overall blend on stone areas (0 = off)
+export const ISLAND_ROCK_MATCH_SATURATION = 0.4500; // 1 = keep original saturation, 0 = grayscale
+export const ISLAND_ROCK_MATCH_BRIGHTNESS = 0.8000; // 1 = keep, <1 darkens toward the darker rocks
+export const ISLAND_ROCK_MATCH_COLOR_TINT = 0.5500; // how much the target color tints (0..1)
+export const ISLAND_ROCK_MATCH_GREEN_THRESHOLD = 0.0400; // green dominance to treat a pixel as moss
+export const ISLAND_ROCK_MATCH_GREEN_STRENGTH = 0.7500; // tint applied to underside moss (protected from gray)
+export const ISLAND_ROCK_MATCH_GREEN_COLOR = '#4f5e39'; // sRGB hex — underside moss tint (muted olive moss, like the rocks)
+
 // ── Bush flower colors ───────────────────────────────────────────────────────
 export const bushFlowerColor      = '#f2d34f';
 export const bushRadioFlowerColor = '#f2d34f';
