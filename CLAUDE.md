@@ -52,7 +52,6 @@ src/
   shaders/              ← raw GLSL exported as TS strings (OceanShaders.ts, SkyboxShader.ts, Settings.ts)
   types/                ← TypeScript .d.ts (shaders.d.ts)
   utils/                ← shared utilities (Random.ts — Perlin noise + seeded random)
-  fonts/                ← Patrick Hand TTF + bundle.ts (used by WelcomeText)
 
 public/
   models/surface/       ← GLB models placed on the island

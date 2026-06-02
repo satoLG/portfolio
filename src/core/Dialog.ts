@@ -72,32 +72,11 @@ let _replyBubbleEl: HTMLDivElement | null = null;
 let _replyOptionsEl: HTMLDivElement | null = null;
 let _replyActive = false;
 
-function _buildTailSvg(ns: string, mirrored: boolean): SVGSVGElement {
-    const svg = document.createElementNS(ns, 'svg') as SVGSVGElement;
-    svg.setAttribute('width', '30');
-    svg.setAttribute('height', '22');
-    svg.setAttribute('aria-hidden', 'true');
-    const path = document.createElementNS(ns, 'path');
-    path.classList.add('dialog-tail-path');
-    if (!mirrored) {
-        // Left tail — tip at (−8, 22), points toward character on the left
-        svg.setAttribute('viewBox', '-8 0 30 22');
-        svg.classList.add('dialog-tail');
-        path.setAttribute('d', 'M 2,0 C -1,7 -5,14 -8,22 C 0,15 11,8 22,0 Z');
-    } else {
-        // Right tail — tip at (30, 22) mirrored, points toward user on the right
-        svg.setAttribute('viewBox', '0 0 30 22');
-        svg.classList.add('dialog-reply-tail');
-        path.setAttribute('d', 'M 20,0 C 23,7 27,14 30,22 C 22,15 11,8 0,0 Z');
-    }
-    svg.appendChild(path);
-    return svg;
-}
-
 function ensureBubble(): void {
-    const ns = 'http://www.w3.org/2000/svg';
-
-    // ─ Character bubble ────────────────────────────────────────────────────────
+    // ─ Character text ──────────────────────────────────────────────────────────
+    // No speech-bubble box anymore — the text is written straight onto the page.
+    // The continue prompt (▼) is wrapped together with the text so it can sit
+    // right after where the typed text ends (see _onLineDoneTyping).
     if (!_bubbleEl) {
         _bubbleEl = document.createElement('div');
         _bubbleEl.className = 'dialog-bubble';
@@ -111,17 +90,17 @@ function ensureBubble(): void {
 
         _bubbleEl.appendChild(_textEl);
         _bubbleEl.appendChild(_promptEl);
-        _bubbleEl.appendChild(_buildTailSvg(ns, false));
         document.body.appendChild(_bubbleEl);
 
-        // Clicking the bubble itself advances the dialog
+        // Clicking the text itself advances the dialog (the canvas click handler
+        // also advances, so this is just a convenience for clicking the words).
         _bubbleEl.addEventListener('pointerdown', (e) => {
             e.stopPropagation();
             advanceDialog();
         });
     }
 
-    // ─ Reply bubble ───────────────────────────────────────────────────────────
+    // ─ Reply text ──────────────────────────────────────────────────────────────
     if (!_replyBubbleEl) {
         _replyBubbleEl = document.createElement('div');
         _replyBubbleEl.className = 'dialog-reply-bubble';
@@ -130,21 +109,18 @@ function ensureBubble(): void {
         _replyOptionsEl.className = 'dialog-reply-options';
 
         _replyBubbleEl.appendChild(_replyOptionsEl);
-        _replyBubbleEl.appendChild(_buildTailSvg(ns, true));
         document.body.appendChild(_replyBubbleEl);
     }
 }
 
 // ─── Positioning ──────────────────────────────────────────────────────────────
 
-const TAIL_HEIGHT     = 22;  // px — height of the SVG tail below the bubble
-const BUBBLE_ABOVE    = 10;  // px — extra clearance between tail tip and anchor point
-const TAIL_TIP_OVERHANG = 8;  // px — SVG tail tip overhangs this far left of bubble.left
-
-/** The SVG <svg> tail element inside the character bubble */
-function _getTailSvg(): SVGSVGElement | null {
-    return _bubbleEl?.querySelector('.dialog-tail') as SVGSVGElement | null;
-}
+const BUBBLE_ABOVE   = 24;  // px — clearance between the text bottom and the anchor point
+// px — how far right of the character the text floats. Larger than the old
+// tail overhang so the boxless text sits clearly to the right of the pug.
+const DIALOG_OFFSET_X = 44;
+// px — keep the text this far from the viewport edges (don't go near the edge).
+const EDGE_MARGIN     = 28;
 
 function _updatePosition(): void {
     if (!_state || !_bubbleEl) return;
@@ -156,29 +132,15 @@ function _updatePosition(): void {
     const ww = window.innerWidth;
     const wh = window.innerHeight;
 
-    // Bubble sits to the RIGHT of the character — tail at bottom-left points back at them.
-    const rawLeft = anchor.x + TAIL_TIP_OVERHANG;
-    const left = Math.max(8, Math.min(ww - bw - 8, rawLeft));
+    // Text floats up and to the RIGHT of the character.
+    const rawLeft = anchor.x + DIALOG_OFFSET_X;
+    const left = Math.max(EDGE_MARGIN, Math.min(ww - bw - EDGE_MARGIN, rawLeft));
 
-    // Place bubble above anchor
-    const top = Math.max(8, Math.min(wh - bh - 8, anchor.y - bh - TAIL_HEIGHT - BUBBLE_ABOVE));
+    // Place the text above the anchor.
+    const top = Math.max(EDGE_MARGIN, Math.min(wh - bh - EDGE_MARGIN, anchor.y - bh - BUBBLE_ABOVE));
 
     _bubbleEl.style.left = `${left}px`;
     _bubbleEl.style.top  = `${top}px`;
-
-    // ── Dynamic tail: keep the SVG tip aligned with the 3D character ──────
-    const tailSvg = _getTailSvg();
-    if (tailSvg) {
-        // The SVG tip sits at (tail.left − TAIL_TIP_OVERHANG) in px from the
-        // bubble's left edge.  We want: left + tailLeft − TAIL_TIP_OVERHANG = anchor.x
-        // → tailLeft = anchor.x − left + TAIL_TIP_OVERHANG
-        const idealTailLeft = anchor.x - left + TAIL_TIP_OVERHANG;
-        // Clamp so the tail stays inside the bubble with some margin
-        const minTail = 12;
-        const maxTail = bw - 28;
-        const clampedTail = Math.max(minTail, Math.min(maxTail, idealTailLeft));
-        tailSvg.style.left = `${clampedTail}px`;
-    }
 }
 
 function _trackLoop(): void {
@@ -274,10 +236,10 @@ function _completeTyping(): void {
 
 // ─── Reply bubble ─────────────────────────────────────────────────────────────
 
-/** px — reply bubble left edge sits this far right of the main bubble's right edge */
-const REPLY_OFFSET_X = 24;
-/** px — gap between reply bubble bottom and viewport bottom */
-const REPLY_BOTTOM_MARGIN = 24;
+/** px — gap between the reply text bottom and the viewport bottom */
+const REPLY_BOTTOM_MARGIN = 40;
+/** px — keep the reply text this far from the right edge (don't touch the edge) */
+const REPLY_RIGHT_MARGIN  = 56;
 
 function _positionReplyBubble(): void {
     if (!_replyBubbleEl) return;
@@ -287,12 +249,12 @@ function _positionReplyBubble(): void {
     const ww     = window.innerWidth;
     const wh     = window.innerHeight;
 
-    // Center horizontally, pinned to the bottom of the viewport
-    const left = Math.max(8, Math.min(ww - replyW - 8, (ww - replyW) / 2));
+    // User replies sit toward the RIGHT, near the bottom of the viewport.
+    const left = Math.max(28, ww - replyW - REPLY_RIGHT_MARGIN);
     const top  = wh - replyH - REPLY_BOTTOM_MARGIN;
 
     _replyBubbleEl.style.left = `${left}px`;
-    _replyBubbleEl.style.top  = `${Math.max(8, top)}px`;
+    _replyBubbleEl.style.top  = `${Math.max(28, top)}px`;
 }
 
 function _showReplyBubble(replies: ReplyOption[]): void {

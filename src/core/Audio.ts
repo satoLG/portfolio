@@ -36,7 +36,6 @@ const INTRO_BREEZE_VOLUME      = 0.08;   // Quieter than scene breeze on purpose
 const INTRO_BREEZE_INTERVAL    = 5;      // Seconds between breeze plays
 const INTRO_FADE_IN_DURATION   = 3.0;    // Fade-in when start clicked
 const INTRO_FADE_OUT_DURATION  = 2.5;    // Fade-out when descent begins
-export const INTRO_WRITING_VOLUME = 0.03; // Tegaki pen scratching during welcome text — read by WelcomeText.ts
 
 // ── Night crickets loop ──────────────────────────────────────────────────────
 const CRICKETS_VOLUME       = 0.08;      // EASY TO TWEAK — very soft
@@ -69,7 +68,6 @@ const AUDIO_PATHS = {
 const INTERACTION_AUDIO_PATHS = {
     appleImpact: 'audio/overall/209012__owlstorm__fruit-impact-1.mp3',
     chestOpen: 'audio/overall/771164__steprock__treasure-chest-open.mp3',
-    writing: '/audio/ui/335518__newagesoup__writing-short-8.mp3',
     coral: [
         'audio/nature/underwater/321802__lloydevans09__pvc_pipe_hit_4.mp3',
         'audio/nature/underwater/321805__lloydevans09__pvc_pipe_hit_1.mp3',
@@ -98,7 +96,6 @@ export function preloadAudioBytes(): Promise<void> {
         ...Object.values(AUDIO_PATHS),
         INTERACTION_AUDIO_PATHS.appleImpact,
         INTERACTION_AUDIO_PATHS.chestOpen,
-        INTERACTION_AUDIO_PATHS.writing,
         ...INTERACTION_AUDIO_PATHS.coral,
         ...INTERACTION_AUDIO_PATHS.dialog,
     ]));
