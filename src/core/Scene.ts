@@ -201,7 +201,7 @@ function restoreVisibility(saved: Array<{ obj: Object3D; vis: boolean }>): void 
 
 // Objects that are irrelevant to depth-intersection foam but expensive to draw
 // a second time in the depth pre-pass. The foam only needs the depth of opaque
-// geometry the ocean surface can graze (island, rocks, dock, sea-floor decor).
+// geometry the ocean surface can graze (island, rocks, sea-floor decor).
 //   - Procedural grass: the single heaviest geometry in the scene (one merged
 //     mesh with a huge vertex count) and it sits entirely above the waterline,
 //     so it never produces intersection foam.

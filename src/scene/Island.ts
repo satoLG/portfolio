@@ -26,15 +26,15 @@ import {
     pugOffset, tentOffset, dogBedOffset, littleRocksOffset, phoneOffset,
     apple1Offset, apple2Offset, apple3Offset,
     mossRock1Offset, mossRock2aOffset, mossRock2bOffset, mossRock3aOffset, mossRock3bOffset, mossRock3cOffset,
-    dockOffset, foldingTrayTableOffset, tentDogBedOffset, rugRoundOffset, lanternOffset, dogBowlOffset, dogBiscuitOffset,
+    foldingTrayTableOffset, tentDogBedOffset, rugRoundOffset, lanternOffset, dogBowlOffset, dogBiscuitOffset,
     islandScale, firecampScale, treeScale, bushScale, bushRadioScale, bushRadio2Scale, bushPugScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, littleRocksScale, phoneScale,
     apple1Scale, apple2Scale, apple3Scale,
     mossRock1Scale, mossRock2aScale, mossRock2bScale, mossRock3aScale, mossRock3bScale, mossRock3cScale,
-    dockScale, foldingTrayTableScale, tentDogBedScale, rugRoundScale, lanternScale, dogBowlScale, dogBiscuitScale,
+    foldingTrayTableScale, tentDogBedScale, rugRoundScale, lanternScale, dogBowlScale, dogBiscuitScale,
     treeRotY, bushRotY, bushRadioRotY, bushRadio2RotY, bushPugRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, littleRocksRot, phoneRot,
     apple1RotY, apple2RotY, apple3RotY,
     mossRock1Rot, mossRock2aRot, mossRock2bRot, mossRock3aRot, mossRock3bRot, mossRock3cRot,
-    dockRot, foldingTrayTableRot, tentDogBedRot, rugRoundRot, lanternRot, dogBowlRot, dogBiscuitRot,
+    foldingTrayTableRot, tentDogBedRot, rugRoundRot, lanternRot, dogBowlRot, dogBiscuitRot,
     ISLAND_SURFACE_GRASS_COLOR,
     ISLAND_SURFACE_GRASS_STRENGTH,
     ISLAND_SURFACE_GRASS_GREEN_THRESHOLD,
@@ -119,7 +119,6 @@ export const mossRock3b = new Group();
 export const mossRock3c = new Group();
 
 // Surface props added in the visual_enhancements_2 branch.
-export const dock              = new Group();
 export const foldingTrayTable  = new Group();
 export const tentDogBed        = new Group();
 export const rugRound          = new Group();
@@ -2383,7 +2382,7 @@ function applyOceanLightingToModel(model: Group): void {
  *  ocean-side via depth-intersection (see SceneDepth + OceanShaders). The
  *  first call per path loads the GLB; subsequent calls with the same path
  *  clone the cached scene (geometry + materials shared, shader injection only
- *  happens once). `moss_rock2.glb` is currently used by 2 instances and
+ *  happens once). `moss_rock1.glb` is currently used by 3 instances and
  *  `moss_rock3.glb` by 3 instances — without the cache each instance held its
  *  own GPU upload. */
 const _mossRockTemplates = new Map<string, Group>();
@@ -3081,14 +3080,13 @@ export function Start(): void {
     // apple-style waterline shader so a foam line is drawn exactly where the
     // mesh crosses the ocean surface — independent of placement.
     _loadMossRock('models/surface/moss_rock1.glb',  mossRock1,  mossRock1Offset,  mossRock1Scale,  mossRock1Rot);
-    _loadMossRock('models/surface/moss_rock2.glb',  mossRock2a, mossRock2aOffset, mossRock2aScale, mossRock2aRot);
-    _loadMossRock('models/surface/moss_rock2.glb',  mossRock2b, mossRock2bOffset, mossRock2bScale, mossRock2bRot);
+    _loadMossRock('models/surface/moss_rock1.glb',  mossRock2a, mossRock2aOffset, mossRock2aScale, mossRock2aRot);
+    _loadMossRock('models/surface/moss_rock1.glb',  mossRock2b, mossRock2bOffset, mossRock2bScale, mossRock2bRot);
     _loadMossRock('models/surface/moss_rock3.glb',  mossRock3a, mossRock3aOffset, mossRock3aScale, mossRock3aRot);
     _loadMossRock('models/surface/moss_rock3.glb',  mossRock3b, mossRock3bOffset, mossRock3bScale, mossRock3bRot);
     _loadMossRock('models/surface/moss_rock3.glb',  mossRock3c, mossRock3cOffset, mossRock3cScale, mossRock3cRot);
 
-    // ── Extra surface props (dock, tent interior) ────────────────────────────
-    _loadSurfaceProp('models/surface/dock.glb',                dock,             dockOffset,             dockScale,             dockRot);
+    // ── Extra surface props (tent interior) ───────────────────────────────────
     _loadSurfaceProp('models/surface/folding_tray_table.glb',  foldingTrayTable, foldingTrayTableOffset, foldingTrayTableScale, foldingTrayTableRot);
     _loadSurfaceProp('models/surface/dog_bed.glb',             tentDogBed,       tentDogBedOffset,       tentDogBedScale,       tentDogBedRot);
     _loadSurfaceProp('models/surface/rug_round.glb',           rugRound,         rugRoundOffset,         rugRoundScale,         rugRoundRot);
