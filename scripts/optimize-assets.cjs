@@ -12,6 +12,13 @@
  * and tracks mtime+size per file — unchanged files are skipped, so the prebuild
  * stays fast on incremental builds.
  *
+ * Because the cache is gitignored and mtime-based, it can't help on a fresh
+ * clone (no cache, reset mtimes) — there the script would otherwise re-optimize
+ * every GLB. Meshopt re-encoding is not byte-stable, so that would rewrite
+ * already-optimized files with no visual change, churning git. To prevent it,
+ * GLBs that already carry EXT_meshopt_compression are detected by content and
+ * skipped (unless --force). Add a NEW raw GLB and it still gets optimized once.
+ *
  * What it does:
  *   1. GLBs in public/models/: weld + dedup + prune via @gltf-transform.
  *      EXT_meshopt_compression encoding ('medium' level) is applied to files
@@ -154,9 +161,26 @@ async function optimizeGLBs(cache) {
 
     let totalBefore = 0;
     let totalAfter  = 0;
+    let skipped     = 0;
 
     for (const file of toProcess) {
         const rel    = path.relative(PUBLIC, file);
+
+        // Already-optimized guard — survives fresh clones, where the mtime+size
+        // cache is gone and every file's mtime is reset to checkout time (so the
+        // isUpToDate() fast-path above can't help). A GLB that already carries
+        // EXT_meshopt_compression was encoded in a previous run or committed
+        // pre-optimized. Re-encoding meshopt is NOT byte-stable — decode →
+        // weld/dedup/prune → re-encode yields a slightly different binary with
+        // no visual change — so reprocessing would only churn git with
+        // meaningless diffs. Detect it from the file's own bytes and skip.
+        // (--force still reprocesses everything by intent.)
+        if (!FORCE && fs.readFileSync(file).includes('EXT_meshopt_compression')) {
+            recordOptimized(cache, file);
+            skipped++;
+            continue;
+        }
+
         const before = fs.statSync(file).size;
         totalBefore += before;
 
@@ -199,7 +223,14 @@ async function optimizeGLBs(cache) {
         recordOptimized(cache, file);
     }
 
-    console.log(`\n  GLB total: ${(totalBefore / 1024).toFixed(0)}KB → ${(totalAfter / 1024).toFixed(0)}KB  (${((1 - totalAfter / totalBefore) * 100).toFixed(1)}% saved)\n`);
+    if (skipped > 0) {
+        console.log(`  ${skipped} file(s) already meshopt-optimized — skipped (no churn).`);
+    }
+    if (totalBefore > 0) {
+        console.log(`\n  GLB total: ${(totalBefore / 1024).toFixed(0)}KB → ${(totalAfter / 1024).toFixed(0)}KB  (${((1 - totalAfter / totalBefore) * 100).toFixed(1)}% saved)\n`);
+    } else {
+        console.log('');
+    }
 }
 
 // ── PNG → WebP conversion ─────────────────────────────────────────────────────
