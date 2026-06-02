@@ -101,6 +101,11 @@ export const cameraForward = new Vector3();
 // Reusable scratch vector for light direction (avoids allocation per frame)
 const _scratchLightDir = new Vector3();
 const _underwaterTransparentTargets: Object3D[] = [];
+const _depthExcludedTargets: Object3D[] = [];
+
+// Fire shadow map refreshes every Nth frame (see throttle in Update).
+const FIRE_SHADOW_UPDATE_INTERVAL = 3;
+let _fireShadowFrame = 0;
 
 // Scratch vectors for UpdateCameraRotation (eliminates 3 Vector3 allocations per frame)
 const _basisX = new Vector3();
@@ -194,6 +199,36 @@ function restoreVisibility(saved: Array<{ obj: Object3D; vis: boolean }>): void 
     for (const item of saved) item.obj.visible = item.vis;
 }
 
+// Objects that are irrelevant to depth-intersection foam but expensive to draw
+// a second time in the depth pre-pass. The foam only needs the depth of opaque
+// geometry the ocean surface can graze (island, rocks, dock, sea-floor decor).
+//   - Procedural grass: the single heaviest geometry in the scene (one merged
+//     mesh with a huge vertex count) and it sits entirely above the waterline,
+//     so it never produces intersection foam.
+//   - Grass shadow floor: flat disc above water, irrelevant.
+//   - Skybox: covers the whole screen but reads as background (depth >= 0.9999)
+//     anyway — the cleared depth target gives the identical result for free.
+//   - Wind lines: thin above-water ribbons, irrelevant.
+// Skipping these in the depth-only pass is the bulk of the pre-pass cost.
+function getDepthPrePassExcluded(): Object3D[] {
+    _depthExcludedTargets.length = 0;
+    if (Island.proceduralGrassMesh) _depthExcludedTargets.push(Island.proceduralGrassMesh);
+    if (Island.grassShadowMesh)     _depthExcludedTargets.push(Island.grassShadowMesh);
+    if (Skybox.skybox)              _depthExcludedTargets.push(Skybox.skybox);
+    if (WindLines.windLinesGroup)   _depthExcludedTargets.push(WindLines.windLinesGroup);
+    return _depthExcludedTargets;
+}
+
+function hideDepthPrePassExcluded(): Array<{ obj: Object3D; vis: boolean }> {
+    const saved: Array<{ obj: Object3D; vis: boolean }> = [];
+    for (const obj of getDepthPrePassExcluded()) {
+        if (!obj.visible) continue; // already hidden by visibility gating — nothing to restore
+        saved.push({ obj, vis: obj.visible });
+        obj.visible = false;
+    }
+    return saved;
+}
+
 function renderOnlyUnderwaterTransparents(savedTargets: Array<{ obj: Object3D; vis: boolean }>): void {
     const targetSet = new Set(savedTargets.filter(item => item.vis).map(item => item.obj));
     if (targetSet.size === 0) return;
@@ -205,7 +240,15 @@ function renderOnlyUnderwaterTransparents(savedTargets: Array<{ obj: Object3D; v
 
     const prevAutoClear = renderer.autoClear;
     renderer.autoClear = false;
+    // This is a second full renderer.render() in the same frame (only the
+    // underwater transparents are visible). Without suspending shadow updates it
+    // re-renders both VSM shadow maps a second time per frame for nothing — the
+    // shadows were already drawn by the main render and nothing casting them is
+    // visible here. Suspend during this pass.
+    const prevShadowAutoUpdate = renderer.shadowMap.autoUpdate;
+    renderer.shadowMap.autoUpdate = false;
     renderer.render(scene, camera);
+    renderer.shadowMap.autoUpdate = prevShadowAutoUpdate;
     renderer.autoClear = prevAutoClear;
 
     restoreVisibility(savedChildren);
@@ -227,7 +270,11 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     // AFTER per-frame visibility gating (already set above us in Update) and
     // BEFORE the main scene render — the override material is a cheap
     // MeshDepthMaterial so the cost is just vertex pipeline + depth write.
+    // Exclude foam-irrelevant heavy geometry (grass, skybox, wind lines) so the
+    // pre-pass doesn't re-submit the scene's biggest vertex loads for nothing.
+    const depthExcludedVis = hideDepthPrePassExcluded();
     SceneDepth.capture(renderer, scene, camera);
+    restoreVisibility(depthExcludedVis);
     sceneDepthUniform.value = SceneDepth.getDepthTexture();
     updateSceneDepthCamera(camera);
 
@@ -284,7 +331,7 @@ export function setShadowsEnabled(value: boolean): void
 
 export function Start(): void
 {
-    const dpr = Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2);  // cap DPR to limit GPU memory
+    const dpr = Math.min(window.devicePixelRatio, 1.5);  // cap DPR to limit GPU memory (UI 'high' preset raises it to 2)
     
     // ── Viewport helpers ─────────────────────────────────────────────────────
     // Use window.innerWidth/Height — matches henryjeff's Sizes.ts approach.
@@ -843,6 +890,14 @@ export function Update(): void
     cssCamera.near = camera.near * CSS_SCALE;
     cssCamera.far = camera.far * CSS_SCALE;
     cssCamera.updateProjectionMatrix();
+
+    // Fire shadow map throttle: its caster geometry is near-static (only the
+    // slowly-breathing pug moves under the cone), so refresh it every 3rd frame
+    // instead of every frame. ~66% fewer fire-shadow renders; the ~50ms latency
+    // on the pug's warm contact shadow is imperceptible. autoUpdate is off on
+    // this light (see Fire.ts), so it renders only on the frames flagged here.
+    _fireShadowFrame = (_fireShadowFrame + 1) % FIRE_SHADOW_UPDATE_INTERVAL;
+    Fire.fireShadowLight.shadow.needsUpdate = (_fireShadowFrame === 0);
 
     // Main WebGL render — single-pass: scene includes occluders (MeshBasicMaterial
     // with NoBlending punches transparent holes), matching henryjeff's architecture.

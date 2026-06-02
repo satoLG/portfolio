@@ -18,6 +18,7 @@ import {
     Vector3
 } from "three";
 import { deltaTime, time } from "../core/Time";
+import { isMobile } from "../core/Scene";
 import { isDayTime } from "./Skybox";
 import { FIRE_LIGHT_INTENSITY, FIRE_LIGHT_RANGE, FIRE_LIGHT_DECAY, FIRE_LIGHT_FLICKER } from "./config/IslandConfig";
 
@@ -36,6 +37,14 @@ fireShadowLight.shadow.bias = 0.0005;
 fireShadowLight.shadow.normalBias = 0.02;
 fireShadowLight.shadow.radius = 2;
 fireShadowLight.shadow.blurSamples = 8;
+// This is the scene's second VSM shadow map (depth render + blur pass) and it
+// runs every frame. Its content is almost entirely static (logs, props) — the
+// only animated caster under the cone is the slowly-breathing pug. So don't
+// re-render it every frame: switch off per-light auto-update and let Scene.ts
+// flag needsUpdate on a throttle. Light intensity/color flicker is unaffected
+// (VSM stores depth moments, not radiance), so the warm flicker still animates.
+fireShadowLight.shadow.autoUpdate = false;
+fireShadowLight.shadow.needsUpdate = true; // render once so the shadow exists from frame 0
 
 const FIRE_SCALE = 0.2;
 const FIRE_HEIGHT_OFFSET = -0.01;
@@ -65,7 +74,12 @@ let _spriteFrame     = 0;
 let _spriteFrameTime = 0;
 
 function createFireSprite(): Sprite {
-    _fireSpriteTex = new TextureLoader().load('images/fire_spritesheet.webp');
+    // PNG spritesheet, resolution-adaptive: mobile loads the half-res sheet
+    // (~4MB VRAM), desktop the full-res original (sharper fire up close). Both
+    // share the same 9x6 grid, so the UV sampling below is identical.
+    _fireSpriteTex = new TextureLoader().load(
+        isMobile ? 'images/fire_spritesheet_mobile.png' : 'images/fire_spritesheet.png'
+    );
     _fireSpriteTex.colorSpace  = SRGBColorSpace;
     _fireSpriteTex.wrapS       = RepeatWrapping;
     _fireSpriteTex.wrapT       = RepeatWrapping;

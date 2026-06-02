@@ -416,7 +416,11 @@ export function Start(): void {
                 setShadowResolution(256);
                 break;
             case 'medium':
-                setDPR(isMobile ? 1.5 : 2);
+                // Desktop DPR capped at 1.5 (was 2): ~44% fewer fragments across
+                // every fullscreen pass (main render, ocean blur, FXAA, framebuffer
+                // copies) with only a slight softening that FXAA hides. Users who
+                // want the crisp 2x can pick the 'high' preset.
+                setDPR(1.5);
                 setShadowsEnabled(true);
                 setShadowResolution(isMobile ? 512 : 1024);
                 break;

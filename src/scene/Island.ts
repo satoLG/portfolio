@@ -2193,6 +2193,7 @@ function applyIslandSurfaceFilterShader(model: Group): void {
                         shader.uniforms.uIslandRockMatchGreenThreshold = islandRockMatchGreenThresholdUniform;
                         shader.uniforms.uIslandRockMatchGreenStrength = islandRockMatchGreenStrengthUniform;
                         shader.uniforms.uIslandRockMatchGreenColor = islandRockMatchGreenColorUniform;
+                        shader.uniforms.uWaterlineY = waterlineYUniform;
 
                         shader.vertexShader = shader.vertexShader.replace(
                             '#include <common>',
@@ -2237,6 +2238,7 @@ function applyIslandSurfaceFilterShader(model: Group): void {
                             uniform float uIslandRockMatchGreenThreshold;
                             uniform float uIslandRockMatchGreenStrength;
                             uniform vec3 uIslandRockMatchGreenColor;
+                            uniform float uWaterlineY;
                             ${oceanLightingPars}`
                         );
                         shader.fragmentShader = shader.fragmentShader.replace(
@@ -2273,10 +2275,17 @@ function applyIslandSurfaceFilterShader(model: Group): void {
                                 islandGreenDominance
                             );
 
+                            // Below-water gate: the rock-match grade and underside moss tint are an
+                            // UNDERWATER look only. The island's top (above the ocean surface) already
+                            // has its own color filters that must be respected 100%, so confine both
+                            // effects to geometry below the waterline with a thin soft band to avoid
+                            // a hard seam at the surface.
+                            float islandBelowWaterMask = 1.0 - smoothstep(uWaterlineY - 0.06, uWaterlineY + 0.06, vWorldPosition.y);
+
                             // Rock-match grade: nudge the non-grass STONE tones toward the standalone
                             // rock models' palette (darker, cool blue-gray). Excludes both the top
                             // grass and any moss green so only bare stone is regraded.
-                            float islandRockMask = (1.0 - islandGrassMask) * (1.0 - islandAnyGreenMask) * uIslandRockMatchStrength;
+                            float islandRockMask = (1.0 - islandGrassMask) * (1.0 - islandAnyGreenMask) * uIslandRockMatchStrength * islandBelowWaterMask;
                             float islandRockLuma = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
                             vec3 islandRockGraded = mix(vec3(islandRockLuma), diffuseColor.rgb, uIslandRockMatchSaturation);
                             islandRockGraded *= uIslandRockMatchBrightness;
@@ -2286,7 +2295,7 @@ function applyIslandSurfaceFilterShader(model: Group): void {
 
                             // Underside moss: tint the green that the top-grass mask missed toward a
                             // moss color so it reads green (matching the surface grass), not gray.
-                            float islandUnderGreenMask = islandAnyGreenMask * (1.0 - islandGrassMask) * uIslandRockMatchGreenStrength;
+                            float islandUnderGreenMask = islandAnyGreenMask * (1.0 - islandGrassMask) * uIslandRockMatchGreenStrength * islandBelowWaterMask;
                             vec3 islandUnderGreenTint = uIslandRockMatchGreenColor * max(islandSurfaceLuma, 0.38);
                             diffuseColor.rgb = mix(diffuseColor.rgb, islandUnderGreenTint, islandUnderGreenMask);
 

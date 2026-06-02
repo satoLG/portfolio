@@ -27,6 +27,15 @@ let depthTexture: DepthTexture | null = null;
 let width = 1;
 let height = 1;
 
+// The foam edge is a soft smoothstep, so it tolerates a half-resolution depth
+// target: a quarter of the depth-buffer fragments + a quarter of the VRAM, with
+// no visible change to the contact line. The ocean shader samples by normalized
+// UV, so the lower-res target is fully transparent to it.
+const DEPTH_SCALE = 0.5;
+function scaleDim(v: number): number {
+    return Math.max(1, Math.round(v * DEPTH_SCALE));
+}
+
 // MeshDepthMaterial writes linear depth packed into RGBA by default; with a
 // dedicated DepthTexture attachment we don't actually consume its color output,
 // but the material is required as `scene.overrideMaterial` so that custom
@@ -57,14 +66,14 @@ function ensureTarget(w: number, h: number): WebGLRenderTarget {
     return depthTarget;
 }
 
-/** Allocate the depth target at the renderer's current drawing-buffer size. */
+/** Allocate the depth target at half the renderer's current drawing-buffer size. */
 export function Start(renderer: WebGLRenderer): void {
     renderer.getDrawingBufferSize(_size);
-    ensureTarget(_size.x, _size.y);
+    ensureTarget(scaleDim(_size.x), scaleDim(_size.y));
 }
 
 export function onResize(w: number, h: number): void {
-    ensureTarget(w, h);
+    ensureTarget(scaleDim(w), scaleDim(h));
 }
 
 /** Get the depth texture for ocean-shader sampling. May be null pre-Start(). */
@@ -87,10 +96,18 @@ export function prewarm(renderer: WebGLRenderer, scene: ThreeScene, camera: Came
  */
 export function capture(renderer: WebGLRenderer, scene: ThreeScene, camera: Camera): void {
     renderer.getDrawingBufferSize(_size);
-    const target = ensureTarget(_size.x, _size.y);
+    const target = ensureTarget(scaleDim(_size.x), scaleDim(_size.y));
 
     const prevTarget = renderer.getRenderTarget();
     const prevOverride = scene.overrideMaterial;
+    // This depth-only pass uses MeshDepthMaterial and receives no shadows, but
+    // renderer.render() re-renders every shadow map at the top of the call when
+    // shadowMap.autoUpdate is on (the default). That would render the VSM maps
+    // (+ blur pass) a second time per frame for nothing. Suspend shadow updates
+    // during the pre-pass; the main render right after re-enables and renders
+    // them exactly once.
+    const prevShadowAutoUpdate = renderer.shadowMap.autoUpdate;
+    renderer.shadowMap.autoUpdate = false;
 
     scene.overrideMaterial = overrideMaterial;
     renderer.setRenderTarget(target);
@@ -99,4 +116,5 @@ export function capture(renderer: WebGLRenderer, scene: ThreeScene, camera: Came
 
     scene.overrideMaterial = prevOverride;
     renderer.setRenderTarget(prevTarget);
+    renderer.shadowMap.autoUpdate = prevShadowAutoUpdate;
 }

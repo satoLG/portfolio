@@ -209,8 +209,18 @@ async function convertTextures(cache) {
     const imagesDir = path.join(PUBLIC, 'images');
     const MIN_SIZE  = 10 * 1024;  // only convert PNGs > 10KB
 
+    // These textures are intentionally served as PNG (no WebP twin). The fire
+    // spritesheet is loaded resolution-adaptively as PNG and the cloud sprite
+    // reads best from PNG; converting them would recreate the orphaned .webp the
+    // runtime no longer references. Keep them out of the conversion.
+    const WEBP_EXCLUDE = new Set([
+        'cloud10.png',
+        'fire_spritesheet.png',
+        'fire_spritesheet_mobile.png',
+    ]);
+
     const pngFiles = fs.readdirSync(imagesDir)
-        .filter(f => f.endsWith('.png'))
+        .filter(f => f.endsWith('.png') && !WEBP_EXCLUDE.has(f))
         .map(f => path.join(imagesDir, f))
         .filter(f => fs.statSync(f).size > MIN_SIZE);
 
