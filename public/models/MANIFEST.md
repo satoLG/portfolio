@@ -20,10 +20,9 @@ For shader-injection guidance per model, see [src/scene/CLAUDE.md](src/scene/CLA
 | `sword.glb` | 46 KB | [Island.ts:2799](src/scene/Island.ts#L2799) | Sword prop |
 | `custom_tent.glb` | 40 KB | [Island.ts:2872](src/scene/Island.ts#L2872) | Tent (replaces older `tent.glb`) |
 | `little_rocks.glb` | 5 KB | [Island.ts:2897](src/scene/Island.ts#L2897) | Small accent rocks |
-| `moss_rock1.glb` | 1.1 MB | [Island.ts:2924](src/scene/Island.ts#L2924) | Mossy rock (1 instance) |
-| `moss_rock2.glb` | 1.1 MB | [Island.ts:2925-2926](src/scene/Island.ts#L2925) | Mossy rock (2 instances: a, b) |
+| `moss_rock1.glb` | 1.1 MB | [Island.ts:2924-2926](src/scene/Island.ts#L2924) | Mossy rock (3 instances: 1, 2a, 2b) |
+| `moss_rock2.glb` | 1.1 MB | _(unused — instances replaced by `moss_rock1.glb`)_ | Mossy rock (currently unused) |
 | `moss_rock3.glb` | 814 KB | [Island.ts:2927-2929](src/scene/Island.ts#L2927) | Mossy rock (3 instances: a, b, c) |
-| `dock.glb` | 86 KB | [Island.ts:2932](src/scene/Island.ts#L2932) | Wooden dock |
 | `folding_tray_table.glb` | 435 KB | [Island.ts:2933](src/scene/Island.ts#L2933) | Camp table |
 | `dog_bed.glb` | 212 KB | [Island.ts:2934](src/scene/Island.ts#L2934) | Pug bed |
 | `lantern.glb` | 72 KB | [Island.ts:2936](src/scene/Island.ts#L2936) | Lantern prop |

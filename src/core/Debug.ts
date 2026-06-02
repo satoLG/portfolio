@@ -157,7 +157,6 @@ import {
     mossRock3a,
     mossRock3b,
     mossRock3c,
-    dock,
     foldingTrayTable,
     tentDogBed,
     rugRound,
@@ -763,7 +762,6 @@ function buildGUI(): void {
                 `export const mossRock3aOffset  = { x: ${f(mossRock3a.position.x - ip.x)}, y: ${f(mossRock3a.position.y - ip.y)}, z: ${f(mossRock3a.position.z - ip.z)} };`,
                 `export const mossRock3bOffset  = { x: ${f(mossRock3b.position.x - ip.x)}, y: ${f(mossRock3b.position.y - ip.y)}, z: ${f(mossRock3b.position.z - ip.z)} };`,
                 `export const mossRock3cOffset  = { x: ${f(mossRock3c.position.x - ip.x)}, y: ${f(mossRock3c.position.y - ip.y)}, z: ${f(mossRock3c.position.z - ip.z)} };`,
-                `export const dockOffset             = { x: ${f(dock.position.x             - ip.x)}, y: ${f(dock.position.y             - ip.y)}, z: ${f(dock.position.z             - ip.z)} };`,
                 `export const foldingTrayTableOffset = { x: ${f(foldingTrayTable.position.x - ip.x)}, y: ${f(foldingTrayTable.position.y - ip.y)}, z: ${f(foldingTrayTable.position.z - ip.z)} };`,
                 `export const tentDogBedOffset       = { x: ${f(tentDogBed.position.x       - ip.x)}, y: ${f(tentDogBed.position.y       - ip.y)}, z: ${f(tentDogBed.position.z       - ip.z)} };`,
                 `export const rugRoundOffset         = { x: ${f(rugRound.position.x         - ip.x)}, y: ${f(rugRound.position.y         - ip.y)}, z: ${f(rugRound.position.z         - ip.z)} };`,
@@ -795,7 +793,6 @@ function buildGUI(): void {
                 `export const mossRock3aScale  = ${f(mossRock3a.scale.x)};`,
                 `export const mossRock3bScale  = ${f(mossRock3b.scale.x)};`,
                 `export const mossRock3cScale  = ${f(mossRock3c.scale.x)};`,
-                `export const dockScale             = ${f(dock.scale.x)};`,
                 `export const foldingTrayTableScale = ${f(foldingTrayTable.scale.x)};`,
                 `export const tentDogBedScale       = ${f(tentDogBed.scale.x)};`,
                 `export const rugRoundScale         = ${f(rugRound.scale.x)};`,
@@ -825,7 +822,6 @@ function buildGUI(): void {
                 `export const mossRock3aRot  = { x: ${f(mossRock3a.rotation.x)}, y: ${f(mossRock3a.rotation.y)}, z: ${f(mossRock3a.rotation.z)} };`,
                 `export const mossRock3bRot  = { x: ${f(mossRock3b.rotation.x)}, y: ${f(mossRock3b.rotation.y)}, z: ${f(mossRock3b.rotation.z)} };`,
                 `export const mossRock3cRot  = { x: ${f(mossRock3c.rotation.x)}, y: ${f(mossRock3c.rotation.y)}, z: ${f(mossRock3c.rotation.z)} };`,
-                `export const dockRot             = { x: ${f(dock.rotation.x)},             y: ${f(dock.rotation.y)},             z: ${f(dock.rotation.z)} };`,
                 `export const foldingTrayTableRot = { x: ${f(foldingTrayTable.rotation.x)}, y: ${f(foldingTrayTable.rotation.y)}, z: ${f(foldingTrayTable.rotation.z)} };`,
                 `export const tentDogBedRot       = { x: ${f(tentDogBed.rotation.x)},       y: ${f(tentDogBed.rotation.y)},       z: ${f(tentDogBed.rotation.z)} };`,
                 `export const rugRoundRot         = { x: ${f(rugRound.rotation.x)},         y: ${f(rugRound.rotation.y)},         z: ${f(rugRound.rotation.z)} };`,
@@ -1414,10 +1410,6 @@ function buildGUI(): void {
     }
 
     {
-        const newPropsFolder = surfaceFolder.addFolder('New Props');
-        addObjectFolder(newPropsFolder, 'Dock',     dock,   { scaleRange: [0.05, 2.0], rotAxes: ['x', 'y', 'z'] });
-        newPropsFolder.close();
-
         const tentFolder = surfaceFolder.addFolder('Tent Interior');
         addObjectFolder(tentFolder, 'Folding Tray Table', foldingTrayTable, { scaleRange: [0.02, 1.0], rotAxes: ['x', 'y', 'z'] });
         addObjectFolder(tentFolder, 'Tent Dog Bed',       tentDogBed,       { scaleRange: [0.02, 1.0], rotAxes: ['x', 'y', 'z'] });
