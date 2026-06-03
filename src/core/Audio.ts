@@ -24,6 +24,8 @@ const UI_SOUND_THROTTLE = 100;
 const WATER_SPLASH_VOLUME = 0.3;
 const UI_SOUND_VOLUME = 0.4;
 const CHARACTER_SNORE_VOLUME = 0.5;
+// Pug dialog bark ("latido"). Defaulted to 10% of its previous level (was 0.85).
+const CHARACTER_BARK_VOLUME = 0.085;
 const CROSSFADE_DURATION = 1.0;
 const AUDIO_CHECK_INTERVAL = 2000;
 const FADE_IN_DURATION = 2.0;  // seconds — all audio fades in over this after start
@@ -36,7 +38,6 @@ const INTRO_BREEZE_VOLUME      = 0.08;   // Quieter than scene breeze on purpose
 const INTRO_BREEZE_INTERVAL    = 5;      // Seconds between breeze plays
 const INTRO_FADE_IN_DURATION   = 3.0;    // Fade-in when start clicked
 const INTRO_FADE_OUT_DURATION  = 2.5;    // Fade-out when descent begins
-export const INTRO_WRITING_VOLUME = 0.03; // Tegaki pen scratching during welcome text — read by WelcomeText.ts
 
 // ── Night crickets loop ──────────────────────────────────────────────────────
 const CRICKETS_VOLUME       = 0.08;      // EASY TO TWEAK — very soft
@@ -69,7 +70,6 @@ const AUDIO_PATHS = {
 const INTERACTION_AUDIO_PATHS = {
     appleImpact: 'audio/overall/209012__owlstorm__fruit-impact-1.mp3',
     chestOpen: 'audio/overall/771164__steprock__treasure-chest-open.mp3',
-    writing: '/audio/ui/335518__newagesoup__writing-short-8.mp3',
     coral: [
         'audio/nature/underwater/321802__lloydevans09__pvc_pipe_hit_4.mp3',
         'audio/nature/underwater/321805__lloydevans09__pvc_pipe_hit_1.mp3',
@@ -79,6 +79,10 @@ const INTERACTION_AUDIO_PATHS = {
         '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.mp3',
         '/audio/character/pug/freesound_community-pug-woof-2-103762_SEGUNDA.mp3',
     ],
+    // Dialog UI cues: a soft "pop" when a dialog bubble first appears and a tick
+    // per typed letter. Played via playOneShot so ticks can overlap naturally.
+    dialogAppear: '/audio/ui/drop_002.ogg',
+    dialogType: '/audio/ui/drop_003.ogg',
 };
 
 // ============================================
@@ -98,9 +102,10 @@ export function preloadAudioBytes(): Promise<void> {
         ...Object.values(AUDIO_PATHS),
         INTERACTION_AUDIO_PATHS.appleImpact,
         INTERACTION_AUDIO_PATHS.chestOpen,
-        INTERACTION_AUDIO_PATHS.writing,
         ...INTERACTION_AUDIO_PATHS.coral,
         ...INTERACTION_AUDIO_PATHS.dialog,
+        INTERACTION_AUDIO_PATHS.dialogAppear,
+        INTERACTION_AUDIO_PATHS.dialogType,
     ]));
     _prefetchPromise = Promise.all(
         paths.map(async (url) => {
@@ -862,6 +867,10 @@ async function preloadInteractionSounds(): Promise<void> {
         loadAudioBuffer(INTERACTION_AUDIO_PATHS.chestOpen),
         ...INTERACTION_AUDIO_PATHS.coral.map(url => loadAudioBuffer(url)),
         ...INTERACTION_AUDIO_PATHS.dialog.map(url => loadAudioBuffer(url)),
+        // .ogg — tolerate a decode failure (e.g. old Safari) so it can't reject
+        // the batch and skip the chest-reverse setup below; the cue just no-ops.
+        loadAudioBuffer(INTERACTION_AUDIO_PATHS.dialogAppear).catch(() => undefined),
+        loadAudioBuffer(INTERACTION_AUDIO_PATHS.dialogType).catch(() => undefined),
     ]);
     const chestBuffer = _decodedBufferCache.get(INTERACTION_AUDIO_PATHS.chestOpen);
     if (chestBuffer && !_chestReverseBuffer) {
@@ -910,7 +919,32 @@ export function playDialogSound(url: string, onEnd?: () => void): void {
     playOneShot(
         _decodedBufferCache.get(url),
         getCharacterDestination(),
-        { volume: 0.85, onEnded: onEnd },
+        { volume: CHARACTER_BARK_VOLUME, onEnded: onEnd },
+    );
+}
+
+// Dialog UI cue volumes — TWEAK. The type tick repeats per letter so it stays
+// quiet; the appear pop fires once when a bubble shows up.
+const DIALOG_APPEAR_VOLUME = 0.55;
+const DIALOG_TYPE_VOLUME   = 0.3;
+// Slightly under 1.0 so each tick plays a touch slower/lower than the raw clip.
+const DIALOG_TYPE_PLAYBACK_RATE = 0.9;
+
+/** Soft "pop" played once when a dialog bubble first appears (drop_002). */
+export function playDialogAppearSound(): void {
+    playOneShot(
+        _decodedBufferCache.get(INTERACTION_AUDIO_PATHS.dialogAppear),
+        getCharacterDestination(),
+        { volume: DIALOG_APPEAR_VOLUME },
+    );
+}
+
+/** Tick played as each letter types into a dialog bubble (drop_003). */
+export function playDialogTypeSound(): void {
+    playOneShot(
+        _decodedBufferCache.get(INTERACTION_AUDIO_PATHS.dialogType),
+        getCharacterDestination(),
+        { volume: DIALOG_TYPE_VOLUME, playbackRate: DIALOG_TYPE_PLAYBACK_RATE },
     );
 }
 

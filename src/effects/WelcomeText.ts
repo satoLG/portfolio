@@ -1,53 +1,16 @@
-import { TegakiEngine, type TegakiBundle } from 'tegaki/core';
-import _patrickHand from '../fonts/patrick-hand/bundle';
 import { getCurrentLanguage } from '../core/i18n';
-import { INTRO_WRITING_VOLUME } from "../core/Audio";
-
-// tegaki bundles use readonly tuples that don't match the mutable TegakiBundle type.
-const patrickHand = _patrickHand as unknown as TegakiBundle;
+import { playDialogAppearSound, playDialogTypeSound } from '../core/Audio';
 
 // ── Speed knob ────────────────────────────────────────────────────────────────
-// Playback speed multiplier. 1 = default, 0.6 = slower, 1.5 = faster.
-const PLAYBACK_SPEED = 1.5;
+// Typewriter speed in characters per second — matches the pug dialog feel
+// (Dialog.ts CHARS_PER_SEC), so the intro and the dialogs reveal identically.
+const CHARS_PER_SEC = 20;
 // ─────────────────────────────────────────────────────────────────────────────
 
 const FADE_OUT_DURATION = 650;
-const WELCOME_COLOR = '#e8eced36';
-const WRITING_AUDIO_SRC = '/audio/ui/335518__newagesoup__writing-short-8.mp3';
-const WRITING_AUDIO_FADE_MS = 180;
-
-function startWritingAudio(): HTMLAudioElement {
-    const audio = new Audio(WRITING_AUDIO_SRC);
-    audio.loop = true;
-    audio.volume = INTRO_WRITING_VOLUME;
-    audio.play().catch(() => {
-        // Some browsers may block playback if the delayed welcome starts after
-        // transient user activation. The visual intro should continue normally.
-    });
-    return audio;
-}
-
-function fadeOutWritingAudio(audio: HTMLAudioElement): void {
-    const startVolume = audio.volume;
-    const startedAt = performance.now();
-
-    const tick = (now: number): void => {
-        const progress = Math.min(1, (now - startedAt) / WRITING_AUDIO_FADE_MS);
-        const eased = 1 - Math.pow(1 - progress, 2);
-        audio.volume = startVolume * (1 - eased);
-
-        if (progress < 1) {
-            requestAnimationFrame(tick);
-            return;
-        }
-
-        audio.pause();
-        audio.currentTime = 0;
-        audio.src = '';
-    };
-
-    requestAnimationFrame(tick);
-}
+// Same translucent white the dialog text + continue arrows use (see style.css
+// --intro-white). Kept here as the single source for the inline color.
+const WELCOME_COLOR = '#e8eced6c';
 
 export function showWelcomeText(
     onComplete: () => void,
@@ -68,51 +31,109 @@ export function showWelcomeText(
         transition: opacity 280ms ease-in;
     `;
 
-    const container = document.createElement('div');
-    container.className = 'welcome-tegaki';
-    container.style.cssText = `
+    // Mirror the pug dialog layout exactly: a block that shrink-wraps to the
+    // word, the text revealed left→right, and the continue arrow tucked into the
+    // bottom-right corner (instead of the old centred word + centred arrow).
+    const block = document.createElement('div');
+    block.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+    `;
+
+    const textStyle = `
         color: ${WELCOME_COLOR};
+        font-family: 'Patrick Hand', cursive;
         font-size: clamp(40px, 7vw, 64px);
         white-space: nowrap;
+        text-align: left;
     `;
+
+    // Relative wrapper holding a hidden "ghost" copy of the full word (reserves
+    // the final width/height so nothing shifts as letters appear) and the visible
+    // typed copy layered on top, anchored left so it grows rightward.
+    const textWrap = document.createElement('div');
+    textWrap.style.cssText = 'position: relative;';
+
+    const ghost = document.createElement('div');
+    ghost.className = 'welcome-text';
+    ghost.style.cssText = textStyle + 'visibility: hidden;';
+    ghost.textContent = word;
+
+    const container = document.createElement('div');
+    container.className = 'welcome-text';
+    container.style.cssText = textStyle + 'position: absolute; left: 0; top: 0;';
+
+    textWrap.appendChild(ghost);
+    textWrap.appendChild(container);
 
     const arrow = document.createElement('div');
     arrow.className = 'welcome-continue-arrow';
+    arrow.style.alignSelf = 'flex-end';  // bottom-right corner, like the dialog ▼
 
-    overlay.appendChild(container);
-    overlay.appendChild(arrow);
+    block.appendChild(textWrap);
+    block.appendChild(arrow);
+    overlay.appendChild(block);
     document.body.appendChild(overlay);
 
     requestAnimationFrame(() => requestAnimationFrame(() => {
         overlay.style.opacity = '1';
+        playDialogAppearSound();  // same "pop" as a dialog bubble appearing
     }));
 
-    const writingAudio = startWritingAudio();
+    // ── Typewriter ────────────────────────────────────────────────────────────
+    // Same rAF-driven, delta-clamped approach as Dialog._startTyping so a
+    // throttled mobile frame can't dump the whole word at once.
+    const msPerChar = 1000 / CHARS_PER_SEC;
+    let typeIndex = 0;
+    let lastTime = -1;
+    let accumulated = 0;
+    let rafId = 0;
 
-    const engine = new TegakiEngine(container, {
-        text: word,
-        font: patrickHand,
-        time: { mode: 'uncontrolled', speed: PLAYBACK_SPEED } as any,
-        onComplete: () => {
-            fadeOutWritingAudio(writingAudio);
-            overlay.style.pointerEvents = 'auto';
-            overlay.style.cursor = 'pointer';
-            arrow.classList.add('welcome-continue-arrow--visible');
+    const onTypingComplete = (): void => {
+        overlay.style.pointerEvents = 'auto';
+        overlay.style.cursor = 'pointer';
+        arrow.classList.add('welcome-continue-arrow--visible');
 
-            const continueIntro = (): void => {
-                overlay.removeEventListener('pointerdown', continueIntro);
-                overlay.style.pointerEvents = 'none';
-                overlay.style.cursor = '';
-                overlay.style.transition = `opacity ${FADE_OUT_DURATION}ms ease-out`;
-                overlay.style.opacity = '0';
-                setTimeout(() => {
-                    engine.destroy();
-                    overlay.remove();
-                    onComplete();
-                }, FADE_OUT_DURATION);
-            };
+        const continueIntro = (): void => {
+            overlay.removeEventListener('pointerdown', continueIntro);
+            overlay.style.pointerEvents = 'none';
+            overlay.style.cursor = '';
+            overlay.style.transition = `opacity ${FADE_OUT_DURATION}ms ease-out`;
+            overlay.style.opacity = '0';
+            setTimeout(() => {
+                overlay.remove();
+                onComplete();
+            }, FADE_OUT_DURATION);
+        };
 
-            overlay.addEventListener('pointerdown', continueIntro, { once: true });
-        },
-    });
+        overlay.addEventListener('pointerdown', continueIntro, { once: true });
+    };
+
+    const tick = (now: number): void => {
+        if (lastTime < 0) {
+            lastTime = now;
+            rafId = requestAnimationFrame(tick);
+            return;
+        }
+        const delta = Math.min(now - lastTime, 120);
+        lastTime = now;
+        accumulated += delta;
+
+        const add = Math.floor(accumulated / msPerChar);
+        if (add > 0) {
+            accumulated -= add * msPerChar;
+            typeIndex = Math.min(typeIndex + add, word.length);
+            container.textContent = word.slice(0, typeIndex);
+            playDialogTypeSound();  // one tick per frame that revealed a letter
+        }
+
+        if (typeIndex >= word.length) {
+            onTypingComplete();
+        } else {
+            rafId = requestAnimationFrame(tick);
+        }
+    };
+
+    rafId = requestAnimationFrame(tick);
 }

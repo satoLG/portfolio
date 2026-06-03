@@ -73,7 +73,7 @@ Four buckets:
 - `music/` — radio tracks (HTMLAudioElement, streamed)
 - `nature/` — ambient (surface birds, crickets; underwater bubbles)
 - `overall/` — UI clicks, swipes
-- `ui/` — interaction feedback (writing pen for welcome text, etc.)
+- `ui/` — interaction feedback (switches, button clicks, bubble pops, spin, etc.)
 
 Loading: [core/Audio.ts](src/core/Audio.ts). Critical clips are preloaded during `Audio.preloadAudioBytes()` in the prewarm sequence so first interaction has zero latency.
 

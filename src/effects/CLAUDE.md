@@ -56,8 +56,10 @@ Don't reorder. PostProcess copies the framebuffer **before** clouds, so clouds a
 
 ## WelcomeText.ts
 
-- Tegaki + patrick-hand font for the handwritten welcome animation.
-- Plays a "writing pen" audio loop synchronized to the path animation.
+- Typewriter reveal of the welcome word in the Google "Patrick Hand" font,
+  using the same rAF/delta-clamped typing as the pug dialogs (Dialog.ts).
+- Translucent white (`--intro-white`); no audio. The continue arrow appears
+  once typing finishes; a click fades the overlay and runs `onComplete`.
 
 ## Common mistakes
 

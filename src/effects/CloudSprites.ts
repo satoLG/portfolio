@@ -21,7 +21,7 @@ const CLOUD_CHUNK_COUNT = 3;
 const CLOUD_LOOP_DEPTH = 35;
 const CLOUD_GROUP_Z = 10;
 const CLOUD_WIDTH = 180;
-// Tweak this to keep the initial cloud sprites below the welcome Tegaki text.
+// Tweak this to keep the initial cloud sprites below the welcome text.
 // This is a hard cap for the rotated sprite vertices, not just the sprite center.
 const CLOUD_MAX_TOP_Y = 10;
 const CLOUD_LAYER_DEPTH = 1.7;
