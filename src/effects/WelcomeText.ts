@@ -1,4 +1,5 @@
 import { getCurrentLanguage } from '../core/i18n';
+import { playDialogAppearSound, playDialogTypeSound } from '../core/Audio';
 
 // ── Speed knob ────────────────────────────────────────────────────────────────
 // Typewriter speed in characters per second — matches the pug dialog feel
@@ -77,6 +78,7 @@ export function showWelcomeText(
 
     requestAnimationFrame(() => requestAnimationFrame(() => {
         overlay.style.opacity = '1';
+        playDialogAppearSound();  // same "pop" as a dialog bubble appearing
     }));
 
     // ── Typewriter ────────────────────────────────────────────────────────────
@@ -123,6 +125,7 @@ export function showWelcomeText(
             accumulated -= add * msPerChar;
             typeIndex = Math.min(typeIndex + add, word.length);
             container.textContent = word.slice(0, typeIndex);
+            playDialogTypeSound();  // one tick per frame that revealed a letter
         }
 
         if (typeIndex >= word.length) {

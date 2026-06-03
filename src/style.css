@@ -2633,6 +2633,21 @@ a:visited
     color: #e8eced;
 }
 
+/* Mobile: the doubled desktop sizes are too big on a phone — restore the
+   original dialog sizes, which already read well there. Only the pug dialog is
+   affected; the intro word scales on its own via clamp(). 767px = the project's
+   mobile breakpoint (innerWidth < 768). Declared after the base rules so these
+   win the !important tie. */
+@media (max-width: 767px) {
+    .dialog-text,
+    .dialog-reply-option {
+        font-size: 32px !important;
+    }
+    .dialog-prompt {
+        font-size: 18px !important;
+    }
+}
+
 /* ============================================
    COIN TOOLTIP
    ============================================ */

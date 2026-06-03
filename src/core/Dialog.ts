@@ -8,7 +8,7 @@
  *   isDialogActive() → bool
  */
 
-import { playDialogSound } from './Audio';
+import { playDialogSound, playDialogAppearSound, playDialogTypeSound } from './Audio';
 import { t, onLanguageChange } from './i18n';
 
 // ─── iOS detection (run once at module load) ──────────────────────────────────
@@ -203,6 +203,9 @@ function _startTyping(text: string): void {
             accumulated = Math.min(accumulated - add * msPerChar, msPerChar);
             _state.typeIndex = Math.min(_state.typeIndex + add, text.length);
             if (_textEl) _textEl.textContent = text.slice(0, _state.typeIndex);
+            // One tick per frame that revealed at least one letter (avoids stacking
+            // several at the same instant when a throttled frame adds 2–3 chars).
+            playDialogTypeSound();
         }
         if (_state.typeIndex >= text.length) {
             _state.typeTimer = null;
@@ -377,6 +380,7 @@ export function showDialog(
     _bubbleEl!.classList.remove('dialog-out');
     void _bubbleEl!.offsetWidth;  // force reflow so animation restarts
     _bubbleEl!.classList.add('dialog-visible');
+    playDialogAppearSound();  // soft "pop" the first time the bubble appears
 
     const line = lines[0];
     line.onLineStart?.();
