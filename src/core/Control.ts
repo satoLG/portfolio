@@ -8,6 +8,7 @@ import { defaultCameraX, defaultCameraZ, defaultFov, mobileFov, mobileBreakpoint
 import { phoneZoomHeight, phoneZoomTilt, phoneZoomPitch, phoneZoomFov } from '../scene/config/PhoneConfig';
 import { mountIframe as mountPhoneIframe, unmountIframe as unmountPhoneIframe } from './PhoneScreen';
 import { config as sfDecorConfig } from '../scene/SeaFloorDecor';
+import { isDialogActive } from './Dialog';
 
 const baseMoveSpeed = 10;
 const shiftMoveSpeed = baseMoveSpeed * 5;
@@ -342,6 +343,10 @@ export function toggleCameraMode(): boolean {
 
 export function handleScroll(deltaY: number): void {
     if (!scrollEnabled) return;  // Block scroll during intro
+    // Block scroll entirely while a dialog is open. Returning before the zoom
+    // safety below also prevents the "3 attempts → forceExitZoom" escape hatch
+    // from firing mid-dialog (which orphaned the dialog and bugged everything).
+    if (isDialogActive()) return;
     if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive) {
         // Safety: user is trying to scroll while a zoom flag is active.
         // Increment a counter — if they keep scrolling, force-clear the stuck zoom.
@@ -366,7 +371,9 @@ export function handleScroll(deltaY: number): void {
 }
 
 export function isSceneScrollEnabled(): boolean {
-    return scrollEnabled;
+    // Also reports "disabled" during a dialog so Input.ts preventDefaults wheel /
+    // touchmove events — no native page scroll or rubber-banding while talking.
+    return scrollEnabled && !isDialogActive();
 }
 
 declare global {

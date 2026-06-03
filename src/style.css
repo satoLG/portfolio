@@ -71,9 +71,10 @@ body.pixel-max * {
 }
 
 /* Shared translucent white used by the intro text, the dialog text, and every
-   continue arrow — single source so they always match. */
+   continue arrow — single source so they always match. Alpha 0x6c (~0.42) reads
+   clearly against the bright sky/ocean. */
 :root {
-    --intro-white: #e8eced36;
+    --intro-white: #e8eced6c;
 }
 
 .welcome-text,
@@ -2507,9 +2508,10 @@ a:visited
 .dialog-bubble {
     position: fixed;
     z-index: 1200;
-    /* A little larger than before, but kept off the page edges by the JS
-       positioner (EDGE_MARGIN). */
-    max-width: min(460px, 78vw);
+    /* Give the text plenty of room to grow on one line before it has to wrap —
+       on desktop it can run almost to the page edge (the JS positioner keeps it
+       off the very edge via EDGE_MARGIN). Short lines still shrink-wrap. */
+    max-width: min(1100px, 94vw);
     width: max-content;
     pointer-events: auto;
     cursor: pointer;
@@ -2524,12 +2526,15 @@ a:visited
 
 .dialog-bubble.dialog-out {
     display: block;
+    /* Faded out → must not intercept clicks. Without this the boxless text keeps
+       its hit area and swallows clicks after the dialog is gone. */
+    pointer-events: none;
     animation: dialog-fade-out 0.18s ease-in forwards;
 }
 
 .dialog-text {
     margin: 0;
-    font-size: 32px !important;
+    font-size: 64px !important;
     font-family: 'Patrick Hand', cursive !important;
     font-weight: 400 !important;
     color: var(--intro-white);
@@ -2543,7 +2548,7 @@ a:visited
     /* Aligns to the right edge of the shrink-wrapped text — i.e. just under
        where the longest typed line ends, not at some fixed box width. */
     text-align: right;
-    font-size: 18px !important;
+    font-size: 36px !important;
     font-weight: 400 !important;
     color: var(--intro-white);
     opacity: 0;
@@ -2579,7 +2584,7 @@ a:visited
 .dialog-reply-bubble {
     position: fixed;
     z-index: 1200;
-    max-width: min(460px, 78vw);
+    max-width: min(1100px, 94vw);
     width: max-content;
     pointer-events: auto;
     cursor: default;
@@ -2595,6 +2600,10 @@ a:visited
 
 .dialog-reply-bubble.dialog-out {
     display: block;
+    /* Once a reply is picked (or the dialog ends) the options fade out but stay
+       in the DOM at full size — kill their hit area so an accidental click on
+       the invisible option can't re-fire onSelect and corrupt the dialog. */
+    pointer-events: none;
     animation: dialog-fade-out 0.18s ease-in forwards;
 }
 
@@ -2609,7 +2618,7 @@ a:visited
 
 .dialog-reply-option {
     display: block;
-    font-size: 32px !important;
+    font-size: 64px !important;
     font-family: 'Patrick Hand', cursive !important;
     font-weight: 400 !important;
     color: var(--intro-white);

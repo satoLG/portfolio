@@ -116,9 +116,9 @@ function ensureBubble(): void {
 // ─── Positioning ──────────────────────────────────────────────────────────────
 
 const BUBBLE_ABOVE   = 24;  // px — clearance between the text bottom and the anchor point
-// px — how far right of the character the text floats. Larger than the old
-// tail overhang so the boxless text sits clearly to the right of the pug.
-const DIALOG_OFFSET_X = 44;
+// px — how far right of the character the text floats. Pushed well clear of the
+// pug so the (now larger) boxless text reads as sitting to its right.
+const DIALOG_OFFSET_X = 96;
 // px — keep the text this far from the viewport edges (don't go near the edge).
 const EDGE_MARGIN     = 28;
 
@@ -152,7 +152,7 @@ function _trackLoop(): void {
 
 // ─── Typewriter ───────────────────────────────────────────────────────────────
 
-const CHARS_PER_SEC = 22;
+const CHARS_PER_SEC = 20;
 /** Max characters added in a single frame — prevents a throttled mobile rAF
  *  from dumping an entire sentence at once after a long gap between frames. */
 const MAX_CHARS_PER_FRAME = 3;
@@ -165,11 +165,15 @@ function _startTyping(text: string): void {
 
     // Pre-fix the bubble's dimensions to prevent width/height oscillation
     // while characters are added one by one (line-wraps would cause jarring reflow).
+    // Measure the full (max-content) width with the real text in place, then lock
+    // it in. We use getBoundingClientRect().width (fractional) and round UP plus a
+    // 1px guard: offsetWidth truncates the sub-pixel width, which can leave the
+    // box a hair too narrow and wrap the last word (e.g. "au au" → "au"/"au").
     _bubbleEl.style.width     = '';
     _bubbleEl.style.minHeight = '';
     _textEl.textContent = text;
     void _bubbleEl.offsetWidth;                         // force reflow
-    _bubbleEl.style.width     = `${_bubbleEl.offsetWidth}px`;
+    _bubbleEl.style.width     = `${Math.ceil(_bubbleEl.getBoundingClientRect().width) + 1}px`;
     _bubbleEl.style.minHeight = `${_bubbleEl.offsetHeight}px`;
     _textEl.textContent = '';
 
@@ -238,8 +242,16 @@ function _completeTyping(): void {
 
 /** px — gap between the reply text bottom and the viewport bottom */
 const REPLY_BOTTOM_MARGIN = 40;
-/** px — keep the reply text this far from the right edge (don't touch the edge) */
+/** px — keep the reply text this far from the right edge (mobile baseline) */
 const REPLY_RIGHT_MARGIN  = 56;
+/**
+ * Desktop centering: below this width the reply hugs the right edge (mobile —
+ * looks good there). Above it, the reply's right edge is pulled left a fraction
+ * of the extra width so on wide screens it lands nearer the middle, relatively
+ * close to the pug dialog instead of glued to the right edge.
+ */
+const REPLY_CENTER_FROM_WIDTH = 600;
+const REPLY_CENTER_PULL_RATE  = 0.3;
 
 function _positionReplyBubble(): void {
     if (!_replyBubbleEl) return;
@@ -249,8 +261,12 @@ function _positionReplyBubble(): void {
     const ww     = window.innerWidth;
     const wh     = window.innerHeight;
 
-    // User replies sit toward the RIGHT, near the bottom of the viewport.
-    const left = Math.max(28, ww - replyW - REPLY_RIGHT_MARGIN);
+    // User replies sit toward the RIGHT, near the bottom of the viewport. On wide
+    // screens the right edge is pulled inward so it reads closer to the pug dialog
+    // instead of touching the screen edge; on mobile it stays near the edge.
+    const extraPull  = Math.max(0, ww - REPLY_CENTER_FROM_WIDTH) * REPLY_CENTER_PULL_RATE;
+    const rightEdge  = ww - (REPLY_RIGHT_MARGIN + extraPull);
+    const left = Math.max(28, rightEdge - replyW);
     const top  = wh - replyH - REPLY_BOTTOM_MARGIN;
 
     _replyBubbleEl.style.left = `${left}px`;

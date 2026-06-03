@@ -3,13 +3,13 @@ import { getCurrentLanguage } from '../core/i18n';
 // ── Speed knob ────────────────────────────────────────────────────────────────
 // Typewriter speed in characters per second — matches the pug dialog feel
 // (Dialog.ts CHARS_PER_SEC), so the intro and the dialogs reveal identically.
-const CHARS_PER_SEC = 22;
+const CHARS_PER_SEC = 20;
 // ─────────────────────────────────────────────────────────────────────────────
 
 const FADE_OUT_DURATION = 650;
 // Same translucent white the dialog text + continue arrows use (see style.css
 // --intro-white). Kept here as the single source for the inline color.
-const WELCOME_COLOR = '#e8eced36';
+const WELCOME_COLOR = '#e8eced6c';
 
 export function showWelcomeText(
     onComplete: () => void,
@@ -30,20 +30,49 @@ export function showWelcomeText(
         transition: opacity 280ms ease-in;
     `;
 
-    const container = document.createElement('div');
-    container.className = 'welcome-text';
-    container.style.cssText = `
+    // Mirror the pug dialog layout exactly: a block that shrink-wraps to the
+    // word, the text revealed left→right, and the continue arrow tucked into the
+    // bottom-right corner (instead of the old centred word + centred arrow).
+    const block = document.createElement('div');
+    block.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+    `;
+
+    const textStyle = `
         color: ${WELCOME_COLOR};
         font-family: 'Patrick Hand', cursive;
         font-size: clamp(40px, 7vw, 64px);
         white-space: nowrap;
+        text-align: left;
     `;
+
+    // Relative wrapper holding a hidden "ghost" copy of the full word (reserves
+    // the final width/height so nothing shifts as letters appear) and the visible
+    // typed copy layered on top, anchored left so it grows rightward.
+    const textWrap = document.createElement('div');
+    textWrap.style.cssText = 'position: relative;';
+
+    const ghost = document.createElement('div');
+    ghost.className = 'welcome-text';
+    ghost.style.cssText = textStyle + 'visibility: hidden;';
+    ghost.textContent = word;
+
+    const container = document.createElement('div');
+    container.className = 'welcome-text';
+    container.style.cssText = textStyle + 'position: absolute; left: 0; top: 0;';
+
+    textWrap.appendChild(ghost);
+    textWrap.appendChild(container);
 
     const arrow = document.createElement('div');
     arrow.className = 'welcome-continue-arrow';
+    arrow.style.alignSelf = 'flex-end';  // bottom-right corner, like the dialog ▼
 
-    overlay.appendChild(container);
-    overlay.appendChild(arrow);
+    block.appendChild(textWrap);
+    block.appendChild(arrow);
+    overlay.appendChild(block);
     document.body.appendChild(overlay);
 
     requestAnimationFrame(() => requestAnimationFrame(() => {
