@@ -84,28 +84,8 @@ body.pixel-max .welcome-text {
     font-size-adjust: none;
 }
 
-.welcome-continue-arrow {
-    width: 0;
-    height: 0;
-    margin-top: 10px;
-    border-left: 9px solid transparent;
-    border-right: 9px solid transparent;
-    border-top: 13px solid var(--intro-white);
-    opacity: 0;
-    transform: translateY(-2px);
-    transition: opacity 1800ms ease, transform 180ms ease;
-}
-
-.welcome-continue-arrow--visible {
-    opacity: 1;
-    transform: translateY(0);
-    animation: welcome-arrow-float 1.75s ease-in-out infinite;
-}
-
-@keyframes welcome-arrow-float {
-    0%, 100% { transform: translateY(0);   }
-    50%      { transform: translateY(3px); }
-}
+/* The intro's continue arrow reuses the pug dialog's `.dialog-prompt` ▼ verbatim
+   (see WelcomeText.ts) so the two are identical — no bespoke arrow styles here. */
 
 /* ============================================
    PIXEL ICON SWAP
@@ -2510,8 +2490,11 @@ a:visited
     z-index: 1200;
     /* Give the text plenty of room to grow on one line before it has to wrap —
        on desktop it can run almost to the page edge (the JS positioner keeps it
-       off the very edge via EDGE_MARGIN). Short lines still shrink-wrap. */
-    max-width: min(1100px, 94vw);
+       off the very edge via EDGE_MARGIN). Short lines still shrink-wrap.
+       The 56px reserve = 2×EDGE_MARGIN (28px each side): it guarantees the box —
+       and the right-aligned ▼ at its edge — always fits within the screen margins
+       on mobile, where a full-width line would otherwise push the arrow off-screen. */
+    max-width: min(1100px, calc(100vw - 56px));
     width: max-content;
     pointer-events: auto;
     cursor: pointer;
@@ -2584,7 +2567,9 @@ a:visited
 .dialog-reply-bubble {
     position: fixed;
     z-index: 1200;
-    max-width: min(1100px, 94vw);
+    /* 56px reserve = 2×EDGE_MARGIN, same as the pug dialog — keeps the reply list
+       within the screen margins on mobile. */
+    max-width: min(1100px, calc(100vw - 56px));
     width: max-content;
     pointer-events: auto;
     cursor: default;
