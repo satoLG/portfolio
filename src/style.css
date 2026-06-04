@@ -2510,8 +2510,11 @@ a:visited
     z-index: 1200;
     /* Give the text plenty of room to grow on one line before it has to wrap —
        on desktop it can run almost to the page edge (the JS positioner keeps it
-       off the very edge via EDGE_MARGIN). Short lines still shrink-wrap. */
-    max-width: min(1100px, 94vw);
+       off the very edge via EDGE_MARGIN). Short lines still shrink-wrap.
+       The 56px reserve = 2×EDGE_MARGIN (28px each side): it guarantees the box —
+       and the right-aligned ▼ at its edge — always fits within the screen margins
+       on mobile, where a full-width line would otherwise push the arrow off-screen. */
+    max-width: min(1100px, calc(100vw - 56px));
     width: max-content;
     pointer-events: auto;
     cursor: pointer;
@@ -2584,7 +2587,9 @@ a:visited
 .dialog-reply-bubble {
     position: fixed;
     z-index: 1200;
-    max-width: min(1100px, 94vw);
+    /* 56px reserve = 2×EDGE_MARGIN, same as the pug dialog — keeps the reply list
+       within the screen margins on mobile. */
+    max-width: min(1100px, calc(100vw - 56px));
     width: max-content;
     pointer-events: auto;
     cursor: default;

@@ -165,15 +165,23 @@ function _startTyping(text: string): void {
 
     // Pre-fix the bubble's dimensions to prevent width/height oscillation
     // while characters are added one by one (line-wraps would cause jarring reflow).
-    // Measure the full (max-content) width with the real text in place, then lock
-    // it in. We use getBoundingClientRect().width (fractional) and round UP plus a
-    // 1px guard: offsetWidth truncates the sub-pixel width, which can leave the
-    // box a hair too narrow and wrap the last word (e.g. "au au" → "au"/"au").
+    // We lock the box to the WIDEST actually-rendered line, not the max-content
+    // width. When the text is long enough to wrap (capped by the CSS max-width),
+    // measuring the block would return the full max-width — which on mobile leaves
+    // the right-aligned ▼ floating at the screen edge, far from the real text. A
+    // Range over the text node returns the union of its per-line rects, i.e. the
+    // widest line, so the box shrink-wraps to the words and the ▼ stays beside them.
+    // Fractional width is rounded UP plus a 1px guard: offsetWidth truncates the
+    // sub-pixel width, which can leave the box a hair too narrow and wrap the last
+    // word (e.g. "au au" → "au"/"au").
     _bubbleEl.style.width     = '';
     _bubbleEl.style.minHeight = '';
     _textEl.textContent = text;
     void _bubbleEl.offsetWidth;                         // force reflow
-    _bubbleEl.style.width     = `${Math.ceil(_bubbleEl.getBoundingClientRect().width) + 1}px`;
+    const _range = document.createRange();
+    _range.selectNodeContents(_textEl);
+    const _lineW = _range.getBoundingClientRect().width;
+    _bubbleEl.style.width     = `${Math.ceil(_lineW) + 1}px`;
     _bubbleEl.style.minHeight = `${_bubbleEl.offsetHeight}px`;
     _textEl.textContent = '';
 
@@ -223,10 +231,12 @@ function _startTyping(text: string): void {
 function _onLineDoneTyping(): void {
     if (!_state || !_promptEl) return;
     const currentLine = _state.lines[_state.lineIdx];
+    // The ▼ indicator stays visible even on the line that waits for a reply —
+    // it signals "the pug is done talking" regardless of whether the next step is
+    // an advance-click or picking a reply. The reply bubble appears alongside it.
+    _promptEl.classList.add('dialog-prompt--visible');
     if (currentLine.replies?.length) {
         _showReplyBubble(currentLine.replies);
-    } else {
-        _promptEl.classList.add('dialog-prompt--visible');
     }
 }
 
@@ -245,8 +255,12 @@ function _completeTyping(): void {
 
 /** px — gap between the reply text bottom and the viewport bottom */
 const REPLY_BOTTOM_MARGIN = 40;
-/** px — keep the reply text this far from the right edge (mobile baseline) */
-const REPLY_RIGHT_MARGIN  = 56;
+/**
+ * px — keep the reply text this far from the right edge (mobile baseline). Matches
+ * the pug dialog's EDGE_MARGIN so the reply list and the pug's text respect the
+ * exact same distance from the screen border.
+ */
+const REPLY_RIGHT_MARGIN  = EDGE_MARGIN;
 /**
  * Desktop centering: below this width the reply hugs the right edge (mobile —
  * looks good there). Above it, the reply's right edge is pulled left a fraction
@@ -286,7 +300,13 @@ function _showReplyBubble(replies: ReplyOption[]): void {
         optEl.className = 'dialog-reply-option';
         optEl.textContent = t(reply.textKey);
         optEl.dataset.textKey = reply.textKey;
-        optEl.addEventListener('pointerdown', (e) => {
+        // Select on `click`, not `pointerdown`: handling it on pointerdown hides the
+        // reply bubble before the browser dispatches the follow-up synthetic click,
+        // which then hit-tests through to the canvas underneath and fires
+        // advanceDialog() — instantly dumping the next line instead of letting it
+        // type. With `click` the option stays the event target, so it never falls
+        // through, and a deliberate second tap on the scene can still skip-ahead.
+        optEl.addEventListener('click', (e) => {
             e.stopPropagation();
             _hideReplyBubble();
             reply.onSelect();
