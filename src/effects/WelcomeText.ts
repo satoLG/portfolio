@@ -67,9 +67,14 @@ export function showWelcomeText(
     textWrap.appendChild(ghost);
     textWrap.appendChild(container);
 
-    const arrow = document.createElement('div');
-    arrow.className = 'welcome-continue-arrow';
-    arrow.style.alignSelf = 'flex-end';  // bottom-right corner, like the dialog ▼
+    // Reuse the pug dialog's continue prompt verbatim — the same ▼ glyph and the
+    // same `.dialog-prompt` styling/animation — so the intro is 100% identical to
+    // the in-scene dialogs (the old CSS border-triangle looked different). It's a
+    // block with text-align:right, so inside the stretched flex column it lands in
+    // the bottom-right corner, under the end of the word, just like the dialog.
+    const arrow = document.createElement('span');
+    arrow.className = 'dialog-prompt';
+    arrow.textContent = '▼';
 
     block.appendChild(textWrap);
     block.appendChild(arrow);
@@ -93,7 +98,7 @@ export function showWelcomeText(
     const onTypingComplete = (): void => {
         overlay.style.pointerEvents = 'auto';
         overlay.style.cursor = 'pointer';
-        arrow.classList.add('welcome-continue-arrow--visible');
+        arrow.classList.add('dialog-prompt--visible');
 
         const continueIntro = (): void => {
             overlay.removeEventListener('pointerdown', continueIntro);

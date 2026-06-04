@@ -862,15 +862,13 @@ function playOneShot(
 let _chestReverseBuffer: AudioBuffer | null = null;
 
 async function preloadInteractionSounds(): Promise<void> {
+    // Note: the dialog cue clips (dialogAppear/dialogType) are decoded earlier in
+    // initAudio so the intro welcome text already ticks/pops — not here.
     await Promise.all([
         loadAudioBuffer(INTERACTION_AUDIO_PATHS.appleImpact),
         loadAudioBuffer(INTERACTION_AUDIO_PATHS.chestOpen),
         ...INTERACTION_AUDIO_PATHS.coral.map(url => loadAudioBuffer(url)),
         ...INTERACTION_AUDIO_PATHS.dialog.map(url => loadAudioBuffer(url)),
-        // .ogg — tolerate a decode failure (e.g. old Safari) so it can't reject
-        // the batch and skip the chest-reverse setup below; the cue just no-ops.
-        loadAudioBuffer(INTERACTION_AUDIO_PATHS.dialogAppear).catch(() => undefined),
-        loadAudioBuffer(INTERACTION_AUDIO_PATHS.dialogType).catch(() => undefined),
     ]);
     const chestBuffer = _decodedBufferCache.get(INTERACTION_AUDIO_PATHS.chestOpen);
     if (chestBuffer && !_chestReverseBuffer) {
@@ -1061,6 +1059,17 @@ async function initAudio(): Promise<void> {
         introPianoSound = createBufferSound(introPianoBuf, introGain, { loop: true, volume: INTRO_PIANO_VOLUME });
         introBreezeSound = createBufferSound(breezeBuf, introGain, { volume: INTRO_BREEZE_VOLUME });
 
+        // Decode the dialog cue clips here, up front — the intro welcome text shows
+        // ~1s after the start click and ticks/pops via these. Decoding them with the
+        // core buffers (rather than in the deferred interaction preload below) makes
+        // sure they're ready in time, otherwise the dialog sound only kicks in after
+        // the intro text has finished typing. Tiny .ogg clips; tolerate a decode
+        // failure (e.g. old Safari) so the cue just no-ops.
+        await Promise.all([
+            loadAudioBuffer(INTERACTION_AUDIO_PATHS.dialogAppear).catch(() => undefined),
+            loadAudioBuffer(INTERACTION_AUDIO_PATHS.dialogType).catch(() => undefined),
+        ]);
+
         // Load character sounds
         try {
             const pugSnoreBuf = await loadAudioBuffer(AUDIO_PATHS.pugSnore);
@@ -1088,22 +1097,29 @@ async function initAudio(): Promise<void> {
         } else if (!natureMuted) {
             startIntroPiano();
         }
-
-        await Promise.all([
-            preloadUISounds(),
-            preloadInteractionSounds(),
-        ]);
     } catch (e) {
         console.error('Failed to load audio buffers:', e);
     }
 
-    // Gradually fade in all audio from silence
+    // Gradually fade in all audio from silence. Done here — as soon as the core +
+    // intro + dialog-cue buffers are ready — rather than after the deferred
+    // interaction-sound preload below, so the intro piano and the welcome-text
+    // dialog cues are audible during the intro instead of staying silent until the
+    // whole load chain finishes.
     const now = _audioContext.currentTime;
     masterGain.gain.setValueAtTime(0, now);
     masterGain.gain.linearRampToValueAtTime(1, now + FADE_IN_DURATION);
 
     setupVisibilityHandler();
     console.log('Web Audio engine initialized (pure AudioBuffer)');
+
+    // Remaining interaction/UI SFX are only needed for later user actions (apple
+    // drop, chest, pug barks, header buttons), so decode them in the background —
+    // they must not gate the fade-in above.
+    await Promise.all([
+        preloadUISounds(),
+        preloadInteractionSounds(),
+    ]).catch(e => console.warn('Interaction sound preload failed:', e));
 }
 
 function setupVisibilityHandler(): void {

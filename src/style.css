@@ -84,28 +84,8 @@ body.pixel-max .welcome-text {
     font-size-adjust: none;
 }
 
-.welcome-continue-arrow {
-    width: 0;
-    height: 0;
-    margin-top: 10px;
-    border-left: 9px solid transparent;
-    border-right: 9px solid transparent;
-    border-top: 13px solid var(--intro-white);
-    opacity: 0;
-    transform: translateY(-2px);
-    transition: opacity 1800ms ease, transform 180ms ease;
-}
-
-.welcome-continue-arrow--visible {
-    opacity: 1;
-    transform: translateY(0);
-    animation: welcome-arrow-float 1.75s ease-in-out infinite;
-}
-
-@keyframes welcome-arrow-float {
-    0%, 100% { transform: translateY(0);   }
-    50%      { transform: translateY(3px); }
-}
+/* The intro's continue arrow reuses the pug dialog's `.dialog-prompt` ▼ verbatim
+   (see WelcomeText.ts) so the two are identical — no bespoke arrow styles here. */
 
 /* ============================================
    PIXEL ICON SWAP
