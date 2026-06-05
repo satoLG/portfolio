@@ -207,7 +207,9 @@ const activeFish: SwimmingFish[] = [];   // in-scene swimming creatures
 let fishPoolInitialized = false;
 let jellyPoolInitialized = false;
 let fishModelsLoaded = 0;
-let fixedLoopsInitialized = false;
+let fixedLoopsInitialized = false;  // true once the generic-fish stream is seeded (isReady gate)
+let fishLoopsSeeded = false;        // generic fish seeded into activeFish
+let jellyLoopsSeeded = false;       // jellyfish seeded into activeFish
 let underwaterView = false;
 let shallowVisibilityMinY = Number.POSITIVE_INFINITY;
 
@@ -579,7 +581,16 @@ function seedInitialFish(entry: PooledFish, index: number, total: number): Swimm
     const scale = GENERIC_FISH_SCALE * scaleMult;
 
     const z = GENERIC_FISH_Z_MIN + Math.random() * (GENERIC_FISH_Z_MAX - GENERIC_FISH_Z_MIN);
-    const { spawnX, despawnX } = getFrustumEdgesX(z);
+    const _edges = getFrustumEdgesX(z);
+    // Guard against a degenerate camera projection at seed time. This runs from
+    // the async GLB-load callback during the loading screen, before the camera is
+    // necessarily set up, so the unprojection can return a non-finite edge. That
+    // would seed the fish at x = NaN — and because `NaN < despawnX` is always
+    // false the fish would NEVER despawn/respawn, staying invisible for the whole
+    // session (the intermittent "generic fish don't render" bug). resetLooping-
+    // Creature already guards the same way; this is the one seed path that didn't.
+    const spawnX   = Number.isFinite(_edges.spawnX)   ? _edges.spawnX   :  5.5;
+    const despawnX = Number.isFinite(_edges.despawnX) ? _edges.despawnX : -5.5;
     // X: uniform across the FULL cycle — visible band [despawnX, spawnX] PLUS
     // the off-screen-right transit band [spawnX, spawnX + RESPAWN_X_JITTER].
     // Seeding only within the visible band makes every fish enter its cycle in
@@ -689,24 +700,36 @@ export function beginJellyfishPrewarm(): () => void {
 }
 
 function initFixedCreatureLoops(): void {
-    if (fixedLoopsInitialized || !fishPoolInitialized || !jellyPoolInitialized) return;
-    fixedLoopsInitialized = true;
-
-    const fishEntries = fishPool.splice(0);
-    // Shuffle so the deterministic Y stratification isn't paired with a fixed
-    // order of pool entries (pool entries are clones — they're interchangeable,
-    // but shuffling makes color distribution independent of Y ladder).
-    for (let i = fishEntries.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [fishEntries[i], fishEntries[j]] = [fishEntries[j], fishEntries[i]];
+    // Seed the generic-fish and jellyfish streams INDEPENDENTLY. They used to
+    // share one gate that required BOTH pools (`!fishPoolInitialized ||
+    // !jellyPoolInitialized → return`), so a failed/slow jellyfish.glb load
+    // (onLoadError leaves jellyPoolInitialized false forever) silently left the
+    // scene with no generic fish at all. Decoupled, the generic fish spawn as
+    // soon as their own pool is ready, regardless of the jellyfish.
+    if (!fishLoopsSeeded && fishPoolInitialized) {
+        fishLoopsSeeded = true;
+        const fishEntries = fishPool.splice(0);
+        // Shuffle so the deterministic Y stratification isn't paired with a fixed
+        // order of pool entries (pool entries are clones — they're interchangeable,
+        // but shuffling makes color distribution independent of Y ladder).
+        for (let i = fishEntries.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [fishEntries[i], fishEntries[j]] = [fishEntries[j], fishEntries[i]];
+        }
+        for (let i = 0; i < fishEntries.length; i++) {
+            activeFish.push(seedInitialFish(fishEntries[i], i, fishEntries.length));
+        }
+        // isReady()/prewarm gate — the generic fish are the critical stream; the
+        // jellyfish are night-only and may legitimately never load.
+        fixedLoopsInitialized = true;
     }
-    for (let i = 0; i < fishEntries.length; i++) {
-        activeFish.push(seedInitialFish(fishEntries[i], i, fishEntries.length));
-    }
 
-    const jellyEntries = jellyPool.splice(0);
-    for (let i = 0; i < jellyEntries.length; i++) {
-        activeFish.push(resetLoopingCreature(jellyEntries[i], i / Math.max(1, jellyEntries.length)));
+    if (!jellyLoopsSeeded && jellyPoolInitialized) {
+        jellyLoopsSeeded = true;
+        const jellyEntries = jellyPool.splice(0);
+        for (let i = 0; i < jellyEntries.length; i++) {
+            activeFish.push(resetLoopingCreature(jellyEntries[i], i / Math.max(1, jellyEntries.length)));
+        }
     }
 }
 
@@ -951,7 +974,12 @@ export function Update(): void {
         group.rotation.x = fish.currentTilt;
 
         const { despawnX } = getFrustumEdgesX(group.position.z);
-        if (group.position.x < despawnX) {
+        // Recycle when the fish drifts past the left edge — OR if its position
+        // ever went non-finite. A NaN x never satisfies `x < despawnX`, so without
+        // this self-heal such a fish would be stuck invisible forever; reseeding
+        // it through resetLoopingCreature (which clamps to a valid right edge)
+        // brings it back. Belt-and-suspenders for getDiagState().nanX.
+        if (!Number.isFinite(group.position.x) || group.position.x < despawnX) {
             activeFish[i] = resetLoopingCreature(fish.pool, 1);
         }
     }
