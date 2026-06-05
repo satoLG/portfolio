@@ -2748,3 +2748,45 @@ body.day-mode .ct-body::after {
     0%   { opacity: 1; transform: scale(1);    }
     100% { opacity: 0; transform: scale(0.55); }
 }
+
+/* ============================================
+   CABANA EXIT BUTTON (door/exit, bottom-centre)
+   Shown only while inside the cabana zoom — there's no "outside" to click there.
+   ============================================ */
+.cabana-exit-btn {
+    position: fixed;
+    left: 50%;
+    bottom: 32px;
+    transform: translateX(-50%) translateY(8px);
+    z-index: 1300;
+    width: 56px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background: rgba(10, 14, 20, 0.55);
+    color: #e8eced;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;   /* not interactive until --visible */
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    transition: opacity 0.25s ease, transform 0.25s ease, background 0.15s ease;
+}
+
+.cabana-exit-btn--visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(-50%) translateY(0);
+}
+
+.cabana-exit-btn:hover {
+    background: rgba(20, 28, 40, 0.78);
+}
+
+@media (max-width: 767px) {
+    .cabana-exit-btn { bottom: 24px; width: 52px; height: 52px; }
+}

@@ -6,6 +6,7 @@ import { spotLightDistance, spotLightDistanceUniform } from "../materials/OceanM
 import { islandPosition as cfgIslandPos, radioOffset as cfgRadioOffset, radioRotY as cfgRadioRotY, pugOffset as cfgPugOffset, pugRotY as cfgPugRotY, phoneOffset as cfgPhoneOffset } from '../scene/config/IslandConfig';
 import { defaultCameraX, defaultCameraZ, defaultFov, mobileFov, mobileBreakpointWidth, aboveWaterBottomY as cfgAboveWaterBottomY, aboveWaterBottomYMobile as cfgAboveWaterBottomYMobile, underwaterTopY as cfgUnderwaterTopY, underwaterTopYMobile as cfgUnderwaterTopYMobile } from '../scene/config/CameraConfig';
 import { phoneZoomHeight, phoneZoomTilt, phoneZoomPitch, phoneZoomFov } from '../scene/config/PhoneConfig';
+import { cabanaCamX, cabanaCamY, cabanaCamZ, cabanaPhi, cabanaPitch, cabanaFov } from '../scene/config/CabanaConfig';
 import { mountIframe as mountPhoneIframe, unmountIframe as unmountPhoneIframe } from './PhoneScreen';
 import { config as sfDecorConfig } from '../scene/SeaFloorDecor';
 import { isDialogActive } from './Dialog';
@@ -105,6 +106,9 @@ let radioZoomActive = false;
 let pugZoomActive = false;
 let phoneZoomActive = false;
 let chestZoomActive = false;
+// Cabana (tent interior) zoom — the OUTER level. The phone zoom is nested inside
+// it: phoneZoomActive can only be true while cabanaZoomActive is also true.
+let cabanaZoomActive = false;
 
 // Counter for scroll attempts during zoom (stuck-zoom safety valve)
 let _zoomScrollAttempts = 0;
@@ -197,6 +201,17 @@ export const phoneZoomConfig = {
 const _phoneWorldX = cfgIslandPos.x + cfgPhoneOffset.x;
 const _phoneWorldY = cfgIslandPos.y + cfgPhoneOffset.y;
 const _phoneWorldZ = cfgIslandPos.z + cfgPhoneOffset.z;
+
+// Cabana zoom target — absolute world-space camera pose just inside the tent
+// entrance. Mutable so the debug GUI can dial it in live (copy back to CabanaConfig).
+export const cabanaZoomConfig = {
+    camX:  cabanaCamX,
+    camY:  cabanaCamY,
+    camZ:  cabanaCamZ,
+    phi:   cabanaPhi,    // yaw looking into the tent
+    pitch: cabanaPitch,  // slight downward pitch
+    fov:   cabanaFov,    // narrow telephoto (> 0)
+};
 // Phone zoom targets are computed live each frame in Update() from phoneZoomConfig
 // Camera yaw: face negative Z to look toward the phone
 const PHONE_ZOOM_PHI = Math.PI * 2;
@@ -221,6 +236,10 @@ export function isChestZoomActive(): boolean {
     return chestZoomActive;
 }
 
+export function isCabanaZoomActive(): boolean {
+    return cabanaZoomActive;
+}
+
 function saveAndStartZoom(): void {
     savedCameraX = camera.position.x;
     savedCameraY = currentY;
@@ -233,9 +252,28 @@ function saveAndStartZoom(): void {
 
 // Zoom camera to focus on radio (called when expanding media player above water)
 export function zoomToRadio(): void {
-    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || isUnderwater) return;
+    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaZoomActive || isUnderwater) return;
     saveAndStartZoom();
     radioZoomActive = true;
+}
+
+// Zoom camera INTO the cabana (tent interior). Outer level — the phone zoom nests
+// inside it. Mounts the phone iframe so the interior phone screen is already live.
+export function zoomToCabana(): void {
+    if (cabanaZoomActive || radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || isUnderwater) return;
+    saveAndStartZoom();
+    cabanaZoomActive = true;
+    mountPhoneIframe();
+}
+
+// Zoom out of the cabana entirely (also drops any nested phone zoom). Tears down
+// the phone iframe. Triggered by the on-screen exit button.
+export function zoomOutFromCabana(): void {
+    if (!cabanaZoomActive) return;
+    phoneZoomActive = false;   // drop the inner zoom if it was active
+    cabanaZoomActive = false;
+    targetY = savedTargetY;
+    unmountPhoneIframe();
 }
 
 // Return camera to previous position (called when collapsing media player)
@@ -247,7 +285,7 @@ export function zoomOutFromRadio(): void {
 
 // Zoom camera to focus on pug
 export function zoomToPug(): void {
-    if (pugZoomActive || radioZoomActive || phoneZoomActive || chestZoomActive || isUnderwater) return;
+    if (pugZoomActive || radioZoomActive || phoneZoomActive || chestZoomActive || cabanaZoomActive || isUnderwater) return;
     saveAndStartZoom();
     pugZoomActive = true;
 }
@@ -259,30 +297,26 @@ export function zoomOutFromPug(): void {
     targetY = savedTargetY;
 }
 
-// Zoom camera to focus on phone (top-down view)
+// Zoom camera to focus on phone (top-down view). INNER level — only reachable
+// while inside the cabana. The cabana already saved the outside camera state and
+// mounted the iframe, so this just retargets the camera; it must NOT re-save or
+// re-mount (that would clobber the single save slot / reload the iframe).
 export function zoomToPhone(): void {
-    if (phoneZoomActive || radioZoomActive || pugZoomActive || chestZoomActive || isUnderwater) return;
-    saveAndStartZoom();
+    if (!cabanaZoomActive || phoneZoomActive) return;
     phoneZoomActive = true;
-    // Mount the iframe lazily so the external page (~150-300 MB) is only loaded
-    // while the user is actually viewing it.
-    mountPhoneIframe();
 }
 
-// Zoom out from phone
+// Zoom out from phone back to the cabana room view (cabana stays active). Does
+// NOT restore targetY or unmount — the cabana owns those; the Update loop simply
+// falls back to the cabana camera target once phoneZoomActive is cleared.
 export function zoomOutFromPhone(): void {
     if (!phoneZoomActive) return;
     phoneZoomActive = false;
-    // Don't snap zoomTetha — let the normal-mode damp smoothly return it to 0
-    targetY = savedTargetY;
-    // Tear down the iframe so its memory + scripts are released.
-    // The next zoom-in reloads it fresh (~1-2 s).
-    unmountPhoneIframe();
 }
 
 // Zoom camera to focus on chest (underwater)
 export function zoomToChest(): void {
-    if (chestZoomActive || radioZoomActive || pugZoomActive || phoneZoomActive || !isUnderwater) return;
+    if (chestZoomActive || radioZoomActive || pugZoomActive || phoneZoomActive || cabanaZoomActive || !isUnderwater) return;
     saveAndStartZoom();
     chestZoomActive = true;
 }
@@ -299,7 +333,9 @@ function forceExitZoom(): void {
     _zoomScrollAttempts = 0;
     if (radioZoomActive) { radioZoomActive = false; targetY = savedTargetY; }
     if (pugZoomActive)   { pugZoomActive = false;   targetY = savedTargetY; }
-    if (phoneZoomActive) { phoneZoomActive = false;  targetY = savedTargetY; unmountPhoneIframe(); }
+    // Phone is the inner level — the cabana below owns the restore + iframe teardown.
+    if (phoneZoomActive) { phoneZoomActive = false; }
+    if (cabanaZoomActive){ cabanaZoomActive = false; targetY = savedTargetY; unmountPhoneIframe(); }
     if (chestZoomActive) { chestZoomActive = false;  targetY = savedTargetY; }
 }
 
@@ -347,7 +383,7 @@ export function handleScroll(deltaY: number): void {
     // safety below also prevents the "3 attempts → forceExitZoom" escape hatch
     // from firing mid-dialog (which orphaned the dialog and bugged everything).
     if (isDialogActive()) return;
-    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive) {
+    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaZoomActive) {
         // Safety: user is trying to scroll while a zoom flag is active.
         // Increment a counter — if they keep scrolling, force-clear the stuck zoom.
         _zoomScrollAttempts++;
@@ -609,13 +645,18 @@ export function Update(): void
 
     // Web page mode: override camera position with smooth scroll/zoom
     if (webPageMode) {
-        if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive) {
+        if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaZoomActive) {
             // ZOOM MODE: Smoothly move camera to target position
             let zoomTargetX: number, zoomTargetY: number, zoomTargetZ: number;
             if (phoneZoomActive) {
+                // Inner level — wins over the cabana target below when both active.
                 zoomTargetX = _phoneWorldX;
                 zoomTargetY = _phoneWorldY + phoneZoomConfig.height;
                 zoomTargetZ = _phoneWorldZ + phoneZoomConfig.tilt;
+            } else if (cabanaZoomActive) {
+                zoomTargetX = cabanaZoomConfig.camX;
+                zoomTargetY = cabanaZoomConfig.camY;
+                zoomTargetZ = cabanaZoomConfig.camZ;
             } else if (pugZoomActive) {
                 zoomTargetX = PUG_FINAL_X + _pugCamOffsetX;
                 zoomTargetY = PUG_ZOOM_TARGET_Y;
@@ -640,17 +681,23 @@ export function Update(): void
             // Keep currentY in sync for when we exit zoom
             currentY = currentZoomY;
 
-            // Smoothly rotate camera to face the target during zoom
-            if (radioZoomActive) {
-                zoomPhi = MathUtils.damp(zoomPhi, RADIO_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
-            } else if (pugZoomActive) {
-                zoomPhi = MathUtils.damp(zoomPhi, PUG_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
-            } else if (phoneZoomActive) {
+            // Smoothly rotate camera to face the target during zoom. Phone (inner)
+            // and cabana are checked first so the nested phone framing wins.
+            if (phoneZoomActive) {
                 zoomPhi = MathUtils.damp(zoomPhi, PHONE_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
                 // Tilt camera down for top-down phone view
                 zoomTetha = MathUtils.damp(zoomTetha, phoneZoomConfig.pitch, ZOOM_SMOOTH, deltaTime);
                 // Narrow FOV for telephoto phone zoom
                 currentFov = MathUtils.damp(currentFov, phoneZoomConfig.fov, ZOOM_SMOOTH, deltaTime);
+            } else if (cabanaZoomActive) {
+                zoomPhi = MathUtils.damp(zoomPhi, cabanaZoomConfig.phi, ZOOM_SMOOTH, deltaTime);
+                zoomTetha = MathUtils.damp(zoomTetha, cabanaZoomConfig.pitch, ZOOM_SMOOTH, deltaTime);
+                // Narrow FOV toward ~0 for the "stepping into the cabana" effect
+                currentFov = MathUtils.damp(currentFov, cabanaZoomConfig.fov, ZOOM_SMOOTH, deltaTime);
+            } else if (radioZoomActive) {
+                zoomPhi = MathUtils.damp(zoomPhi, RADIO_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
+            } else if (pugZoomActive) {
+                zoomPhi = MathUtils.damp(zoomPhi, PUG_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
             } else if (chestZoomActive) {
                 zoomPhi = MathUtils.damp(zoomPhi, CHEST_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
                 // Tilt camera down to look at chest from above

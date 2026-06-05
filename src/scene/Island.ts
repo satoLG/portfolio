@@ -11,7 +11,8 @@ import {
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../core/Time";
 import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../core/MediaPlayer";
-import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive, touchControls } from "../core/Control";
+import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive, zoomToCabana, isCabanaZoomActive, touchControls } from "../core/Control";
+import { cabanaShadeX, cabanaShadeY, cabanaShadeZ, cabanaShadeRotY, cabanaShadeWidth, cabanaShadeHeight, cabanaShadeColor, cabanaShadeOpacity } from "./config/CabanaConfig";
 import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../core/Dialog";
 import * as CoinTooltip from '../core/CoinTooltip';
 import type { DialogLine, ReplyOption } from "../core/Dialog";
@@ -100,6 +101,11 @@ export const radio = new Group();
 export const sword = new Group();
 export const pug = new Group();
 export const tent = new Group();
+// Dark unlit plane over the tent opening — hides the interior (phone + props)
+// from outside, day or night. Created when the tent GLB loads; faded out while
+// the cabana zoom is active. Surface-only (gated in Scene.ts).
+export let cabanaShade: Mesh | null = null;
+let cabanaShadeMat: MeshBasicMaterial | null = null;
 export const dogBed = new Group();
 export const littleRocks = new Group();
 export const phone = new Group();
@@ -3050,6 +3056,28 @@ export function Start(): void {
         (error) => { console.error('Error loading tent:', error); }
     );
 
+    // Dark entrance shade — an unlit plane over the tent opening so the interior
+    // can't be seen from outside (day or night). MeshBasicMaterial ignores scene
+    // lights, so it stays the same dark tone regardless of time of day. Faded out
+    // while inside (see Update). Added straight to the scene like the phone.
+    cabanaShadeMat = new MeshBasicMaterial({
+        color: cabanaShadeColor,
+        transparent: true,
+        opacity: cabanaShadeOpacity,
+        depthWrite: false,   // don't pollute the foam depth target / occlude oddly
+        side: DoubleSide,    // visible whichever way the camera approaches
+        fog: false,
+    });
+    cabanaShade = new Mesh(new PlaneGeometry(cabanaShadeWidth, cabanaShadeHeight), cabanaShadeMat);
+    cabanaShade.position.set(
+        islandPosition.x + cabanaShadeX,
+        islandPosition.y + cabanaShadeY,
+        islandPosition.z + cabanaShadeZ,
+    );
+    cabanaShade.rotation.y = cabanaShadeRotY;
+    cabanaShade.renderOrder = 2;  // draw after opaque interior so it actually hides it
+    threeScene.add(cabanaShade);
+
     // Load little rocks (between pug and firecamp — phone leans on them)
     loader.load(
         'models/surface/little_rocks.glb',
@@ -3284,6 +3312,9 @@ export function Start(): void {
 
     // Setup phone click/hover interaction
     setupPhoneInteraction();
+
+    // Setup cabana (tent) click/hover interaction → zoom into the interior
+    setupCabanaInteraction();
 
     // Setup chest click/hover interaction (underwater)
     setupChestInteraction();
@@ -3604,25 +3635,6 @@ function _getPugScreenPos(): { x: number; y: number } | null {
 // ── Configurable pug animation indices ────────────────────────────────────────
 const PUG_ANIM_BARK = 4;   // bark / react animation clip index
 const PUG_ANIM_WALK = 10;  // walk animation clip index
-const PUG_ANIM_DROP = 0;   // drop / place item animation clip index
-/** Walk animation playback speed during the phone drop cutscene — TWEAK (1.0 = normal) */
-const PUG_CUTSCENE_WALK_SPEED = 0.55;
-
-let phoneDropped = false;  // True after the cutscene sequence (runtime only, no localStorage)
-
-// ── Helper: build the "who's Leo?" branch (ends with phone drop cutscene) ────
-function _buildLeoBranch(): DialogLine[] {
-    return [
-        {
-            textKey: 'pug.day.leo.0',
-            onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
-        },
-        {
-            textKey: 'pug.day.leo.1',
-            onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
-        },
-    ];
-}
 
 // ── Helper: build the "what is this place?" branch ───────────────────────────
 function _buildPlaceBranch(): DialogLine[] {
@@ -3642,34 +3654,19 @@ function _buildPlaceBranch(): DialogLine[] {
         {
             textKey: 'pug.day.place.3',
             onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
-            replies: (() => {
-                const opts: ReplyOption[] = [
-                    {
-                        textKey: 'pug.reply.likeit',
-                        onSelect: () => {
-                            showDialog([
-                                {
-                                    textKey: 'pug.reply.response.likeit',
-                                    onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
-                                },
-                            ], _getPugScreenPos, _onPugDialogComplete);
-                        },
-                    } as ReplyOption,
-                ];
-                // Only offer "who's Leo?" before the phone has been dropped
-                if (!phoneDropped) {
-                    opts.push({
-                        textKey: 'pug.reply.wholeo',
-                        onSelect: () => {
-                            showDialog(_buildLeoBranch(), _getPugScreenPos, () => {
-                                // After "let me show you on my phone" — start the cutscene
-                                _startPhoneDropSequence();
-                            });
-                        },
-                    } as ReplyOption);
-                }
-                return opts;
-            })(),
+            replies: [
+                {
+                    textKey: 'pug.reply.likeit',
+                    onSelect: () => {
+                        showDialog([
+                            {
+                                textKey: 'pug.reply.response.likeit',
+                                onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
+                            },
+                        ], _getPugScreenPos, _onPugDialogComplete);
+                    },
+                } as ReplyOption,
+            ],
         },
     ];
 }
@@ -3817,72 +3814,6 @@ function _tweenValue(
     });
 }
 
-/**
- * Phone cutscene — pug walks to the phone, does a pointing gesture, camera
- * zooms into the phone, pug walks back.  Phone is always already visible.
- * Called after the "let me show you on my phone" dialog line completes.
- */
-async function _startPhoneDropSequence(): Promise<void> {
-    // ── 1. Release pug zoom & dismiss dialog so camera returns to orbit ──────
-    zoomOutFromPug();
-    dismissDialog();
-
-    // ── 2. Save current pug position & rotation ──────────────────────────────
-    const savedPosX = pug.position.x;
-    const savedPosZ = pug.position.z;
-    const savedRotY = pug.rotation.y;
-
-    // Walk target: just beside the phone (slightly behind it so the pug faces it)
-    const walkTargetX = phone.position.x + 0.12;
-    const walkTargetZ = phone.position.z + 0.14;
-
-    // ── 3. Walk to phone position ─────────────────────────────────────────────
-    const dxWalk = walkTargetX - savedPosX;
-    const dzWalk = walkTargetZ - savedPosZ;
-    pug.rotation.y = Math.atan2(dxWalk, dzWalk);
-    setPugAnimation(PUG_ANIM_WALK);
-    if (_pugCurrentAction) _pugCurrentAction.timeScale = PUG_CUTSCENE_WALK_SPEED;
-
-    await Promise.all([
-        _tweenValue(savedPosX, walkTargetX, 1200, v => { pug.position.x = v; }),
-        _tweenValue(savedPosZ, walkTargetZ, 1200, v => { pug.position.z = v; }),
-    ]);
-
-    // ── 4. Play drop/point animation (reused as "pointing at phone") ─────────
-    setPugAnimation(PUG_ANIM_DROP);
-    await _delay(500);  // let the pointing gesture start
-
-    // ── 5. Zoom into the phone using the default zoom logic ──────────────────
-    zoomToPhone();
-    await _delay(300);
-
-    // ── 6. Walk back to original position (while phone is zoomed in) ─────────
-    const dxReturn = savedPosX - pug.position.x;
-    const dzReturn = savedPosZ - pug.position.z;
-    pug.rotation.y = Math.atan2(dxReturn, dzReturn);
-    setPugAnimation(PUG_ANIM_WALK);
-    if (_pugCurrentAction) _pugCurrentAction.timeScale = PUG_CUTSCENE_WALK_SPEED;
-
-    await Promise.all([
-        _tweenValue(pug.position.x, savedPosX, 1200, v => { pug.position.x = v; }),
-        _tweenValue(pug.position.z, savedPosZ, 1200, v => { pug.position.z = v; }),
-    ]);
-
-    // ── 7. Restore idle and finish ───────────────────────────────────────────
-    if (pugMixer && pugAnimClips[PUG_ANIM_WALK]) {
-        pugMixer.clipAction(pugAnimClips[PUG_ANIM_WALK]).timeScale = 1;
-    }
-    pug.rotation.y = savedRotY;
-    phoneDropped = true;
-    // Restore correct idle — respect music state, same logic as _onPugDialogComplete
-    if (_pugMusicWasPlaying) {
-        pugDefaultAnimIndex = PUG_ANIM_BARK;
-        setPugAnimation(PUG_ANIM_BARK);
-    } else {
-        _restorePugNightState();
-    }
-}
-
 // ============================================
 // PHONE CLICK/HOVER INTERACTION
 // ============================================
@@ -3916,6 +3847,10 @@ function setupPhoneInteraction(): void {
             return;
         }
 
+        // The phone zoom is the INNER level — only reachable from inside the
+        // cabana. From outside the phone is hidden by the shade and not zoomable.
+        if (!isCabanaZoomActive()) return;
+
         if (phone.children.length === 0) return;
 
         phoneMouse.x = (clientX / window.innerWidth) * 2 - 1;
@@ -3943,7 +3878,9 @@ function setupPhoneInteraction(): void {
     });
 
     canvas.addEventListener('mousemove', (e: MouseEvent) => {
-        if (!phone.visible || phone.children.length === 0
+        // Only show the phone hover cursor while inside the cabana (the phone is
+        // only zoomable from there).
+        if (!phone.visible || phone.children.length === 0 || !isCabanaZoomActive()
             || isPhoneZoomActive() || camera.position.y < UNDERWATER_Y_THRESHOLD) {
             if (isPhoneHovered) { isPhoneHovered = false; canvas.style.cursor = ''; }
             return;
@@ -3961,6 +3898,70 @@ function setupPhoneInteraction(): void {
 
     canvas.addEventListener('mouseleave', () => {
         if (isPhoneHovered) { isPhoneHovered = false; canvas.style.cursor = ''; }
+    });
+}
+
+// ============================================
+// CABANA (TENT) CLICK/HOVER INTERACTION
+// ============================================
+const cabanaRaycaster = new Raycaster();
+const cabanaMouse = new Vector2();
+let isCabanaHovered = false;
+
+function setupCabanaInteraction(): void {
+    const canvas = renderer.domElement;
+    if (!canvas) return;
+
+    const onCabanaClick = (clientX: number, clientY: number) => {
+        if (tent.children.length === 0) return;             // not loaded yet
+        if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;  // above water only
+        // Ignore while any zoom is already active (incl. already inside the cabana).
+        if (isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive()
+            || isChestZoomActive() || isCabanaZoomActive()) return;
+
+        cabanaMouse.x = (clientX / window.innerWidth) * 2 - 1;
+        cabanaMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+        cabanaRaycaster.setFromCamera(cabanaMouse, camera);
+        const intersects = cabanaRaycaster.intersectObjects(tent.children, true);
+        if (intersects.length > 0) {
+            isCabanaHovered = false;
+            canvas.style.cursor = '';
+            zoomToCabana();
+        }
+    };
+
+    canvas.addEventListener('click', (e: MouseEvent) => {
+        onCabanaClick(e.clientX, e.clientY);
+    });
+
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (_touchWasMulti || _touchDragged) return;  // was a scroll gesture — skip click
+        if (e.changedTouches.length > 0) {
+            const touch = e.changedTouches[0];
+            onCabanaClick(touch.clientX, touch.clientY);
+        }
+    });
+
+    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+        if (tent.children.length === 0 || camera.position.y < UNDERWATER_Y_THRESHOLD
+            || isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive()
+            || isChestZoomActive() || isCabanaZoomActive()) {
+            if (isCabanaHovered) { isCabanaHovered = false; canvas.style.cursor = ''; }
+            return;
+        }
+        cabanaMouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        cabanaMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        cabanaRaycaster.setFromCamera(cabanaMouse, camera);
+        const intersects = cabanaRaycaster.intersectObjects(tent.children, true);
+        if (intersects.length > 0) {
+            if (!isCabanaHovered) { isCabanaHovered = true; canvas.style.cursor = 'pointer'; }
+        } else {
+            if (isCabanaHovered) { isCabanaHovered = false; canvas.style.cursor = ''; }
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (isCabanaHovered) { isCabanaHovered = false; canvas.style.cursor = ''; }
     });
 }
 
@@ -4553,6 +4554,13 @@ export function Update(isUnderwater = false): void {
   _updateAppleImpacts();
   islandCampfireGroundCenterUniform.value.set(firecamp.position.x, firecamp.position.z);
   _updateGroundApples();
+
+  // Fade the cabana entrance shade out while inside (reveals the interior) and
+  // back to full when outside (hides the phone + props, day or night).
+  if (cabanaShadeMat) {
+      const shadeTarget = isCabanaZoomActive() ? 0 : cabanaShadeOpacity;
+      cabanaShadeMat.opacity = MathUtils.damp(cabanaShadeMat.opacity, shadeTarget, 6, deltaTime);
+  }
 
   if (!isUnderwater) {
     // Update palm tree wind shader time

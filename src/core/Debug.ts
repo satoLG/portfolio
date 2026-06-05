@@ -320,7 +320,7 @@ import {
     edgeFoamFadeStartZMobile as CFG_EF_FADE_START_Z_MOBILE,
     edgeFoamFadeEndZMobile as CFG_EF_FADE_END_Z_MOBILE,
 } from '../scene/config/OceanConfig';
-import { phoneZoomConfig, mainCameraConfig, isWebPageMode, toggleCameraMode } from './Control';
+import { phoneZoomConfig, cabanaZoomConfig, mainCameraConfig, isWebPageMode, toggleCameraMode } from './Control';
 import { mobileFov, mobileBreakpointWidth, aboveWaterBottomY as CFG_ABOVE_BOTTOM, aboveWaterBottomYMobile as CFG_ABOVE_BOTTOM_MOBILE, underwaterTopY as CFG_UNDER_TOP, underwaterTopYMobile as CFG_UNDER_TOP_MOBILE } from '../scene/config/CameraConfig';
 import { SetFOV, scene as threeScene } from './Scene';
 import { phoneScreenConfig, updateOverlayStyle } from './PhoneScreen';
@@ -2431,6 +2431,23 @@ function buildGUI(): void {
     mainCamFolder.add(mainCamProxy, 'desktopFov',  10,  120, 0.5 ).name('FOV (desktop)').listen();
     mainCamFolder.add(mainCamProxy, 'mobileFov',   10,  120, 0.5 ).name('FOV (mobile)').listen();
     mainCamFolder.close();
+
+    // ── Camera: Cabana (tent interior) zoom + entrance shade ───────────────────
+    // Camera-pose sliders write straight into cabanaZoomConfig (read live by
+    // Control each frame), so enter the cabana first then tweak. Read the values
+    // off the panel and paste into CabanaConfig.ts. The shade sub-folder only
+    // appears if the tent GLB has finished loading by GUI-build time.
+    const cabanaFolder = cameraFolder.addFolder('Cabana');
+    cabanaFolder.add(cabanaZoomConfig, 'camX',  -3,  3,         0.01).name('Cam X').listen();
+    cabanaFolder.add(cabanaZoomConfig, 'camY',  -2,  3,         0.01).name('Cam Y').listen();
+    cabanaFolder.add(cabanaZoomConfig, 'camZ',  -6,  0,         0.01).name('Cam Z').listen();
+    cabanaFolder.add(cabanaZoomConfig, 'phi',    0,  Math.PI*4, 0.01).name('Yaw (phi)').listen();
+    cabanaFolder.add(cabanaZoomConfig, 'pitch', -1.5, 1.5,      0.01).name('Pitch').listen();
+    cabanaFolder.add(cabanaZoomConfig, 'fov',    1,  60,        0.5 ).name('FOV').listen();
+    if (Island.cabanaShade) {
+        addObjectFolder(cabanaFolder, 'Entrance Shade', Island.cabanaShade, { scaleRange: [0.1, 3.0], rotAxes: ['x', 'y', 'z'] });
+    }
+    cabanaFolder.close();
 
     // ── Close all top-level groups by default ───────────────────────────────
     surfaceFolder.close();
