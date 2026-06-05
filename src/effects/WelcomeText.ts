@@ -43,7 +43,7 @@ export function showWelcomeText(
 
     const textStyle = `
         color: ${WELCOME_COLOR};
-        font-family: 'Patrick Hand', cursive;
+        font-family: 'Pangolin', cursive;
         font-size: clamp(40px, 7vw, 64px);
         white-space: nowrap;
         text-align: left;
@@ -67,14 +67,13 @@ export function showWelcomeText(
     textWrap.appendChild(ghost);
     textWrap.appendChild(container);
 
-    // Reuse the pug dialog's continue prompt verbatim — the same ▼ glyph and the
-    // same `.dialog-prompt` styling/animation — so the intro is 100% identical to
-    // the in-scene dialogs (the old CSS border-triangle looked different). It's a
-    // block with text-align:right, so inside the stretched flex column it lands in
-    // the bottom-right corner, under the end of the word, just like the dialog.
+    // Reuse the pug dialog's continue prompt verbatim — the same `.dialog-prompt`
+    // (a CSS-masked rounded triangle) and the same styling/animation — so the
+    // intro is 100% identical to the in-scene dialogs. It's a full-width block
+    // with the triangle masked at its right edge, so inside the stretched flex
+    // column it lands in the bottom-right corner, under the end of the word.
     const arrow = document.createElement('span');
     arrow.className = 'dialog-prompt';
-    arrow.textContent = '▼';
 
     block.appendChild(textWrap);
     block.appendChild(arrow);

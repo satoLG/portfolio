@@ -56,7 +56,7 @@ Don't reorder. PostProcess copies the framebuffer **before** clouds, so clouds a
 
 ## WelcomeText.ts
 
-- Typewriter reveal of the welcome word in the Google "Patrick Hand" font,
+- Typewriter reveal of the welcome word in the Google "Pangolin" font,
   using the same rAF/delta-clamped typing as the pug dialogs (Dialog.ts).
 - Translucent white (`--intro-white`); no audio. The continue arrow appears
   once typing finishes; a click fades the overlay and runs `onComplete`.

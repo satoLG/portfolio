@@ -80,7 +80,7 @@ body.pixel-max * {
 .welcome-text,
 body.pixel-medium .welcome-text,
 body.pixel-max .welcome-text {
-    font-family: 'Patrick Hand', cursive !important;
+    font-family: 'Pangolin', cursive !important;
     font-size-adjust: none;
 }
 
@@ -2517,8 +2517,8 @@ a:visited
 
 .dialog-text {
     margin: 0;
-    font-size: 64px !important;
-    font-family: 'Patrick Hand', cursive !important;
+    font-size: 54px !important;
+    font-family: 'Pangolin', cursive !important;
     font-weight: 400 !important;
     color: var(--intro-white);
     line-height: 1.32;
@@ -2527,20 +2527,30 @@ a:visited
 }
 
 .dialog-prompt {
+    /* Rounded down-triangle drawn as a mask, so it looks identical on every
+       platform — the ▼ glyph rendered sharp on desktop but rounded on mobile.
+       background-color: currentColor makes it inherit the text colour (and the
+       --visible fade/bob); the mask paints only the triangle, at the right edge
+       just under where the typed text ends (replaces the old text-align:right). */
     display: block;
-    /* Aligns to the right edge of the shrink-wrapped text — i.e. just under
-       where the longest typed line ends, not at some fixed box width. */
-    text-align: right;
-    font-size: 36px !important;
-    font-weight: 400 !important;
+    height: 17px;            /* desktop arrow size — mobile shrinks it below */
     color: var(--intro-white);
+    background-color: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 16'%3E%3Cpath d='M10 14 L2.5 3 L17.5 3 Z' fill='%23000' stroke='%23000' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E") right center / contain no-repeat;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 16'%3E%3Cpath d='M10 14 L2.5 3 L17.5 3 Z' fill='%23000' stroke='%23000' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E") right center / contain no-repeat;
     opacity: 0;
-    transition: opacity 0.15s ease;
+    /* No transition on the hidden (base) state, so REMOVING --visible hides the
+       arrow instantly. Browsers pick the transition from the after-change style,
+       so the fade only lives on --visible below = fade-in only. This stops the
+       arrow from lingering and drifting with the text while the next line types. */
+    transition: none;
     animation: none;
 }
 
 .dialog-prompt--visible {
     opacity: 1;
+    /* Gradual fade-in when typing finishes (after-change style = this rule). */
+    transition: opacity 0.2s ease;
     animation: dialog-prompt-bob 0.75s ease-in-out infinite;
 }
 
@@ -2603,8 +2613,8 @@ a:visited
 
 .dialog-reply-option {
     display: block;
-    font-size: 64px !important;
-    font-family: 'Patrick Hand', cursive !important;
+    font-size: 54px !important;
+    font-family: 'Pangolin', cursive !important;
     font-weight: 400 !important;
     color: var(--intro-white);
     line-height: 1.32;
@@ -2629,7 +2639,7 @@ a:visited
         font-size: 32px !important;
     }
     .dialog-prompt {
-        font-size: 18px !important;
+        height: 11px;  /* smaller arrow on mobile (already looked good there) */
     }
 }
 
