@@ -819,7 +819,6 @@ export function Update(): void
         Fire.fire.visible = true;
         if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = true;
         if (Island.grassShadowMesh)     Island.grassShadowMesh.visible     = true;
-        if (Island.cabanaShade)         Island.cabanaShade.visible         = false;  // surface-only
 
         SeaFloor.Update();
         SeaFloorDecor.Update(deltaTime);
@@ -847,8 +846,6 @@ export function Update(): void
         Fire.fire.visible = true;
         // Show procedural foliage on surface
         if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = true;
-        // Dark entrance shade hides the cabana interior from outside
-        if (Island.cabanaShade) Island.cabanaShade.visible = true;
 
         Island.Update(false);
         Fire.Update();

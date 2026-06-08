@@ -12,7 +12,7 @@ import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial"
 import { deltaTime, time } from "../core/Time";
 import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../core/MediaPlayer";
 import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive, zoomToCabana, isCabanaZoomActive, touchControls } from "../core/Control";
-import { cabanaShadeX, cabanaShadeY, cabanaShadeZ, cabanaShadeRotY, cabanaShadeWidth, cabanaShadeHeight, cabanaShadeColor, cabanaShadeOpacity } from "./config/CabanaConfig";
+import { cabanaShadeX, cabanaShadeY, cabanaShadeZ, cabanaShadeRadiusX, cabanaShadeRadiusY, cabanaShadeRadiusZ, cabanaShadeEdge, cabanaShadeColor, cabanaShadeStrength, cabanaShadeRevealSpeed, cabanaShadeCoverSpeed } from "./config/CabanaConfig";
 import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../core/Dialog";
 import * as CoinTooltip from '../core/CoinTooltip';
 import type { DialogLine, ReplyOption } from "../core/Dialog";
@@ -101,11 +101,25 @@ export const radio = new Group();
 export const sword = new Group();
 export const pug = new Group();
 export const tent = new Group();
-// Dark unlit plane over the tent opening — hides the interior (phone + props)
-// from outside, day or night. Created when the tent GLB loads; faded out while
-// the cabana zoom is active. Surface-only (gated in Scene.ts).
-export let cabanaShade: Mesh | null = null;
-let cabanaShadeMat: MeshBasicMaterial | null = null;
+// ── Cabana interior shade (world-space ellipsoid) ────────────────────────────
+// Darkens the tent fabric interior + interior props from outside (day or night)
+// without any floating geometry: the darkening is injected into the tent/prop
+// shaders (see applyCabanaInteriorShade) and gated by a world-space ellipsoid,
+// so it conforms to the real geometry. `cabanaDarkenUniform` is the global fade
+// (1 = outside/dark, 0 = inside/revealed), damped each frame toward the cabana
+// zoom state. The rest describe the ellipsoid + tone, tweakable from IslandDebug.
+export const cabanaDarkenUniform        = new Uniform(1.0);
+export const cabanaShadeCenterUniform   = new Uniform(new Vector3());
+export const cabanaShadeRadiiUniform    = new Uniform(new Vector3(cabanaShadeRadiusX, cabanaShadeRadiusY, cabanaShadeRadiusZ));
+export const cabanaShadeEdgeUniform     = new Uniform(cabanaShadeEdge);
+export const cabanaShadeColorUniform    = new Uniform(new Color(cabanaShadeColor));
+export const cabanaShadeStrengthUniform = new Uniform(cabanaShadeStrength);
+// CPU-side fade timing (damp lambda) — not shader uniforms. Asymmetric: slow to
+// reveal the interior on zoom-in, fast to re-darken it on zoom-out.
+export const cabanaShadeFade = {
+    revealSpeed: cabanaShadeRevealSpeed,
+    coverSpeed:  cabanaShadeCoverSpeed,
+};
 export const dogBed = new Group();
 export const littleRocks = new Group();
 export const phone = new Group();
@@ -2012,6 +2026,25 @@ const oceanLightingFragment = /*glsl*/`
     }
 `;
 
+// Cabana interior shade — darkens fragments inside a world-space ellipsoid toward
+// a near-black tone. Applied on top of the ocean lighting (operates on the same
+// `outgoingLight` and reuses the `vWorldPosition` varying). `uCabanaDarken` is the
+// global fade (1 = outside/dark, 0 = revealed inside).
+const cabanaShadePars = /*glsl*/`
+    uniform float uCabanaDarken;
+    uniform vec3  uCabanaCenter;
+    uniform vec3  uCabanaRadii;
+    uniform float uCabanaEdge;
+    uniform vec3  uCabanaShadeColor;
+    uniform float uCabanaStrength;
+`;
+
+const cabanaShadeFragment = /*glsl*/`
+    vec3 cabanaD = (vWorldPosition - uCabanaCenter) / max(uCabanaRadii, vec3(1e-4));
+    float cabanaInside = 1.0 - smoothstep(1.0 - uCabanaEdge, 1.0, length(cabanaD));
+    outgoingLight = mix(outgoingLight, uCabanaShadeColor, cabanaInside * uCabanaStrength * uCabanaDarken);
+`;
+
 
 export let islandSurfaceGrassColor = ISLAND_SURFACE_GRASS_COLOR;
 export let islandSurfaceGrassStrength = ISLAND_SURFACE_GRASS_STRENGTH;
@@ -2383,6 +2416,66 @@ function applyOceanLightingToModel(model: Group): void {
     });
 }
 
+/** Like applyOceanLightingToModel, but also darkens the model where it falls
+ *  inside the cabana interior ellipsoid (see cabanaShade* uniforms). Used for the
+ *  tent fabric and every interior prop, so the interior reads dark from outside
+ *  and fades clear when the cabana zoom is active — all conforming to the real
+ *  geometry, no floating planes. Composed cache key keeps this variant isolated
+ *  from the plain ocean-lighting program. */
+function applyCabanaInteriorShade(model: Group): void {
+    model.traverse((child) => {
+        if ((child as any).isMesh && (child as any).material) {
+            const mesh = child as any;
+            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            materials.forEach((mat: any) => {
+                if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial || mat.isMeshBasicMaterial) {
+                    // Render the inner faces so the interior reads as a solid dark
+                    // cavity instead of letting the camera see through the opening.
+                    mat.side = DoubleSide;
+                    mat.customProgramCacheKey = () => 'ocean_lighting_cabana';
+                    mat.onBeforeCompile = (shader: any) => {
+                        shader.uniforms.uLight = lightUniform;
+                        shader.uniforms.uAbsorption = oceanAbsorptionUniform;
+                        shader.uniforms.uFogDist = underwaterFogDistUniform;
+                        shader.uniforms.uSunVisibility = sunVisibilityUniform;
+                        shader.uniforms.uCabanaDarken = cabanaDarkenUniform;
+                        shader.uniforms.uCabanaCenter = cabanaShadeCenterUniform;
+                        shader.uniforms.uCabanaRadii = cabanaShadeRadiiUniform;
+                        shader.uniforms.uCabanaEdge = cabanaShadeEdgeUniform;
+                        shader.uniforms.uCabanaShadeColor = cabanaShadeColorUniform;
+                        shader.uniforms.uCabanaStrength = cabanaShadeStrengthUniform;
+
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <common>',
+                            `#include <common>
+                            varying vec3 vWorldPosition;`
+                        );
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <worldpos_vertex>',
+                            `#include <worldpos_vertex>
+                            vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;`
+                        );
+                        shader.fragmentShader = shader.fragmentShader.replace(
+                            '#include <common>',
+                            `#include <common>
+                            varying vec3 vWorldPosition;
+                            ${oceanLightingPars}
+                            ${cabanaShadePars}`
+                        );
+                        shader.fragmentShader = shader.fragmentShader.replace(
+                            '#include <opaque_fragment>',
+                            `${oceanLightingFragment}
+                            ${cabanaShadeFragment}
+                            #include <opaque_fragment>`
+                        );
+                    };
+                    mat.needsUpdate = true;
+                }
+            });
+        }
+    });
+}
+
 /** Load a moss rock GLB, wire it up with the standard ocean lighting, then
  *  position/scale/rotate it relative to the island. Edge foam is handled
  *  ocean-side via depth-intersection (see SceneDepth + OceanShaders). The
@@ -2444,7 +2537,9 @@ function _loadMossRock(
 
 /** Generic surface prop loader: ocean lighting + waterline + shadows + transform.
  *  Mirrors the moss-rock loader but skips the per-object waterline shader since
- *  most tent-interior props sit well above the waterline. */
+ *  most tent-interior props sit well above the waterline. These props all sit
+ *  inside the cabana, so they use the interior-shade variant — darkened from
+ *  outside, revealed on zoom. */
 function _loadSurfaceProp(
     path: string,
     group: Group,
@@ -2455,7 +2550,7 @@ function _loadSurfaceProp(
     loader.load(
         path,
         (gltf) => {
-            applyOceanLightingToModel(gltf.scene);
+            applyCabanaInteriorShade(gltf.scene);
             gltf.scene.traverse((child) => {
                 if ((child as any).isMesh) {
                     child.castShadow = true;
@@ -3031,11 +3126,20 @@ export function Start(): void {
         }
     );
 
+    // Position the cabana interior-shade ellipsoid (offset added to islandPosition,
+    // same convention as tentOffset). The radii / edge / color / strength live in
+    // their uniforms (set from config at module init), tweakable from IslandDebug.
+    cabanaShadeCenterUniform.value.set(
+        islandPosition.x + cabanaShadeX,
+        islandPosition.y + cabanaShadeY,
+        islandPosition.z + cabanaShadeZ,
+    );
+
     // Load custom tent to the right of the palm tree
     loader.load(
         'models/surface/custom_tent.glb',
         (gltf) => {
-            applyOceanLightingToModel(gltf.scene);
+            applyCabanaInteriorShade(gltf.scene);
             gltf.scene.traverse((child) => {
                 if ((child as any).isMesh) {
                     child.castShadow = true;
@@ -3055,28 +3159,6 @@ export function Start(): void {
         undefined,
         (error) => { console.error('Error loading tent:', error); }
     );
-
-    // Dark entrance shade — an unlit plane over the tent opening so the interior
-    // can't be seen from outside (day or night). MeshBasicMaterial ignores scene
-    // lights, so it stays the same dark tone regardless of time of day. Faded out
-    // while inside (see Update). Added straight to the scene like the phone.
-    cabanaShadeMat = new MeshBasicMaterial({
-        color: cabanaShadeColor,
-        transparent: true,
-        opacity: cabanaShadeOpacity,
-        depthWrite: false,   // don't pollute the foam depth target / occlude oddly
-        side: DoubleSide,    // visible whichever way the camera approaches
-        fog: false,
-    });
-    cabanaShade = new Mesh(new PlaneGeometry(cabanaShadeWidth, cabanaShadeHeight), cabanaShadeMat);
-    cabanaShade.position.set(
-        islandPosition.x + cabanaShadeX,
-        islandPosition.y + cabanaShadeY,
-        islandPosition.z + cabanaShadeZ,
-    );
-    cabanaShade.rotation.y = cabanaShadeRotY;
-    cabanaShade.renderOrder = 2;  // draw after opaque interior so it actually hides it
-    threeScene.add(cabanaShade);
 
     // Load little rocks (between pug and firecamp — phone leans on them)
     loader.load(
@@ -3122,11 +3204,11 @@ export function Start(): void {
     _loadSurfaceProp('models/surface/dog_bowl.glb',            dogBowl,          dogBowlOffset,          dogBowlScale,          dogBowlRot);
     _loadSurfaceProp('models/surface/dog_biscuit.glb',         dogBiscuit,       dogBiscuitOffset,       dogBiscuitScale,       dogBiscuitRot);
 
-    // Phone model — always spawned on the little rocks
+    // Phone model — always spawned on the little rocks (inside the cabana)
     loader.load(
         'models/overall/phone.glb',
         (gltf) => {
-            applyOceanLightingToModel(gltf.scene);
+            applyCabanaInteriorShade(gltf.scene);
             gltf.scene.traverse((child) => {
                 if ((child as any).isMesh) {
                     child.castShadow = true;
@@ -4555,12 +4637,13 @@ export function Update(isUnderwater = false): void {
   islandCampfireGroundCenterUniform.value.set(firecamp.position.x, firecamp.position.z);
   _updateGroundApples();
 
-  // Fade the cabana entrance shade out while inside (reveals the interior) and
-  // back to full when outside (hides the phone + props, day or night).
-  if (cabanaShadeMat) {
-      const shadeTarget = isCabanaZoomActive() ? 0 : cabanaShadeOpacity;
-      cabanaShadeMat.opacity = MathUtils.damp(cabanaShadeMat.opacity, shadeTarget, 6, deltaTime);
-  }
+  // Fade the cabana interior shade out while inside (reveals the interior) and
+  // back to full when outside (darkens the tent fabric + props, day or night).
+  // Asymmetric speed: slow reveal on zoom-in, fast re-darken on zoom-out.
+  const cabanaInside = isCabanaZoomActive();
+  const cabanaDarkenTarget = cabanaInside ? 0 : 1;
+  const cabanaFadeSpeed = cabanaInside ? cabanaShadeFade.revealSpeed : cabanaShadeFade.coverSpeed;
+  cabanaDarkenUniform.value = MathUtils.damp(cabanaDarkenUniform.value, cabanaDarkenTarget, cabanaFadeSpeed, deltaTime);
 
   if (!isUnderwater) {
     // Update palm tree wind shader time

@@ -102,6 +102,19 @@ These are not exported but are reused across every tree+bush onBeforeCompile hoo
 
 All module-private, defined [Island.ts:1876-1889](src/scene/Island.ts#L1876). Cache key `island_surface_grass_filter`. Drive the painted-grass effect on the island ground mesh + the orange firepit floor tint.
 
+## Cabana interior shade — [scene/Island.ts](src/scene/Island.ts)
+
+Darkens the tent fabric interior + interior props (anything loaded via `applyCabanaInteriorShade`: `custom_tent.glb`, the tent-interior props, the phone) where they fall inside a world-space ellipsoid. Composed cache key `ocean_lighting_cabana` (ocean lighting + interior shade). Readers: tent/prop materials + [core/Debug.ts](src/core/Debug.ts) (Camera → Cabana → Interior Shade sliders).
+
+| Uniform | Purpose |
+|---|---|
+| `cabanaDarkenUniform` | Global fade. `1` = outside/dark, `0` = revealed. Damped each frame in `Island.Update()` toward the cabana zoom state. |
+| `cabanaShadeCenterUniform` | World-space ellipsoid center (`islandPosition + cabanaShadeXYZ`). |
+| `cabanaShadeRadiiUniform` | Ellipsoid radii (Vec3). |
+| `cabanaShadeEdgeUniform` | Soft falloff at the volume edge (smoothstep width). |
+| `cabanaShadeColorUniform` | Tone the interior fades toward (near-black). |
+| `cabanaShadeStrengthUniform` | Max darkening amount. |
+
 ---
 
 ## Adding a new shared uniform
