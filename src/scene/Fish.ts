@@ -990,10 +990,32 @@ export function setVisible(visible: boolean): void {
     setCameraVisibility(visible, visible ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY);
 }
 
+/** Spread the active generic fish across the CURRENT frustum band. Called on the
+ *  surface→underwater transition: the fish advance/recycle every frame against
+ *  the live camera frustum, which at the surface (and during the intro descent,
+ *  where they're first seeded) is far wider/offset than underwater — so on a dive
+ *  most fish sit off-screen and only wander into view over a minute-plus. This
+ *  makes a dive show a populated scene immediately. Jellyfish are stationary —
+ *  left untouched. */
+function reseedActiveFishX(): void {
+    for (let i = 0; i < activeFish.length; i++) {
+        const entry = activeFish[i].pool;
+        if (entry.isJellyfish) continue;
+        const edges = getFrustumEdgesX(entry.group.position.z);
+        const spawnX   = Number.isFinite(edges.spawnX)   ? edges.spawnX   :  5.5;
+        const despawnX = Number.isFinite(edges.despawnX) ? edges.despawnX : -5.5;
+        entry.group.position.x = despawnX + Math.random() * (spawnX - despawnX + RESPAWN_X_JITTER);
+    }
+}
+
 export function setCameraVisibility(isUnderwater: boolean, shallowMinY: number): void {
+    const enteringUnderwater = isUnderwater && !underwaterView;
     underwaterView = isUnderwater;
     shallowVisibilityMinY = shallowMinY;
     genericFishContainer.visible = true;
+    // Populate the dive immediately instead of waiting for fish to drift in from
+    // the wide surface/intro frustum (the "fish missing for ~2 min" bug).
+    if (enteringUnderwater) reseedActiveFishX();
     clownFish.visible = shouldShowCircleFish(clownFish);
     doriFish.visible = shouldShowCircleFish(doriFish);
     for (let i = 0; i < activeFish.length; i++) {
