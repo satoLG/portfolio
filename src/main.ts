@@ -3,6 +3,7 @@ import * as SCENE from "./core/Scene";
 import * as INPUT from "./core/Input";
 import * as CONTROL from "./core/Control";
 import * as UI from "./core/UI";
+import * as CABANA_EXIT from "./core/CabanaExit";
 import * as DEBUG from "./core/Debug";
 import * as SETTINGS from "./shaders/Settings"
 import "./style.css";
@@ -26,6 +27,7 @@ SCENE.Start();
 INPUT.Start();
 CONTROL.Start();
 UI.Start();
+CABANA_EXIT.Start();
 DEBUG.Start();
 
 requestAnimationFrame(UpdateFrame);
@@ -39,6 +41,7 @@ function UpdateFrame(): void
     INPUT.Update();
     CONTROL.Update();
     UI.Update();
+    CABANA_EXIT.Update();
     DEBUG.Update();
 
     DEBUG.End();

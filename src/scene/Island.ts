@@ -1,4 +1,4 @@
-import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, DoubleSide, MeshBasicMaterial, Box3, MeshStandardMaterial, ShaderChunk, Plane } from "three";
+import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, SphereGeometry, DoubleSide, BackSide, MeshBasicMaterial, Box3, MeshStandardMaterial, ShaderChunk, Plane } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { config as sfDecorConfig } from './SeaFloorDecor';
@@ -11,7 +11,8 @@ import {
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../core/Time";
 import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../core/MediaPlayer";
-import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive, touchControls } from "../core/Control";
+import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive, zoomToCabana, isCabanaZoomActive, getCabanaPhase, registerCabanaInterior, touchControls } from "../core/Control";
+import { cabanaShadeX, cabanaShadeY, cabanaShadeZ, cabanaShadeRadiusX, cabanaShadeRadiusY, cabanaShadeRadiusZ, cabanaShadeEdge, cabanaShadeColor, cabanaShadeStrength, cabanaShadeRevealSpeed, cabanaShadeCoverSpeed, cabanaDomeX, cabanaDomeY, cabanaDomeZ, cabanaDomeRadius, cabanaDomeColor, cabanaDomeOpacity } from "./config/CabanaConfig";
 import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../core/Dialog";
 import * as CoinTooltip from '../core/CoinTooltip';
 import type { DialogLine, ReplyOption } from "../core/Dialog";
@@ -100,6 +101,43 @@ export const radio = new Group();
 export const sword = new Group();
 export const pug = new Group();
 export const tent = new Group();
+// ── Cabana interior shade (world-space ellipsoid) ────────────────────────────
+// Darkens the tent fabric interior + interior props from outside (day or night)
+// without any floating geometry: the darkening is injected into the tent/prop
+// shaders (see applyCabanaInteriorShade) and gated by a world-space ellipsoid,
+// so it conforms to the real geometry. `cabanaDarkenUniform` is the global fade
+// (1 = outside/dark, 0 = inside/revealed), damped each frame toward the cabana
+// zoom state. The rest describe the ellipsoid + tone, tweakable from IslandDebug.
+export const cabanaDarkenUniform        = new Uniform(1.0);
+export const cabanaShadeCenterUniform   = new Uniform(new Vector3());
+export const cabanaShadeRadiiUniform    = new Uniform(new Vector3(cabanaShadeRadiusX, cabanaShadeRadiusY, cabanaShadeRadiusZ));
+export const cabanaShadeEdgeUniform     = new Uniform(cabanaShadeEdge);
+export const cabanaShadeColorUniform    = new Uniform(new Color(cabanaShadeColor));
+export const cabanaShadeStrengthUniform = new Uniform(cabanaShadeStrength);
+// CPU-side fade timing (damp lambda) — not shader uniforms. Asymmetric: slow to
+// reveal the interior on zoom-in, fast to re-darken it on zoom-out.
+export const cabanaShadeFade = {
+    revealSpeed: cabanaShadeRevealSpeed,
+    coverSpeed:  cabanaShadeCoverSpeed,
+};
+
+// ── Cabana reverse dome + lazy-load state ────────────────────────────────────
+// The dome is a dark inverted sphere that seals the view to the outside world
+// while inside; its opacity is damped each frame in Update. The interior props
+// are lazy-loaded on the first cabana zoom (see loadCabanaInterior) and kept.
+export let cabanaDome: Mesh | null = null;
+let cabanaDomeMat: MeshBasicMaterial | null = null;
+// Max opacity the dome fades to when sealed — mutable for live debug tweaking.
+export const cabanaDomeConfig = { opacity: cabanaDomeOpacity };
+let _cabanaInteriorRequested = false;
+let _cabanaInteriorReady = false;
+/** True once the lazy-loaded cabana interior (props + phone) has finished. */
+export function isCabanaInteriorReady(): boolean { return _cabanaInteriorReady; }
+/** True once the reverse dome is opaque enough to safely hide/skip the outside. */
+export function isCabanaSealed(): boolean {
+    return cabanaDomeMat != null && cabanaDomeMat.opacity > 0.9 && getCabanaPhase() === 'inside';
+}
+
 export const dogBed = new Group();
 export const littleRocks = new Group();
 export const phone = new Group();
@@ -700,6 +738,12 @@ const loader = new GLTFLoader(loadingManager);
 // they'd fail to load. Decoder is shared globally and awaits its own .ready
 // promise internally.
 loader.setMeshoptDecoder(MeshoptDecoder);
+
+// Separate loader for the cabana interior — deliberately NOT wired to the
+// LoadingManager so its lazy load (on first cabana zoom) doesn't re-open the
+// loading screen / re-fire prewarm. Mirrors SeaFloorDecor's own-loader pattern.
+const cabanaLoader = new GLTFLoader();
+cabanaLoader.setMeshoptDecoder(MeshoptDecoder);
 
 // Placement constants are imported from IslandConfig.ts — edit that file or
 // use the debug panel's "Copy Config" button to regenerate it.
@@ -2006,6 +2050,34 @@ const oceanLightingFragment = /*glsl*/`
     }
 `;
 
+// Cabana interior shade — darkens fragments inside a world-space ellipsoid toward
+// a near-black tone. Applied on top of the ocean lighting (operates on the same
+// `outgoingLight` and reuses the `vWorldPosition` varying). `uCabanaDarken` is the
+// global fade (1 = outside/dark, 0 = revealed inside).
+const cabanaShadePars = /*glsl*/`
+    uniform float uCabanaDarken;
+    uniform vec3  uCabanaCenter;
+    uniform vec3  uCabanaRadii;
+    uniform float uCabanaEdge;
+    uniform vec3  uCabanaShadeColor;
+    uniform float uCabanaStrength;
+`;
+
+// `faceMask` is the per-variant factor. Props use '1.0' (the whole volume darkens
+// — they're solid and hidden from outside anyway). The tent shell uses
+// '(gl_FrontFacing ? 1.0 : 0.0)' so ONLY its interior-facing side darkens: the
+// fabric is a single-layer shell, so the inner and outer surface are the SAME
+// triangle at the same world position — only the facing side tells them apart.
+// On this model the interior side is the front face, so darken front faces; the
+// exterior stays untouched (no bleed onto the outside of the tent).
+const _cabanaShadeFragment = (faceMask: string) => /*glsl*/`
+    vec3 cabanaD = (vWorldPosition - uCabanaCenter) / max(uCabanaRadii, vec3(1e-4));
+    float cabanaInside = 1.0 - smoothstep(1.0 - uCabanaEdge, 1.0, length(cabanaD));
+    outgoingLight = mix(outgoingLight, uCabanaShadeColor, cabanaInside * uCabanaStrength * uCabanaDarken * (${faceMask}));
+`;
+const cabanaShadeFragment     = _cabanaShadeFragment('1.0');
+const cabanaShadeFragmentTent = _cabanaShadeFragment('gl_FrontFacing ? 1.0 : 0.0');
+
 
 export let islandSurfaceGrassColor = ISLAND_SURFACE_GRASS_COLOR;
 export let islandSurfaceGrassStrength = ISLAND_SURFACE_GRASS_STRENGTH;
@@ -2377,6 +2449,72 @@ function applyOceanLightingToModel(model: Group): void {
     });
 }
 
+/** Like applyOceanLightingToModel, but also darkens the model where it falls
+ *  inside the cabana interior ellipsoid (see cabanaShade* uniforms). Used for the
+ *  tent fabric and every interior prop, so the interior reads dark from outside
+ *  and fades clear when the cabana zoom is active — all conforming to the real
+ *  geometry, no floating planes. Composed cache key keeps this variant isolated
+ *  from the plain ocean-lighting program. */
+function applyCabanaInteriorShade(model: Group, opts?: { exteriorSafe?: boolean }): void {
+    // exteriorSafe → tent shell: gate the darkening to its interior-facing side
+    // only (via gl_FrontFacing) so it never tints the exterior. Props leave it off
+    // (whole volume darkens — they're solid and hidden from outside anyway).
+    const exteriorSafe = opts?.exteriorSafe ?? false;
+    const shadeFrag = exteriorSafe ? cabanaShadeFragmentTent : cabanaShadeFragment;
+    const cacheKey = exteriorSafe ? 'ocean_lighting_cabana_tent' : 'ocean_lighting_cabana';
+    model.traverse((child) => {
+        if ((child as any).isMesh && (child as any).material) {
+            const mesh = child as any;
+            const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            materials.forEach((mat: any) => {
+                if (mat.isMeshStandardMaterial || mat.isMeshPhysicalMaterial || mat.isMeshBasicMaterial) {
+                    // Render the inner faces so the interior reads as a solid dark
+                    // cavity instead of letting the camera see through the opening.
+                    mat.side = DoubleSide;
+                    mat.customProgramCacheKey = () => cacheKey;
+                    mat.onBeforeCompile = (shader: any) => {
+                        shader.uniforms.uLight = lightUniform;
+                        shader.uniforms.uAbsorption = oceanAbsorptionUniform;
+                        shader.uniforms.uFogDist = underwaterFogDistUniform;
+                        shader.uniforms.uSunVisibility = sunVisibilityUniform;
+                        shader.uniforms.uCabanaDarken = cabanaDarkenUniform;
+                        shader.uniforms.uCabanaCenter = cabanaShadeCenterUniform;
+                        shader.uniforms.uCabanaRadii = cabanaShadeRadiiUniform;
+                        shader.uniforms.uCabanaEdge = cabanaShadeEdgeUniform;
+                        shader.uniforms.uCabanaShadeColor = cabanaShadeColorUniform;
+                        shader.uniforms.uCabanaStrength = cabanaShadeStrengthUniform;
+
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <common>',
+                            `#include <common>
+                            varying vec3 vWorldPosition;`
+                        );
+                        shader.vertexShader = shader.vertexShader.replace(
+                            '#include <worldpos_vertex>',
+                            `#include <worldpos_vertex>
+                            vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;`
+                        );
+                        shader.fragmentShader = shader.fragmentShader.replace(
+                            '#include <common>',
+                            `#include <common>
+                            varying vec3 vWorldPosition;
+                            ${oceanLightingPars}
+                            ${cabanaShadePars}`
+                        );
+                        shader.fragmentShader = shader.fragmentShader.replace(
+                            '#include <opaque_fragment>',
+                            `${oceanLightingFragment}
+                            ${shadeFrag}
+                            #include <opaque_fragment>`
+                        );
+                    };
+                    mat.needsUpdate = true;
+                }
+            });
+        }
+    });
+}
+
 /** Load a moss rock GLB, wire it up with the standard ocean lighting, then
  *  position/scale/rotate it relative to the island. Edge foam is handled
  *  ocean-side via depth-intersection (see SceneDepth + OceanShaders). The
@@ -2438,18 +2576,22 @@ function _loadMossRock(
 
 /** Generic surface prop loader: ocean lighting + waterline + shadows + transform.
  *  Mirrors the moss-rock loader but skips the per-object waterline shader since
- *  most tent-interior props sit well above the waterline. */
+ *  most tent-interior props sit well above the waterline. These props all sit
+ *  inside the cabana, so they use the interior-shade variant — darkened from
+ *  outside, revealed on zoom. */
 function _loadSurfaceProp(
     path: string,
     group: Group,
     offset: { x: number; y: number; z: number },
     scale: number,
     rot: { x: number; y: number; z: number },
+    opts?: { loader?: GLTFLoader; onDone?: () => void },
 ): void {
-    loader.load(
+    const useLoader = opts?.loader ?? loader;
+    useLoader.load(
         path,
         (gltf) => {
-            applyOceanLightingToModel(gltf.scene);
+            applyCabanaInteriorShade(gltf.scene);
             gltf.scene.traverse((child) => {
                 if ((child as any).isMesh) {
                     child.castShadow = true;
@@ -2466,9 +2608,64 @@ function _loadSurfaceProp(
             group.rotation.set(rot.x, rot.y, rot.z);
             threeScene.add(group);
             console.log(`Surface prop loaded: ${path}`);
+            opts?.onDone?.();
         },
         undefined,
-        (err) => { console.error(`Error loading surface prop ${path}:`, err); },
+        (err) => { console.error(`Error loading surface prop ${path}:`, err); opts?.onDone?.(); },
+    );
+}
+
+/** Lazy-load the cabana interior (props + phone) on the first zoom-in. Idempotent
+ *  — runs once, then the models stay in memory (just hidden when outside). The
+ *  dark dive into the tent masks the load; once everything's in we compile the
+ *  programs (props still hidden) so the reveal has no shader hitch, then flag
+ *  ready so Control can trigger the reveal. */
+function loadCabanaInterior(): void {
+    if (_cabanaInteriorRequested) return;
+    _cabanaInteriorRequested = true;
+
+    let pending = 7;
+    const done = () => {
+        if (--pending > 0) return;
+        try { renderer.compile(threeScene, camera); } catch (e) { /* compile is best-effort */ }
+        _cabanaInteriorReady = true;
+        console.log('Cabana interior ready');
+    };
+    const opts = { loader: cabanaLoader, onDone: done };
+
+    _loadSurfaceProp('models/surface/folding_tray_table.glb', foldingTrayTable, foldingTrayTableOffset, foldingTrayTableScale, foldingTrayTableRot, opts);
+    _loadSurfaceProp('models/surface/dog_bed.glb',            tentDogBed,       tentDogBedOffset,       tentDogBedScale,       tentDogBedRot,       opts);
+    _loadSurfaceProp('models/surface/rug_round.glb',          rugRound,         rugRoundOffset,         rugRoundScale,         rugRoundRot,         opts);
+    _loadSurfaceProp('models/surface/lantern.glb',            lantern,          lanternOffset,          lanternScale,          lanternRot,          opts);
+    _loadSurfaceProp('models/surface/dog_bowl.glb',           dogBowl,          dogBowlOffset,          dogBowlScale,          dogBowlRot,          opts);
+    _loadSurfaceProp('models/surface/dog_biscuit.glb',        dogBiscuit,       dogBiscuitOffset,       dogBiscuitScale,       dogBiscuitRot,       opts);
+
+    // Phone model — sits on the little rocks inside the cabana.
+    cabanaLoader.load(
+        'models/overall/phone.glb',
+        (gltf) => {
+            applyCabanaInteriorShade(gltf.scene);
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    (child as any).receiveShadow = true;
+                }
+            });
+            phone.add(gltf.scene);
+            phone.position.set(
+                islandPosition.x + phoneOffset.x,
+                islandPosition.y + phoneOffset.y,
+                islandPosition.z + phoneOffset.z
+            );
+            phone.scale.setScalar(phoneScale);
+            phone.rotation.set(phoneRot.x, phoneRot.y, phoneRot.z);
+            threeScene.add(phone);
+            PhoneScreen.init(threeScene);
+            console.log('Phone loaded (cabana interior)');
+            done();
+        },
+        undefined,
+        (error) => { console.error('Error loading phone:', error); done(); }
     );
 }
 
@@ -3025,11 +3222,53 @@ export function Start(): void {
         }
     );
 
+    // Position the cabana interior-shade ellipsoid (offset added to islandPosition,
+    // same convention as tentOffset). The radii / edge / color / strength live in
+    // their uniforms (set from config at module init), tweakable from IslandDebug.
+    cabanaShadeCenterUniform.value.set(
+        islandPosition.x + cabanaShadeX,
+        islandPosition.y + cabanaShadeY,
+        islandPosition.z + cabanaShadeZ,
+    );
+
+    // ── Cabana zoom + interior temporarily DISABLED ──────────────────────────
+    // The reverse dome, interior-prop lazy-load, and tent-zoom trigger are commented
+    // out so nothing spawns/renders inside the tent for now. Only the tent's shade
+    // shader stays active (the camera never enters, so the phase stays 'outside' and
+    // cabanaDarkenUniform holds at 1 → the interior reads dark from outside).
+    // Re-enable by uncommenting these + setupCabanaInteraction() below.
+    /*
+    // Reverse dome — a dark inverted sphere that seals off the (hidden) outside
+    // world while inside the cabana. Starts invisible; opacity is damped in
+    // Update. renderOrder -1 + depthWrite off keeps it behind the interior props.
+    cabanaDomeMat = new MeshBasicMaterial({
+        color: new Color(cabanaDomeColor),
+        side: BackSide,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        fog: false,
+    });
+    cabanaDome = new Mesh(new SphereGeometry(cabanaDomeRadius, 24, 16), cabanaDomeMat);
+    cabanaDome.position.set(
+        islandPosition.x + cabanaDomeX,
+        islandPosition.y + cabanaDomeY,
+        islandPosition.z + cabanaDomeZ,
+    );
+    cabanaDome.renderOrder = -1;
+    cabanaDome.frustumCulled = false;
+    cabanaDome.visible = false;
+    threeScene.add(cabanaDome);
+
+    // Let Control drive the lazy-load on first zoom and query readiness for the reveal.
+    registerCabanaInterior(loadCabanaInterior, isCabanaInteriorReady);
+    */
+
     // Load custom tent to the right of the palm tree
     loader.load(
         'models/surface/custom_tent.glb',
         (gltf) => {
-            applyOceanLightingToModel(gltf.scene);
+            applyCabanaInteriorShade(gltf.scene, { exteriorSafe: true });
             gltf.scene.traverse((child) => {
                 if ((child as any).isMesh) {
                     child.castShadow = true;
@@ -3086,43 +3325,10 @@ export function Start(): void {
     _loadMossRock('models/surface/moss_rock3.glb',  mossRock3b, mossRock3bOffset, mossRock3bScale, mossRock3bRot);
     _loadMossRock('models/surface/moss_rock3.glb',  mossRock3c, mossRock3cOffset, mossRock3cScale, mossRock3cRot);
 
-    // ── Extra surface props (tent interior) ───────────────────────────────────
-    _loadSurfaceProp('models/surface/folding_tray_table.glb',  foldingTrayTable, foldingTrayTableOffset, foldingTrayTableScale, foldingTrayTableRot);
-    _loadSurfaceProp('models/surface/dog_bed.glb',             tentDogBed,       tentDogBedOffset,       tentDogBedScale,       tentDogBedRot);
-    _loadSurfaceProp('models/surface/rug_round.glb',           rugRound,         rugRoundOffset,         rugRoundScale,         rugRoundRot);
-    _loadSurfaceProp('models/surface/lantern.glb',             lantern,          lanternOffset,          lanternScale,          lanternRot);
-    _loadSurfaceProp('models/surface/dog_bowl.glb',            dogBowl,          dogBowlOffset,          dogBowlScale,          dogBowlRot);
-    _loadSurfaceProp('models/surface/dog_biscuit.glb',         dogBiscuit,       dogBiscuitOffset,       dogBiscuitScale,       dogBiscuitRot);
-
-    // Phone model — always spawned on the little rocks
-    loader.load(
-        'models/overall/phone.glb',
-        (gltf) => {
-            applyOceanLightingToModel(gltf.scene);
-            gltf.scene.traverse((child) => {
-                if ((child as any).isMesh) {
-                    child.castShadow = true;
-                    (child as any).receiveShadow = true;
-                }
-            });
-            phone.add(gltf.scene);
-            phone.position.set(
-                islandPosition.x + phoneOffset.x,
-                islandPosition.y + phoneOffset.y,
-                islandPosition.z + phoneOffset.z
-            );
-            phone.scale.setScalar(phoneScale);
-            phone.rotation.set(phoneRot.x, phoneRot.y, phoneRot.z);
-            threeScene.add(phone);
-            // Phone is always visible — no cutscene gate
-            phone.visible = true;
-            PhoneScreen.init(threeScene);
-            PhoneScreen.setVisible(true);
-            console.log('Phone loaded (always visible on little rocks)');
-        },
-        undefined,
-        (error) => { console.error('Error loading phone:', error); }
-    );
+    // Cabana interior props (table, dog bed, rug, lantern, bowl, biscuit) + the
+    // phone are NOT loaded here — they're lazy-loaded on the first cabana zoom via
+    // loadCabanaInterior() (registered with Control below), to keep the main scene
+    // lean. They start hidden and are revealed once inside.
 
     // Load treasure chest model (underwater, among coral rocks)
     loader.load(
@@ -3284,6 +3490,10 @@ export function Start(): void {
 
     // Setup phone click/hover interaction
     setupPhoneInteraction();
+
+    // Setup cabana (tent) click/hover interaction → zoom into the interior
+    // TEMPORARILY DISABLED — no tent zoom for now (interior spawning is off too).
+    // setupCabanaInteraction();
 
     // Setup chest click/hover interaction (underwater)
     setupChestInteraction();
@@ -3604,25 +3814,6 @@ function _getPugScreenPos(): { x: number; y: number } | null {
 // ── Configurable pug animation indices ────────────────────────────────────────
 const PUG_ANIM_BARK = 4;   // bark / react animation clip index
 const PUG_ANIM_WALK = 10;  // walk animation clip index
-const PUG_ANIM_DROP = 0;   // drop / place item animation clip index
-/** Walk animation playback speed during the phone drop cutscene — TWEAK (1.0 = normal) */
-const PUG_CUTSCENE_WALK_SPEED = 0.55;
-
-let phoneDropped = false;  // True after the cutscene sequence (runtime only, no localStorage)
-
-// ── Helper: build the "who's Leo?" branch (ends with phone drop cutscene) ────
-function _buildLeoBranch(): DialogLine[] {
-    return [
-        {
-            textKey: 'pug.day.leo.0',
-            onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
-        },
-        {
-            textKey: 'pug.day.leo.1',
-            onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
-        },
-    ];
-}
 
 // ── Helper: build the "what is this place?" branch ───────────────────────────
 function _buildPlaceBranch(): DialogLine[] {
@@ -3642,34 +3833,19 @@ function _buildPlaceBranch(): DialogLine[] {
         {
             textKey: 'pug.day.place.3',
             onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
-            replies: (() => {
-                const opts: ReplyOption[] = [
-                    {
-                        textKey: 'pug.reply.likeit',
-                        onSelect: () => {
-                            showDialog([
-                                {
-                                    textKey: 'pug.reply.response.likeit',
-                                    onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
-                                },
-                            ], _getPugScreenPos, _onPugDialogComplete);
-                        },
-                    } as ReplyOption,
-                ];
-                // Only offer "who's Leo?" before the phone has been dropped
-                if (!phoneDropped) {
-                    opts.push({
-                        textKey: 'pug.reply.wholeo',
-                        onSelect: () => {
-                            showDialog(_buildLeoBranch(), _getPugScreenPos, () => {
-                                // After "let me show you on my phone" — start the cutscene
-                                _startPhoneDropSequence();
-                            });
-                        },
-                    } as ReplyOption);
-                }
-                return opts;
-            })(),
+            replies: [
+                {
+                    textKey: 'pug.reply.likeit',
+                    onSelect: () => {
+                        showDialog([
+                            {
+                                textKey: 'pug.reply.response.likeit',
+                                onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
+                            },
+                        ], _getPugScreenPos, _onPugDialogComplete);
+                    },
+                } as ReplyOption,
+            ],
         },
     ];
 }
@@ -3817,72 +3993,6 @@ function _tweenValue(
     });
 }
 
-/**
- * Phone cutscene — pug walks to the phone, does a pointing gesture, camera
- * zooms into the phone, pug walks back.  Phone is always already visible.
- * Called after the "let me show you on my phone" dialog line completes.
- */
-async function _startPhoneDropSequence(): Promise<void> {
-    // ── 1. Release pug zoom & dismiss dialog so camera returns to orbit ──────
-    zoomOutFromPug();
-    dismissDialog();
-
-    // ── 2. Save current pug position & rotation ──────────────────────────────
-    const savedPosX = pug.position.x;
-    const savedPosZ = pug.position.z;
-    const savedRotY = pug.rotation.y;
-
-    // Walk target: just beside the phone (slightly behind it so the pug faces it)
-    const walkTargetX = phone.position.x + 0.12;
-    const walkTargetZ = phone.position.z + 0.14;
-
-    // ── 3. Walk to phone position ─────────────────────────────────────────────
-    const dxWalk = walkTargetX - savedPosX;
-    const dzWalk = walkTargetZ - savedPosZ;
-    pug.rotation.y = Math.atan2(dxWalk, dzWalk);
-    setPugAnimation(PUG_ANIM_WALK);
-    if (_pugCurrentAction) _pugCurrentAction.timeScale = PUG_CUTSCENE_WALK_SPEED;
-
-    await Promise.all([
-        _tweenValue(savedPosX, walkTargetX, 1200, v => { pug.position.x = v; }),
-        _tweenValue(savedPosZ, walkTargetZ, 1200, v => { pug.position.z = v; }),
-    ]);
-
-    // ── 4. Play drop/point animation (reused as "pointing at phone") ─────────
-    setPugAnimation(PUG_ANIM_DROP);
-    await _delay(500);  // let the pointing gesture start
-
-    // ── 5. Zoom into the phone using the default zoom logic ──────────────────
-    zoomToPhone();
-    await _delay(300);
-
-    // ── 6. Walk back to original position (while phone is zoomed in) ─────────
-    const dxReturn = savedPosX - pug.position.x;
-    const dzReturn = savedPosZ - pug.position.z;
-    pug.rotation.y = Math.atan2(dxReturn, dzReturn);
-    setPugAnimation(PUG_ANIM_WALK);
-    if (_pugCurrentAction) _pugCurrentAction.timeScale = PUG_CUTSCENE_WALK_SPEED;
-
-    await Promise.all([
-        _tweenValue(pug.position.x, savedPosX, 1200, v => { pug.position.x = v; }),
-        _tweenValue(pug.position.z, savedPosZ, 1200, v => { pug.position.z = v; }),
-    ]);
-
-    // ── 7. Restore idle and finish ───────────────────────────────────────────
-    if (pugMixer && pugAnimClips[PUG_ANIM_WALK]) {
-        pugMixer.clipAction(pugAnimClips[PUG_ANIM_WALK]).timeScale = 1;
-    }
-    pug.rotation.y = savedRotY;
-    phoneDropped = true;
-    // Restore correct idle — respect music state, same logic as _onPugDialogComplete
-    if (_pugMusicWasPlaying) {
-        pugDefaultAnimIndex = PUG_ANIM_BARK;
-        setPugAnimation(PUG_ANIM_BARK);
-    } else {
-        _restorePugNightState();
-    }
-}
-
 // ============================================
 // PHONE CLICK/HOVER INTERACTION
 // ============================================
@@ -3916,6 +4026,10 @@ function setupPhoneInteraction(): void {
             return;
         }
 
+        // The phone zoom is the INNER level — only reachable from inside the
+        // cabana. From outside the phone is hidden by the shade and not zoomable.
+        if (!isCabanaZoomActive()) return;
+
         if (phone.children.length === 0) return;
 
         phoneMouse.x = (clientX / window.innerWidth) * 2 - 1;
@@ -3943,7 +4057,9 @@ function setupPhoneInteraction(): void {
     });
 
     canvas.addEventListener('mousemove', (e: MouseEvent) => {
-        if (!phone.visible || phone.children.length === 0
+        // Only show the phone hover cursor while inside the cabana (the phone is
+        // only zoomable from there).
+        if (!phone.visible || phone.children.length === 0 || !isCabanaZoomActive()
             || isPhoneZoomActive() || camera.position.y < UNDERWATER_Y_THRESHOLD) {
             if (isPhoneHovered) { isPhoneHovered = false; canvas.style.cursor = ''; }
             return;
@@ -3961,6 +4077,70 @@ function setupPhoneInteraction(): void {
 
     canvas.addEventListener('mouseleave', () => {
         if (isPhoneHovered) { isPhoneHovered = false; canvas.style.cursor = ''; }
+    });
+}
+
+// ============================================
+// CABANA (TENT) CLICK/HOVER INTERACTION
+// ============================================
+const cabanaRaycaster = new Raycaster();
+const cabanaMouse = new Vector2();
+let isCabanaHovered = false;
+
+function setupCabanaInteraction(): void {
+    const canvas = renderer.domElement;
+    if (!canvas) return;
+
+    const onCabanaClick = (clientX: number, clientY: number) => {
+        if (tent.children.length === 0) return;             // not loaded yet
+        if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;  // above water only
+        // Ignore while any zoom is already active (incl. already inside the cabana).
+        if (isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive()
+            || isChestZoomActive() || isCabanaZoomActive()) return;
+
+        cabanaMouse.x = (clientX / window.innerWidth) * 2 - 1;
+        cabanaMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+        cabanaRaycaster.setFromCamera(cabanaMouse, camera);
+        const intersects = cabanaRaycaster.intersectObjects(tent.children, true);
+        if (intersects.length > 0) {
+            isCabanaHovered = false;
+            canvas.style.cursor = '';
+            zoomToCabana();
+        }
+    };
+
+    canvas.addEventListener('click', (e: MouseEvent) => {
+        onCabanaClick(e.clientX, e.clientY);
+    });
+
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (_touchWasMulti || _touchDragged) return;  // was a scroll gesture — skip click
+        if (e.changedTouches.length > 0) {
+            const touch = e.changedTouches[0];
+            onCabanaClick(touch.clientX, touch.clientY);
+        }
+    });
+
+    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+        if (tent.children.length === 0 || camera.position.y < UNDERWATER_Y_THRESHOLD
+            || isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive()
+            || isChestZoomActive() || isCabanaZoomActive()) {
+            if (isCabanaHovered) { isCabanaHovered = false; canvas.style.cursor = ''; }
+            return;
+        }
+        cabanaMouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        cabanaMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        cabanaRaycaster.setFromCamera(cabanaMouse, camera);
+        const intersects = cabanaRaycaster.intersectObjects(tent.children, true);
+        if (intersects.length > 0) {
+            if (!isCabanaHovered) { isCabanaHovered = true; canvas.style.cursor = 'pointer'; }
+        } else {
+            if (isCabanaHovered) { isCabanaHovered = false; canvas.style.cursor = ''; }
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (isCabanaHovered) { isCabanaHovered = false; canvas.style.cursor = ''; }
     });
 }
 
@@ -4553,6 +4733,35 @@ export function Update(isUnderwater = false): void {
   _updateAppleImpacts();
   islandCampfireGroundCenterUniform.value.set(firecamp.position.x, firecamp.position.z);
   _updateGroundApples();
+
+  // Cabana phase drives the whole interior reveal. Asymmetric speed: slow reveal
+  // (fade dark out / dome in) while settling inside, fast cover on the way out.
+  const cabanaPhase = getCabanaPhase();
+  const cabanaRevealing = cabanaPhase === 'inside';
+  const cabanaFadeSpeed = cabanaRevealing ? cabanaShadeFade.revealSpeed : cabanaShadeFade.coverSpeed;
+  // Interior shade darkening: dark from outside / during the dive, lifts only once
+  // revealed inside (the tent fabric + props fade up from black).
+  cabanaDarkenUniform.value = MathUtils.damp(cabanaDarkenUniform.value, cabanaRevealing ? 0 : 1, cabanaFadeSpeed, deltaTime);
+  // Reverse dome opacity — seals the outside while inside.
+  if (cabanaDomeMat && cabanaDome) {
+      cabanaDomeMat.opacity = MathUtils.damp(cabanaDomeMat.opacity, cabanaRevealing ? cabanaDomeConfig.opacity : 0, cabanaFadeSpeed, deltaTime);
+      cabanaDome.visible = cabanaDomeMat.opacity > 0.003;
+  }
+  // Interior props/phone render only once revealed (inside) or while exiting; the
+  // dark dive (entering) keeps them hidden, and 'outside' re-hides them unseen.
+  const showCabanaInterior = cabanaPhase === 'inside' || cabanaPhase === 'exiting';
+  if (foldingTrayTable.visible !== showCabanaInterior) {
+      foldingTrayTable.visible = showCabanaInterior;
+      tentDogBed.visible = showCabanaInterior;
+      rugRound.visible = showCabanaInterior;
+      lantern.visible = showCabanaInterior;
+      dogBowl.visible = showCabanaInterior;
+      dogBiscuit.visible = showCabanaInterior;
+      phone.visible = showCabanaInterior;
+      // Sync the phone screen occluder/overlay so it doesn't punch a hole in
+      // mid-air while the phone is hidden. Only once the phone has loaded.
+      if (phone.children.length > 0) PhoneScreen.setVisible(showCabanaInterior);
+  }
 
   if (!isUnderwater) {
     // Update palm tree wind shader time

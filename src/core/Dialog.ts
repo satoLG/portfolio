@@ -85,8 +85,7 @@ function ensureBubble(): void {
         _textEl.className = 'dialog-text';
 
         _promptEl = document.createElement('span');
-        _promptEl.className = 'dialog-prompt';
-        _promptEl.textContent = '▼';
+        _promptEl.className = 'dialog-prompt';  // triangle is drawn via CSS mask
 
         _bubbleEl.appendChild(_textEl);
         _bubbleEl.appendChild(_promptEl);
