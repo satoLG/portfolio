@@ -320,7 +320,8 @@ import {
     edgeFoamFadeStartZMobile as CFG_EF_FADE_START_Z_MOBILE,
     edgeFoamFadeEndZMobile as CFG_EF_FADE_END_Z_MOBILE,
 } from '../scene/config/OceanConfig';
-import { phoneZoomConfig, cabanaZoomConfig, mainCameraConfig, isWebPageMode, toggleCameraMode } from './Control';
+import { phoneZoomConfig, cabanaZoomConfig, cabanaRevealConfig, mainCameraConfig, isWebPageMode, toggleCameraMode } from './Control';
+import { cabanaDomeRadius } from '../scene/config/CabanaConfig';
 import { mobileFov, mobileBreakpointWidth, aboveWaterBottomY as CFG_ABOVE_BOTTOM, aboveWaterBottomYMobile as CFG_ABOVE_BOTTOM_MOBILE, underwaterTopY as CFG_UNDER_TOP, underwaterTopYMobile as CFG_UNDER_TOP_MOBILE } from '../scene/config/CameraConfig';
 import { SetFOV, scene as threeScene } from './Scene';
 import { phoneScreenConfig, updateOverlayStyle } from './PhoneScreen';
@@ -2433,17 +2434,31 @@ function buildGUI(): void {
     mainCamFolder.close();
 
     // ── Camera: Cabana (tent interior) zoom + entrance shade ───────────────────
-    // Camera-pose sliders write straight into cabanaZoomConfig (read live by
-    // Control each frame), so enter the cabana first then tweak. Read the values
-    // off the panel and paste into CabanaConfig.ts. The shade sub-folder only
-    // appears if the tent GLB has finished loading by GUI-build time.
+    // Camera-pose sliders edit whichever device variant is currently active
+    // (desktop vs mobile, by viewport width) — resize the window to tune the
+    // other one. Control reads the active pose live each frame. Copy emits BOTH.
     const cabanaFolder = cameraFolder.addFolder('Cabana');
-    cabanaFolder.add(cabanaZoomConfig, 'camX',  -3,  3,         0.01).name('Cam X').listen();
-    cabanaFolder.add(cabanaZoomConfig, 'camY',  -2,  3,         0.01).name('Cam Y').listen();
-    cabanaFolder.add(cabanaZoomConfig, 'camZ',  -6,  0,         0.01).name('Cam Z').listen();
-    cabanaFolder.add(cabanaZoomConfig, 'phi',    0,  Math.PI*4, 0.01).name('Yaw (phi)').listen();
-    cabanaFolder.add(cabanaZoomConfig, 'pitch', -1.5, 1.5,      0.01).name('Pitch').listen();
-    cabanaFolder.add(cabanaZoomConfig, 'fov',    1,  60,        0.5 ).name('FOV').listen();
+    const onMobileVp = () => window.innerWidth <= mobileBreakpointWidth;
+    const cabanaCamProxy = {
+        get camX()  { return onMobileVp() ? cabanaZoomConfig.camXMobile  : cabanaZoomConfig.camX;  },
+        set camX(v) { if (onMobileVp()) cabanaZoomConfig.camXMobile = v;  else cabanaZoomConfig.camX = v;  },
+        get camY()  { return onMobileVp() ? cabanaZoomConfig.camYMobile  : cabanaZoomConfig.camY;  },
+        set camY(v) { if (onMobileVp()) cabanaZoomConfig.camYMobile = v;  else cabanaZoomConfig.camY = v;  },
+        get camZ()  { return onMobileVp() ? cabanaZoomConfig.camZMobile  : cabanaZoomConfig.camZ;  },
+        set camZ(v) { if (onMobileVp()) cabanaZoomConfig.camZMobile = v;  else cabanaZoomConfig.camZ = v;  },
+        get phi()   { return onMobileVp() ? cabanaZoomConfig.phiMobile   : cabanaZoomConfig.phi;   },
+        set phi(v)  { if (onMobileVp()) cabanaZoomConfig.phiMobile = v;   else cabanaZoomConfig.phi = v;   },
+        get pitch() { return onMobileVp() ? cabanaZoomConfig.pitchMobile : cabanaZoomConfig.pitch; },
+        set pitch(v){ if (onMobileVp()) cabanaZoomConfig.pitchMobile = v; else cabanaZoomConfig.pitch = v; },
+        get fov()   { return onMobileVp() ? cabanaZoomConfig.fovMobile   : cabanaZoomConfig.fov;   },
+        set fov(v)  { if (onMobileVp()) cabanaZoomConfig.fovMobile = v;   else cabanaZoomConfig.fov = v;   },
+    };
+    cabanaFolder.add(cabanaCamProxy, 'camX',  -3,  3,         0.01).name('Cam X').listen();
+    cabanaFolder.add(cabanaCamProxy, 'camY',  -2,  3,         0.01).name('Cam Y').listen();
+    cabanaFolder.add(cabanaCamProxy, 'camZ',  -6,  0,         0.01).name('Cam Z').listen();
+    cabanaFolder.add(cabanaCamProxy, 'phi',    0,  Math.PI*4, 0.01).name('Yaw (phi)').listen();
+    cabanaFolder.add(cabanaCamProxy, 'pitch', -1.5, 1.5,      0.01).name('Pitch').listen();
+    cabanaFolder.add(cabanaCamProxy, 'fov',    1,  120,       0.5 ).name('FOV').listen();
 
     // Interior-shade ellipsoid — darkens the tent fabric + props from outside.
     // Center sliders edit the OFFSET from islandPosition (config convention); the
@@ -2482,6 +2497,34 @@ function buildGUI(): void {
     shadeFolder.add(Island.cabanaShadeFade, 'coverSpeed',  0.2, 20, 0.1).name('Cover speed (out)').listen();
     shadeFolder.close();
 
+    // Reveal trigger — how close the camera must get before the interior reveals.
+    cabanaFolder.add(cabanaRevealConfig, 'arriveDist', 0.02, 1.0, 0.01).name('Arrive dist').listen();
+
+    // Reverse dome — dark backdrop that seals the outside while inside. Center is
+    // edited as an OFFSET from islandPosition; radius scales the base sphere.
+    const domeFolder = cabanaFolder.addFolder('Reverse Dome');
+    const cabanaDomeProxy = {
+        get centerX()  { return Island.cabanaDome ? Island.cabanaDome.position.x - island.position.x : 0; },
+        set centerX(v) { if (Island.cabanaDome) Island.cabanaDome.position.x = island.position.x + v; },
+        get centerY()  { return Island.cabanaDome ? Island.cabanaDome.position.y - island.position.y : 0; },
+        set centerY(v) { if (Island.cabanaDome) Island.cabanaDome.position.y = island.position.y + v; },
+        get centerZ()  { return Island.cabanaDome ? Island.cabanaDome.position.z - island.position.z : 0; },
+        set centerZ(v) { if (Island.cabanaDome) Island.cabanaDome.position.z = island.position.z + v; },
+        get radius()   { return (Island.cabanaDome ? Island.cabanaDome.scale.x : 1) * cabanaDomeRadius; },
+        set radius(v)  { if (Island.cabanaDome) Island.cabanaDome.scale.setScalar(v / cabanaDomeRadius); },
+        get opacity()  { return Island.cabanaDomeConfig.opacity; },
+        set opacity(v) { Island.cabanaDomeConfig.opacity = v; },
+        get color()    { return Island.cabanaDome ? (Island.cabanaDome.material as any).color.getHex() : 0; },
+        set color(v)   { if (Island.cabanaDome) (Island.cabanaDome.material as any).color.setHex(v); },
+    };
+    domeFolder.add(cabanaDomeProxy, 'centerX', -3, 3, 0.01).name('Center X (offset)').listen();
+    domeFolder.add(cabanaDomeProxy, 'centerY', -3, 3, 0.01).name('Center Y (offset)').listen();
+    domeFolder.add(cabanaDomeProxy, 'centerZ', -6, 0, 0.01).name('Center Z (offset)').listen();
+    domeFolder.add(cabanaDomeProxy, 'radius',  1, 12, 0.1).name('Radius').listen();
+    domeFolder.add(cabanaDomeProxy, 'opacity', 0, 1, 0.01).name('Opacity').listen();
+    domeFolder.addColor(cabanaDomeProxy, 'color').name('Dome color');
+    domeFolder.close();
+
     // ── Copy CabanaConfig.ts ──────────────────────────────────────────────────
     const cabanaConfigActions = {
         copyConfig: () => {
@@ -2497,12 +2540,20 @@ function buildGUI(): void {
                 `// Paste this entire file to replace src/scene/config/CabanaConfig.ts`,
                 ``,
                 `// ── Cabana zoom ───────────────────────────────────────────────────────────────`,
+                `// Desktop (used when viewport width > mobileBreakpointWidth).`,
                 `export const cabanaCamX   = ${f(c.camX)};`,
                 `export const cabanaCamY   = ${f(c.camY)};`,
                 `export const cabanaCamZ   = ${f(c.camZ)};`,
                 `export const cabanaPhi    = ${f(c.phi)};`,
                 `export const cabanaPitch  = ${f(c.pitch)};`,
                 `export const cabanaFov    = ${f(c.fov)};`,
+                `// Mobile (used when viewport width ≤ mobileBreakpointWidth).`,
+                `export const cabanaCamXMobile   = ${f(c.camXMobile)};`,
+                `export const cabanaCamYMobile   = ${f(c.camYMobile)};`,
+                `export const cabanaCamZMobile   = ${f(c.camZMobile)};`,
+                `export const cabanaPhiMobile    = ${f(c.phiMobile)};`,
+                `export const cabanaPitchMobile  = ${f(c.pitchMobile)};`,
+                `export const cabanaFovMobile    = ${f(c.fovMobile)};`,
                 ``,
                 `// ── Interior shade (world-space volume) ───────────────────────────────────────`,
                 `// Center is an OFFSET added to islandPosition (same convention as tentOffset).`,
@@ -2519,6 +2570,18 @@ function buildGUI(): void {
                 `// ── Fade speeds (damp lambda) ─────────────────────────────────────────────────`,
                 `export const cabanaShadeRevealSpeed = ${f(Island.cabanaShadeFade.revealSpeed)};`,
                 `export const cabanaShadeCoverSpeed  = ${f(Island.cabanaShadeFade.coverSpeed)};`,
+                ``,
+                `// ── Reveal trigger ────────────────────────────────────────────────────────────`,
+                `export const cabanaArriveDist = ${f(cabanaRevealConfig.arriveDist)};`,
+                ``,
+                `// ── Reverse dome ──────────────────────────────────────────────────────────────`,
+                `// Center is an OFFSET added to islandPosition (same convention as tentOffset).`,
+                `export const cabanaDomeX       = ${f(Island.cabanaDome ? Island.cabanaDome.position.x - ip.x : 0)};`,
+                `export const cabanaDomeY       = ${f(Island.cabanaDome ? Island.cabanaDome.position.y - ip.y : 0)};`,
+                `export const cabanaDomeZ       = ${f(Island.cabanaDome ? Island.cabanaDome.position.z - ip.z : 0)};`,
+                `export const cabanaDomeRadius  = ${f((Island.cabanaDome ? Island.cabanaDome.scale.x : 1) * cabanaDomeRadius)};`,
+                `export const cabanaDomeColor   = ${Island.cabanaDome ? '0x' + (Island.cabanaDome.material as any).color.getHexString() : '0x05060a'};`,
+                `export const cabanaDomeOpacity = ${f(Island.cabanaDomeConfig.opacity)};`,
             ].join('\n');
             navigator.clipboard.writeText(content).then(() => {
                 console.log('[Debug] CabanaConfig.ts content copied to clipboard!');

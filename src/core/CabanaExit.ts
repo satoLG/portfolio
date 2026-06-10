@@ -10,7 +10,7 @@
  * DOM-only (like CoinTooltip). Wired from main.ts: Start() once, Update() each frame.
  */
 
-import { isCabanaZoomActive, isPhoneZoomActive, zoomOutFromPhone, zoomOutFromCabana } from './Control';
+import { isPhoneZoomActive, getCabanaPhase, zoomOutFromPhone, zoomOutFromCabana } from './Control';
 
 let _btn: HTMLButtonElement | null = null;
 let _visible = false;
@@ -40,7 +40,7 @@ export function Start(): void {
         // Step out one level: phone (inner) first, then the cabana itself.
         if (isPhoneZoomActive()) {
             zoomOutFromPhone();
-        } else if (isCabanaZoomActive()) {
+        } else if (getCabanaPhase() !== 'outside') {
             zoomOutFromCabana();
         }
     });
@@ -50,7 +50,7 @@ export function Start(): void {
 
 export function Update(): void {
     if (!_btn) return;
-    const shouldShow = isCabanaZoomActive();
+    const shouldShow = getCabanaPhase() === 'inside';
     if (shouldShow === _visible) return;   // no DOM churn when unchanged
     _visible = shouldShow;
     _btn.classList.toggle('cabana-exit-btn--visible', shouldShow);

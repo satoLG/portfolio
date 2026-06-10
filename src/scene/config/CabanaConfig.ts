@@ -3,12 +3,21 @@
 // Paste this entire file to replace src/scene/config/CabanaConfig.ts
 
 // ── Cabana zoom ───────────────────────────────────────────────────────────────
+// Desktop (used when viewport width > mobileBreakpointWidth).
 export const cabanaCamX   = 0.2400;
-export const cabanaCamY   = 0.7400;
+export const cabanaCamY   = 0.5700;
 export const cabanaCamZ   = -3.0700;
 export const cabanaPhi    = 6.6800;
-export const cabanaPitch  = -0.4700;
-export const cabanaFov    = 51.5000;
+export const cabanaPitch  = -0.2600;
+export const cabanaFov    = 49.0000;
+// Mobile (used when viewport width ≤ mobileBreakpointWidth). The narrower mobile
+// FOV/pose framing is dialled in separately so the tent reads well on phones.
+export const cabanaCamXMobile   = 0.2100;
+export const cabanaCamYMobile   = 0.6800;
+export const cabanaCamZMobile   = -3.0000;
+export const cabanaPhiMobile    = 6.6800;
+export const cabanaPitchMobile  = -0.2600;
+export const cabanaFovMobile    = 60.0000;
 
 // ── Interior shade (world-space volume) ───────────────────────────────────────
 // Center is an OFFSET added to islandPosition (same convention as tentOffset).
@@ -23,8 +32,17 @@ export const cabanaShadeColor   = 0x141414;
 export const cabanaShadeStrength = 1.0000;
 
 // ── Fade speeds (damp lambda) ─────────────────────────────────────────────────
-// Asymmetric fade: revealing the interior (zooming in) is slow so the shade
-// gently dissolves as the camera approaches; re-darkening (zooming out) is fast
-// so the interior is hidden again almost immediately. Higher = snappier.
-export const cabanaShadeRevealSpeed = 2.0000;   // fade-out while zoomed in (lower = slower)
-export const cabanaShadeCoverSpeed  = 10.0000;  // fade back in on zoom out (higher = faster)
+export const cabanaShadeRevealSpeed = 2.0000;
+export const cabanaShadeCoverSpeed  = 10.0000;
+
+// ── Reveal trigger ────────────────────────────────────────────────────────────
+export const cabanaArriveDist = 0.1200;
+
+// ── Reverse dome ──────────────────────────────────────────────────────────────
+// Center is an OFFSET added to islandPosition (same convention as tentOffset).
+export const cabanaDomeX       = 0.3000;
+export const cabanaDomeY       = 0.9000;
+export const cabanaDomeZ       = -0.4000;
+export const cabanaDomeRadius  = 3.0000;
+export const cabanaDomeColor   = 0x05060a;
+export const cabanaDomeOpacity = 1.0000;

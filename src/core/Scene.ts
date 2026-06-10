@@ -279,7 +279,9 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     updateSceneDepthCamera(camera);
 
     PostProcess.renderScene(renderer, scene, camera, () => {
-        Ocean.RenderSurface(renderer, camera);
+        // Skip the ocean surface pass while sealed inside the cabana — the dome
+        // hides it and the camera is above water, so it's pure waste.
+        if (!Island.isCabanaSealed()) Ocean.RenderSurface(renderer, camera);
         if (underwaterTransparentVis) {
             renderOnlyUnderwaterTransparents(underwaterTransparentVis);
             restoreVisibility(underwaterTransparentVis);
@@ -831,21 +833,42 @@ export function Update(): void
         Island.Update(true);
         Fire.Update();
     } else {
-        // Show surface, hide underwater
+        // Show surface, hide underwater.
+        // When sealed inside the cabana, the reverse dome hides the outside world,
+        // so we also stop rendering it entirely (the big perf win). The interior
+        // (tent, lazy-loaded props, little rocks, dome) stays visible — handled by
+        // Island.Update. Un-sealing flips this back the same frame (instant return).
+        const cabanaSealed = Island.isCabanaSealed();
+        const showOutside = !cabanaSealed;
         SeaFloor.setVisible(false);
         SeaFloorDecor.decorGroup.visible = false;
         Fish.setCameraVisibility(false, Island.getLowestY());
-        WindLines.windLinesGroup.visible = true;
-        Island.island.visible = true;
-        Island.firecamp.visible = true;
-        Island.tree.visible = true;
-        Island.bush.visible = true;
-        Island.bushRadio.visible = true;
-        Island.bushRadio2.visible = true;
-        Island.bushPug.visible = true;
-        Fire.fire.visible = true;
+        WindLines.windLinesGroup.visible = showOutside;
+        Skybox.skybox.visible = showOutside;
+        Island.island.visible = showOutside;
+        Island.firecamp.visible = showOutside;
+        Island.tree.visible = showOutside;
+        Island.bush.visible = showOutside;
+        Island.bushRadio.visible = showOutside;
+        Island.bushRadio2.visible = showOutside;
+        Island.bushPug.visible = showOutside;
+        Island.radio.visible = showOutside;
+        Island.sword.visible = showOutside;
+        Island.pug.visible = showOutside;
+        Island.dogBed.visible = showOutside;
+        Island.apple1.visible = showOutside;
+        Island.apple2.visible = showOutside;
+        Island.apple3.visible = showOutside;
+        Island.mossRock1.visible = showOutside;
+        Island.mossRock2a.visible = showOutside;
+        Island.mossRock2b.visible = showOutside;
+        Island.mossRock3a.visible = showOutside;
+        Island.mossRock3b.visible = showOutside;
+        Island.mossRock3c.visible = showOutside;
+        Fire.fire.visible = showOutside;
         // Show procedural foliage on surface
-        if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = true;
+        if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = showOutside;
+        if (Island.grassShadowMesh)     Island.grassShadowMesh.visible     = showOutside;
 
         Island.Update(false);
         Fire.Update();
@@ -904,7 +927,8 @@ export function Update(): void
     // PostProcess.renderScene wraps renderer.render() with post-processing
     // (pixelation + underwater distortion).
     renderSceneFrame(isUnderwater);
-    CloudSprites.Render(renderer, camera);
+    // Clouds are sky-only — skip them while sealed inside the cabana.
+    if (!Island.isCabanaSealed()) CloudSprites.Render(renderer, camera);
 
     // Debug axes
     renderer.autoClearColor = false;
