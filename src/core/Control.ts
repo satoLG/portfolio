@@ -59,11 +59,11 @@ let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
 // INTRO CAMERA DESCENT SETTINGS
 // ============================================
 const introStartY = 8.5;      // Where the post-click descent begins (just above the cloud deck)
-// On page open the camera parks a touch higher than introStartY and eases down to
-// it while the loading-screen blur clears, so the very first thing the visitor sees
-// is a wider sky that gently settles onto the cloud deck. This only moves the CAMERA
-// — the cloud deck's base Y is untouched.
-const introPreStartY = 10.5;  // Camera parks here on page open; descends to introStartY as the blur clears
+// On page open the camera parks well above the cloud deck — high enough that NO
+// clouds are visible at all — and eases down to introStartY while the loading-screen
+// blur clears, so the clouds rise into frame as the scene settles. This only moves the
+// CAMERA — the cloud deck's base Y is untouched.
+const introPreStartY = 16.0;  // Camera parks here on page open (above the clouds); descends to introStartY as the blur clears
 const introEndY = aboveWaterTopY;  // Camera ends at normal top position
 let introActive = false;       // Kept false during loading — camera parked. True only during post-click descent.
 let introLoadingActive = true; // True from page open until Start clicked — drives the pre-click loading descent
