@@ -77,8 +77,12 @@ export function onDescentComplete(cb: () => void): void {
 // Camera tilts up during loading so the viewport shows only sky (horizon below frame).
 // Must exceed the half-vertical-FOV (~25°) to guarantee no ocean is visible.
 // Damped back to 0 once the user clicks Start, giving a cinematic sky→scene swoop.
-const INTRO_TETHA_START = 0.35;   // radians; keeps the cloud deck in the lower frame
-let introTetha = INTRO_TETHA_START;
+const INTRO_TETHA_START = 0.35;   // radians; pitch at introStartY — keeps the cloud deck in the lower frame
+// At the higher introPreStartY the camera looks over the cloud deck and would catch
+// the ocean plane, so it parks at a steeper upward pitch (sky only) and eases down to
+// INTRO_TETHA_START as the loading blur clears, tracking the Y descent.
+const INTRO_PRE_TETHA_START = 0.62;  // radians; pitch at introPreStartY (above the half-vertical-FOV so no ocean shows)
+let introTetha = INTRO_PRE_TETHA_START;
 const INTRO_DESCENT_SPEED  = 2.5;   // units/second at full speed
 const INTRO_EASE_OUT_ZONE  = 1.8;   // last N units before landing where speed tapers — raise to ease earlier
 const INTRO_MIN_SPEED      = 0.3;   // speed multiplier at the very end (0.3 = 30% of full speed)
@@ -839,10 +843,12 @@ export function Update(): void
 
             if (introLoadingActive) {
                 // Pre-click: track the loading blur. Camera eases from introPreStartY
-                // down to introStartY as progress goes 0→1, landing exactly at
-                // introStartY before the post-click descent (introActive) takes over.
+                // down to introStartY (and pitch from INTRO_PRE_TETHA_START down to
+                // INTRO_TETHA_START) as progress goes 0→1, landing exactly at the
+                // introStartY pose before the post-click descent (introActive) takes over.
                 currentY = MathUtils.lerp(introPreStartY, introStartY, introLoadingProgress);
                 camera.position.y = currentY;
+                introTetha = MathUtils.lerp(INTRO_PRE_TETHA_START, INTRO_TETHA_START, introLoadingProgress);
             } else if (introActive) {
                 const yDist    = targetY - currentY;
                 const remaining = Math.abs(yDist);
