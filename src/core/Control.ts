@@ -58,9 +58,16 @@ let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
 // ============================================
 // INTRO CAMERA DESCENT SETTINGS
 // ============================================
-const introStartY = 8.5;      // Camera starts just above the cloud deck
+const introStartY = 8.5;      // Where the post-click descent begins (just above the cloud deck)
+// On page open the camera parks a touch higher than introStartY and eases down to
+// it while the loading-screen blur clears, so the very first thing the visitor sees
+// is a wider sky that gently settles onto the cloud deck. This only moves the CAMERA
+// — the cloud deck's base Y is untouched.
+const introPreStartY = 10.5;  // Camera parks here on page open; descends to introStartY as the blur clears
 const introEndY = aboveWaterTopY;  // Camera ends at normal top position
 let introActive = false;       // Kept false during loading — camera parked. True only during post-click descent.
+let introLoadingActive = true; // True from page open until Start clicked — drives the pre-click loading descent
+let introLoadingProgress = 0;  // 0→1, mirrors the loading-screen blur clearing (set via setIntroProgress)
 let scrollEnabled = false;     // Prevent scrolling until descent completes
 let _descentCompleteCallback: (() => void) | null = null;
 
@@ -77,18 +84,19 @@ const INTRO_EASE_OUT_ZONE  = 1.8;   // last N units before landing where speed t
 const INTRO_MIN_SPEED      = 0.3;   // speed multiplier at the very end (0.3 = 30% of full speed)
 const INTRO_TETHA_SPEED = INTRO_TETHA_START / (introStartY - introEndY) * INTRO_DESCENT_SPEED;
 
-// Set intro loading progress (called from UI.ts for the loading bar animation).
-// Camera no longer follows loading progress — it stays parked at introStartY
-// until the user clicks Start, then descends cinematically in Update().
-// The progress value is forwarded to the loading bar only (not used for camera movement).
-export function setIntroProgress(_progress: number): void {
-    // no-op for camera — progress is only used by UI.ts for the loading bar display
+// Set intro loading progress (called from UI.ts, fed the same value that drives the
+// loading-screen blur). The pre-click camera descent in Update() tracks this 0→1
+// value: the camera eases from introPreStartY down to introStartY as the blur clears,
+// landing at introStartY by the time the user clicks Start (post-click descent begins).
+export function setIntroProgress(progress: number): void {
+    introLoadingProgress = MathUtils.clamp(progress, 0, 1);
 }
 
 // Enable normal scroll (called when start button clicked).
 // Triggers the cinematic camera descent from introStartY → introEndY.
 export function enableScroll(): void {
-    introActive = true;   // triggers smooth descent in Update()
+    introActive = true;          // triggers smooth descent in Update()
+    introLoadingActive = false;  // loading descent done — hand off to the post-click descent
     scrollEnabled = false;
     isScrolling = false;
     if (scrollTimeout) {
@@ -502,9 +510,11 @@ export function changeDownState(down: boolean): void
 
 export function Start(): void
 {
-    // Initialize camera at intro start position (high above scene)
+    // Initialize camera at intro start position (high above scene). currentY parks a
+    // touch higher (introPreStartY) and eases down to introStartY as the loading blur
+    // clears; targetY is the destination of that descent and the start of the post-click one.
     targetY = introStartY;
-    currentY = introStartY;
+    currentY = introPreStartY;
 }
 
 export function Update(): void
@@ -827,7 +837,13 @@ export function Update(): void
             currentFov = MathUtils.damp(currentFov, mainCameraConfig.fov, ZOOM_SMOOTH, deltaTime);
             if (Math.abs(currentFov - mainCameraConfig.fov) < 0.05) currentFov = mainCameraConfig.fov;
 
-            if (introActive) {
+            if (introLoadingActive) {
+                // Pre-click: track the loading blur. Camera eases from introPreStartY
+                // down to introStartY as progress goes 0→1, landing exactly at
+                // introStartY before the post-click descent (introActive) takes over.
+                currentY = MathUtils.lerp(introPreStartY, introStartY, introLoadingProgress);
+                camera.position.y = currentY;
+            } else if (introActive) {
                 const yDist    = targetY - currentY;
                 const remaining = Math.abs(yDist);
                 const speedScale = remaining < INTRO_EASE_OUT_ZONE

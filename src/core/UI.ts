@@ -5,7 +5,6 @@ import { startAudio, transitionFromIntroToScene, transitionToUnderwater, transit
 import { getCameraY, setIntroProgress, enableScroll, onDescentComplete } from "./Control";
 import { beginDescent as beginCloudDescent } from "../effects/CloudSprites.ts";
 import { showWelcomeText } from "../effects/WelcomeText";
-import { setLoadingCallback } from "../scene/Island";
 import { t, setLanguage, type Language } from "./i18n";
 
 const THEME_STORAGE_KEY = 'portfolio-theme-mode';
@@ -161,6 +160,11 @@ export function Start(): void {
         const blurPx = BLUR_MAX * (1 - displayedProgress);
         blurOverlay.style.backdropFilter = `blur(${blurPx}px)`;
         blurOverlay.style.setProperty('-webkit-backdrop-filter', `blur(${blurPx}px)`);
+
+        // Drive the pre-click camera descent off the exact same value as the blur, so
+        // the camera eases down from its higher start to introStartY in lockstep with
+        // the blur clearing.
+        setIntroProgress(displayedProgress);
         
         // Check if we've reached 100% and both conditions are met
         if (displayedProgress >= 0.99 && targetProgress >= 1 && !loadingComplete) {
@@ -195,13 +199,11 @@ export function Start(): void {
     
     // Start animation loop
     requestAnimationFrame(animateProgress);
-    
-    // Mirror progress into Control for the intro descent. targetProgress itself
-    // is driven by polling getStartupProgress() in animateProgress above (it
-    // accounts for all model loaders, not just Island's).
-    setLoadingCallback((progress: number) => {
-        setIntroProgress(progress);
-    });
+
+    // Note: the pre-click camera descent is driven directly off displayedProgress
+    // inside animateProgress (see setIntroProgress call there) so it stays locked to
+    // the blur. The raw per-loader callback below would fight that, so it's no longer
+    // wired to the camera.
     startButton.onclick = function() {
         // Kick off audio init in this first user gesture so the intro piano +
         // breeze loop start playing during the welcome-text moment in the sky.
