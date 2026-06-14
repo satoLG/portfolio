@@ -25,6 +25,12 @@ const CLOUD_WIDTH = 180;
 // This is a hard cap for the rotated sprite vertices, not just the sprite center.
 const CLOUD_MAX_TOP_Y = 10;
 const CLOUD_LAYER_DEPTH = 1.7;
+// Per-sprite Y jitter (world units, zero-mean ±value) layered on top of the base
+// placement so the deck reads less flat / more hand-painted. Does NOT move the deck's
+// base Y — sprites still hang from the same CLOUD_MAX_TOP_Y anchor, and the top of any
+// jittered-up sprite is clamped to that cap so nothing pokes above the welcome text.
+// Set to 0 to disable; raise for a more scattered, cottony look.
+const CLOUD_Y_VARIANCE = 0.8;
 const CLOUD_BASE_SIZE = 2.95;
 const CLOUD_FRONT_DROP_START = 0.1;
 const CLOUD_FRONT_DROP_END = 0.96;
@@ -349,7 +355,11 @@ function createCloudGeometry(count: number): BufferGeometry {
         const scale = Math.random() * Math.random() * 1.5 + 0.5;
         const half = CLOUD_BASE_SIZE * scale * 0.5;
         const topExtent = half * (Math.abs(Math.cos(rotation)) + Math.abs(Math.sin(rotation)));
-        const y = CLOUD_MAX_TOP_Y - topExtent - Math.random() * Math.random() * CLOUD_LAYER_DEPTH;
+        // Zero-mean jitter for a more natural, scattered deck. Clamp the result so a
+        // jittered-up sprite's top vertex never rises past CLOUD_MAX_TOP_Y (the welcome-text cap).
+        const yJitter = (Math.random() - 0.5) * 2 * CLOUD_Y_VARIANCE;
+        const yMax = CLOUD_MAX_TOP_Y - topExtent;
+        const y = Math.min(yMax, yMax - Math.random() * Math.random() * CLOUD_LAYER_DEPTH + yJitter);
 
         writePlane(positions, uvs, indices, i, x, y, z, half, rotation);
     }
