@@ -699,6 +699,131 @@ export function beginJellyfishPrewarm(): () => void {
     };
 }
 
+// Z-plane (depth into the scene) the prewarm grid is parked on — inside the
+// generic-fish / jelly Z band so getFrustumEdgesX gives sane horizontal extents.
+const CREATURE_PREWARM_Z = -2.0;
+
+/** Force every pooled creature clone (generic fish AND jellyfish) to be DRAWN
+ *  in-frustum once during the loading-screen prewarm, so each clone's per-instance
+ *  GPU buffers upload now rather than on first dive/scroll.
+ *
+ *  renderer.compile() warms shader PROGRAMS for the whole scene, but geometry
+ *  VBOs, per-instance skinned-mesh BONE TEXTURES and cloned-material textures only
+ *  upload when an object is actually rendered while inside the frustum. The
+ *  pooled clones sit at scattered positions that the fixed prewarm camera passes
+ *  don't cover, so without this they upload lazily on the first real frame they
+ *  enter view — that's the dive/fish-band stutter (made worse by reseedActiveFishX,
+ *  which teleports the whole generic stream into view at once on dive).
+ *
+ *  Parks all clones in a grid directly in front of the camera (which it points at a
+ *  deterministic underwater pose), makes them visible/opaque, poses their skeletons,
+ *  then the caller renders one underwater frame. The returned closure restores every
+ *  touched transform / visibility / material / light value. The camera pose is
+ *  restored by prewarmGPU's outer finally. Follows beginJellyfishPrewarm's
+ *  save/restore pattern and the jelly PointLight contract (never toggle light.visible). */
+export function beginCreaturePrewarm(): () => void {
+    const savedContainerVisible = genericFishContainer.visible;
+    genericFishContainer.visible = true;
+
+    // Aim the camera straight down -Z at the fish Y band so the parked grid is
+    // unambiguously in-frustum and the frustum-edge math reads a clean projection.
+    const yMid = (GENERIC_FISH_Y_MIN + GENERIC_FISH_Y_MAX) * 0.5;
+    camera.position.set(0, yMid, defaultCameraZ);
+    camera.lookAt(0, yMid, CREATURE_PREWARM_Z);
+    camera.updateProjectionMatrix();
+
+    // Collect every clone: pools are spliced empty once seeded into activeFish, so
+    // union all three sources and dedup by identity (belt-and-suspenders).
+    const entries = new Set<PooledFish>();
+    for (const e of fishPool) entries.add(e);
+    for (const e of jellyPool) entries.add(e);
+    for (const f of activeFish) entries.add(f.pool);
+    const clones = [...entries];
+
+    // Horizontal extent of the frustum at the grid plane, with a small margin.
+    const { spawnX, despawnX } = getFrustumEdgesX(CREATURE_PREWARM_Z);
+    const rightX = Number.isFinite(spawnX)   ? spawnX   - SCREEN_MARGIN :  4.0;
+    const leftX  = Number.isFinite(despawnX) ? despawnX + SCREEN_MARGIN : -4.0;
+
+    const cols = Math.max(1, Math.ceil(Math.sqrt(clones.length)));
+    const rows = Math.max(1, Math.ceil(clones.length / cols));
+
+    const saved: Array<{
+        entry: PooledFish;
+        position: Vector3;
+        scale: Vector3;
+        rotX: number; rotY: number; rotZ: number;
+        visible: boolean;
+        opacity: number[];
+        emissiveIntensity: number[];
+        lightIntensity: number;
+        lightPos: Vector3 | null;
+    }> = [];
+
+    for (let i = 0; i < clones.length; i++) {
+        const entry = clones[i];
+        const group = entry.group;
+        saved.push({
+            entry,
+            position: group.position.clone(),
+            scale: group.scale.clone(),
+            rotX: group.rotation.x, rotY: group.rotation.y, rotZ: group.rotation.z,
+            visible: group.visible,
+            opacity: entry.materials.map(m => m.opacity),
+            emissiveIntensity: entry.materials.map(m => m.emissiveIntensity),
+            lightIntensity: entry.light ? entry.light.intensity : 0,
+            lightPos: entry.light ? entry.light.position.clone() : null,
+        });
+
+        // Grid cell position on the parking plane.
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const fx = cols > 1 ? col / (cols - 1) : 0.5;
+        const fy = rows > 1 ? row / (rows - 1) : 0.5;
+        const x = leftX + (rightX - leftX) * fx;
+        const y = GENERIC_FISH_Y_MIN + (GENERIC_FISH_Y_MAX - GENERIC_FISH_Y_MIN) * fy;
+        group.position.set(x, y, CREATURE_PREWARM_Z);
+        group.scale.setScalar(entry.isJellyfish ? JELLYFISH_SCALE : GENERIC_FISH_SCALE);
+        group.visible = true;
+
+        if (entry.isJellyfish) {
+            for (const mat of entry.materials) {
+                mat.opacity = JELLY_OPACITY;
+                mat.emissiveIntensity = JELLY_EMISSIVE_INTENSITY;
+            }
+            // Warm the lit per-light fragment path (see beginJellyfishPrewarm).
+            // Only intensity may change — never light.visible (Fish.ts contract).
+            if (entry.light) {
+                entry.light.intensity = jellyfishLightConfig.intensity;
+                entry.light.position.copy(group.position);
+            }
+        }
+
+        // Pose the skeleton so the bone texture is populated before the draw.
+        ensureLoopAction(entry);
+        entry.mixer.update(0);
+    }
+
+    return () => {
+        genericFishContainer.visible = savedContainerVisible;
+        for (const s of saved) {
+            const group = s.entry.group;
+            group.position.copy(s.position);
+            group.scale.copy(s.scale);
+            group.rotation.set(s.rotX, s.rotY, s.rotZ);
+            group.visible = s.visible;
+            for (let i = 0; i < s.entry.materials.length; i++) {
+                s.entry.materials[i].opacity = s.opacity[i];
+                s.entry.materials[i].emissiveIntensity = s.emissiveIntensity[i];
+            }
+            if (s.entry.light) {
+                s.entry.light.intensity = s.lightIntensity;
+                if (s.lightPos) s.entry.light.position.copy(s.lightPos);
+            }
+        }
+    };
+}
+
 function initFixedCreatureLoops(): void {
     // Seed the generic-fish and jellyfish streams INDEPENDENTLY. They used to
     // share one gate that required BOTH pools (`!fishPoolInitialized ||
