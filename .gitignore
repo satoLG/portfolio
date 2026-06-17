@@ -5,3 +5,15 @@ dist/
 .vscode/
 .claude/
 scripts/.optimize-cache.json
+
+# Claude docs / briefing markdown (not versioned) — keep README.md
+*.md
+!README.md
+
+# caveman agent rule files (not versioned)
+AGENTS.md
+.opencode/
+.cursor/
+.windsurf/
+.clinerules/
+.github/copilot-instructions.md
