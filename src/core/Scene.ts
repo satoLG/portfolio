@@ -275,7 +275,7 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     const depthExcludedVis = hideDepthPrePassExcluded();
     SceneDepth.capture(renderer, scene, camera);
     restoreVisibility(depthExcludedVis);
-    sceneDepthUniform.value = SceneDepth.getPackedDepthTexture();
+    sceneDepthUniform.value = SceneDepth.getDepthTexture();
     updateSceneDepthCamera(camera);
 
     PostProcess.renderScene(renderer, scene, camera, () => {
