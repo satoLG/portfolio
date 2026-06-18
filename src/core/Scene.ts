@@ -16,7 +16,7 @@ import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
 import * as WindLines from "../effects/WindLines.ts";
 import * as CloudSprites from "../effects/CloudSprites.ts";
 import * as SceneDepth from "../effects/SceneDepth.ts";
-import { sceneDepthUniform, updateSceneDepthCamera, edgeFoamIntensityUniform, foamIntensityUniform } from "../materials/OceanMaterial";
+import { sceneDepthUniform, updateSceneDepthCamera, edgeFoamIntensityUniform, foamIntensityUniform, edgeFoamWidthUniform, edgeFoamFadeStartZUniform, edgeFoamFadeEndZUniform } from "../materials/OceanMaterial";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
@@ -521,14 +521,28 @@ export function Start(): void
     // depth-intersection foam.
     SceneDepth.Start(renderer);
 
-    // On-device foam diagnostics (no keyboard needed on mobile). Append to the
-    // URL to isolate a foam artifact on the live preview:
-    //   ?noedge → disable depth-intersection (edge) foam
-    //   ?nosdf  → disable the SDF shore-foam ring
+    // On-device foam diagnostics + live tuning (no keyboard needed on mobile — the
+    // lil-gui panel only opens with [H], which iPhones can't press). Append to the
+    // URL to isolate or dial in edge foam on the live preview:
+    //   ?noedge        → disable depth-intersection (edge) foam
+    //   ?nosdf         → disable the SDF shore-foam ring
+    //   ?efwidth=1.5   → edge foam band width (world units)
+    //   ?efint=1.0     → edge foam intensity
+    //   ?efstartz=-40  → world-Z where the edge foam fade starts (full in front of it)
+    //   ?efendz=-60    → world-Z where the edge foam fade ends (gone behind it)
     {
         const params = new URLSearchParams(window.location.search);
         if (params.has('noedge')) edgeFoamIntensityUniform.value = 0;
         if (params.has('nosdf'))  foamIntensityUniform.value = 0;
+        const applyNum = (key: string, uniform: { value: number }) => {
+            if (!params.has(key)) return;
+            const n = parseFloat(params.get(key) ?? '');
+            if (Number.isFinite(n)) uniform.value = n;
+        };
+        applyNum('efwidth', edgeFoamWidthUniform);
+        applyNum('efint', edgeFoamIntensityUniform);
+        applyNum('efstartz', edgeFoamFadeStartZUniform);
+        applyNum('efendz', edgeFoamFadeEndZUniform);
     }
     // FXAA replaces MSAA when antialiasing is off (the new default).
     PostProcess.setFxaaEnabled(!antialias);

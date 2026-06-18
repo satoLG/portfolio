@@ -51,7 +51,7 @@ export const waterlineY         = 0.0050;
 // Industry-standard "intersection foam": the ocean shader reads the opaque
 // scene depth and brightens fragments where the ocean grazes geometry behind
 // it. Fully independent from the SDF foam ring around the island silhouette.
-export const edgeFoamWidth     = 0.4000;  // world-space distance over which foam fades to nothing
+export const edgeFoamWidth     = 1.0000;  // world-space distance over which foam fades to nothing
 export const edgeFoamIntensity = 0.4200;  // overall brightness of the depth-intersection foam
 export const edgeFoamUnderwaterMul = 0.3500;  // dimming factor for the same effect with camera below water (silvery refraction sheen)
 export const edgeFoamColor     = { r: 1.0000, g: 0.9700, b: 1.0000 };
