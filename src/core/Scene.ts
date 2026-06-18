@@ -16,7 +16,7 @@ import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
 import * as WindLines from "../effects/WindLines.ts";
 import * as CloudSprites from "../effects/CloudSprites.ts";
 import * as SceneDepth from "../effects/SceneDepth.ts";
-import { sceneDepthUniform, updateSceneDepthCamera } from "../materials/OceanMaterial";
+import { sceneDepthUniform, updateSceneDepthCamera, edgeFoamIntensityUniform, foamIntensityUniform } from "../materials/OceanMaterial";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
@@ -275,7 +275,7 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     const depthExcludedVis = hideDepthPrePassExcluded();
     SceneDepth.capture(renderer, scene, camera);
     restoreVisibility(depthExcludedVis);
-    sceneDepthUniform.value = SceneDepth.getDepthTexture();
+    sceneDepthUniform.value = SceneDepth.getPackedDepthTexture();
     updateSceneDepthCamera(camera);
 
     PostProcess.renderScene(renderer, scene, camera, () => {
@@ -520,6 +520,16 @@ export function Start(): void
     // Allocate the depth-capture target — used by the ocean shader for
     // depth-intersection foam.
     SceneDepth.Start(renderer);
+
+    // On-device foam diagnostics (no keyboard needed on mobile). Append to the
+    // URL to isolate a foam artifact on the live preview:
+    //   ?noedge → disable depth-intersection (edge) foam
+    //   ?nosdf  → disable the SDF shore-foam ring
+    {
+        const params = new URLSearchParams(window.location.search);
+        if (params.has('noedge')) edgeFoamIntensityUniform.value = 0;
+        if (params.has('nosdf'))  foamIntensityUniform.value = 0;
+    }
     // FXAA replaces MSAA when antialiasing is off (the new default).
     PostProcess.setFxaaEnabled(!antialias);
 

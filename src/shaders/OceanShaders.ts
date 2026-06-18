@@ -115,9 +115,18 @@ export const surfaceFragment =
     uniform float _WaterlineCompositeOpacity;
 
     // Depth-intersection foam — opaque scene depth captured pre-ocean by SceneDepth.ts.
-    // highp: the sampled depth lives near 1.0, where mediump (the iOS default for
-    // samplers) quantizes catastrophically and makes the contact line flicker.
-    uniform highp sampler2D _SceneDepth;
+    // This is the RGBA-PACKED depth (gl_FragCoord.z encoded across RGBA8 by
+    // MeshDepthMaterial), NOT a hardware depth texture: iOS samples a real depth
+    // texture at reduced precision, and with near=0.3/far=4000 the contact sits
+    // at depth≈0.96 where one coarse step ≈ the whole foam width, so depthDiff
+    // flickered across the threshold every frame. unpackRGBAToDepth recovers the
+    // full-precision value device-consistently (the trick three.js uses for shadows).
+    uniform sampler2D _SceneDepth;
+
+    const float _UnpackDownscale = 255.0 / 256.0;
+    const vec3  _PackFactors = vec3(256.0 * 256.0 * 256.0, 256.0 * 256.0, 256.0);
+    const vec4  _UnpackFactors = _UnpackDownscale / vec4(_PackFactors, 1.0);
+    float unpackRGBAToDepth(const in vec4 v) { return dot(v, _UnpackFactors); }
     uniform float _CameraNear;
     uniform float _CameraFar;
     uniform float _EdgeFoamWidth;
@@ -240,7 +249,7 @@ export const surfaceFragment =
     // regardless of object shape/slope/geometry density because it lives on
     // the (wave-displaced) ocean surface and reads the actual scene depth.
     float calcEdgeFoam(vec2 screenUv, float worldZ) {
-        float sceneDepth = texture2D(_SceneDepth, screenUv).x;
+        float sceneDepth = unpackRGBAToDepth(texture2D(_SceneDepth, screenUv));
         // Skybox / cleared background reads as 1.0 — no opaque object here.
         if (sceneDepth >= 0.9999) return 0.0;
         float sceneLinear = linearizeDepthBuffer(sceneDepth, _CameraNear, _CameraFar);

@@ -56,14 +56,6 @@ export const edgeFoamIntensity = 0.4200;  // overall brightness of the depth-int
 export const edgeFoamUnderwaterMul = 0.3500;  // dimming factor for the same effect with camera below water (silvery refraction sheen)
 export const edgeFoamColor     = { r: 1.0000, g: 0.9700, b: 1.0000 };
 
-// Waterline depth-clip margin (world units). The depth pre-pass clips geometry
-// below the waterline so the intersection foam never paints the island's
-// SUBMERGED hull (a stray white line in open water, worst on iOS). This margin
-// keeps a thin sliver below the waterline so the REAL shoreline contact band is
-// preserved — raise it if shore/rock foam weakens, lower it if any submerged
-// smear remains. See src/effects/SceneDepth.ts.
-export const edgeFoamDepthClipMargin = 0.0300;
-
 // Edge-foam world-Z fade. The depth-intersection foam flickers on the back rocks
 // on iOS (mediump/16-bit depth precision). Instead of a hard cut, fade the foam
 // out by WORLD Z so the contact line stays put while the foam vanishes toward the
