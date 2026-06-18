@@ -327,6 +327,12 @@ export function getChestRayMats(): MeshBasicMaterial[] { return _chestRayMats; }
 const _chestRayMats: MeshBasicMaterial[] = [];
 // Coins stored for live debug-GUI transforms
 const _chestCoins: Group[] = [];
+// True once all three chest coins exist in the scene. The GPU prewarm waits on
+// this (via Scene.waitForModels) so the coins are present + in-frustum during the
+// chest-corridor warm pass — otherwise their materials upload on the first chest
+// reveal and hitch. coin.glb loads NESTED inside the chest onLoad, so it can
+// settle slightly after the rest; backstopped by the prewarm's 12s timeout.
+export function coinsReady(): boolean { return _chestCoins.length >= 3; }
 // Coin spring animation state (parallel arrays, one entry per coin)
 const _coinCurrentScales: number[] = [];
 const _coinVelocities:    number[] = [];

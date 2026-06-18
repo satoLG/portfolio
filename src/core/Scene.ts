@@ -643,6 +643,17 @@ async function prewarmGPU(): Promise<void> {
         renderer.render(scene, camera);
         Ocean.RenderSurface(renderer, camera);
 
+        // Page-open PARK pose: the intro now opens higher and steeper than the pose
+        // above (introPreStartY=16.0, INTRO_PRE_TETHA_START=0.62 in Control.ts) and
+        // eases down to introStartY as the loading blur clears. Warm that frustum too
+        // so the very first sky/cloud frame the user sees on page open doesn't hitch.
+        // Look direction = pitched up 0.62 rad toward -Z: forward ≈ (0, 0.581, -0.814).
+        camera.position.set(-0.1, 16.0, 1.78);
+        camera.lookAt(-0.1, 16.0 + 4.52, 1.78 - 6.33);
+        camera.updateProjectionMatrix();
+        renderer.render(scene, camera);
+        Ocean.RenderSurface(renderer, camera);
+
         // Island-facing pass: uploads all island/tree/object textures to GPU
         // (the sky pass above looks away from the island, so nothing on it gets uploaded).
         const surfaceWasVisible = Ocean.surface.visible;
@@ -659,13 +670,32 @@ async function prewarmGPU(): Promise<void> {
         const restoreJellyfishPrewarm = Fish.beginJellyfishPrewarm();
         try {
             await prewarmChestCorridor();
-            // Exercise the full PostProcess pipeline (copyFramebufferToTexture + distortion
-            // quad render) so the GPU path is warm before the user actually dives.
-            // Without this the first real crossing of UNDERWATER_Y_THRESHOLD causes a
-            // pipeline stall on the copyFramebufferToTexture call.
-            PostProcess.updateUnderwaterAmount(camera.position.y);  // sets underwaterAmount > 0
-            renderSceneFrame(true);
-            PostProcess.updateUnderwaterAmount(100);                 // reset to 0 (positive Y → depth < 0)
+
+            // Park every pooled fish/jelly clone in-frustum so their per-instance GPU
+            // buffers (geometry VBOs, skinned bone textures, cloned-material textures)
+            // upload now instead of on the first dive/scroll. MUST run AFTER the chest
+            // corridor: beginCreaturePrewarm points the camera at a deterministic
+            // underwater pose and lays the grid out relative to it, and the corridor
+            // above moves the camera — so parking has to be the last thing before the
+            // warm render or the grid would sit off-frustum and never get drawn.
+            const restoreCreaturePrewarm = Fish.beginCreaturePrewarm();
+            try {
+                // Exercise the full PostProcess pipeline (copyFramebufferToTexture +
+                // distortion quad render) so the GPU path is warm before the user dives.
+                // Without this the first real crossing of UNDERWATER_Y_THRESHOLD causes a
+                // pipeline stall on the copyFramebufferToTexture call. The same render
+                // draws the parked creature grid (via the underwater transparent pass),
+                // forcing every clone's buffers to upload.
+                PostProcess.updateUnderwaterAmount(camera.position.y);  // sets underwaterAmount > 0
+                renderSceneFrame(true);
+                renderer.getContext().finish();                         // ensure uploads complete before restore
+                PostProcess.updateUnderwaterAmount(100);                // reset to 0 (positive Y → depth < 0)
+            } finally {
+                // Parking moved the clones (and acquired jelly PointLight intensity);
+                // restore even if the warm render threw, or the fish/jelly stay frozen
+                // mid-grid for the session.
+                restoreCreaturePrewarm();
+            }
         } finally {
             // The prewarm temporarily acquires PointLights from the pool. If the
             // GPU work above ever throws, the restore must still run — otherwise
@@ -761,13 +791,14 @@ function waitForModels(): Promise<void> {
     return new Promise<void>(resolve => {
         const startedAt = performance.now();
         (function check() {
-            if (SeaFloorDecor.isLoaded() && Fish.isReady()) {
+            if (SeaFloorDecor.isLoaded() && Fish.isReady() && Island.coinsReady()) {
                 resolve();
             } else if (performance.now() - startedAt >= PREWARM_MODEL_WAIT_TIMEOUT_MS) {
                 console.warn(
                     '[Scene] Prewarm proceeding before all underwater models were ready ' +
                     `(timed out after ${PREWARM_MODEL_WAIT_TIMEOUT_MS}ms). ` +
-                    `SeaFloorDecor.isLoaded=${SeaFloorDecor.isLoaded()} Fish.isReady=${Fish.isReady()}`,
+                    `SeaFloorDecor.isLoaded=${SeaFloorDecor.isLoaded()} Fish.isReady=${Fish.isReady()} ` +
+                    `Island.coinsReady=${Island.coinsReady()}`,
                 );
                 resolve();
             } else {
