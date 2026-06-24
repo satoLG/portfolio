@@ -57,7 +57,9 @@ export const foamMaskCenterUniform   = new Uniform(new Vector2(0.0, 0.0));      
 export const foamMaskSizeUniform     = new Uniform(new Vector2(4.0, 4.0));          // World XZ extent — overwritten by setFoamMask()
 export const foamCenterOffsetUniform = new Uniform(new Vector2(OceanConfig.foamCenterOffset.x, OceanConfig.foamCenterOffset.y)); // user nudge on top of baked center
 export const foamWidthUniform        = new Uniform(OceanConfig.foamWidth);
-export const foamIntensityUniform    = new Uniform(OceanConfig.foamIntensity);
+const _isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+
+export const foamIntensityUniform    = new Uniform(_isMobile ? 0 : OceanConfig.foamIntensity);
 export const foamAnimSpeedUniform    = new Uniform(OceanConfig.foamAnimSpeed);
 export const foamEdgeNoiseAmtUniform = new Uniform(OceanConfig.foamEdgeNoiseAmt);
 export const foamWobbleAmtUniform    = new Uniform(OceanConfig.foamWobbleAmt);
@@ -111,14 +113,10 @@ export const sceneDepthUniform     = new Uniform<Texture | null>(null);
 export const cameraNearUniform     = new Uniform(0.1);
 export const cameraFarUniform      = new Uniform(2000);
 export const edgeFoamWidthUniform  = new Uniform(OceanConfig.edgeFoamWidth);
-export const edgeFoamIntensityUniform = new Uniform(OceanConfig.edgeFoamIntensity);
+export const edgeFoamIntensityUniform = new Uniform(_isMobile ? 0 : OceanConfig.edgeFoamIntensity);
 export const edgeFoamUnderwaterMulUniform = new Uniform(OceanConfig.edgeFoamUnderwaterMul);
 export const edgeFoamColorUniform  = new Uniform(new Vector3(OceanConfig.edgeFoamColor.r, OceanConfig.edgeFoamColor.g, OceanConfig.edgeFoamColor.b));
 
-// World-Z fade: keeps foam away from the flicker-prone back rocks on iOS
-// (16-bit/mediump depth buffer). Fade starts at the pug's world Z and goes
-// fully dark 1 unit behind it. Desktop keeps full foam (values far off-scene).
-const _isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
 export const edgeFoamFadeStartZUniform = new Uniform(_isMobile ? OceanConfig.edgeFoamFadeStartZMobile : OceanConfig.edgeFoamFadeStartZDesktop);
 export const edgeFoamFadeEndZUniform   = new Uniform(_isMobile ? OceanConfig.edgeFoamFadeEndZMobile   : OceanConfig.edgeFoamFadeEndZDesktop);
 
