@@ -62,7 +62,7 @@ export const edgeFoamColor     = { r: 1.0000, g: 0.9700, b: 1.0000 };
 // Pug world Z = islandPosition.z (-3.3) + pugOffset.z (+1.0) = -2.3
 export const edgeFoamFadeStartZDesktop = -40.0000;
 export const edgeFoamFadeEndZDesktop   = -60.0000;
-export const edgeFoamFadeStartZMobile  = -2.3000;
+export const edgeFoamFadeStartZMobile  = -1.5000;
 export const edgeFoamFadeEndZMobile    = -3.5000;
 
 // ── Reflection ────────────────────────────────────────────────────────────────
