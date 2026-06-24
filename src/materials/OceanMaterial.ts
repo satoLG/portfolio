@@ -115,6 +115,13 @@ export const edgeFoamIntensityUniform = new Uniform(OceanConfig.edgeFoamIntensit
 export const edgeFoamUnderwaterMulUniform = new Uniform(OceanConfig.edgeFoamUnderwaterMul);
 export const edgeFoamColorUniform  = new Uniform(new Vector3(OceanConfig.edgeFoamColor.r, OceanConfig.edgeFoamColor.g, OceanConfig.edgeFoamColor.b));
 
+// World-Z fade: keeps foam away from the flicker-prone back rocks on iOS
+// (16-bit/mediump depth buffer). Fade starts at the pug's world Z and goes
+// fully dark 1 unit behind it. Desktop keeps full foam (values far off-scene).
+const _isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+export const edgeFoamFadeStartZUniform = new Uniform(_isMobile ? OceanConfig.edgeFoamFadeStartZMobile : OceanConfig.edgeFoamFadeStartZDesktop);
+export const edgeFoamFadeEndZUniform   = new Uniform(_isMobile ? OceanConfig.edgeFoamFadeEndZMobile   : OceanConfig.edgeFoamFadeEndZDesktop);
+
 /** Each frame, push the camera's current near/far into the shader uniforms so
  *  the depth linearization in `calcEdgeFoam` stays correct after any FOV /
  *  clip-plane change. */
@@ -283,6 +290,8 @@ export function Start(): void
         _EdgeFoamIntensity: edgeFoamIntensityUniform,
         _EdgeFoamUnderwaterMul: edgeFoamUnderwaterMulUniform,
         _EdgeFoamColor: edgeFoamColorUniform,
+        _EdgeFoamFadeStartZ: edgeFoamFadeStartZUniform,
+        _EdgeFoamFadeEndZ: edgeFoamFadeEndZUniform,
     };
     SetSkyboxUniforms(surface);
     
