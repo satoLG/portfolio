@@ -947,8 +947,6 @@ function buildGUI(): void {
             const abs  = oceanAbsorptionUniform.value;
             const flc  = foamLineColorUniform.value;
             const efc  = edgeFoamColorUniform.value;
-            // The live edge-foam Z-fade uniforms hold only the active device's
-            // pair; emit them into the matching slot and keep the other from config.
             const _efIsMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
             const content = [
                 `// src/scene/OceanConfig.ts`,
@@ -1009,16 +1007,13 @@ function buildGUI(): void {
                 `export const edgeFoamUnderwaterMul = ${f(edgeFoamUnderwaterMulUniform.value as number)};  // dimming factor for the same effect with camera below water (silvery refraction sheen)`,
                 `export const edgeFoamColor     = { r: ${f(efc.x)}, g: ${f(efc.y)}, b: ${f(efc.z)} };`,
                 ``,
-                `// Edge-foam world-Z fade. Fades the depth-intersection foam out by WORLD Z so`,
-                `// the contact line stays put while the foam vanishes toward the back of the`,
-                `// scene. Ocean world Z runs +Z (front/camera) → -Z (back). Full strength at/above`,
-                `// FadeStartZ, gone at/below FadeEndZ. Desktop keeps all foam; mobile fades out`,
-                `// before the flicker-prone back rocks. Only the active device's pair is live in`,
-                `// this session; the other pair is preserved from the current config.`,
-                `export const edgeFoamFadeStartZDesktop = ${f(_efIsMobile ? CFG_EF_FADE_START_Z_DESKTOP : edgeFoamFadeStartZUniform.value as number)}; // desktop: full strength up to here (effectively everything)`,
-                `export const edgeFoamFadeEndZDesktop   = ${f(_efIsMobile ? CFG_EF_FADE_END_Z_DESKTOP : edgeFoamFadeEndZUniform.value as number)}; // desktop: gone here (far beyond the scene → no visible cut)`,
-                `export const edgeFoamFadeStartZMobile  = ${f(_efIsMobile ? edgeFoamFadeStartZUniform.value as number : CFG_EF_FADE_START_Z_MOBILE)};  // mobile: full strength in front of this (keeps front rocks at z≈-2)`,
-                `export const edgeFoamFadeEndZMobile    = ${f(_efIsMobile ? edgeFoamFadeEndZUniform.value as number : CFG_EF_FADE_END_Z_MOBILE)};  // mobile: gone by here (before back rocks at z≈-4.7)`,
+                `// World-Z fade for edge foam. iOS 16-bit depth buffer causes flicker on back`,
+                `// rocks (z ≈ -4.7..-5.6). Fade starts at the pug's world Z where precision is`,
+                `// clean, fully gone behind. Desktop is off-scene. Pug Z = islandZ(-3.3) + pugOffsetZ(+1.0)`,
+                `export const edgeFoamFadeStartZDesktop = ${f(_efIsMobile ? CFG_EF_FADE_START_Z_DESKTOP : edgeFoamFadeStartZUniform.value as number)};`,
+                `export const edgeFoamFadeEndZDesktop   = ${f(_efIsMobile ? CFG_EF_FADE_END_Z_DESKTOP : edgeFoamFadeEndZUniform.value as number)};`,
+                `export const edgeFoamFadeStartZMobile  = ${f(_efIsMobile ? edgeFoamFadeStartZUniform.value as number : CFG_EF_FADE_START_Z_MOBILE)};`,
+                `export const edgeFoamFadeEndZMobile    = ${f(_efIsMobile ? edgeFoamFadeEndZUniform.value as number : CFG_EF_FADE_END_Z_MOBILE)};`,
                 ``,
                 `// ── Reflection ────────────────────────────────────────────────────────────────`,
                 `export const reflectionFresnelPower = ${f(reflectionFresnelPowerUniform.value as number)}; // lower = visible at more angles`,
@@ -1863,9 +1858,6 @@ function buildGUI(): void {
         set colorG(v)   { edgeFoamColorUniform.value.y = v; },
         get colorB()    { return edgeFoamColorUniform.value.z; },
         set colorB(v)   { edgeFoamColorUniform.value.z = v; },
-        // World-Z fade. Live uniforms hold whichever device's values were picked
-        // at load (desktop far back / mobile in front of the back rocks). Tweak
-        // here, then read both device pairs back from OceanConfig when copying.
         get fadeStartZ() { return edgeFoamFadeStartZUniform.value as number; },
         set fadeStartZ(v) { edgeFoamFadeStartZUniform.value = v; },
         get fadeEndZ()   { return edgeFoamFadeEndZUniform.value as number; },

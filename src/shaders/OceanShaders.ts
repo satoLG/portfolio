@@ -124,12 +124,6 @@ export const surfaceFragment =
     uniform float _EdgeFoamIntensity;
     uniform float _EdgeFoamUnderwaterMul;  // dim factor for camera-below-water (refractive sheen vs surface foam)
     uniform vec3  _EdgeFoamColor;
-    // Edge foam fades out by WORLD Z (not camera distance) so the contact line
-    // stays put while the foam disappears toward the back of the scene. The
-    // ocean's world Z runs +Z (camera/front) → -Z (back rocks). Desktop uses a
-    // far threshold (effectively keeps all foam); mobile cuts in front of the
-    // back rocks (≈ z -4.7) where the 16-bit/mediump depth precision makes the
-    // contact line flicker. Values are picked per-device in OceanMaterial.ts.
     uniform float _EdgeFoamFadeStartZ;  // world Z at/above which foam is full strength
     uniform float _EdgeFoamFadeEndZ;    // world Z (further back) at/below which foam is gone
 
@@ -254,16 +248,8 @@ export const surfaceFragment =
         float oceanLinear = -(viewMatrix * vec4(_worldPos.x, _elevation, _worldPos.y, 1.0)).z;
         float depthDiff = sceneLinear - oceanLinear;
 
-        // Contact line, unchanged from the original: foam starts exactly where
-        // the ocean meets opaque geometry (depthDiff > 0).
         if (depthDiff <= 0.0) return 0.0;
         float foam = 1.0 - smoothstep(0.0, _EdgeFoamWidth, depthDiff);
-
-        // World-Z fade: kill the foam gradually toward the back of the scene
-        // (more negative Z) so it never reaches the flicker-prone back rocks on
-        // mobile, without a hard cut. Independent of camera distance — the cut
-        // line stays fixed in the world. smoothstep is reversed because Z
-        // decreases toward the back: full at/above FadeStartZ, gone at FadeEndZ.
         foam *= smoothstep(_EdgeFoamFadeEndZ, _EdgeFoamFadeStartZ, worldZ);
 
         return foam;
