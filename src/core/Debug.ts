@@ -293,6 +293,8 @@ import {
     edgeFoamColorUniform,
     edgeFoamFadeStartZUniform,
     edgeFoamFadeEndZUniform,
+    edgeFoamMaxDistStartUniform,
+    edgeFoamMaxDistEndUniform,
     underwaterFogDistUniform,
 } from '../materials/OceanMaterial';
 import * as WindLines from '../effects/WindLines';
@@ -1014,6 +1016,8 @@ function buildGUI(): void {
                 `export const edgeFoamFadeEndZDesktop   = ${f(_efIsMobile ? CFG_EF_FADE_END_Z_DESKTOP : edgeFoamFadeEndZUniform.value as number)};`,
                 `export const edgeFoamFadeStartZMobile  = ${f(_efIsMobile ? edgeFoamFadeStartZUniform.value as number : CFG_EF_FADE_START_Z_MOBILE)};`,
                 `export const edgeFoamFadeEndZMobile    = ${f(_efIsMobile ? edgeFoamFadeEndZUniform.value as number : CFG_EF_FADE_END_Z_MOBILE)};`,
+                `export const edgeFoamMaxDistStart = ${f(edgeFoamMaxDistStartUniform.value as number)};  // full foam at/below this eye distance`,
+                `export const edgeFoamMaxDistEnd   = ${f(edgeFoamMaxDistEndUniform.value as number)};  // foam fully gone at/beyond this eye distance`,
                 ``,
                 `// ── Reflection ────────────────────────────────────────────────────────────────`,
                 `export const reflectionFresnelPower = ${f(reflectionFresnelPowerUniform.value as number)}; // lower = visible at more angles`,
@@ -1862,6 +1866,10 @@ function buildGUI(): void {
         set fadeStartZ(v) { edgeFoamFadeStartZUniform.value = v; },
         get fadeEndZ()   { return edgeFoamFadeEndZUniform.value as number; },
         set fadeEndZ(v)  { edgeFoamFadeEndZUniform.value = v; },
+        get maxDistStart() { return edgeFoamMaxDistStartUniform.value as number; },
+        set maxDistStart(v) { edgeFoamMaxDistStartUniform.value = v; },
+        get maxDistEnd()   { return edgeFoamMaxDistEndUniform.value as number; },
+        set maxDistEnd(v)  { edgeFoamMaxDistEndUniform.value = v; },
     };
     edgeFoamFolder.add(edgeFoamProxy, 'width', 0, 2, 0.01).name('Width (world units)').listen();
     edgeFoamFolder.add(edgeFoamProxy, 'intensity', 0, 3, 0.01).name('Intensity (above water)').listen();
@@ -1871,6 +1879,8 @@ function buildGUI(): void {
     edgeFoamFolder.add(edgeFoamProxy, 'colorB', 0, 2, 0.01).name('Color B').listen();
     edgeFoamFolder.add(edgeFoamProxy, 'fadeStartZ', -60, 5, 0.1).name('Fade start Z (full)').listen();
     edgeFoamFolder.add(edgeFoamProxy, 'fadeEndZ', -60, 5, 0.1).name('Fade end Z (gone)').listen();
+    edgeFoamFolder.add(edgeFoamProxy, 'maxDistStart', 0, 60, 0.5).name('Max dist start (full)').listen();
+    edgeFoamFolder.add(edgeFoamProxy, 'maxDistEnd', 0, 60, 0.5).name('Max dist end (gone)').listen();
     edgeFoamFolder.close();
 
     // ── Wind Lines ────────────────────────────────────────────────────────────

@@ -120,6 +120,9 @@ export const edgeFoamColorUniform  = new Uniform(new Vector3(OceanConfig.edgeFoa
 export const edgeFoamFadeStartZUniform = new Uniform(_isMobile ? OceanConfig.edgeFoamFadeStartZMobile : OceanConfig.edgeFoamFadeStartZDesktop);
 export const edgeFoamFadeEndZUniform   = new Uniform(_isMobile ? OceanConfig.edgeFoamFadeEndZMobile   : OceanConfig.edgeFoamFadeEndZDesktop);
 
+export const edgeFoamMaxDistStartUniform = new Uniform(OceanConfig.edgeFoamMaxDistStart);
+export const edgeFoamMaxDistEndUniform   = new Uniform(OceanConfig.edgeFoamMaxDistEnd);
+
 /** Each frame, push the camera's current near/far into the shader uniforms so
  *  the depth linearization in `calcEdgeFoam` stays correct after any FOV /
  *  clip-plane change. */
@@ -290,6 +293,8 @@ export function Start(): void
         _EdgeFoamColor: edgeFoamColorUniform,
         _EdgeFoamFadeStartZ: edgeFoamFadeStartZUniform,
         _EdgeFoamFadeEndZ: edgeFoamFadeEndZUniform,
+        _EdgeFoamMaxDistStart: edgeFoamMaxDistStartUniform,
+        _EdgeFoamMaxDistEnd: edgeFoamMaxDistEndUniform,
     };
     SetSkyboxUniforms(surface);
     

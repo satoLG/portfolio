@@ -65,6 +65,14 @@ export const edgeFoamFadeEndZDesktop   = -60.0000;
 export const edgeFoamFadeStartZMobile  = -1.5000;
 export const edgeFoamFadeEndZMobile    = -3.5000;
 
+// Camera-distance cap for edge foam. Real shoreline contact foam is always near
+// the camera; the false white line at the horizon / ocean-plane far edge is the
+// grazing-angle depth collapse (ocean surface and the geometry behind it both
+// compress toward the far plane, yielding a tiny positive depthDiff). Fade foam
+// out by the ocean fragment's eye distance so only genuine nearby contact shows.
+export const edgeFoamMaxDistStart = 14.0000;  // full foam at/below this eye distance
+export const edgeFoamMaxDistEnd   = 22.0000;  // foam fully gone at/beyond this eye distance
+
 // ── Reflection ────────────────────────────────────────────────────────────────
 export const reflectionFresnelPower = 0.6500; // lower = visible at more angles
 export const reflectionFloor        = 0.2200; // minimum reflectivity at any angle

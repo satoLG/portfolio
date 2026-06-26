@@ -126,6 +126,8 @@ export const surfaceFragment =
     uniform vec3  _EdgeFoamColor;
     uniform float _EdgeFoamFadeStartZ;  // world Z at/above which foam is full strength
     uniform float _EdgeFoamFadeEndZ;    // world Z (further back) at/below which foam is gone
+    uniform float _EdgeFoamMaxDistStart; // eye distance at/below which foam is full strength
+    uniform float _EdgeFoamMaxDistEnd;   // eye distance at/beyond which foam is gone
 
     varying vec2 _worldPos;
     varying vec2 _uv;
@@ -251,6 +253,12 @@ export const surfaceFragment =
         if (depthDiff <= 0.0) return 0.0;
         float foam = 1.0 - smoothstep(0.0, _EdgeFoamWidth, depthDiff);
         foam *= smoothstep(_EdgeFoamFadeEndZ, _EdgeFoamFadeStartZ, worldZ);
+        // Kill foam beyond a max eye distance. At the ocean plane's far edge /
+        // horizon, the surface and the geometry behind it both collapse toward
+        // the far plane, producing a tiny positive depthDiff → a false foam
+        // line. Genuine shoreline contact is always near the camera, so fade
+        // foam out with the ocean fragment's own eye distance.
+        foam *= 1.0 - smoothstep(_EdgeFoamMaxDistStart, _EdgeFoamMaxDistEnd, oceanLinear);
 
         return foam;
     }

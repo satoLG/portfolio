@@ -8,7 +8,6 @@ import {
 import { camera, scene } from "../core/Scene";
 import { deltaTime } from "../core/Time";
 import { UNDERWATER_Y_THRESHOLD } from "./PostProcess";
-import { islandPosition } from "../scene/config/IslandConfig";
 
 // ============================================
 // UNDERWATER PARTICLE SETTINGS (tweak these!)
@@ -187,10 +186,8 @@ export function Update(cameraY: number): void {
     const arr = posAttr.array as Float32Array;
     const box = PARTICLE_BOX_SIZE;
 
-    // Cap particles below the island base so none drifts near the surface and
-    // appears on the horizon. islandPosition.y (-0.8) sits well below the
-    // waterline (0.0) — particles beyond that would be visible above the reef.
-    const maxLocalY = islandPosition.y - camY;
+    // Max local Y so that world Y stays below the ocean surface
+    const maxLocalY = UNDERWATER_Y_THRESHOLD - camY - 0.1;  // small margin below surface
 
     for (let i = 0; i < PARTICLE_COUNT; i++) {
         const i3 = i * 3;
