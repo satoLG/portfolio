@@ -16,7 +16,7 @@ export const PARTICLE_COUNT        = 300;     // Total number of specks
 export const PARTICLE_BOX_SIZE     = 12.0;    // Half-size of the cube volume around camera
 export const PARTICLE_MIN_DIST     = 1.0;     // Minimum distance from camera (no specks in your face)
 export const PARTICLE_SIZE         = 1.0;     // Point size (pixels) — tiny specks
-export const PARTICLE_OPACITY      = 0.35;    // Max opacity (0-1) — subtle dust, not bright
+export const PARTICLE_OPACITY      = 1;     // Max opacity (0-1)
 export const PARTICLE_DRIFT_SPEED  = 0.01;   // Very slow drift (units/sec)
 export const PARTICLE_FADE_NEAR    = 2.0;     // Fade in between minDist and this distance
 export const PARTICLE_FADE_FAR     = 10.0;    // Start fading out at this distance
@@ -72,8 +72,7 @@ const fragmentShader = /* glsl */`
     varying float vAlpha;
 
     void main() {
-        // Soft blue-green tint to blend with the underwater atmosphere
-        gl_FragColor = vec4(0.65, 0.88, 0.95, vAlpha);
+        gl_FragColor = vec4(1.0, 1.0, 1.0, vAlpha);
     }
 `;
 
@@ -127,12 +126,12 @@ export function Start(): void {
         transparent: true,
         blending: NormalBlending,
         depthWrite: false,
-        depthTest: true
+        depthTest: false
     });
 
     points = new Points(geometry, material);
     points.frustumCulled = false;
-    points.renderOrder = 2;
+    points.renderOrder = 1000;  // Render AFTER ocean surface and all other transparent objects
     points.raycast = () => {};   // purely visual — must not intercept raycasts
     scene.add(points);
 
@@ -144,32 +143,30 @@ export function Update(cameraY: number): void {
 
     const isUnderwater = cameraY < UNDERWATER_Y_THRESHOLD;
 
-    const camX = camera.position.x;
-    const camY = camera.position.y;
-    const camZ = camera.position.z;
+    // Smoothly fade in/out
+    const targetOpacity = isUnderwater ? PARTICLE_OPACITY : 0;
+    const prevOpacity = currentOpacity;
+    currentOpacity += (targetOpacity - currentOpacity) * Math.min(1, deltaTime * 4);
 
-    // Above water: hide completely and bail. No fade-out, no rendering. The
-    // particles only make sense underwater, and any frame rendered above water
-    // (e.g. during the pug zoom) would show a stray frozen speck sweeping across
-    // the horizon as the camera moves. Snapping to invisible avoids that entirely.
-    if (!isUnderwater) {
-        currentOpacity = 0;
+    if (currentOpacity < 0.001) {
+        // Not visible — skip all CPU/GPU work, but still track camera so
+        // particles re-enter from sensible positions when we dive again.
         if (points.visible) {
             points.visible = false;
             material.uniforms.uOpacity.value = 0;
         }
-        lastCamX = camX;
-        lastCamY = camY;
-        lastCamZ = camZ;
+        // Keep lastCam* in sync so dCam is zero on first visible frame
+        lastCamX = camera.position.x;
+        lastCamY = camera.position.y;
+        lastCamZ = camera.position.z;
         firstFrame = false;
         return;
     }
-
-    // Underwater: fade in smoothly toward full opacity.
-    const prevOpacity = currentOpacity;
-    currentOpacity += (PARTICLE_OPACITY - currentOpacity) * Math.min(1, deltaTime * 3);
-
     points.visible = true;
+
+    const camX = camera.position.x;
+    const camY = camera.position.y;
+    const camZ = camera.position.z;
 
     if (firstFrame) {
         lastCamX = camX;
@@ -192,15 +189,17 @@ export function Update(cameraY: number): void {
     const box = PARTICLE_BOX_SIZE;
 
     // Max local Y so that world Y stays below the ocean surface
-    const maxLocalY = UNDERWATER_Y_THRESHOLD - camY - 0.1;
+    const maxLocalY = UNDERWATER_Y_THRESHOLD - camY - 0.1;  // small margin below surface
 
     for (let i = 0; i < PARTICLE_COUNT; i++) {
         const i3 = i * 3;
 
+        // Drift very slowly in world space (subtract camera movement to keep them in local space)
         arr[i3]     += velocities[i3]     * dt - dCamX;
         arr[i3 + 1] += velocities[i3 + 1] * dt - dCamY;
         arr[i3 + 2] += velocities[i3 + 2] * dt - dCamZ;
 
+        // Wrap within box (toroidal wrapping)
         if (arr[i3]     >  box) arr[i3]     -= box * 2;
         if (arr[i3]     < -box) arr[i3]     += box * 2;
         if (arr[i3 + 1] >  box) arr[i3 + 1] -= box * 2;
@@ -208,14 +207,19 @@ export function Update(cameraY: number): void {
         if (arr[i3 + 2] >  box) arr[i3 + 2] -= box * 2;
         if (arr[i3 + 2] < -box) arr[i3 + 2] += box * 2;
 
+        // Clamp: keep particle below ocean surface
         if (arr[i3 + 1] > maxLocalY) {
-            arr[i3 + 1] = -box + Math.random() * box;
+            arr[i3 + 1] = -box + Math.random() * box;  // wrap to lower half
         }
     }
 
+    // Only push data to GPU when the buffer actually changed
     posAttr.needsUpdate = true;
+
+    // The positions are local-space offsets — center on camera
     points.position.set(camX, camY, camZ);
 
+    // Only write uniform when the value changed (avoids a driver round-trip on unchanged frames)
     if (currentOpacity !== prevOpacity) {
         material.uniforms.uOpacity.value = currentOpacity;
     }
