@@ -144,15 +144,16 @@ export function Update(cameraY: number): void {
 
     const isUnderwater = cameraY < UNDERWATER_Y_THRESHOLD;
 
-    const targetOpacity = isUnderwater ? PARTICLE_OPACITY : 0;
-    const prevOpacity = currentOpacity;
-    currentOpacity += (targetOpacity - currentOpacity) * Math.min(1, deltaTime * (isUnderwater ? 3 : 20));
-
     const camX = camera.position.x;
     const camY = camera.position.y;
     const camZ = camera.position.z;
 
-    if (currentOpacity < 0.001) {
+    // Above water: hide completely and bail. No fade-out, no rendering. The
+    // particles only make sense underwater, and any frame rendered above water
+    // (e.g. during the pug zoom) would show a stray frozen speck sweeping across
+    // the horizon as the camera moves. Snapping to invisible avoids that entirely.
+    if (!isUnderwater) {
+        currentOpacity = 0;
         if (points.visible) {
             points.visible = false;
             material.uniforms.uOpacity.value = 0;
@@ -163,21 +164,12 @@ export function Update(cameraY: number): void {
         firstFrame = false;
         return;
     }
-    points.visible = true;
 
-    // When fading out above water: freeze particle positions entirely.
-    // Any camera jump (pug zoom etc.) would otherwise push local offsets out of
-    // the box, triggering toroidal wrapping that makes particles streak across
-    // the horizon for a frame or two. Freezing positions avoids all of that —
-    // the particles just follow the camera and fade away quickly.
-    if (!isUnderwater) {
-        points.position.set(camX, camY, camZ);
-        if (currentOpacity !== prevOpacity) material.uniforms.uOpacity.value = currentOpacity;
-        lastCamX = camX;
-        lastCamY = camY;
-        lastCamZ = camZ;
-        return;
-    }
+    // Underwater: fade in smoothly toward full opacity.
+    const prevOpacity = currentOpacity;
+    currentOpacity += (PARTICLE_OPACITY - currentOpacity) * Math.min(1, deltaTime * 3);
+
+    points.visible = true;
 
     if (firstFrame) {
         lastCamX = camX;
