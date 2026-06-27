@@ -25,6 +25,16 @@ export const waveVelocity1     = { x: 0.0330, y: -0.0100 };
 export const waveVelocity2     = { x: -0.0270, y: -0.0180 };
 export const edgeFadeDistance  = 0.5400;
 
+// Horizon haze, driven by the view's GRAZING ANGLE (not distance). The ocean
+// plane edge and any grazing-angle reflection speck always sit where the line of
+// sight is near-horizontal, so veil that band by blending the surface to the
+// sky's horizon color there. Distance-based fog could never catch it because the
+// horizon's distance changes with camera height; the grazing angle does not.
+// Values are -viewDir.y (0 = looking dead horizontal at the horizon, ~1 = down).
+// Full haze at the horizon, fading to none once the view tips below ~End.
+export const horizonFadeStart  = 0.0000;  // -viewDir.y where the haze starts fading out
+export const horizonFadeEnd    = 0.1800;  // -viewDir.y where the haze is fully gone (looking down)
+
 // ── Surface Vertex Displacement (near-camera swell) ──────────────────────────
 // Real geometry waves applied ONLY to the strip of ocean in front of the camera
 // — amplitude fades to 0 with distance so it fuses seamlessly with the flat
@@ -35,6 +45,15 @@ export const surfaceWaveSpeed       = 0.6000; // animation speed of the swell
 export const surfaceWaveRange       = 18.0000; // XZ distance from camera over which the waves fade to flat
 export const surfaceWaveForwardBias = 0.6000; // 0 = full radial ring around camera, 1 = only directly ahead
 export const surfaceWaveSteepness   = 0.3900; // blend of the cross wave layer — adds choppiness
+// The swell is camera-relative (follows the camera, biased ahead of its
+// heading) and only meant for the moment the camera crosses the waterline. When
+// the camera sits above the surface and looks toward the horizon (e.g. the pug
+// zoom at y~0.43), the region's far edge lands right on the horizon line and its
+// wave normal flashes a bright sky reflection that tracks the camera. Fade the
+// whole effect out by camera height above the waterline so it only shows at the
+// crossing, never as a horizon speck.
+export const surfaceWaveHeightFadeStart = 0.1500; // camera |Y| where the swell starts fading out
+export const surfaceWaveHeightFadeEnd   = 0.3000; // camera |Y| where the swell is fully gone
 
 // ── Ocean Surface ─────────────────────────────────────────────────────────────
 export const surfaceColor   = { r: 0.0000, g: 1.1800, b: 1.1700 }; // RGB tint (1,1,1 = no tint)

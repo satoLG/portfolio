@@ -16,7 +16,7 @@ export const PARTICLE_COUNT        = 300;     // Total number of specks
 export const PARTICLE_BOX_SIZE     = 12.0;    // Half-size of the cube volume around camera
 export const PARTICLE_MIN_DIST     = 1.0;     // Minimum distance from camera (no specks in your face)
 export const PARTICLE_SIZE         = 1.0;     // Point size (pixels) — tiny specks
-export const PARTICLE_OPACITY      = 1;     // Max opacity (0-1)
+export const PARTICLE_OPACITY      = 0.35;    // Max opacity (0-1) — subtle dust, not bright
 export const PARTICLE_DRIFT_SPEED  = 0.01;   // Very slow drift (units/sec)
 export const PARTICLE_FADE_NEAR    = 2.0;     // Fade in between minDist and this distance
 export const PARTICLE_FADE_FAR     = 10.0;    // Start fading out at this distance
@@ -72,7 +72,7 @@ const fragmentShader = /* glsl */`
     varying float vAlpha;
 
     void main() {
-        gl_FragColor = vec4(1.0, 1.0, 1.0, vAlpha);
+        gl_FragColor = vec4(0.65, 0.88, 0.95, vAlpha);
     }
 `;
 
@@ -126,12 +126,12 @@ export function Start(): void {
         transparent: true,
         blending: NormalBlending,
         depthWrite: false,
-        depthTest: false
+        depthTest: true
     });
 
     points = new Points(geometry, material);
     points.frustumCulled = false;
-    points.renderOrder = 1000;  // Render AFTER ocean surface and all other transparent objects
+    points.renderOrder = 2;
     points.raycast = () => {};   // purely visual — must not intercept raycasts
     scene.add(points);
 
@@ -143,30 +143,28 @@ export function Update(cameraY: number): void {
 
     const isUnderwater = cameraY < UNDERWATER_Y_THRESHOLD;
 
-    // Smoothly fade in/out
-    const targetOpacity = isUnderwater ? PARTICLE_OPACITY : 0;
-    const prevOpacity = currentOpacity;
-    currentOpacity += (targetOpacity - currentOpacity) * Math.min(1, deltaTime * 4);
+    const camX = camera.position.x;
+    const camY = camera.position.y;
+    const camZ = camera.position.z;
 
-    if (currentOpacity < 0.001) {
-        // Not visible — skip all CPU/GPU work, but still track camera so
-        // particles re-enter from sensible positions when we dive again.
+    // Above water: hide instantly so no particle leaks above the surface.
+    if (!isUnderwater) {
+        currentOpacity = 0;
         if (points.visible) {
             points.visible = false;
             material.uniforms.uOpacity.value = 0;
         }
-        // Keep lastCam* in sync so dCam is zero on first visible frame
-        lastCamX = camera.position.x;
-        lastCamY = camera.position.y;
-        lastCamZ = camera.position.z;
+        lastCamX = camX;
+        lastCamY = camY;
+        lastCamZ = camZ;
         firstFrame = false;
         return;
     }
-    points.visible = true;
 
-    const camX = camera.position.x;
-    const camY = camera.position.y;
-    const camZ = camera.position.z;
+    // Underwater: fade in smoothly.
+    const prevOpacity = currentOpacity;
+    currentOpacity += (PARTICLE_OPACITY - currentOpacity) * Math.min(1, deltaTime * 3);
+    points.visible = true;
 
     if (firstFrame) {
         lastCamX = camX;

@@ -256,12 +256,16 @@ import {
     waveVelocity1Uniform,
     waveVelocity2Uniform,
     edgeFadeDistanceUniform,
+    horizonFadeStartUniform,
+    horizonFadeEndUniform,
     surfaceWaveAmplitudeUniform,
     surfaceWaveLengthUniform,
     surfaceWaveSpeedUniform,
     surfaceWaveRangeUniform,
     surfaceWaveForwardBiasUniform,
     surfaceWaveSteepnessUniform,
+    surfaceWaveHeightFadeStartUniform,
+    surfaceWaveHeightFadeEndUniform,
     surfaceColorUniform,
     surfaceOpacityUniform,
     reflectionFresnelPowerUniform,
@@ -975,6 +979,8 @@ function buildGUI(): void {
                 `export const waveVelocity1     = { x: ${f(vel1.x)}, y: ${f(vel1.y)} };`,
                 `export const waveVelocity2     = { x: ${f(vel2.x)}, y: ${f(vel2.y)} };`,
                 `export const edgeFadeDistance  = ${f(edgeFadeDistanceUniform.value as number)};`,
+                `export const horizonFadeStart  = ${f(horizonFadeStartUniform.value as number)};`,
+                `export const horizonFadeEnd    = ${f(horizonFadeEndUniform.value as number)};`,
                 ``,
                 `// ── Surface Vertex Displacement (near-camera swell) ──────────────────────────`,
                 `// Real geometry waves applied ONLY to the strip of ocean in front of the camera`,
@@ -986,6 +992,8 @@ function buildGUI(): void {
                 `export const surfaceWaveRange       = ${f(surfaceWaveRangeUniform.value as number)}; // XZ distance from camera over which the waves fade to flat`,
                 `export const surfaceWaveForwardBias = ${f(surfaceWaveForwardBiasUniform.value as number)}; // 0 = full radial ring around camera, 1 = only directly ahead`,
                 `export const surfaceWaveSteepness   = ${f(surfaceWaveSteepnessUniform.value as number)}; // blend of the cross wave layer — adds choppiness`,
+                `export const surfaceWaveHeightFadeStart = ${f(surfaceWaveHeightFadeStartUniform.value as number)}; // camera |Y| where the swell starts fading out`,
+                `export const surfaceWaveHeightFadeEnd   = ${f(surfaceWaveHeightFadeEndUniform.value as number)}; // camera |Y| where the swell is fully gone`,
                 ``,
                 `// ── Ocean Surface ─────────────────────────────────────────────────────────────`,
                 `export const surfaceColor   = { r: ${f(sc.x)}, g: ${f(sc.y)}, b: ${f(sc.z)} }; // RGB tint (1,1,1 = no tint)`,
@@ -1715,6 +1723,10 @@ function buildGUI(): void {
         set vel2y(v)     { waveVelocity2Uniform.value.y = v; },
         get edgeFade()   { return edgeFadeDistanceUniform.value as number; },
         set edgeFade(v)  { edgeFadeDistanceUniform.value = v; },
+        get horizonFadeStart() { return horizonFadeStartUniform.value as number; },
+        set horizonFadeStart(v) { horizonFadeStartUniform.value = v; },
+        get horizonFadeEnd()   { return horizonFadeEndUniform.value as number; },
+        set horizonFadeEnd(v)  { horizonFadeEndUniform.value = v; },
         get dispAmp()    { return surfaceWaveAmplitudeUniform.value as number; },
         set dispAmp(v)   { surfaceWaveAmplitudeUniform.value = v; },
         get dispLen()    { return surfaceWaveLengthUniform.value as number; },
@@ -1727,6 +1739,10 @@ function buildGUI(): void {
         set dispFwd(v)   { surfaceWaveForwardBiasUniform.value = v; },
         get dispSteep()  { return surfaceWaveSteepnessUniform.value as number; },
         set dispSteep(v) { surfaceWaveSteepnessUniform.value = v; },
+        get dispHeightFadeStart() { return surfaceWaveHeightFadeStartUniform.value as number; },
+        set dispHeightFadeStart(v) { surfaceWaveHeightFadeStartUniform.value = v; },
+        get dispHeightFadeEnd()   { return surfaceWaveHeightFadeEndUniform.value as number; },
+        set dispHeightFadeEnd(v)  { surfaceWaveHeightFadeEndUniform.value = v; },
     };
 
     wavesFolder.add(wavesProxy, 'nmScale',    0, 1,    0.001).name('NormalMap Scale').listen();
@@ -1736,6 +1752,8 @@ function buildGUI(): void {
     wavesFolder.add(wavesProxy, 'vel2x',   -0.5, 0.5,  0.001).name('Wave2 Vel X').listen();
     wavesFolder.add(wavesProxy, 'vel2y',   -0.5, 0.5,  0.001).name('Wave2 Vel Y').listen();
     wavesFolder.add(wavesProxy, 'edgeFade', 0,   5,    0.01 ).name('Edge Fade Distance').listen();
+    wavesFolder.add(wavesProxy, 'horizonFadeStart', 0, 1, 0.005).name('Horizon Haze Start (angle)').listen();
+    wavesFolder.add(wavesProxy, 'horizonFadeEnd',   0, 1, 0.005).name('Horizon Haze End (angle)').listen();
 
     // Near-camera vertex displacement (real geometry swell ahead of the camera)
     wavesFolder.add(wavesProxy, 'dispAmp',   0,   0.4,  0.001).name('Displace Amplitude').listen();
@@ -1744,6 +1762,8 @@ function buildGUI(): void {
     wavesFolder.add(wavesProxy, 'dispRange', 1,   80,   0.5  ).name('Displace Range').listen();
     wavesFolder.add(wavesProxy, 'dispFwd',   0,   1,    0.01 ).name('Forward Bias').listen();
     wavesFolder.add(wavesProxy, 'dispSteep', 0,   1,    0.01 ).name('Displace Steepness').listen();
+    wavesFolder.add(wavesProxy, 'dispHeightFadeStart', 0, 2, 0.01).name('Swell Height Fade Start').listen();
+    wavesFolder.add(wavesProxy, 'dispHeightFadeEnd',   0, 2, 0.01).name('Swell Height Fade End').listen();
 
     wavesFolder.close();
 

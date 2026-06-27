@@ -9,6 +9,8 @@ export const surfaceVertex =
     uniform float _SurfaceWaveRange;
     uniform float _SurfaceWaveForwardBias;
     uniform float _SurfaceWaveSteepness;
+    uniform float _SurfaceWaveHeightFadeStart;
+    uniform float _SurfaceWaveHeightFadeEnd;
 
     varying vec2 _worldPos;
     varying vec2 _uv;
@@ -32,7 +34,12 @@ export const surfaceVertex =
         float facing = dot(normalize(toCam + vec2(1e-5)), fwd);
         float fwdMask = mix(1.0, smoothstep(-0.15, 0.55, facing), _SurfaceWaveForwardBias);
 
-        float mask = distMask * fwdMask;
+        // Fade the swell out as the camera rises above the waterline. The effect
+        // is only for the surface-crossing moment; above the water its far edge
+        // sits on the horizon line and flashes a camera-tracking reflection speck.
+        float heightFade = 1.0 - smoothstep(_SurfaceWaveHeightFadeStart, _SurfaceWaveHeightFadeEnd, abs(cameraPosition.y));
+
+        float mask = distMask * fwdMask * heightFade;
 
         float elevation = 0.0;
         _waveNormal = vec3(0.0);
@@ -74,7 +81,9 @@ export const surfaceFragment =
     #include <ocean>
 
     uniform float _EdgeFadeDistance;
-    
+    uniform float _HorizonFadeStart; // eye distance where the surface starts blending to horizon color
+    uniform float _HorizonFadeEnd;   // eye distance where the surface fully matches the horizon color
+
     // Foam mask — top-down island silhouette rendered at runtime
     uniform sampler2D _FoamMask;
     uniform vec2 _FoamMaskCenter;   // World XZ center of the mask region (auto-baked from island)
@@ -333,6 +342,15 @@ export const surfaceFragment =
         float viewLen = length(viewVec);
         vec3 viewDir = viewVec / viewLen;
 
+        // Horizon haze driven by the view's grazing angle, NOT distance. The
+        // ocean-plane edge and any grazing-reflection speck always sit where the
+        // line of sight is near-horizontal (-viewDir.y -> 0), regardless of how
+        // far the horizon is for the current camera height. Veil that band by
+        // blending the surface to the sky's horizon color + flattening its
+        // normal, so the plane edge dissolves into the sky. 1 at the horizon,
+        // 0 once looking down past _HorizonFadeEnd radians-ish below horizontal.
+        float horizonHaze = 1.0 - smoothstep(_HorizonFadeStart, _HorizonFadeEnd, max(0.0, -viewDir.y));
+
         vec3 normal = texture2D(_NormalMap1, _uv + _WaveVelocity1 * _Time).xyz * 2.0 - 1.0;
         normal += texture2D(_NormalMap2, _uv + _WaveVelocity2 * _Time).xyz * 2.0 - 1.0;
         normal *= _NormalMapStrength;
@@ -340,6 +358,10 @@ export const surfaceFragment =
         normal += rippleNormalOffset;  // Add ripple normal perturbation
         normal += _waveNormal;         // Add near-camera vertex-displacement tilt
         normal = normalize(normal).xzy;
+
+        // Flatten the surface in the horizon band so it reflects the smooth sky
+        // uniformly — kills the grazing-angle reflection speck at its source.
+        normal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), horizonHaze));
 
         sampleDither(gl_FragCoord.xy);
 
@@ -375,6 +397,10 @@ export const surfaceFragment =
             // of object shape — uses a brighten-only mix so it sits on top of
             // whatever surface tint/refraction is already there.
             surface = mix(surface, max(surface, _EdgeFoamColor), clamp(edgeFoam, 0.0, 1.0));
+
+            // Veil the horizon band with the sky's horizon color so the ocean
+            // plane edge and any grazing reflection dissolve into the sky.
+            surface = mix(surface, sampleFog(viewDir), horizonHaze);
 
             // _SurfaceOpacity blends from physics-based alpha (Fresnel + fog) to full opacity.
             // At 0: transparent where Fresnel is low (looking straight down).
@@ -451,16 +477,23 @@ export const volumeFragment =
 
         if (cameraPosition.y > 0.0)
         {
+            // The volume is the underwater fog box; above water it is only valid
+            // for rays travelling DOWN into the water. Near the horizon
+            // (-viewDir.y -> 0) the distance-to-waterline term blows up, driving
+            // viewLen hugely negative and exploding the exp() below into a
+            // blown-out white speck — the underwater effect leaking above the
+            // surface right at the horizon. Skip those grazing/upward rays.
+            if (-viewDir.y < 0.02) discard;
             float distAbove = cameraPosition.y / -viewDir.y;
             viewLen -= distAbove;
             originY = 0.0;
         }
-        viewLen = min(viewLen, MAX_VIEW_DEPTH);
+        viewLen = clamp(viewLen, 0.0, MAX_VIEW_DEPTH);
 
         float sampleY = originY + viewDir.y * viewLen;
         vec3 light = exp((sampleY - viewLen * DENSITY) * _Absorption);
         light *= _Light;
-        
+
         gl_FragColor = vec4(light, 1.0);
     }
 `;

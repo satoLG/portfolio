@@ -1,5 +1,5 @@
 import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap, Object3D, Quaternion } from "three";
-import { getIsUnderwater } from "./Control";
+import { getIsUnderwater, isPugZoomActive } from "./Control";
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
 import * as SeaFloor from "../scene/SeaFloor";
@@ -874,7 +874,7 @@ export function Update(): void
         SeaFloor.setVisible(false);
         SeaFloorDecor.decorGroup.visible = false;
         Fish.setCameraVisibility(false, Island.getLowestY());
-        WindLines.windLinesGroup.visible = showOutside;
+        WindLines.windLinesGroup.visible = showOutside && !isPugZoomActive();
         Skybox.skybox.visible = showOutside;
         Island.island.visible = showOutside;
         Island.firecamp.visible = showOutside;

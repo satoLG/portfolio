@@ -43,6 +43,9 @@ export const waveVelocity2Uniform     = new Uniform({ x: OceanConfig.waveVelocit
 
 export const edgeFadeDistanceUniform = new Uniform(OceanConfig.edgeFadeDistance);
 
+export const horizonFadeStartUniform = new Uniform(OceanConfig.horizonFadeStart);
+export const horizonFadeEndUniform   = new Uniform(OceanConfig.horizonFadeEnd);
+
 // Near-camera vertex displacement (surface swell) — see OceanConfig for meaning
 export const surfaceWaveAmplitudeUniform   = new Uniform(OceanConfig.surfaceWaveAmplitude);
 export const surfaceWaveLengthUniform      = new Uniform(OceanConfig.surfaceWaveLength);
@@ -50,6 +53,8 @@ export const surfaceWaveSpeedUniform       = new Uniform(OceanConfig.surfaceWave
 export const surfaceWaveRangeUniform       = new Uniform(OceanConfig.surfaceWaveRange);
 export const surfaceWaveForwardBiasUniform = new Uniform(OceanConfig.surfaceWaveForwardBias);
 export const surfaceWaveSteepnessUniform   = new Uniform(OceanConfig.surfaceWaveSteepness);
+export const surfaceWaveHeightFadeStartUniform = new Uniform(OceanConfig.surfaceWaveHeightFadeStart);
+export const surfaceWaveHeightFadeEndUniform   = new Uniform(OceanConfig.surfaceWaveHeightFadeEnd);
 
 // Foam mask — generated at runtime from island silhouette
 export const foamMaskUniform         = new Uniform(null as Texture | null);         // Top-down silhouette texture
@@ -238,6 +243,8 @@ export function Start(): void
         _WaveVelocity1: waveVelocity1Uniform,
         _WaveVelocity2: waveVelocity2Uniform,
         _EdgeFadeDistance: edgeFadeDistanceUniform,
+        _HorizonFadeStart: horizonFadeStartUniform,
+        _HorizonFadeEnd: horizonFadeEndUniform,
         _CameraForward: new Uniform(cameraForward),
         _SurfaceWaveAmplitude: surfaceWaveAmplitudeUniform,
         _SurfaceWaveLength: surfaceWaveLengthUniform,
@@ -245,6 +252,8 @@ export function Start(): void
         _SurfaceWaveRange: surfaceWaveRangeUniform,
         _SurfaceWaveForwardBias: surfaceWaveForwardBiasUniform,
         _SurfaceWaveSteepness: surfaceWaveSteepnessUniform,
+        _SurfaceWaveHeightFadeStart: surfaceWaveHeightFadeStartUniform,
+        _SurfaceWaveHeightFadeEnd: surfaceWaveHeightFadeEndUniform,
         _FoamMask: foamMaskUniform,
         _FoamMaskCenter: foamMaskCenterUniform,
         _FoamMaskSize: foamMaskSizeUniform,
