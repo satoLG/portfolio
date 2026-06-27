@@ -25,15 +25,15 @@ export const waveVelocity1     = { x: 0.0330, y: -0.0100 };
 export const waveVelocity2     = { x: -0.0270, y: -0.0180 };
 export const edgeFadeDistance  = 0.5400;
 
-// Horizon color blend. The ocean is a 400u plane only ~40% fogged at its rim
-// (FOG_DISTANCE=1000), so its bright grazing-angle sky reflection forms a hard
-// cyan line where the surface meets the sky. Rather than fade the surface out
-// (which only sharpens that transition), blend the surface COLOR to the sky's
-// horizon color toward the far edge so the boundary becomes seamless. The
-// visible ocean detail still spans horizonFadeStart units before it eases into
-// the horizon haze.
-export const horizonFadeStart  = 180.0000; // eye distance where blend to horizon color begins
-export const horizonFadeEnd    = 340.0000; // eye distance where surface fully matches horizon color
+// Horizon haze. The ocean is a 400u plane only ~40% fogged at its rim
+// (FOG_DISTANCE=1000), so the distant water keeps its bright grazing-angle sky
+// reflection — a line/speck right at the horizon that no amount of edge tricks
+// fully hides. Instead, blend the surface COLOR to the sky's horizon color as a
+// real distance haze: dense enough, and starting close enough, that the entire
+// back of the scene dissolves into the horizon and any reflection artifact goes
+// with it. Reaches full haze well before the far edge. Lower start = thicker fog.
+export const horizonFadeStart  = 40.0000;  // eye distance where the haze begins
+export const horizonFadeEnd    = 120.0000; // eye distance where the surface fully matches the horizon
 
 // ── Surface Vertex Displacement (near-camera swell) ──────────────────────────
 // Real geometry waves applied ONLY to the strip of ocean in front of the camera
