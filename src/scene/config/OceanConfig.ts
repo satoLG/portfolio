@@ -70,8 +70,8 @@ export const edgeFoamFadeEndZMobile    = -3.5000;
 // grazing-angle depth collapse (ocean surface and the geometry behind it both
 // compress toward the far plane, yielding a tiny positive depthDiff). Fade foam
 // out by the ocean fragment's eye distance so only genuine nearby contact shows.
-export const edgeFoamMaxDistStart = 14.0000;  // full foam at/below this eye distance
-export const edgeFoamMaxDistEnd   = 22.0000;  // foam fully gone at/beyond this eye distance
+export const edgeFoamMaxDistStart = 4.0000;  // full foam at/below this eye distance
+export const edgeFoamMaxDistEnd   = 8.0000;  // foam fully gone at/beyond this eye distance
 
 // ── Reflection ────────────────────────────────────────────────────────────────
 export const reflectionFresnelPower = 0.6500; // lower = visible at more angles
