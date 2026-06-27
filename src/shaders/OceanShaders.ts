@@ -477,16 +477,23 @@ export const volumeFragment =
 
         if (cameraPosition.y > 0.0)
         {
+            // The volume is the underwater fog box; above water it is only valid
+            // for rays travelling DOWN into the water. Near the horizon
+            // (-viewDir.y -> 0) the distance-to-waterline term blows up, driving
+            // viewLen hugely negative and exploding the exp() below into a
+            // blown-out white speck — the underwater effect leaking above the
+            // surface right at the horizon. Skip those grazing/upward rays.
+            if (-viewDir.y < 0.02) discard;
             float distAbove = cameraPosition.y / -viewDir.y;
             viewLen -= distAbove;
             originY = 0.0;
         }
-        viewLen = min(viewLen, MAX_VIEW_DEPTH);
+        viewLen = clamp(viewLen, 0.0, MAX_VIEW_DEPTH);
 
         float sampleY = originY + viewDir.y * viewLen;
         vec3 light = exp((sampleY - viewLen * DENSITY) * _Absorption);
         light *= _Light;
-        
+
         gl_FragColor = vec4(light, 1.0);
     }
 `;
