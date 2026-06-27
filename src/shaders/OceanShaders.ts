@@ -9,6 +9,8 @@ export const surfaceVertex =
     uniform float _SurfaceWaveRange;
     uniform float _SurfaceWaveForwardBias;
     uniform float _SurfaceWaveSteepness;
+    uniform float _SurfaceWaveHeightFadeStart;
+    uniform float _SurfaceWaveHeightFadeEnd;
 
     varying vec2 _worldPos;
     varying vec2 _uv;
@@ -32,7 +34,12 @@ export const surfaceVertex =
         float facing = dot(normalize(toCam + vec2(1e-5)), fwd);
         float fwdMask = mix(1.0, smoothstep(-0.15, 0.55, facing), _SurfaceWaveForwardBias);
 
-        float mask = distMask * fwdMask;
+        // Fade the swell out as the camera rises above the waterline. The effect
+        // is only for the surface-crossing moment; above the water its far edge
+        // sits on the horizon line and flashes a camera-tracking reflection speck.
+        float heightFade = 1.0 - smoothstep(_SurfaceWaveHeightFadeStart, _SurfaceWaveHeightFadeEnd, abs(cameraPosition.y));
+
+        float mask = distMask * fwdMask * heightFade;
 
         float elevation = 0.0;
         _waveNormal = vec3(0.0);

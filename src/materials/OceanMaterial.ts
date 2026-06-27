@@ -53,6 +53,8 @@ export const surfaceWaveSpeedUniform       = new Uniform(OceanConfig.surfaceWave
 export const surfaceWaveRangeUniform       = new Uniform(OceanConfig.surfaceWaveRange);
 export const surfaceWaveForwardBiasUniform = new Uniform(OceanConfig.surfaceWaveForwardBias);
 export const surfaceWaveSteepnessUniform   = new Uniform(OceanConfig.surfaceWaveSteepness);
+export const surfaceWaveHeightFadeStartUniform = new Uniform(OceanConfig.surfaceWaveHeightFadeStart);
+export const surfaceWaveHeightFadeEndUniform   = new Uniform(OceanConfig.surfaceWaveHeightFadeEnd);
 
 // Foam mask — generated at runtime from island silhouette
 export const foamMaskUniform         = new Uniform(null as Texture | null);         // Top-down silhouette texture
@@ -250,6 +252,8 @@ export function Start(): void
         _SurfaceWaveRange: surfaceWaveRangeUniform,
         _SurfaceWaveForwardBias: surfaceWaveForwardBiasUniform,
         _SurfaceWaveSteepness: surfaceWaveSteepnessUniform,
+        _SurfaceWaveHeightFadeStart: surfaceWaveHeightFadeStartUniform,
+        _SurfaceWaveHeightFadeEnd: surfaceWaveHeightFadeEndUniform,
         _FoamMask: foamMaskUniform,
         _FoamMaskCenter: foamMaskCenterUniform,
         _FoamMaskSize: foamMaskSizeUniform,
