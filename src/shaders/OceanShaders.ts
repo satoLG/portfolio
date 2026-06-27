@@ -342,6 +342,15 @@ export const surfaceFragment =
         float viewLen = length(viewVec);
         vec3 viewDir = viewVec / viewLen;
 
+        // Horizon haze driven by the view's grazing angle, NOT distance. The
+        // ocean-plane edge and any grazing-reflection speck always sit where the
+        // line of sight is near-horizontal (-viewDir.y -> 0), regardless of how
+        // far the horizon is for the current camera height. Veil that band by
+        // blending the surface to the sky's horizon color + flattening its
+        // normal, so the plane edge dissolves into the sky. 1 at the horizon,
+        // 0 once looking down past _HorizonFadeEnd radians-ish below horizontal.
+        float horizonHaze = 1.0 - smoothstep(_HorizonFadeStart, _HorizonFadeEnd, max(0.0, -viewDir.y));
+
         vec3 normal = texture2D(_NormalMap1, _uv + _WaveVelocity1 * _Time).xyz * 2.0 - 1.0;
         normal += texture2D(_NormalMap2, _uv + _WaveVelocity2 * _Time).xyz * 2.0 - 1.0;
         normal *= _NormalMapStrength;
@@ -350,16 +359,9 @@ export const surfaceFragment =
         normal += _waveNormal;         // Add near-camera vertex-displacement tilt
         normal = normalize(normal).xzy;
 
-        // Flatten the surface toward the horizon so far water is mirror-smooth and
-        // reflects the smooth sky uniformly. Otherwise a single grazing-angle wave
-        // facet reflects a bright sky spike that aliases into a stray white dot at
-        // the horizon (worst with antialiasing off, i.e. the low-quality preset).
-        // Same view-distance range as the horizon color blend below.
-        {
-            vec3 _hd = vec3(_worldPos.x, _elevation, _worldPos.y) - cameraPosition;
-            float _horizonFlat = smoothstep(_HorizonFadeStart, _HorizonFadeEnd, length(_hd));
-            normal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), _horizonFlat));
-        }
+        // Flatten the surface in the horizon band so it reflects the smooth sky
+        // uniformly — kills the grazing-angle reflection speck at its source.
+        normal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), horizonHaze));
 
         sampleDither(gl_FragCoord.xy);
 
@@ -396,13 +398,9 @@ export const surfaceFragment =
             // whatever surface tint/refraction is already there.
             surface = mix(surface, max(surface, _EdgeFoamColor), clamp(edgeFoam, 0.0, 1.0));
 
-            // Blend the surface to the sky's horizon color toward the far edge.
-            // The ocean's bright grazing-angle sky reflection would otherwise form
-            // a hard cyan line where the plane meets the sky (weak fog: only ~40%
-            // at the 400u rim). Matching the skybox horizon color makes the
-            // boundary seamless. Above-water only — underwater viewLen is capped
-            // far below this range, so it's a no-op there.
-            surface = mix(surface, sampleFog(viewDir), smoothstep(_HorizonFadeStart, _HorizonFadeEnd, viewLen));
+            // Veil the horizon band with the sky's horizon color so the ocean
+            // plane edge and any grazing reflection dissolve into the sky.
+            surface = mix(surface, sampleFog(viewDir), horizonHaze);
 
             // _SurfaceOpacity blends from physics-based alpha (Fresnel + fog) to full opacity.
             // At 0: transparent where Fresnel is low (looking straight down).

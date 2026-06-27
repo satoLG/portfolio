@@ -1752,8 +1752,8 @@ function buildGUI(): void {
     wavesFolder.add(wavesProxy, 'vel2x',   -0.5, 0.5,  0.001).name('Wave2 Vel X').listen();
     wavesFolder.add(wavesProxy, 'vel2y',   -0.5, 0.5,  0.001).name('Wave2 Vel Y').listen();
     wavesFolder.add(wavesProxy, 'edgeFade', 0,   5,    0.01 ).name('Edge Fade Distance').listen();
-    wavesFolder.add(wavesProxy, 'horizonFadeStart', 0, 400, 1).name('Horizon Fade Start').listen();
-    wavesFolder.add(wavesProxy, 'horizonFadeEnd',   0, 400, 1).name('Horizon Fade End').listen();
+    wavesFolder.add(wavesProxy, 'horizonFadeStart', 0, 1, 0.005).name('Horizon Haze Start (angle)').listen();
+    wavesFolder.add(wavesProxy, 'horizonFadeEnd',   0, 1, 0.005).name('Horizon Haze End (angle)').listen();
 
     // Near-camera vertex displacement (real geometry swell ahead of the camera)
     wavesFolder.add(wavesProxy, 'dispAmp',   0,   0.4,  0.001).name('Displace Amplitude').listen();
