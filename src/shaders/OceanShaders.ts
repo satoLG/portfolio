@@ -600,6 +600,7 @@ export const triplanarFragment =
     uniform float _Scale;
     uniform float _SpotLightSharpness;
     uniform float _SpotLightDistance;
+    uniform float _CausticsScale;
 
     varying vec3 _worldPos;
     varying vec3 _normal;
@@ -644,6 +645,10 @@ export const triplanarFragment =
     }
 
     float caustics(vec2 worldXZ) {
+        // Uniform branch: when scale is 0 (mobile/low quality) the GPU skips
+        // the entire voronoi loop, which runs 2×9 trig iterations per fragment.
+        if (_CausticsScale <= 0.0) return 0.0;
+
         // Speed multiplier = 1.0 so drift matches the ocean wave velocities exactly
         float speed = 1.0;
 
@@ -660,7 +665,7 @@ export const triplanarFragment =
         float c2 = voronoiCaustic(uv2 * 2.0);
 
         // Min blend: produces the classic intersecting caustic network
-        return min(c1, c2) * 3.5;
+        return min(c1, c2) * 3.5 * _CausticsScale;
     }
 
     void main()

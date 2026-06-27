@@ -1,4 +1,5 @@
 ﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setDPR, setShadowResolution, isMobile, showOcean, getStartupProgress } from "./Scene";
+import { setCausticsScale } from "../materials/OceanMaterial";
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
 import { startAudio, transitionFromIntroToScene, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
@@ -416,6 +417,7 @@ export function Start(): void {
                 setDPR(1);
                 setShadowsEnabled(false);
                 setShadowResolution(256);
+                setCausticsScale(0);
                 break;
             case 'medium':
                 // Desktop DPR capped at 1.5 (was 2): ~44% fewer fragments across
@@ -425,11 +427,13 @@ export function Start(): void {
                 setDPR(1.5);
                 setShadowsEnabled(true);
                 setShadowResolution(isMobile ? 512 : 1024);
+                setCausticsScale(1);
                 break;
             case 'high':
                 setDPR(2);
                 setShadowsEnabled(true);
                 setShadowResolution(2048);
+                setCausticsScale(1);
                 break;
         }
     }

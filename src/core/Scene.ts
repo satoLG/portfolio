@@ -16,7 +16,7 @@ import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
 import * as WindLines from "../effects/WindLines.ts";
 import * as CloudSprites from "../effects/CloudSprites.ts";
 import * as SceneDepth from "../effects/SceneDepth.ts";
-import { sceneDepthUniform, updateSceneDepthCamera } from "../materials/OceanMaterial";
+import { sceneDepthUniform, updateSceneDepthCamera, edgeFoamIntensityUniform } from "../materials/OceanMaterial";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
@@ -104,7 +104,10 @@ const _underwaterTransparentTargets: Object3D[] = [];
 const _depthExcludedTargets: Object3D[] = [];
 
 // Fire shadow map refreshes every Nth frame (see throttle in Update).
-const FIRE_SHADOW_UPDATE_INTERVAL = 3;
+// On mobile with medium/high quality the VSM blur is expensive; every 6th
+// frame (≈10fps shadow updates at 60fps) is imperceptible for a near-static
+// caster (only the gently-breathing pug moves under the cone).
+const FIRE_SHADOW_UPDATE_INTERVAL = isMobile ? 6 : 3;
 let _fireShadowFrame = 0;
 
 // Scratch vectors for UpdateCameraRotation (eliminates 3 Vector3 allocations per frame)
@@ -272,9 +275,17 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     // MeshDepthMaterial so the cost is just vertex pipeline + depth write.
     // Exclude foam-irrelevant heavy geometry (grass, skybox, wind lines) so the
     // pre-pass doesn't re-submit the scene's biggest vertex loads for nothing.
-    const depthExcludedVis = hideDepthPrePassExcluded();
-    SceneDepth.capture(renderer, scene, camera);
-    restoreVisibility(depthExcludedVis);
+    //
+    // Skip entirely when edge foam intensity is 0 (mobile/low quality default).
+    // The depth texture keeps its last value; calcEdgeFoam() already returns 0
+    // for all cleared (depth=1.0) pixels, so the visual result is identical and
+    // we save a full scene re-render every frame — the heaviest redundant cost on
+    // low-end devices.
+    if ((edgeFoamIntensityUniform.value as number) > 0) {
+        const depthExcludedVis = hideDepthPrePassExcluded();
+        SceneDepth.capture(renderer, scene, camera);
+        restoreVisibility(depthExcludedVis);
+    }
     sceneDepthUniform.value = SceneDepth.getDepthTexture();
     updateSceneDepthCamera(camera);
 
