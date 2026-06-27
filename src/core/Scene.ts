@@ -17,6 +17,7 @@ import * as WindLines from "../effects/WindLines.ts";
 import * as CloudSprites from "../effects/CloudSprites.ts";
 import * as SceneDepth from "../effects/SceneDepth.ts";
 import { sceneDepthUniform, updateSceneDepthCamera, edgeFoamIntensityUniform } from "../materials/OceanMaterial";
+import { DebugPerf, initDebugPerfOverlay } from "./DebugPerf.ts"; // DEBUG-PERF
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
@@ -292,7 +293,7 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     PostProcess.renderScene(renderer, scene, camera, () => {
         // Skip the ocean surface pass while sealed inside the cabana — the dome
         // hides it and the camera is above water, so it's pure waste.
-        if (!Island.isCabanaSealed()) Ocean.RenderSurface(renderer, camera);
+        if (!Island.isCabanaSealed() && !DebugPerf.disableWater) Ocean.RenderSurface(renderer, camera); // DEBUG-PERF (disableWater)
         if (underwaterTransparentVis) {
             renderOnlyUnderwaterTransparents(underwaterTransparentVis);
             restoreVisibility(underwaterTransparentVis);
@@ -574,6 +575,8 @@ export function Start(): void
     // This compiles every shader program during the loading screen so the
     // first scroll and first underwater transition are stutter-free.
     Island.setOnLoadCallback(prewarmGPU);
+
+    initDebugPerfOverlay(); // DEBUG-PERF
 }
 
 // ── GPU Prewarming ───────────────────────────────────────────────────────────
@@ -919,6 +922,17 @@ export function Update(): void
         UnderwaterParticles.Update(camera.position.y);
     }
 
+    // DEBUG-PERF — apply diagnostic overrides AFTER the Updates above (which set
+    // these visibilities each frame), so the overlay can isolate each subsystem.
+    if (DebugPerf.disableGrass && Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = false;
+    if (DebugPerf.disableDecor) SeaFloorDecor.decorGroup.visible = false;
+    if (DebugPerf.disableParticles) {
+        const b = Bubbles.getRenderable();
+        if (b) b.visible = false;
+        const p = UnderwaterParticles.getRenderable();
+        if (p) p.visible = false;
+    }
+
     // Sync lights with skybox sun position and intensity
     // Keep light close enough for shadow mapping to work
     // Reuse a scratch vector instead of cloning every frame
@@ -970,7 +984,7 @@ export function Update(): void
     // (pixelation + underwater distortion).
     renderSceneFrame(isUnderwater);
     // Clouds are sky-only — skip them while sealed inside the cabana.
-    if (!Island.isCabanaSealed()) CloudSprites.Render(renderer, camera);
+    if (!Island.isCabanaSealed() && !DebugPerf.disableClouds) CloudSprites.Render(renderer, camera); // DEBUG-PERF (disableClouds)
 
     // Debug axes
     renderer.autoClearColor = false;

@@ -2,6 +2,7 @@ import { BufferAttribute, BufferGeometry, MathUtils, Mesh, Vector2 } from "three
 import * as oceanMaterials from "../materials/OceanMaterial";
 import { Random } from "../utils/Random";
 import { camera } from "../core/Scene";
+import { DebugPerf } from "../core/DebugPerf"; // DEBUG-PERF
 
 const tilesPerAxis = 13;
 const tileSize = 32;
@@ -238,6 +239,12 @@ let floorEnabled = false;
 
 export function Update(): void
 {
+    // DEBUG-PERF — force-hide every tile so the overlay can isolate floor fill cost.
+    if (DebugPerf.disableFloor) {
+        for (let i = 0; i < tiles.length; i++) if (tiles[i].visible) tiles[i].visible = false;
+        return;
+    }
+
     // Distance-based tile culling — only show tiles near the camera
     if (!floorEnabled) return;
 
