@@ -74,8 +74,8 @@ export const surfaceFragment =
     #include <ocean>
 
     uniform float _EdgeFadeDistance;
-    uniform float _HorizonFadeStart; // eye distance at/below which the ocean is fully opaque
-    uniform float _HorizonFadeEnd;   // eye distance at/beyond which the ocean is fully transparent
+    uniform float _HorizonFadeStart; // eye distance where the surface starts blending to horizon color
+    uniform float _HorizonFadeEnd;   // eye distance where the surface fully matches the horizon color
 
     // Foam mask — top-down island silhouette rendered at runtime
     uniform sampler2D _FoamMask;
@@ -335,14 +335,6 @@ export const surfaceFragment =
         float viewLen = length(viewVec);
         vec3 viewDir = viewVec / viewLen;
 
-        // Dissolve the ocean into haze before its hard far/side geometric edge so
-        // the plane never butts a half-fogged, half-bright edge against the open
-        // sky (the aliased white speck at the horizon). Above-water only —
-        // underwater viewLen is capped well below _HorizonFadeStart so this is a
-        // no-op there.
-        edgeFade *= 1.0 - smoothstep(_HorizonFadeStart, _HorizonFadeEnd, viewLen);
-        if (edgeFade <= 0.0) discard;
-
         vec3 normal = texture2D(_NormalMap1, _uv + _WaveVelocity1 * _Time).xyz * 2.0 - 1.0;
         normal += texture2D(_NormalMap2, _uv + _WaveVelocity2 * _Time).xyz * 2.0 - 1.0;
         normal *= _NormalMapStrength;
@@ -385,6 +377,14 @@ export const surfaceFragment =
             // of object shape — uses a brighten-only mix so it sits on top of
             // whatever surface tint/refraction is already there.
             surface = mix(surface, max(surface, _EdgeFoamColor), clamp(edgeFoam, 0.0, 1.0));
+
+            // Blend the surface to the sky's horizon color toward the far edge.
+            // The ocean's bright grazing-angle sky reflection would otherwise form
+            // a hard cyan line where the plane meets the sky (weak fog: only ~40%
+            // at the 400u rim). Matching the skybox horizon color makes the
+            // boundary seamless. Above-water only — underwater viewLen is capped
+            // far below this range, so it's a no-op there.
+            surface = mix(surface, sampleFog(viewDir), smoothstep(_HorizonFadeStart, _HorizonFadeEnd, viewLen));
 
             // _SurfaceOpacity blends from physics-based alpha (Fresnel + fog) to full opacity.
             // At 0: transparent where Fresnel is low (looking straight down).

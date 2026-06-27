@@ -25,16 +25,15 @@ export const waveVelocity1     = { x: 0.0330, y: -0.0100 };
 export const waveVelocity2     = { x: -0.0270, y: -0.0180 };
 export const edgeFadeDistance  = 0.5400;
 
-// Horizon dissolve. The ocean is a 400u plane that is only ~40% fogged at its
-// rim (FOG_DISTANCE=1000), so its far/side geometric edges butt a half-bright
-// ocean against the pure sky — a high-contrast boundary right at the horizon
-// line. With antialiasing off (the low-quality preset) that edge aliases into a
-// shimmering white speck that sweeps as the camera rotates (e.g. the pug zoom).
-// Fading the ocean's alpha out by view distance dissolves it into haze before
-// the hard edge ever draws. The visible ocean still spans horizonFadeStart
-// units — vast for this scene — so the only change is a soft hazy horizon.
-export const horizonFadeStart  = 180.0000; // full opacity at/below this eye distance
-export const horizonFadeEnd    = 340.0000; // fully transparent at/beyond this eye distance
+// Horizon color blend. The ocean is a 400u plane only ~40% fogged at its rim
+// (FOG_DISTANCE=1000), so its bright grazing-angle sky reflection forms a hard
+// cyan line where the surface meets the sky. Rather than fade the surface out
+// (which only sharpens that transition), blend the surface COLOR to the sky's
+// horizon color toward the far edge so the boundary becomes seamless. The
+// visible ocean detail still spans horizonFadeStart units before it eases into
+// the horizon haze.
+export const horizonFadeStart  = 180.0000; // eye distance where blend to horizon color begins
+export const horizonFadeEnd    = 340.0000; // eye distance where surface fully matches horizon color
 
 // ── Surface Vertex Displacement (near-camera swell) ──────────────────────────
 // Real geometry waves applied ONLY to the strip of ocean in front of the camera
