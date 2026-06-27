@@ -43,6 +43,9 @@ export const waveVelocity2Uniform     = new Uniform({ x: OceanConfig.waveVelocit
 
 export const edgeFadeDistanceUniform = new Uniform(OceanConfig.edgeFadeDistance);
 
+export const horizonFadeStartUniform = new Uniform(OceanConfig.horizonFadeStart);
+export const horizonFadeEndUniform   = new Uniform(OceanConfig.horizonFadeEnd);
+
 // Near-camera vertex displacement (surface swell) — see OceanConfig for meaning
 export const surfaceWaveAmplitudeUniform   = new Uniform(OceanConfig.surfaceWaveAmplitude);
 export const surfaceWaveLengthUniform      = new Uniform(OceanConfig.surfaceWaveLength);
@@ -119,9 +122,6 @@ export const edgeFoamColorUniform  = new Uniform(new Vector3(OceanConfig.edgeFoa
 
 export const edgeFoamFadeStartZUniform = new Uniform(_isMobile ? OceanConfig.edgeFoamFadeStartZMobile : OceanConfig.edgeFoamFadeStartZDesktop);
 export const edgeFoamFadeEndZUniform   = new Uniform(_isMobile ? OceanConfig.edgeFoamFadeEndZMobile   : OceanConfig.edgeFoamFadeEndZDesktop);
-
-export const edgeFoamMaxDistStartUniform = new Uniform(OceanConfig.edgeFoamMaxDistStart);
-export const edgeFoamMaxDistEndUniform   = new Uniform(OceanConfig.edgeFoamMaxDistEnd);
 
 /** Each frame, push the camera's current near/far into the shader uniforms so
  *  the depth linearization in `calcEdgeFoam` stays correct after any FOV /
@@ -241,6 +241,8 @@ export function Start(): void
         _WaveVelocity1: waveVelocity1Uniform,
         _WaveVelocity2: waveVelocity2Uniform,
         _EdgeFadeDistance: edgeFadeDistanceUniform,
+        _HorizonFadeStart: horizonFadeStartUniform,
+        _HorizonFadeEnd: horizonFadeEndUniform,
         _CameraForward: new Uniform(cameraForward),
         _SurfaceWaveAmplitude: surfaceWaveAmplitudeUniform,
         _SurfaceWaveLength: surfaceWaveLengthUniform,
@@ -293,8 +295,6 @@ export function Start(): void
         _EdgeFoamColor: edgeFoamColorUniform,
         _EdgeFoamFadeStartZ: edgeFoamFadeStartZUniform,
         _EdgeFoamFadeEndZ: edgeFoamFadeEndZUniform,
-        _EdgeFoamMaxDistStart: edgeFoamMaxDistStartUniform,
-        _EdgeFoamMaxDistEnd: edgeFoamMaxDistEndUniform,
     };
     SetSkyboxUniforms(surface);
     

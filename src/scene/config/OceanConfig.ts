@@ -25,6 +25,17 @@ export const waveVelocity1     = { x: 0.0330, y: -0.0100 };
 export const waveVelocity2     = { x: -0.0270, y: -0.0180 };
 export const edgeFadeDistance  = 0.5400;
 
+// Horizon dissolve. The ocean is a 400u plane that is only ~40% fogged at its
+// rim (FOG_DISTANCE=1000), so its far/side geometric edges butt a half-bright
+// ocean against the pure sky — a high-contrast boundary right at the horizon
+// line. With antialiasing off (the low-quality preset) that edge aliases into a
+// shimmering white speck that sweeps as the camera rotates (e.g. the pug zoom).
+// Fading the ocean's alpha out by view distance dissolves it into haze before
+// the hard edge ever draws. The visible ocean still spans horizonFadeStart
+// units — vast for this scene — so the only change is a soft hazy horizon.
+export const horizonFadeStart  = 180.0000; // full opacity at/below this eye distance
+export const horizonFadeEnd    = 340.0000; // fully transparent at/beyond this eye distance
+
 // ── Surface Vertex Displacement (near-camera swell) ──────────────────────────
 // Real geometry waves applied ONLY to the strip of ocean in front of the camera
 // — amplitude fades to 0 with distance so it fuses seamlessly with the flat
@@ -64,14 +75,6 @@ export const edgeFoamFadeStartZDesktop = -40.0000;
 export const edgeFoamFadeEndZDesktop   = -60.0000;
 export const edgeFoamFadeStartZMobile  = -1.5000;
 export const edgeFoamFadeEndZMobile    = -3.5000;
-
-// Camera-distance cap for edge foam. Real shoreline contact foam is always near
-// the camera; the false white line at the horizon / ocean-plane far edge is the
-// grazing-angle depth collapse (ocean surface and the geometry behind it both
-// compress toward the far plane, yielding a tiny positive depthDiff). Fade foam
-// out by the ocean fragment's eye distance so only genuine nearby contact shows.
-export const edgeFoamMaxDistStart = 4.0000;  // full foam at/below this eye distance
-export const edgeFoamMaxDistEnd   = 8.0000;  // foam fully gone at/beyond this eye distance
 
 // ── Reflection ────────────────────────────────────────────────────────────────
 export const reflectionFresnelPower = 0.6500; // lower = visible at more angles
