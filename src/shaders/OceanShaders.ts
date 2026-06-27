@@ -343,6 +343,17 @@ export const surfaceFragment =
         normal += _waveNormal;         // Add near-camera vertex-displacement tilt
         normal = normalize(normal).xzy;
 
+        // Flatten the surface toward the horizon so far water is mirror-smooth and
+        // reflects the smooth sky uniformly. Otherwise a single grazing-angle wave
+        // facet reflects a bright sky spike that aliases into a stray white dot at
+        // the horizon (worst with antialiasing off, i.e. the low-quality preset).
+        // Same view-distance range as the horizon color blend below.
+        {
+            vec3 _hd = vec3(_worldPos.x, _elevation, _worldPos.y) - cameraPosition;
+            float _horizonFlat = smoothstep(_HorizonFadeStart, _HorizonFadeEnd, length(_hd));
+            normal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), _horizonFlat));
+        }
+
         sampleDither(gl_FragCoord.xy);
 
         // Depth-intersection foam computed once and shared by both above-water
