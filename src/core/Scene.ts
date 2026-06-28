@@ -876,7 +876,7 @@ export function Update(): void
         // glow fade-out, coin springs, and pug all depend on it.  Wind, radio,
         // pug, and music-note work is skipped when isUnderwater=true.
         Island.Update(true);
-        Fire.Update();
+        if (!(DebugPerf.disableFirecamp || DebugPerf.disableBareIsland)) Fire.Update(); // DEBUG-PERF
     } else {
         // Show surface, hide underwater.
         // When sealed inside the cabana, the reverse dome hides the outside world,
@@ -916,7 +916,7 @@ export function Update(): void
         if (Island.grassShadowMesh)     Island.grassShadowMesh.visible     = showOutside;
 
         Island.Update(false);
-        Fire.Update();
+        if (!(DebugPerf.disableFirecamp || DebugPerf.disableBareIsland)) Fire.Update(); // DEBUG-PERF
         Fish.Update();
         Bubbles.Update(camera.position.y);
         UnderwaterParticles.Update(camera.position.y);
@@ -924,7 +924,10 @@ export function Update(): void
 
     // DEBUG-PERF — apply diagnostic overrides AFTER the Updates above (which set
     // these visibilities each frame), so the overlay can isolate each subsystem.
-    if (DebugPerf.disableGrass && Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = false;
+    if (DebugPerf.disableGrass) {
+        if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = false;
+        if (Island.grassShadowMesh) Island.grassShadowMesh.visible = false;
+    }
     if (DebugPerf.disableDecor) SeaFloorDecor.decorGroup.visible = false;
     if (DebugPerf.disableParticles) {
         const b = Bubbles.getRenderable();
@@ -951,6 +954,49 @@ export function Update(): void
         Island.pug.visible = false;
         Island.bushPug.visible = false;
         Island.dogBed.visible = false;
+    }
+    if (DebugPerf.disableFirecamp) {
+        Island.firecamp.visible = false;
+        Fire.fire.visible = false;
+    }
+    if (DebugPerf.disableRocks) {
+        Island.mossRock1.visible = false;
+        Island.mossRock2a.visible = false;
+        Island.mossRock2b.visible = false;
+        Island.mossRock3a.visible = false;
+        Island.mossRock3b.visible = false;
+        Island.mossRock3c.visible = false;
+        Island.littleRocks.visible = false;
+    }
+    if (DebugPerf.disableSword) {
+        Island.sword.visible = false;
+    }
+    if (DebugPerf.disableTent) {
+        Island.tent.visible = false;
+        Island.foldingTrayTable.visible = false;
+        Island.tentDogBed.visible = false;
+        Island.rugRound.visible = false;
+        Island.lantern.visible = false;
+        Island.dogBowl.visible = false;
+        Island.dogBiscuit.visible = false;
+        if (Island.phone) Island.phone.visible = false;
+    }
+    // Master: hide every island prop, keep ONLY the terrain mesh (Island.island).
+    if (DebugPerf.disableBareIsland) {
+        const hide = (o: { visible: boolean } | null | undefined) => { if (o) o.visible = false; };
+        hide(Island.firecamp); hide(Fire.fire);
+        hide(Island.tree); hide(Island.bush);
+        hide(Island.bushRadio); hide(Island.bushRadio2); hide(Island.bushPug);
+        hide(Island.radio); hide(Island.phone); hide(Island.sword);
+        hide(Island.pug); hide(Island.dogBed);
+        hide(Island.apple1); hide(Island.apple2); hide(Island.apple3);
+        hide(Island.mossRock1); hide(Island.mossRock2a); hide(Island.mossRock2b);
+        hide(Island.mossRock3a); hide(Island.mossRock3b); hide(Island.mossRock3c);
+        hide(Island.littleRocks);
+        hide(Island.proceduralGrassMesh); hide(Island.grassShadowMesh);
+        hide(Island.tent);
+        hide(Island.foldingTrayTable); hide(Island.tentDogBed); hide(Island.rugRound);
+        hide(Island.lantern); hide(Island.dogBowl); hide(Island.dogBiscuit);
     }
 
     // Sync lights with skybox sun position and intensity

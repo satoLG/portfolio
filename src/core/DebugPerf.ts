@@ -18,6 +18,11 @@ export const DebugPerf = {
     disableTreeBush: false,  // tree + main bush (pure GPU, no CPU work)
     disableRadio: false,     // radio + phone + radio bushes + music-note particles
     disablePug: false,       // pug + pug bush + dog bed + mixer/night/Z-particles
+    disableFirecamp: false,  // campfire model + fire (sprite anim + embers + lights)
+    disableRocks: false,     // moss rocks + little rocks
+    disableSword: false,     // sword
+    disableTent: false,      // tent exterior + interior props (table/bed/rug/lantern/bowl/biscuit/phone)
+    disableBareIsland: false, // MASTER: hide every prop + gate all prop CPU; keep only terrain
 };
 
 type FlagKey = keyof typeof DebugPerf;
@@ -34,6 +39,11 @@ const BUTTONS: { key: FlagKey; label: string }[] = [
     { key: 'disableTreeBush',  label: 'Tree+Bush' },
     { key: 'disableRadio',     label: 'Radio' },
     { key: 'disablePug',       label: 'Pug' },
+    { key: 'disableFirecamp',  label: 'Firecamp' },
+    { key: 'disableRocks',     label: 'Rocks' },
+    { key: 'disableSword',     label: 'Sword' },
+    { key: 'disableTent',      label: 'Tent' },
+    { key: 'disableBareIsland', label: 'BARE ISLAND' },
 ];
 
 let _initialized = false;

@@ -4733,9 +4733,9 @@ function setupRadioInteraction(): void {
 }
 
 export function Update(isUnderwater = false): void {
-  if (!DebugPerf.disableApples) _updateAppleImpacts(); // DEBUG-PERF
+  if (!(DebugPerf.disableApples || DebugPerf.disableBareIsland)) _updateAppleImpacts(); // DEBUG-PERF
   islandCampfireGroundCenterUniform.value.set(firecamp.position.x, firecamp.position.z);
-  if (!DebugPerf.disableApples) _updateGroundApples(); // DEBUG-PERF
+  if (!(DebugPerf.disableApples || DebugPerf.disableBareIsland)) _updateGroundApples(); // DEBUG-PERF
 
   // Cabana phase drives the whole interior reveal. Asymmetric speed: slow reveal
   // (fade dark out / dome in) while settling inside, fast cover on the way out.
@@ -4792,7 +4792,7 @@ export function Update(isUnderwater = false): void {
     const appleGroups  = [apple1, apple2, apple3];
 
     // ── Tree apples: sway + respawn spring ──────────────────────────────────
-    if (!DebugPerf.disableApples) // DEBUG-PERF
+    if (!(DebugPerf.disableApples || DebugPerf.disableBareIsland)) // DEBUG-PERF
     for (let i = 0; i < 3; i++) {
         const st = appleStates[i];
         const grp = appleGroups[i];
@@ -4856,7 +4856,7 @@ export function Update(isUnderwater = false): void {
     
   if (!isUnderwater) {
     // Radio vibration when music is playing
-    if (radio.children.length > 0 && !DebugPerf.disableRadio) { // DEBUG-PERF
+    if (radio.children.length > 0 && !(DebugPerf.disableRadio || DebugPerf.disableBareIsland)) { // DEBUG-PERF
 
         // Smooth hover scale
         const targetScale = isRadioHovered ? radioBaseScale * RADIO_HOVER_SCALE : radioBaseScale;
@@ -4931,7 +4931,7 @@ export function Update(isUnderwater = false): void {
     }
     
     // Update pug animation mixer — clamp delta to avoid fast-forward on frame-skips
-    if (pugMixer && !DebugPerf.disablePug) { // DEBUG-PERF
+    if (pugMixer && !(DebugPerf.disablePug || DebugPerf.disableBareIsland)) { // DEBUG-PERF
         pugMixer.update(Math.min(deltaTime, 0.1));
     }
   } // end !isUnderwater gate (wind, radio, pug mixer)
@@ -5024,7 +5024,7 @@ export function Update(isUnderwater = false): void {
     }
 
   if (!isUnderwater) {
-    if (!DebugPerf.disablePug) { // DEBUG-PERF
+    if (!(DebugPerf.disablePug || DebugPerf.disableBareIsland)) { // DEBUG-PERF
     // ── Pug music-playing state: suppress sleep when music is on
     const _musicNowPlaying = getIsPlaying();
     if (_musicNowPlaying && !_pugMusicWasPlaying) {
@@ -5055,7 +5055,7 @@ export function Update(isUnderwater = false): void {
     } // DEBUG-PERF (disablePug)
 
     // Update music note particles
-    if (!DebugPerf.disableRadio) updateMusicNotes(); // DEBUG-PERF
+    if (!(DebugPerf.disableRadio || DebugPerf.disableBareIsland)) updateMusicNotes(); // DEBUG-PERF
   } // end !isUnderwater gate (pug state, music notes)
 }
 
