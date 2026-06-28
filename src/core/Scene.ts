@@ -932,6 +932,26 @@ export function Update(): void
         const p = UnderwaterParticles.getRenderable();
         if (p) p.visible = false;
     }
+    if (DebugPerf.disableApples) {
+        Island.apple1.visible = false;
+        Island.apple2.visible = false;
+        Island.apple3.visible = false;
+    }
+    if (DebugPerf.disableTreeBush) {
+        Island.tree.visible = false;
+        Island.bush.visible = false;
+    }
+    if (DebugPerf.disableRadio) {
+        Island.radio.visible = false;
+        if (Island.phone) Island.phone.visible = false;
+        Island.bushRadio.visible = false;
+        Island.bushRadio2.visible = false;
+    }
+    if (DebugPerf.disablePug) {
+        Island.pug.visible = false;
+        Island.bushPug.visible = false;
+        Island.dogBed.visible = false;
+    }
 
     // Sync lights with skybox sun position and intensity
     // Keep light close enough for shadow mapping to work

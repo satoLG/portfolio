@@ -13,6 +13,11 @@ export const DebugPerf = {
     disableDecor: false,     // corals / kelp / anemone / crab / fish decor
     disableParticles: false, // bubbles + underwater particles
     disablePost: false,      // post-processing (framebuffer copy + fullscreen quad)
+    // Island model buckets — each also gates the subsystem's per-frame CPU work.
+    disableApples: false,    // apple meshes + spring/wind/physics + impact streaks
+    disableTreeBush: false,  // tree + main bush (pure GPU, no CPU work)
+    disableRadio: false,     // radio + phone + radio bushes + music-note particles
+    disablePug: false,       // pug + pug bush + dog bed + mixer/night/Z-particles
 };
 
 type FlagKey = keyof typeof DebugPerf;
@@ -25,6 +30,10 @@ const BUTTONS: { key: FlagKey; label: string }[] = [
     { key: 'disableDecor',     label: 'Decor' },
     { key: 'disableParticles', label: 'Particles' },
     { key: 'disablePost',      label: 'Post' },
+    { key: 'disableApples',    label: 'Apples' },
+    { key: 'disableTreeBush',  label: 'Tree+Bush' },
+    { key: 'disableRadio',     label: 'Radio' },
+    { key: 'disablePug',       label: 'Pug' },
 ];
 
 let _initialized = false;
