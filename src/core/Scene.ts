@@ -1,4 +1,4 @@
-import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap, Object3D, Quaternion } from "three";
+import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap, Object3D, Quaternion, MeshBasicMaterial } from "three";
 import { getIsUnderwater, isPugZoomActive } from "./Control";
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
@@ -822,6 +822,38 @@ function waitForModels(): Promise<void> {
     });
 }
 
+// DEBUG-PERF — cheap-material diagnostic. Swaps every island/decor PROP material
+// for a single flat unlit MeshBasicMaterial (same geometry, same draw calls, but
+// fragment cost ≈ 0). If FPS jumps with this on, the bottleneck is fragment
+// shading (PBR + realtime lights + ocean-lighting injection); if it doesn't, the
+// bottleneck is draw-call / material-switch CPU overhead. Restores on toggle off.
+let _cheapMatApplied = false;
+const _cheapMat = new MeshBasicMaterial({ color: 0x888888 });
+function _applyCheapMaterials(on: boolean): void {
+    const roots: Array<Object3D | null | undefined> = [
+        Island.firecamp, Island.tree, Island.bush, Island.bushRadio, Island.bushRadio2, Island.bushPug,
+        Island.radio, Island.sword, Island.pug, Island.dogBed,
+        Island.apple1, Island.apple2, Island.apple3,
+        Island.mossRock1, Island.mossRock2a, Island.mossRock2b, Island.mossRock3a, Island.mossRock3b, Island.mossRock3c,
+        Island.littleRocks, Island.tent, Island.chest,
+        Island.foldingTrayTable, Island.tentDogBed, Island.rugRound, Island.lantern, Island.dogBowl, Island.dogBiscuit, Island.phone,
+        SeaFloorDecor.decorGroup,
+    ];
+    for (const root of roots) {
+        if (!root) continue;
+        root.traverse((o: any) => {
+            if (!o.isMesh) return;
+            if (on) {
+                if (!o.userData.__origMat) o.userData.__origMat = o.material;
+                o.material = _cheapMat;
+            } else if (o.userData.__origMat) {
+                o.material = o.userData.__origMat;
+                o.userData.__origMat = undefined;
+            }
+        });
+    }
+}
+
 export function Update(): void
 {
     // Skip all rendering during the loading screen — nothing is visible anyway
@@ -997,6 +1029,11 @@ export function Update(): void
         hide(Island.tent);
         hide(Island.foldingTrayTable); hide(Island.tentDogBed); hide(Island.rugRound);
         hide(Island.lantern); hide(Island.dogBowl); hide(Island.dogBiscuit);
+    }
+    // DEBUG-PERF — apply/restore the cheap-material diagnostic only on toggle change.
+    if (DebugPerf.cheapMaterials !== _cheapMatApplied) {
+        _cheapMatApplied = DebugPerf.cheapMaterials;
+        _applyCheapMaterials(_cheapMatApplied);
     }
 
     // Sync lights with skybox sun position and intensity

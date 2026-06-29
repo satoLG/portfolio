@@ -23,6 +23,7 @@ export const DebugPerf = {
     disableSword: false,     // sword
     disableTent: false,      // tent exterior + interior props (table/bed/rug/lantern/bowl/biscuit/phone)
     disableBareIsland: false, // MASTER: hide every prop + gate all prop CPU; keep only terrain
+    cheapMaterials: false,   // DIAGNOSTIC: swap all prop materials to flat unlit MeshBasic
 };
 
 type FlagKey = keyof typeof DebugPerf;
@@ -44,6 +45,7 @@ const BUTTONS: { key: FlagKey; label: string }[] = [
     { key: 'disableSword',     label: 'Sword' },
     { key: 'disableTent',      label: 'Tent' },
     { key: 'disableBareIsland', label: 'BARE ISLAND' },
+    { key: 'cheapMaterials',   label: 'CheapMat' },
 ];
 
 let _initialized = false;
