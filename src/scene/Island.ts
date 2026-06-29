@@ -10,7 +10,6 @@ import {
 } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../core/Time";
-import { DebugPerf } from "../core/DebugPerf"; // DEBUG-PERF
 import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../core/MediaPlayer";
 import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive, zoomToCabana, isCabanaZoomActive, getCabanaPhase, registerCabanaInterior, touchControls } from "../core/Control";
 import { cabanaShadeX, cabanaShadeY, cabanaShadeZ, cabanaShadeRadiusX, cabanaShadeRadiusY, cabanaShadeRadiusZ, cabanaShadeEdge, cabanaShadeColor, cabanaShadeStrength, cabanaShadeRevealSpeed, cabanaShadeCoverSpeed, cabanaDomeX, cabanaDomeY, cabanaDomeZ, cabanaDomeRadius, cabanaDomeColor, cabanaDomeOpacity } from "./config/CabanaConfig";
@@ -4733,9 +4732,9 @@ function setupRadioInteraction(): void {
 }
 
 export function Update(isUnderwater = false): void {
-  if (!(DebugPerf.disableApples || DebugPerf.disableBareIsland)) _updateAppleImpacts(); // DEBUG-PERF
+  _updateAppleImpacts();
   islandCampfireGroundCenterUniform.value.set(firecamp.position.x, firecamp.position.z);
-  if (!(DebugPerf.disableApples || DebugPerf.disableBareIsland)) _updateGroundApples(); // DEBUG-PERF
+  _updateGroundApples();
 
   // Cabana phase drives the whole interior reveal. Asymmetric speed: slow reveal
   // (fade dark out / dome in) while settling inside, fast cover on the way out.
@@ -4792,7 +4791,6 @@ export function Update(isUnderwater = false): void {
     const appleGroups  = [apple1, apple2, apple3];
 
     // ── Tree apples: sway + respawn spring ──────────────────────────────────
-    if (!(DebugPerf.disableApples || DebugPerf.disableBareIsland)) // DEBUG-PERF
     for (let i = 0; i < 3; i++) {
         const st = appleStates[i];
         const grp = appleGroups[i];
@@ -4856,8 +4854,7 @@ export function Update(isUnderwater = false): void {
     
   if (!isUnderwater) {
     // Radio vibration when music is playing
-    if (radio.children.length > 0 && !(DebugPerf.disableRadio || DebugPerf.disableBareIsland)) { // DEBUG-PERF
-
+    if (radio.children.length > 0) {
         // Smooth hover scale
         const targetScale = isRadioHovered ? radioBaseScale * RADIO_HOVER_SCALE : radioBaseScale;
         const currentScale = radio.scale.x;
@@ -4931,7 +4928,7 @@ export function Update(isUnderwater = false): void {
     }
     
     // Update pug animation mixer — clamp delta to avoid fast-forward on frame-skips
-    if (pugMixer && !(DebugPerf.disablePug || DebugPerf.disableBareIsland)) { // DEBUG-PERF
+    if (pugMixer) {
         pugMixer.update(Math.min(deltaTime, 0.1));
     }
   } // end !isUnderwater gate (wind, radio, pug mixer)
@@ -5024,7 +5021,6 @@ export function Update(isUnderwater = false): void {
     }
 
   if (!isUnderwater) {
-    if (!(DebugPerf.disablePug || DebugPerf.disableBareIsland)) { // DEBUG-PERF
     // ── Pug music-playing state: suppress sleep when music is on
     const _musicNowPlaying = getIsPlaying();
     if (_musicNowPlaying && !_pugMusicWasPlaying) {
@@ -5052,10 +5048,9 @@ export function Update(isUnderwater = false): void {
     // ── Pug sleep Z particles — spawning is driven by the animation loop listener;
     //    here we only advance existing particles every frame.
     _updatePugZParticles();
-    } // DEBUG-PERF (disablePug)
 
     // Update music note particles
-    if (!(DebugPerf.disableRadio || DebugPerf.disableBareIsland)) updateMusicNotes(); // DEBUG-PERF
+    updateMusicNotes();
   } // end !isUnderwater gate (pug state, music notes)
 }
 

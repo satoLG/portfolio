@@ -6,46 +6,19 @@
 
 /** Global flags consulted by the render loop. All default OFF (= no change). */
 export const DebugPerf = {
-    disableWater: false,     // ocean surface fragment shader (blur + foam + edge-foam)
-    disableClouds: false,    // 6600 cloud billboards (transparent overdraw)
-    disableGrass: false,     // procedural grass (~1M verts + sway + ocean lighting)
-    disableFloor: false,     // 169 sea-floor triplanar tiles (fill rate)
-    disableDecor: false,     // corals / kelp / anemone / crab / fish decor
-    disableParticles: false, // bubbles + underwater particles
-    disablePost: false,      // post-processing (framebuffer copy + fullscreen quad)
-    // Island model buckets — each also gates the subsystem's per-frame CPU work.
-    disableApples: false,    // apple meshes + spring/wind/physics + impact streaks
-    disableTreeBush: false,  // tree + main bush (pure GPU, no CPU work)
-    disableRadio: false,     // radio + phone + radio bushes + music-note particles
-    disablePug: false,       // pug + pug bush + dog bed + mixer/night/Z-particles
-    disableFirecamp: false,  // campfire model + fire (sprite anim + embers + lights)
-    disableRocks: false,     // moss rocks + little rocks
-    disableSword: false,     // sword
-    disableTent: false,      // tent exterior + interior props (table/bed/rug/lantern/bowl/biscuit/phone)
-    disableBareIsland: false, // MASTER: hide every prop + gate all prop CPU; keep only terrain
-    cheapMaterials: false,   // DIAGNOSTIC: swap all prop materials to flat unlit MeshBasic
+    // Material-swap experiments on the island + decor props (confirmed bottleneck:
+    // per-fragment PBR shading). Priority when several are on: Flat > Basic > Lambert.
+    matFlat: false,    // flat unlit grey — no texture, no lighting (perf ceiling reference)
+    matBasic: false,   // unlit, keeps texture + ocean fog tint (cheapest realistic look)
+    matLambert: false, // cheap diffuse lighting — keeps sun shading + fog, drops PBR/specular
 };
 
 type FlagKey = keyof typeof DebugPerf;
 
 const BUTTONS: { key: FlagKey; label: string }[] = [
-    { key: 'disableWater',     label: 'Water' },
-    { key: 'disableClouds',    label: 'Clouds' },
-    { key: 'disableGrass',     label: 'Grass' },
-    { key: 'disableFloor',     label: 'Floor' },
-    { key: 'disableDecor',     label: 'Decor' },
-    { key: 'disableParticles', label: 'Particles' },
-    { key: 'disablePost',      label: 'Post' },
-    { key: 'disableApples',    label: 'Apples' },
-    { key: 'disableTreeBush',  label: 'Tree+Bush' },
-    { key: 'disableRadio',     label: 'Radio' },
-    { key: 'disablePug',       label: 'Pug' },
-    { key: 'disableFirecamp',  label: 'Firecamp' },
-    { key: 'disableRocks',     label: 'Rocks' },
-    { key: 'disableSword',     label: 'Sword' },
-    { key: 'disableTent',      label: 'Tent' },
-    { key: 'disableBareIsland', label: 'BARE ISLAND' },
-    { key: 'cheapMaterials',   label: 'CheapMat' },
+    { key: 'matFlat',    label: 'Flat' },
+    { key: 'matBasic',   label: 'Basic' },
+    { key: 'matLambert', label: 'Lambert' },
 ];
 
 let _initialized = false;

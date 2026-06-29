@@ -27,7 +27,6 @@ import {
     sceneResolutionUniform,
     captureSceneColor,
 } from "../materials/OceanMaterial";
-import { DebugPerf } from "../core/DebugPerf"; // DEBUG-PERF
 
 // ── Underwater constants ─────────────────────────────────────────────────────
 export const UNDERWATER_Y_THRESHOLD = 0.0;
@@ -224,8 +223,7 @@ export function renderScene(renderer: WebGLRenderer, scene: ThreeScene, camera: 
     renderer.render(scene, camera);
     if (afterBaseRender) afterBaseRender();
     
-    // DEBUG-PERF — `disablePost` forces the cheap path (skip framebuffer copy + quad).
-    const needsPostProcess = !DebugPerf.disablePost && (underwaterAmount > 0 || pixelSize > 0 || fxaaEnabled);
+    const needsPostProcess = (underwaterAmount > 0 || pixelSize > 0 || fxaaEnabled);
     if (!needsPostProcess || !initialized || !material) {
         return;
     }

@@ -1,4 +1,4 @@
-import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap, Object3D, Quaternion, MeshBasicMaterial } from "three";
+import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap, Object3D, Quaternion, MeshBasicMaterial, MeshLambertMaterial } from "three";
 import { getIsUnderwater, isPugZoomActive } from "./Control";
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
@@ -293,7 +293,7 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     PostProcess.renderScene(renderer, scene, camera, () => {
         // Skip the ocean surface pass while sealed inside the cabana — the dome
         // hides it and the camera is above water, so it's pure waste.
-        if (!Island.isCabanaSealed() && !DebugPerf.disableWater) Ocean.RenderSurface(renderer, camera); // DEBUG-PERF (disableWater)
+        if (!Island.isCabanaSealed()) Ocean.RenderSurface(renderer, camera);
         if (underwaterTransparentVis) {
             renderOnlyUnderwaterTransparents(underwaterTransparentVis);
             restoreVisibility(underwaterTransparentVis);
@@ -822,15 +822,21 @@ function waitForModels(): Promise<void> {
     });
 }
 
-// DEBUG-PERF — cheap-material diagnostic. Swaps every island/decor PROP material
-// for a single flat unlit MeshBasicMaterial (same geometry, same draw calls, but
-// fragment cost ≈ 0). If FPS jumps with this on, the bottleneck is fragment
-// shading (PBR + realtime lights + ocean-lighting injection); if it doesn't, the
-// bottleneck is draw-call / material-switch CPU overhead. Restores on toggle off.
-let _cheapMatApplied = false;
-const _cheapMat = new MeshBasicMaterial({ color: 0x888888 });
-function _applyCheapMaterials(on: boolean): void {
-    const roots: Array<Object3D | null | undefined> = [
+// DEBUG-PERF — material-swap experiment. The confirmed bottleneck is per-fragment
+// shading (MeshStandardMaterial PBR + realtime lights + ocean-lighting injection)
+// on the island + decor props. These toggles swap those prop materials, live, to
+// cheaper variants so we can A/B both FPS and visual on the device:
+//   'flat'    flat unlit grey — no texture, no lighting (perf-ceiling reference)
+//   'basic'   MeshBasicMaterial — unlit but keeps the texture + ocean fog tint
+//   'lambert' MeshLambertMaterial — cheap diffuse lighting (keeps sun shading)
+// Basic/Lambert copy the original's onBeforeCompile so the ocean-lighting fog
+// injection (and kelp sway / bush wind) is preserved exactly on the new material.
+type MatMode = 'off' | 'flat' | 'basic' | 'lambert';
+let _matModeApplied: MatMode = 'off';
+const _flatMat = new MeshBasicMaterial({ color: 0x888888 });
+
+function _matRoots(): Array<Object3D | null | undefined> {
+    return [
         Island.firecamp, Island.tree, Island.bush, Island.bushRadio, Island.bushRadio2, Island.bushPug,
         Island.radio, Island.sword, Island.pug, Island.dogBed,
         Island.apple1, Island.apple2, Island.apple3,
@@ -839,17 +845,54 @@ function _applyCheapMaterials(on: boolean): void {
         Island.foldingTrayTable, Island.tentDogBed, Island.rugRound, Island.lantern, Island.dogBowl, Island.dogBiscuit, Island.phone,
         SeaFloorDecor.decorGroup,
     ];
-    for (const root of roots) {
+}
+
+// Build a cheaper clone of one source material, preserving texture/transparency
+// and the injected shader (ocean fog / sway / wind) by copying onBeforeCompile.
+function _cheapClone(src: any, kind: 'basic' | 'lambert'): any {
+    const Ctor = kind === 'basic' ? MeshBasicMaterial : MeshLambertMaterial;
+    const c: any = new Ctor();
+    if (src.map) c.map = src.map;
+    if (src.color && c.color) c.color.copy(src.color);
+    c.transparent = src.transparent;
+    c.opacity = src.opacity;
+    c.alphaTest = src.alphaTest;
+    c.side = src.side;
+    c.depthWrite = src.depthWrite;
+    c.vertexColors = src.vertexColors;
+    // Preserve whatever shader was injected on the original (ocean lighting fog,
+    // kelp/anemone sway, bush wind). The same string-replace targets exist in the
+    // Basic/Lambert shaders, so the injection compiles identically.
+    c.onBeforeCompile = src.onBeforeCompile;
+    c.customProgramCacheKey = src.customProgramCacheKey;
+    c.needsUpdate = true;
+    return c;
+}
+
+function _variantFor(o: any, kind: 'basic' | 'lambert'): any {
+    const cacheProp = kind === 'basic' ? '__basicMat' : '__lambertMat';
+    if (!o.userData[cacheProp]) {
+        const orig = o.userData.__origMat;
+        o.userData[cacheProp] = Array.isArray(orig)
+            ? orig.map((m: any) => _cheapClone(m, kind))
+            : _cheapClone(orig, kind);
+    }
+    return o.userData[cacheProp];
+}
+
+function _applyMatMode(mode: MatMode): void {
+    for (const root of _matRoots()) {
         if (!root) continue;
         root.traverse((o: any) => {
             if (!o.isMesh) return;
-            if (on) {
-                if (!o.userData.__origMat) o.userData.__origMat = o.material;
-                o.material = _cheapMat;
-            } else if (o.userData.__origMat) {
-                o.material = o.userData.__origMat;
-                o.userData.__origMat = undefined;
+            if (mode === 'off') {
+                if (o.userData.__origMat) o.material = o.userData.__origMat;
+                return;
             }
+            if (!o.userData.__origMat) o.userData.__origMat = o.material;
+            if (mode === 'flat')         o.material = _flatMat;
+            else if (mode === 'basic')   o.material = _variantFor(o, 'basic');
+            else if (mode === 'lambert') o.material = _variantFor(o, 'lambert');
         });
     }
 }
@@ -908,7 +951,7 @@ export function Update(): void
         // glow fade-out, coin springs, and pug all depend on it.  Wind, radio,
         // pug, and music-note work is skipped when isUnderwater=true.
         Island.Update(true);
-        if (!(DebugPerf.disableFirecamp || DebugPerf.disableBareIsland)) Fire.Update(); // DEBUG-PERF
+        Fire.Update();
     } else {
         // Show surface, hide underwater.
         // When sealed inside the cabana, the reverse dome hides the outside world,
@@ -948,92 +991,21 @@ export function Update(): void
         if (Island.grassShadowMesh)     Island.grassShadowMesh.visible     = showOutside;
 
         Island.Update(false);
-        if (!(DebugPerf.disableFirecamp || DebugPerf.disableBareIsland)) Fire.Update(); // DEBUG-PERF
+        Fire.Update();
         Fish.Update();
         Bubbles.Update(camera.position.y);
         UnderwaterParticles.Update(camera.position.y);
     }
 
-    // DEBUG-PERF — apply diagnostic overrides AFTER the Updates above (which set
-    // these visibilities each frame), so the overlay can isolate each subsystem.
-    if (DebugPerf.disableGrass) {
-        if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = false;
-        if (Island.grassShadowMesh) Island.grassShadowMesh.visible = false;
-    }
-    if (DebugPerf.disableDecor) SeaFloorDecor.decorGroup.visible = false;
-    if (DebugPerf.disableParticles) {
-        const b = Bubbles.getRenderable();
-        if (b) b.visible = false;
-        const p = UnderwaterParticles.getRenderable();
-        if (p) p.visible = false;
-    }
-    if (DebugPerf.disableApples) {
-        Island.apple1.visible = false;
-        Island.apple2.visible = false;
-        Island.apple3.visible = false;
-    }
-    if (DebugPerf.disableTreeBush) {
-        Island.tree.visible = false;
-        Island.bush.visible = false;
-    }
-    if (DebugPerf.disableRadio) {
-        Island.radio.visible = false;
-        if (Island.phone) Island.phone.visible = false;
-        Island.bushRadio.visible = false;
-        Island.bushRadio2.visible = false;
-    }
-    if (DebugPerf.disablePug) {
-        Island.pug.visible = false;
-        Island.bushPug.visible = false;
-        Island.dogBed.visible = false;
-    }
-    if (DebugPerf.disableFirecamp) {
-        Island.firecamp.visible = false;
-        Fire.fire.visible = false;
-    }
-    if (DebugPerf.disableRocks) {
-        Island.mossRock1.visible = false;
-        Island.mossRock2a.visible = false;
-        Island.mossRock2b.visible = false;
-        Island.mossRock3a.visible = false;
-        Island.mossRock3b.visible = false;
-        Island.mossRock3c.visible = false;
-        Island.littleRocks.visible = false;
-    }
-    if (DebugPerf.disableSword) {
-        Island.sword.visible = false;
-    }
-    if (DebugPerf.disableTent) {
-        Island.tent.visible = false;
-        Island.foldingTrayTable.visible = false;
-        Island.tentDogBed.visible = false;
-        Island.rugRound.visible = false;
-        Island.lantern.visible = false;
-        Island.dogBowl.visible = false;
-        Island.dogBiscuit.visible = false;
-        if (Island.phone) Island.phone.visible = false;
-    }
-    // Master: hide every island prop, keep ONLY the terrain mesh (Island.island).
-    if (DebugPerf.disableBareIsland) {
-        const hide = (o: { visible: boolean } | null | undefined) => { if (o) o.visible = false; };
-        hide(Island.firecamp); hide(Fire.fire);
-        hide(Island.tree); hide(Island.bush);
-        hide(Island.bushRadio); hide(Island.bushRadio2); hide(Island.bushPug);
-        hide(Island.radio); hide(Island.phone); hide(Island.sword);
-        hide(Island.pug); hide(Island.dogBed);
-        hide(Island.apple1); hide(Island.apple2); hide(Island.apple3);
-        hide(Island.mossRock1); hide(Island.mossRock2a); hide(Island.mossRock2b);
-        hide(Island.mossRock3a); hide(Island.mossRock3b); hide(Island.mossRock3c);
-        hide(Island.littleRocks);
-        hide(Island.proceduralGrassMesh); hide(Island.grassShadowMesh);
-        hide(Island.tent);
-        hide(Island.foldingTrayTable); hide(Island.tentDogBed); hide(Island.rugRound);
-        hide(Island.lantern); hide(Island.dogBowl); hide(Island.dogBiscuit);
-    }
-    // DEBUG-PERF — apply/restore the cheap-material diagnostic only on toggle change.
-    if (DebugPerf.cheapMaterials !== _cheapMatApplied) {
-        _cheapMatApplied = DebugPerf.cheapMaterials;
-        _applyCheapMaterials(_cheapMatApplied);
+    // DEBUG-PERF — material-swap experiment. Resolves the desired mode from the
+    // flags (priority Flat > Basic > Lambert) and re-applies only when it changes.
+    const _desiredMatMode = DebugPerf.matFlat ? 'flat'
+        : DebugPerf.matBasic ? 'basic'
+        : DebugPerf.matLambert ? 'lambert'
+        : 'off';
+    if (_desiredMatMode !== _matModeApplied) {
+        _matModeApplied = _desiredMatMode;
+        _applyMatMode(_desiredMatMode);
     }
 
     // Sync lights with skybox sun position and intensity
@@ -1087,7 +1059,7 @@ export function Update(): void
     // (pixelation + underwater distortion).
     renderSceneFrame(isUnderwater);
     // Clouds are sky-only — skip them while sealed inside the cabana.
-    if (!Island.isCabanaSealed() && !DebugPerf.disableClouds) CloudSprites.Render(renderer, camera); // DEBUG-PERF (disableClouds)
+    if (!Island.isCabanaSealed()) CloudSprites.Render(renderer, camera);
 
     // Debug axes
     renderer.autoClearColor = false;
