@@ -74,18 +74,24 @@ export function guessInitialTier(): Tier {
     if (!_isMobile) return 'high';   // desktop
     if (_isIOS) return 'high';       // Apple GPUs are strong; governor demotes old/weak iPhones
 
-    // Android — the one platform where the GPU string is usually readable.
+    // Android (and other mobile). A downgrade-only governor can only REACH 'high'
+    // if it STARTS there — so any device powerful enough to hold the frame rate
+    // must start high, not just iOS or GPUs we happen to recognise. We therefore
+    // default to 'high' and let the governor lower it. Only devices we can
+    // positively flag as weak start low, to spare them a janky first few seconds
+    // before the governor catches up.
     const g = gpu();
-    const cores = (navigator as any).hardwareConcurrency || 0;
-    const mem = (navigator as any).deviceMemory || 0;
+    const mem = (navigator as any).deviceMemory || 0;   // GB, 0 = unknown
 
-    // Known weak mobile GPUs → start low (Adreno 3xx–62x, Mali-4xx/T/G3x/G5x, PowerVR).
-    if (/(adreno \(?tm\)? ?(3|4|5|6[0-2])|mali-(4|t|g3|g5[0-2])|powervr)/.test(g)) return 'low';
-    // Known strong mobile GPUs → allow high.
-    if (/(adreno \(?tm\)? ?(7|8|6[5-9])|mali-(g7|g9|immortalis))/.test(g)) return 'high';
-    // Unknown Android: bias by CPU/RAM, otherwise the safe middle.
-    if (cores >= 8 && mem >= 6) return 'high';
-    return 'medium';
+    // Clearly weak/entry mobile GPUs: Adreno 3xx–5xx & 60x–61x, Mali T/G3x/G5(0-2)/4xx,
+    // PowerVR, VideoCore. Strong/mid parts (Adreno 62x+/7xx/8xx, Mali G57+/G6x/G7x/
+    // G9x/Immortalis) are intentionally NOT here — they start high and the governor
+    // decides. (Redmi 11 = Adreno 610 / Mali-G52 → matches → starts low.)
+    const weakGPU = /(adreno \(?tm\)? ?([3-5]\d\d|6[01]\d)|mali-(t\d|g3\d|g5[0-2]|4\d\d)|powervr|videocore)/.test(g);
+    const lowRAM = mem > 0 && mem <= 3;
+    if (weakGPU || lowRAM) return 'low';
+
+    return 'high';
 }
 
 // ── Downgrade-only FPS governor ────────────────────────────────────────────────
