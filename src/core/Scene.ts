@@ -17,7 +17,7 @@ import * as WindLines from "../effects/WindLines.ts";
 import * as CloudSprites from "../effects/CloudSprites.ts";
 import * as SceneDepth from "../effects/SceneDepth.ts";
 import { sceneDepthUniform, updateSceneDepthCamera, edgeFoamIntensityUniform } from "../materials/OceanMaterial";
-import { DebugPerf, initDebugPerfOverlay } from "./DebugPerf.ts"; // DEBUG-PERF
+import { initDebugPerfOverlay } from "./DebugPerf.ts"; // DEBUG-PERF
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
@@ -607,6 +607,10 @@ async function prewarmGPU(): Promise<void> {
     // Wait for SeaFloorDecor models (loaded via a separate GLTFLoader,
     // not tracked by Island's LoadingManager).
     await waitForModels();
+    // All props are now in the scene — apply the active material tier (e.g. the
+    // 'low' Lambert swap) BEFORE the compile pass below, so the right materials
+    // get warmed and the first visible frame is already correct.
+    reapplyPropMaterials();
     await Audio.preloadAudioBytes();
 
     // 1. Save visibility & camera state
@@ -822,15 +826,13 @@ function waitForModels(): Promise<void> {
     });
 }
 
-// DEBUG-PERF — material-swap experiment. The confirmed bottleneck is per-fragment
-// shading (MeshStandardMaterial PBR + realtime lights + ocean-lighting injection)
-// on the island + decor props. These toggles swap those prop materials, live, to
-// cheaper variants so we can A/B both FPS and visual on the device:
-//   'flat'    flat unlit grey — no texture, no lighting (perf-ceiling reference)
-//   'basic'   MeshBasicMaterial — unlit but keeps the texture + ocean fog tint
-//   'lambert' MeshLambertMaterial — cheap diffuse lighting (keeps sun shading)
-// Basic/Lambert copy the original's onBeforeCompile so the ocean-lighting fog
-// injection (and kelp sway / bush wind) is preserved exactly on the new material.
+// Prop material tier. The 'low' graphics tier swaps the island + decor props
+// from MeshStandardMaterial (PBR + realtime lights — the confirmed mobile
+// bottleneck) to a cheap MeshLambertMaterial, live. The swap copies each
+// original material's onBeforeCompile, so the ocean-lighting fog (and kelp sway /
+// bush wind) is preserved exactly on the new material — only the costly PBR/
+// specular lighting model is dropped. 'off' restores the originals (Standard).
+// 'flat'/'basic' remain from the diagnosis phase; production uses 'off'/'lambert'.
 type MatMode = 'off' | 'flat' | 'basic' | 'lambert';
 let _matModeApplied: MatMode = 'off';
 const _flatMat = new MeshBasicMaterial({ color: 0x888888 });
@@ -889,12 +891,32 @@ function _applyMatMode(mode: MatMode): void {
                 if (o.userData.__origMat) o.material = o.userData.__origMat;
                 return;
             }
+            // Only swap the expensive PBR materials. Intentional unlit effects
+            // (chest light rays, glows — MeshBasicMaterial with additive blending)
+            // must keep their original material, or they'd render wrong.
+            const cur = o.userData.__origMat ?? o.material;
+            const isPBR = Array.isArray(cur)
+                ? cur.some((m: any) => m.isMeshStandardMaterial || m.isMeshPhysicalMaterial)
+                : (cur.isMeshStandardMaterial || cur.isMeshPhysicalMaterial);
+            if (!isPBR) return;
             if (!o.userData.__origMat) o.userData.__origMat = o.material;
             if (mode === 'flat')         o.material = _flatMat;
             else if (mode === 'basic')   o.material = _variantFor(o, 'basic');
             else if (mode === 'lambert') o.material = _variantFor(o, 'lambert');
         });
     }
+}
+
+/** Production entry: set the prop material tier ('low' → 'lambert', else 'standard'). */
+export function setPropMaterials(mode: 'standard' | 'lambert'): void {
+    _matModeApplied = mode === 'lambert' ? 'lambert' : 'off';
+    _applyMatMode(_matModeApplied);
+}
+
+/** Re-apply the current prop material tier — call after async model loads so
+ *  late-arriving props (decor, island GLBs) pick up the active mode. */
+export function reapplyPropMaterials(): void {
+    _applyMatMode(_matModeApplied);
 }
 
 export function Update(): void
@@ -997,16 +1019,6 @@ export function Update(): void
         UnderwaterParticles.Update(camera.position.y);
     }
 
-    // DEBUG-PERF — material-swap experiment. Resolves the desired mode from the
-    // flags (priority Flat > Basic > Lambert) and re-applies only when it changes.
-    const _desiredMatMode = DebugPerf.matFlat ? 'flat'
-        : DebugPerf.matBasic ? 'basic'
-        : DebugPerf.matLambert ? 'lambert'
-        : 'off';
-    if (_desiredMatMode !== _matModeApplied) {
-        _matModeApplied = _desiredMatMode;
-        _applyMatMode(_desiredMatMode);
-    }
 
     // Sync lights with skybox sun position and intensity
     // Keep light close enough for shadow mapping to work
