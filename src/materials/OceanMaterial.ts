@@ -125,6 +125,15 @@ export const edgeFoamColorUniform  = new Uniform(new Vector3(OceanConfig.edgeFoa
 export const edgeFoamFadeStartZUniform = new Uniform(_isMobile ? OceanConfig.edgeFoamFadeStartZMobile : OceanConfig.edgeFoamFadeStartZDesktop);
 export const edgeFoamFadeEndZUniform   = new Uniform(_isMobile ? OceanConfig.edgeFoamFadeEndZMobile   : OceanConfig.edgeFoamFadeEndZDesktop);
 
+// Caustics quality scale: 0 = disabled (mobile/low quality), 1 = full.
+// When 0, the GPU skips the entire voronoi caustics loop (uniform branch).
+export const causticsScaleUniform = new Uniform(_isMobile ? 0.0 : 1.0);
+
+/** Set caustics intensity scale (0 = off, 1 = full). Used by quality presets. */
+export function setCausticsScale(scale: number): void {
+    causticsScaleUniform.value = scale;
+}
+
 /** Each frame, push the camera's current near/far into the shader uniforms so
  *  the depth linearization in `calcEdgeFoam` stays correct after any FOV /
  *  clip-plane change. */
@@ -335,7 +344,8 @@ export function Start(): void
         _Absorption: oceanAbsorptionUniform,
         _Time: timeUniform,
         _WaveVelocity1: waveVelocity1Uniform,
-        _WaveVelocity2: waveVelocity2Uniform
+        _WaveVelocity2: waveVelocity2Uniform,
+        _CausticsScale: causticsScaleUniform
     };
     SetSkyboxUniforms(triplanar);
 }

@@ -1,4 +1,4 @@
-import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap, Object3D, Quaternion } from "three";
+import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap, Object3D, Quaternion, MeshLambertMaterial } from "three";
 import { getIsUnderwater, isPugZoomActive } from "./Control";
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
@@ -16,7 +16,7 @@ import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
 import * as WindLines from "../effects/WindLines.ts";
 import * as CloudSprites from "../effects/CloudSprites.ts";
 import * as SceneDepth from "../effects/SceneDepth.ts";
-import { sceneDepthUniform, updateSceneDepthCamera } from "../materials/OceanMaterial";
+import { sceneDepthUniform, updateSceneDepthCamera, edgeFoamIntensityUniform } from "../materials/OceanMaterial";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
@@ -104,7 +104,10 @@ const _underwaterTransparentTargets: Object3D[] = [];
 const _depthExcludedTargets: Object3D[] = [];
 
 // Fire shadow map refreshes every Nth frame (see throttle in Update).
-const FIRE_SHADOW_UPDATE_INTERVAL = 3;
+// On mobile with medium/high quality the VSM blur is expensive; every 6th
+// frame (≈10fps shadow updates at 60fps) is imperceptible for a near-static
+// caster (only the gently-breathing pug moves under the cone).
+const FIRE_SHADOW_UPDATE_INTERVAL = isMobile ? 6 : 3;
 let _fireShadowFrame = 0;
 
 // Scratch vectors for UpdateCameraRotation (eliminates 3 Vector3 allocations per frame)
@@ -272,9 +275,17 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     // MeshDepthMaterial so the cost is just vertex pipeline + depth write.
     // Exclude foam-irrelevant heavy geometry (grass, skybox, wind lines) so the
     // pre-pass doesn't re-submit the scene's biggest vertex loads for nothing.
-    const depthExcludedVis = hideDepthPrePassExcluded();
-    SceneDepth.capture(renderer, scene, camera);
-    restoreVisibility(depthExcludedVis);
+    //
+    // Skip entirely when edge foam intensity is 0 (mobile/low quality default).
+    // The depth texture keeps its last value; calcEdgeFoam() already returns 0
+    // for all cleared (depth=1.0) pixels, so the visual result is identical and
+    // we save a full scene re-render every frame — the heaviest redundant cost on
+    // low-end devices.
+    if ((edgeFoamIntensityUniform.value as number) > 0) {
+        const depthExcludedVis = hideDepthPrePassExcluded();
+        SceneDepth.capture(renderer, scene, camera);
+        restoreVisibility(depthExcludedVis);
+    }
     sceneDepthUniform.value = SceneDepth.getDepthTexture();
     updateSceneDepthCamera(camera);
 
@@ -593,6 +604,10 @@ async function prewarmGPU(): Promise<void> {
     // Wait for SeaFloorDecor models (loaded via a separate GLTFLoader,
     // not tracked by Island's LoadingManager).
     await waitForModels();
+    // All props are now in the scene — apply the active material tier (e.g. the
+    // 'low' Lambert swap) BEFORE the compile pass below, so the right materials
+    // get warmed and the first visible frame is already correct.
+    reapplyPropMaterials();
     await Audio.preloadAudioBytes();
 
     // 1. Save visibility & camera state
@@ -808,6 +823,91 @@ function waitForModels(): Promise<void> {
     });
 }
 
+// Prop material tier. The 'low' graphics tier swaps the island + decor props
+// from MeshStandardMaterial (PBR + realtime lights — the confirmed mobile
+// bottleneck) to a cheap MeshLambertMaterial, live. 'standard' restores the
+// originals.
+type MatMode = 'standard' | 'lambert';
+let _matMode: MatMode = 'standard';
+
+function _matRoots(): Array<Object3D | null | undefined> {
+    return [
+        Island.firecamp, Island.tree, Island.bush, Island.bushRadio, Island.bushRadio2, Island.bushPug,
+        Island.radio, Island.sword, Island.pug, Island.dogBed,
+        Island.apple1, Island.apple2, Island.apple3,
+        Island.mossRock1, Island.mossRock2a, Island.mossRock2b, Island.mossRock3a, Island.mossRock3b, Island.mossRock3c,
+        Island.littleRocks, Island.tent, Island.chest,
+        Island.foldingTrayTable, Island.tentDogBed, Island.rugRound, Island.lantern, Island.dogBowl, Island.dogBiscuit, Island.phone,
+        SeaFloorDecor.decorGroup,
+    ];
+}
+
+// Build a Lambert clone of one source material, preserving texture/transparency
+// and the injected shader (ocean fog / kelp sway / bush wind) by copying
+// onBeforeCompile — the same string-replace targets exist in the Lambert shader,
+// so the injection compiles identically; only the costly PBR/specular lighting
+// model is dropped.
+function _lambertClone(src: any): any {
+    const c: any = new MeshLambertMaterial();
+    if (src.map) c.map = src.map;
+    if (src.color && c.color) c.color.copy(src.color);
+    c.transparent = src.transparent;
+    c.opacity = src.opacity;
+    c.alphaTest = src.alphaTest;
+    c.side = src.side;
+    c.depthWrite = src.depthWrite;
+    c.vertexColors = src.vertexColors;
+    c.onBeforeCompile = src.onBeforeCompile;
+    c.customProgramCacheKey = src.customProgramCacheKey;
+    c.needsUpdate = true;
+    return c;
+}
+
+function _lambertFor(o: any): any {
+    if (!o.userData.__lambertMat) {
+        const orig = o.userData.__origMat;
+        o.userData.__lambertMat = Array.isArray(orig)
+            ? orig.map((m: any) => _lambertClone(m))
+            : _lambertClone(orig);
+    }
+    return o.userData.__lambertMat;
+}
+
+function _applyMatMode(mode: MatMode): void {
+    for (const root of _matRoots()) {
+        if (!root) continue;
+        root.traverse((o: any) => {
+            if (!o.isMesh) return;
+            if (mode === 'standard') {
+                if (o.userData.__origMat) o.material = o.userData.__origMat;
+                return;
+            }
+            // Only swap the expensive PBR materials. Intentional unlit effects
+            // (chest light rays, glows — MeshBasicMaterial with additive blending)
+            // must keep their original material, or they'd render wrong.
+            const cur = o.userData.__origMat ?? o.material;
+            const isPBR = Array.isArray(cur)
+                ? cur.some((m: any) => m.isMeshStandardMaterial || m.isMeshPhysicalMaterial)
+                : (cur.isMeshStandardMaterial || cur.isMeshPhysicalMaterial);
+            if (!isPBR) return;
+            if (!o.userData.__origMat) o.userData.__origMat = o.material;
+            o.material = _lambertFor(o);
+        });
+    }
+}
+
+/** Production entry: set the prop material tier ('low' → 'lambert', else 'standard'). */
+export function setPropMaterials(mode: MatMode): void {
+    _matMode = mode;
+    _applyMatMode(_matMode);
+}
+
+/** Re-apply the current prop material tier — call after async model loads so
+ *  late-arriving props (decor, island GLBs) pick up the active mode. */
+export function reapplyPropMaterials(): void {
+    _applyMatMode(_matMode);
+}
+
 export function Update(): void
 {
     // Skip all rendering during the loading screen — nothing is visible anyway
@@ -907,6 +1007,7 @@ export function Update(): void
         Bubbles.Update(camera.position.y);
         UnderwaterParticles.Update(camera.position.y);
     }
+
 
     // Sync lights with skybox sun position and intensity
     // Keep light close enough for shadow mapping to work

@@ -1,4 +1,6 @@
-﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setDPR, setShadowResolution, isMobile, showOcean, getStartupProgress } from "./Scene";
+﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setDPR, setShadowResolution, isMobile, showOcean, getStartupProgress, setPropMaterials } from "./Scene";
+import { setCausticsScale } from "../materials/OceanMaterial";
+import { guessInitialTier, startPerfGovernor, stopPerfGovernor, lowerTier, type Tier } from "./DeviceCapability";
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
 import { startAudio, transitionFromIntroToScene, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
@@ -406,8 +408,15 @@ export function Start(): void {
     function saveQ(key: string, val: string): void  { localStorage.setItem('portfolio-q-' + key, val); }
 
     const _isMobileQ = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.innerWidth < 768;
+    // Auto performance optimisation (FPS governor). On by default. While on, the
+    // tier is auto-managed and the manual quality buttons are locked.
+    let autoPerf = loadQ('autoperf', 'true') === 'true';
+    // Initial tier: a remembered choice always wins; otherwise the device guess
+    // (when auto is on) or the legacy mobile/desktop default.
+    const _persistedQuality = localStorage.getItem('portfolio-q-quality');
     const curGfx = {
-        quality:    loadQ('quality',    _isMobileQ ? 'low' : 'medium'),
+        quality: _persistedQuality
+            ?? (autoPerf ? guessInitialTier() : (_isMobileQ ? 'low' : 'medium')),
     };
 
     function applyQualityPreset(preset: string): void {
@@ -416,6 +425,8 @@ export function Start(): void {
                 setDPR(1);
                 setShadowsEnabled(false);
                 setShadowResolution(256);
+                setCausticsScale(0);
+                setPropMaterials('lambert');   // cheap diffuse lighting on props
                 break;
             case 'medium':
                 // Desktop DPR capped at 1.5 (was 2): ~44% fewer fragments across
@@ -425,11 +436,15 @@ export function Start(): void {
                 setDPR(1.5);
                 setShadowsEnabled(true);
                 setShadowResolution(isMobile ? 512 : 1024);
+                setCausticsScale(1);
+                setPropMaterials('standard');
                 break;
             case 'high':
                 setDPR(2);
                 setShadowsEnabled(true);
                 setShadowResolution(2048);
+                setCausticsScale(1);
+                setPropMaterials('standard');
                 break;
         }
     }
@@ -489,6 +504,13 @@ export function Start(): void {
                         <button class="mode-option${curGfx.quality === 'medium' ? ' active' : ''}" data-value="medium" data-i18n="settings.medium">${t('settings.medium')}</button>
                         <button class="mode-option${curGfx.quality === 'high' ? ' active' : ''}" data-value="high" data-i18n="settings.high">${t('settings.high')}</button>
                     </div>
+                </div>
+                <div class="settings-row" style="padding-top:6px;display:flex;align-items:center;justify-content:space-between;gap:8px">
+                    <label class="settings-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.9em">
+                        <input type="checkbox" class="autoperf-toggle"${autoPerf ? ' checked' : ''} />
+                        <span>Auto performance (FPS)</span>
+                    </label>
+                    <span class="fps-counter" style="font-size:0.9em;opacity:0.8;font-variant-numeric:tabular-nums;white-space:nowrap">-- FPS</span>
                 </div>
 
             </div>
@@ -771,6 +793,7 @@ export function Start(): void {
     qualitySwitch.querySelectorAll('.mode-option').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (autoPerf) return;  // manual quality is locked while auto-optimisation is on
             const value = (btn as HTMLElement).dataset.value || 'medium';
             qualitySwitch.querySelectorAll('.mode-option').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
@@ -779,6 +802,54 @@ export function Start(): void {
             applyQualityPreset(value);
         });
     });
+
+    // ---- Auto performance (FPS governor) ----
+    const autoToggle = settingsPanel.querySelector('.autoperf-toggle') as HTMLInputElement | null;
+    _fpsCounterEl = settingsPanel.querySelector('.fps-counter') as HTMLElement | null;
+
+    function setQualityButtonsLocked(locked: boolean): void {
+        qualitySwitch.style.opacity = locked ? '0.45' : '1';
+        qualitySwitch.style.pointerEvents = locked ? 'none' : 'auto';
+    }
+
+    function reflectQualityButtons(value: string): void {
+        qualitySwitch.querySelectorAll('.mode-option').forEach(b =>
+            b.classList.toggle('active', (b as HTMLElement).dataset.value === value));
+    }
+
+    // Governor callback — steps the tier down one level (never up).
+    function autoDowngrade(): void {
+        const next = lowerTier(curGfx.quality as Tier);
+        if (!next) return;
+        curGfx.quality = next;
+        saveQ('quality', next);
+        applyQualityPreset(next);
+        reflectQualityButtons(next);
+    }
+
+    function refreshAutoPerf(): void {
+        if (autoPerf) {
+            setQualityButtonsLocked(true);
+            startPerfGovernor({
+                getTier: () => curGfx.quality as Tier,
+                downgrade: autoDowngrade,
+                // Don't measure during the loading screen / intro — only once models
+                // are in and the scene is rendering normally.
+                ready: () => getStartupProgress() >= 1,
+            });
+        } else {
+            setQualityButtonsLocked(false);
+            stopPerfGovernor();
+        }
+    }
+
+    autoToggle?.addEventListener('change', () => {
+        autoPerf = !!autoToggle.checked;
+        saveQ('autoperf', autoPerf ? 'true' : 'false');
+        refreshAutoPerf();
+    });
+
+    refreshAutoPerf();
 
     // ---- Misc Controls: Pixelation Mode Switch ----
     const pixelationSwitch = settingsPanel.querySelector('.pixelation-switch') as HTMLElement;
@@ -823,7 +894,28 @@ export function Start(): void {
 let _lastBlendClass: 'day' | 'night' = 'day';
 let _lastBlendValue = -1;
 
+// Live FPS readout shown in the settings graphics tab (next to the auto toggle).
+let _fpsCounterEl: HTMLElement | null = null;
+let _fpsLast = 0;
+let _fpsAccum = 0;
+let _fpsFrames = 0;
+
 export function Update(): void {
+    // Live FPS counter (throttled to ~4 updates/sec to avoid layout thrash).
+    if (_fpsCounterEl) {
+        const now = performance.now();
+        if (_fpsLast > 0) {
+            _fpsAccum += now - _fpsLast;
+            _fpsFrames++;
+            if (_fpsAccum >= 250) {
+                _fpsCounterEl.textContent = `${Math.round((_fpsFrames * 1000) / _fpsAccum)} FPS`;
+                _fpsAccum = 0;
+                _fpsFrames = 0;
+            }
+        }
+        _fpsLast = now;
+    }
+
     // Update CSS custom property for smooth day/night color transitions
     // Only update when value actually changed (avoid style recalc every frame)
     const blend = getDayNightBlend();
