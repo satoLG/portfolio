@@ -1,4 +1,4 @@
-import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap, Object3D, Quaternion, MeshBasicMaterial, MeshLambertMaterial } from "three";
+import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap, Object3D, Quaternion, MeshLambertMaterial } from "three";
 import { getIsUnderwater, isPugZoomActive } from "./Control";
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
@@ -17,7 +17,6 @@ import * as WindLines from "../effects/WindLines.ts";
 import * as CloudSprites from "../effects/CloudSprites.ts";
 import * as SceneDepth from "../effects/SceneDepth.ts";
 import { sceneDepthUniform, updateSceneDepthCamera, edgeFoamIntensityUniform } from "../materials/OceanMaterial";
-import { initDebugPerfOverlay } from "./DebugPerf.ts"; // DEBUG-PERF
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
@@ -575,8 +574,6 @@ export function Start(): void
     // This compiles every shader program during the loading screen so the
     // first scroll and first underwater transition are stutter-free.
     Island.setOnLoadCallback(prewarmGPU);
-
-    initDebugPerfOverlay(); // DEBUG-PERF
 }
 
 // ── GPU Prewarming ───────────────────────────────────────────────────────────
@@ -828,14 +825,10 @@ function waitForModels(): Promise<void> {
 
 // Prop material tier. The 'low' graphics tier swaps the island + decor props
 // from MeshStandardMaterial (PBR + realtime lights — the confirmed mobile
-// bottleneck) to a cheap MeshLambertMaterial, live. The swap copies each
-// original material's onBeforeCompile, so the ocean-lighting fog (and kelp sway /
-// bush wind) is preserved exactly on the new material — only the costly PBR/
-// specular lighting model is dropped. 'off' restores the originals (Standard).
-// 'flat'/'basic' remain from the diagnosis phase; production uses 'off'/'lambert'.
-type MatMode = 'off' | 'flat' | 'basic' | 'lambert';
-let _matModeApplied: MatMode = 'off';
-const _flatMat = new MeshBasicMaterial({ color: 0x888888 });
+// bottleneck) to a cheap MeshLambertMaterial, live. 'standard' restores the
+// originals.
+type MatMode = 'standard' | 'lambert';
+let _matMode: MatMode = 'standard';
 
 function _matRoots(): Array<Object3D | null | undefined> {
     return [
@@ -849,11 +842,13 @@ function _matRoots(): Array<Object3D | null | undefined> {
     ];
 }
 
-// Build a cheaper clone of one source material, preserving texture/transparency
-// and the injected shader (ocean fog / sway / wind) by copying onBeforeCompile.
-function _cheapClone(src: any, kind: 'basic' | 'lambert'): any {
-    const Ctor = kind === 'basic' ? MeshBasicMaterial : MeshLambertMaterial;
-    const c: any = new Ctor();
+// Build a Lambert clone of one source material, preserving texture/transparency
+// and the injected shader (ocean fog / kelp sway / bush wind) by copying
+// onBeforeCompile — the same string-replace targets exist in the Lambert shader,
+// so the injection compiles identically; only the costly PBR/specular lighting
+// model is dropped.
+function _lambertClone(src: any): any {
+    const c: any = new MeshLambertMaterial();
     if (src.map) c.map = src.map;
     if (src.color && c.color) c.color.copy(src.color);
     c.transparent = src.transparent;
@@ -862,24 +857,20 @@ function _cheapClone(src: any, kind: 'basic' | 'lambert'): any {
     c.side = src.side;
     c.depthWrite = src.depthWrite;
     c.vertexColors = src.vertexColors;
-    // Preserve whatever shader was injected on the original (ocean lighting fog,
-    // kelp/anemone sway, bush wind). The same string-replace targets exist in the
-    // Basic/Lambert shaders, so the injection compiles identically.
     c.onBeforeCompile = src.onBeforeCompile;
     c.customProgramCacheKey = src.customProgramCacheKey;
     c.needsUpdate = true;
     return c;
 }
 
-function _variantFor(o: any, kind: 'basic' | 'lambert'): any {
-    const cacheProp = kind === 'basic' ? '__basicMat' : '__lambertMat';
-    if (!o.userData[cacheProp]) {
+function _lambertFor(o: any): any {
+    if (!o.userData.__lambertMat) {
         const orig = o.userData.__origMat;
-        o.userData[cacheProp] = Array.isArray(orig)
-            ? orig.map((m: any) => _cheapClone(m, kind))
-            : _cheapClone(orig, kind);
+        o.userData.__lambertMat = Array.isArray(orig)
+            ? orig.map((m: any) => _lambertClone(m))
+            : _lambertClone(orig);
     }
-    return o.userData[cacheProp];
+    return o.userData.__lambertMat;
 }
 
 function _applyMatMode(mode: MatMode): void {
@@ -887,7 +878,7 @@ function _applyMatMode(mode: MatMode): void {
         if (!root) continue;
         root.traverse((o: any) => {
             if (!o.isMesh) return;
-            if (mode === 'off') {
+            if (mode === 'standard') {
                 if (o.userData.__origMat) o.material = o.userData.__origMat;
                 return;
             }
@@ -900,23 +891,21 @@ function _applyMatMode(mode: MatMode): void {
                 : (cur.isMeshStandardMaterial || cur.isMeshPhysicalMaterial);
             if (!isPBR) return;
             if (!o.userData.__origMat) o.userData.__origMat = o.material;
-            if (mode === 'flat')         o.material = _flatMat;
-            else if (mode === 'basic')   o.material = _variantFor(o, 'basic');
-            else if (mode === 'lambert') o.material = _variantFor(o, 'lambert');
+            o.material = _lambertFor(o);
         });
     }
 }
 
 /** Production entry: set the prop material tier ('low' → 'lambert', else 'standard'). */
-export function setPropMaterials(mode: 'standard' | 'lambert'): void {
-    _matModeApplied = mode === 'lambert' ? 'lambert' : 'off';
-    _applyMatMode(_matModeApplied);
+export function setPropMaterials(mode: MatMode): void {
+    _matMode = mode;
+    _applyMatMode(_matMode);
 }
 
 /** Re-apply the current prop material tier — call after async model loads so
  *  late-arriving props (decor, island GLBs) pick up the active mode. */
 export function reapplyPropMaterials(): void {
-    _applyMatMode(_matModeApplied);
+    _applyMatMode(_matMode);
 }
 
 export function Update(): void

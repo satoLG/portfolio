@@ -505,11 +505,12 @@ export function Start(): void {
                         <button class="mode-option${curGfx.quality === 'high' ? ' active' : ''}" data-value="high" data-i18n="settings.high">${t('settings.high')}</button>
                     </div>
                 </div>
-                <div class="settings-row" style="padding-top:6px">
+                <div class="settings-row" style="padding-top:6px;display:flex;align-items:center;justify-content:space-between;gap:8px">
                     <label class="settings-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.9em">
                         <input type="checkbox" class="autoperf-toggle"${autoPerf ? ' checked' : ''} />
                         <span>Auto performance (FPS)</span>
                     </label>
+                    <span class="fps-counter" style="font-size:0.9em;opacity:0.8;font-variant-numeric:tabular-nums;white-space:nowrap">-- FPS</span>
                 </div>
 
             </div>
@@ -804,6 +805,7 @@ export function Start(): void {
 
     // ---- Auto performance (FPS governor) ----
     const autoToggle = settingsPanel.querySelector('.autoperf-toggle') as HTMLInputElement | null;
+    _fpsCounterEl = settingsPanel.querySelector('.fps-counter') as HTMLElement | null;
 
     function setQualityButtonsLocked(locked: boolean): void {
         qualitySwitch.style.opacity = locked ? '0.45' : '1';
@@ -892,7 +894,28 @@ export function Start(): void {
 let _lastBlendClass: 'day' | 'night' = 'day';
 let _lastBlendValue = -1;
 
+// Live FPS readout shown in the settings graphics tab (next to the auto toggle).
+let _fpsCounterEl: HTMLElement | null = null;
+let _fpsLast = 0;
+let _fpsAccum = 0;
+let _fpsFrames = 0;
+
 export function Update(): void {
+    // Live FPS counter (throttled to ~4 updates/sec to avoid layout thrash).
+    if (_fpsCounterEl) {
+        const now = performance.now();
+        if (_fpsLast > 0) {
+            _fpsAccum += now - _fpsLast;
+            _fpsFrames++;
+            if (_fpsAccum >= 250) {
+                _fpsCounterEl.textContent = `${Math.round((_fpsFrames * 1000) / _fpsAccum)} FPS`;
+                _fpsAccum = 0;
+                _fpsFrames = 0;
+            }
+        }
+        _fpsLast = now;
+    }
+
     // Update CSS custom property for smooth day/night color transitions
     // Only update when value actually changed (avoid style recalc every frame)
     const blend = getDayNightBlend();
