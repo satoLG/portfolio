@@ -121,7 +121,7 @@ export function stopPerfGovernor(): void {
 
 export function startPerfGovernor(cfg: GovernorCfg): void {
     stopPerfGovernor();
-    const targetFps = cfg.targetFps ?? 40;
+    const targetFps = cfg.targetFps ?? 30;
     const windowMs = cfg.windowMs ?? 3000;
     const warmupMs = cfg.warmupMs ?? 2500;
 
