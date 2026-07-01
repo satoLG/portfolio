@@ -2615,27 +2615,4 @@ function buildGUI(): void {
 
     gui.hide();
     visible = false;
-
-    // TEMPORARY: touch devices have no 'H' key, so the panel above is
-    // otherwise unreachable on mobile. This dot opens/closes it — needed to
-    // live-tune the iOS edge-foam Z-fade on a real device without a redeploy
-    // per attempt. Remove once those values are confirmed and hardcoded into
-    // OceanConfig.ts.
-    const debugDot = document.createElement('button');
-    debugDot.setAttribute('aria-label', 'Toggle debug panel');
-    debugDot.style.cssText = `
-        position: fixed;
-        bottom: 8px;
-        right: 8px;
-        width: 14px;
-        height: 14px;
-        border-radius: 50%;
-        border: none;
-        background: rgba(128, 128, 128, 0.25);
-        z-index: 10000;
-        padding: 0;
-        -webkit-tap-highlight-color: transparent;
-    `;
-    debugDot.addEventListener('click', toggleVisible);
-    document.body.appendChild(debugDot);
 }

@@ -5,6 +5,7 @@ import * as CONTROL from "./core/Control";
 import * as UI from "./core/UI";
 import * as CABANA_EXIT from "./core/CabanaExit";
 import * as DEBUG from "./core/Debug";
+import * as DIAG_OVERLAY from "./core/DiagOverlay";
 import * as SETTINGS from "./shaders/Settings"
 import "./style.css";
 
@@ -29,6 +30,7 @@ CONTROL.Start();
 UI.Start();
 CABANA_EXIT.Start();
 DEBUG.Start();
+DIAG_OVERLAY.Start();
 
 requestAnimationFrame(UpdateFrame);
 
