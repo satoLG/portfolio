@@ -12,6 +12,7 @@
 import {
     Camera,
     DepthTexture,
+    LinearFilter,
     MeshDepthMaterial,
     NearestFilter,
     RGBADepthPacking,
@@ -22,16 +23,28 @@ import {
     WebGLRenderTarget,
 } from "three";
 
+// Duplicated (not imported from Scene.ts) to avoid a circular import — Scene.ts
+// itself imports this module.
+const _isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+
 let depthTarget: WebGLRenderTarget | null = null;
 let depthTexture: DepthTexture | null = null;
 let width = 1;
 let height = 1;
 
-// The foam edge is a soft smoothstep, so it tolerates a half-resolution depth
-// target: a quarter of the depth-buffer fragments + a quarter of the VRAM, with
-// no visible change to the contact line. The ocean shader samples by normalized
-// UV, so the lower-res target is fully transparent to it.
-const DEPTH_SCALE = 0.5;
+// The foam edge is a soft smoothstep, so a half-resolution depth target holds
+// up fine on desktop: a quarter of the depth-buffer fragments + a quarter of
+// the VRAM, no visible change to the contact line. On mobile, half-res +
+// NearestFilter combine badly at grazing angles / thin rock silhouettes — a
+// single nearest-neighbor sample can flip between two different depths from
+// frame to frame with sub-pixel camera motion, which is the source of the
+// iOS edge-foam flicker (not a depth-value precision issue — an aliasing one
+// at the capture resolution/filter). Mobile gets a resolution bump (still
+// well short of full-res) and linear filtering to blend across that flip
+// instead of hard-snapping. The ocean shader samples by normalized UV, so
+// either resolution is fully transparent to it.
+const DEPTH_SCALE = _isMobile ? 0.75 : 0.5;
+const DEPTH_FILTER = _isMobile ? LinearFilter : NearestFilter;
 function scaleDim(v: number): number {
     return Math.max(1, Math.round(v * DEPTH_SCALE));
 }
@@ -52,14 +65,14 @@ function ensureTarget(w: number, h: number): WebGLRenderTarget {
 
     depthTexture = new DepthTexture(w, h);
     depthTexture.type = UnsignedIntType; // 24-bit depth — enough precision for foam edge
-    depthTexture.minFilter = NearestFilter;
-    depthTexture.magFilter = NearestFilter;
+    depthTexture.minFilter = DEPTH_FILTER;
+    depthTexture.magFilter = DEPTH_FILTER;
 
     depthTarget = new WebGLRenderTarget(w, h, {
         depthTexture,
         depthBuffer: true,
-        minFilter: NearestFilter,
-        magFilter: NearestFilter,
+        minFilter: DEPTH_FILTER,
+        magFilter: DEPTH_FILTER,
     });
     width = w;
     height = h;

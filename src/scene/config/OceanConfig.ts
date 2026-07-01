@@ -82,7 +82,7 @@ export const edgeFoamColor     = { r: 1.0000, g: 0.9700, b: 1.0000 };
 export const edgeFoamFadeStartZDesktop = -40.0000;
 export const edgeFoamFadeEndZDesktop   = -60.0000;
 export const edgeFoamFadeStartZMobile  = -1.5000;
-export const edgeFoamFadeEndZMobile    = -3.5000;
+export const edgeFoamFadeEndZMobile    = -3.0000; // was -3.5 — narrower ramp shrinks the world-space band where residual depth-capture jitter can partially show through the fade
 
 // ── Reflection ────────────────────────────────────────────────────────────────
 export const reflectionFresnelPower = 0.6500; // lower = visible at more angles
