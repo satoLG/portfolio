@@ -60,6 +60,7 @@ function makeToggleRow(label: string, onValue: number, uniform: { value: number 
 }
 
 let seaFloorExcluded = false;
+let fishFxForcedIn = false;
 
 function makeBoolToggleRow(label: string, getValue: () => boolean, setValue: (v: boolean) => void): HTMLDivElement {
     const row = document.createElement('div');
@@ -145,6 +146,17 @@ function buildPanel(): HTMLDivElement {
         (included) => {
             seaFloorExcluded = !included;
             Scene.setDiagExcludeSeaFloor(seaFloorExcluded);
+        },
+    ));
+    // OFF (default) = fish/jellyfish/bubbles/particles excluded from the
+    // depth pre-pass (the fix). ON = force them back in, to A/B-confirm
+    // they're the flicker source live.
+    el.appendChild(makeBoolToggleRow(
+        'Fish/FX Depth',
+        () => fishFxForcedIn,
+        (forcedIn) => {
+            fishFxForcedIn = forcedIn;
+            Scene.setDiagForceIncludeUnderwaterTransparents(fishFxForcedIn);
         },
     ));
 

@@ -233,11 +233,28 @@ function getDepthPrePassExcluded(): Object3D[] {
     if (_diagExcludeSeaFloor) {
         for (const t of SeaFloor.tiles) if (t) _depthExcludedTargets.push(t);
     }
+    // Fish/jellyfish/bubbles/underwater particles: same depthWrite=false-
+    // override bug already fixed for the underwater-dive path below (see
+    // hideUnderwaterTransparents) — but that hide only runs when
+    // useUnderwaterTransparentPass is true (camera underwater). Above water,
+    // these stay visible=true and get swept into the depth pre-pass,
+    // painting stray/flickering foam wherever one drifts. Excluded here too,
+    // unconditionally — this hide/restore is scoped tightly around
+    // SceneDepth.capture() alone and doesn't interact with the separate
+    // underwater-transparent render path.
+    if (!_diagForceIncludeUnderwaterTransparents) {
+        for (const t of getUnderwaterTransparentTargets()) _depthExcludedTargets.push(t);
+    }
     return _depthExcludedTargets;
 }
 
 let _diagExcludeSeaFloor = false;
 export function setDiagExcludeSeaFloor(v: boolean): void { _diagExcludeSeaFloor = v; }
+
+let _diagForceIncludeUnderwaterTransparents = false;
+export function setDiagForceIncludeUnderwaterTransparents(v: boolean): void {
+    _diagForceIncludeUnderwaterTransparents = v;
+}
 
 function hideDepthPrePassExcluded(): Array<{ obj: Object3D; vis: boolean }> {
     const saved: Array<{ obj: Object3D; vis: boolean }> = [];
