@@ -217,6 +217,13 @@ function restoreVisibility(saved: Array<{ obj: Object3D; vis: boolean }>): void 
 //     real material — but the override material ignores that, so left
 //     unexcluded they render as opaque thin quads in the depth-only pass.
 //     Never meant to interact with water, same category as wind lines.
+//   - Fire (campfire flame sprite + embers): a Sprite only stays camera-
+//     facing via billboard logic baked into SpriteMaterial's own shader,
+//     which the depth override completely bypasses — it renders at its raw,
+//     never-rotated local orientation (a flat quad, normal fixed along
+//     world Z) instead of facing the camera. Edge-on from most angles, this
+//     read as a thin flickering line in the iOS edge foam. Embers share the
+//     same "override ignores the real material's transparency" risk.
 // Skipping these in the depth-only pass is the bulk of the pre-pass cost.
 function getDepthPrePassExcluded(): Object3D[] {
     _depthExcludedTargets.length = 0;
@@ -225,6 +232,7 @@ function getDepthPrePassExcluded(): Object3D[] {
     if (Skybox.skybox)              _depthExcludedTargets.push(Skybox.skybox);
     if (WindLines.windLinesGroup)   _depthExcludedTargets.push(WindLines.windLinesGroup);
     if (Island.getChestRayGroup())  _depthExcludedTargets.push(Island.getChestRayGroup()!);
+    if (Fire.fire)                  _depthExcludedTargets.push(Fire.fire);
     // Diagnostic-only (see DiagOverlay.ts): lets the SeaFloor terrain be
     // excluded from the depth pre-pass live, without touching its normal
     // visibility, to test whether it's contributing to the iOS edge-foam
