@@ -212,6 +212,18 @@ function restoreVisibility(saved: Array<{ obj: Object3D; vis: boolean }>): void 
 //   - Skybox: covers the whole screen but reads as background (depth >= 0.9999)
 //     anyway — the cleared depth target gives the identical result for free.
 //   - Wind lines: thin above-water ribbons, irrelevant.
+//   - Chest ray planes: decorative additive light beams (opacity driven by
+//     a separate config, currently 0 / disabled), depthWrite:false in their
+//     real material — but the override material ignores that, so left
+//     unexcluded they render as opaque thin quads in the depth-only pass.
+//     Never meant to interact with water, same category as wind lines.
+//   - Fire (campfire flame sprite + embers): a Sprite only stays camera-
+//     facing via billboard logic baked into SpriteMaterial's own shader,
+//     which the depth override completely bypasses — it renders at its raw,
+//     never-rotated local orientation (a flat quad, normal fixed along
+//     world Z) instead of facing the camera. Edge-on from most angles, this
+//     read as a thin flickering line in the iOS edge foam. Embers share the
+//     same "override ignores the real material's transparency" risk.
 // Skipping these in the depth-only pass is the bulk of the pre-pass cost.
 function getDepthPrePassExcluded(): Object3D[] {
     _depthExcludedTargets.length = 0;
@@ -219,6 +231,18 @@ function getDepthPrePassExcluded(): Object3D[] {
     if (Island.grassShadowMesh)     _depthExcludedTargets.push(Island.grassShadowMesh);
     if (Skybox.skybox)              _depthExcludedTargets.push(Skybox.skybox);
     if (WindLines.windLinesGroup)   _depthExcludedTargets.push(WindLines.windLinesGroup);
+    if (Island.getChestRayGroup())  _depthExcludedTargets.push(Island.getChestRayGroup()!);
+    if (Fire.fire)                  _depthExcludedTargets.push(Fire.fire);
+    // Fish/jellyfish/bubbles/underwater particles: same depthWrite=false-
+    // override bug already fixed for the underwater-dive path below (see
+    // hideUnderwaterTransparents) — but that hide only runs when
+    // useUnderwaterTransparentPass is true (camera underwater). Above water,
+    // these stay visible=true and get swept into the depth pre-pass,
+    // painting stray/flickering foam wherever one drifts. Excluded here too,
+    // unconditionally — this hide/restore is scoped tightly around
+    // SceneDepth.capture() alone and doesn't interact with the separate
+    // underwater-transparent render path.
+    for (const t of getUnderwaterTransparentTargets()) _depthExcludedTargets.push(t);
     return _depthExcludedTargets;
 }
 
@@ -1007,7 +1031,6 @@ export function Update(): void
         Bubbles.Update(camera.position.y);
         UnderwaterParticles.Update(camera.position.y);
     }
-
 
     // Sync lights with skybox sun position and intensity
     // Keep light close enough for shadow mapping to work

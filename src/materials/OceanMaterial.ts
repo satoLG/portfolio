@@ -64,7 +64,14 @@ export const foamCenterOffsetUniform = new Uniform(new Vector2(OceanConfig.foamC
 export const foamWidthUniform        = new Uniform(OceanConfig.foamWidth);
 const _isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
 
-export const foamIntensityUniform    = new Uniform(_isMobile ? 0 : OceanConfig.foamIntensity);
+// Re-enabled on mobile: calcFoam() (the SDF ring / "foam lines") never reads
+// _SceneDepth or gl_FragCoord.z — it was zeroed alongside edgeFoam purely to
+// rule out every suspect while chasing the iOS flicker, not because it was
+// itself implicated. The actual flicker sources found since: edge-foam's
+// depth-buffer precision (fixed by deriving oceanLinear analytically) and the
+// underwater volume mesh blowing out at the horizon (fixed by Y-limiting its
+// visibility). Trying foam lines live on mobile again now that both are gone.
+export const foamIntensityUniform    = new Uniform(OceanConfig.foamIntensity);
 export const foamAnimSpeedUniform    = new Uniform(OceanConfig.foamAnimSpeed);
 export const foamEdgeNoiseAmtUniform = new Uniform(OceanConfig.foamEdgeNoiseAmt);
 export const foamWobbleAmtUniform    = new Uniform(OceanConfig.foamWobbleAmt);
@@ -118,7 +125,14 @@ export const sceneDepthUniform     = new Uniform<Texture | null>(null);
 export const cameraNearUniform     = new Uniform(0.1);
 export const cameraFarUniform      = new Uniform(2000);
 export const edgeFoamWidthUniform  = new Uniform(OceanConfig.edgeFoamWidth);
-export const edgeFoamIntensityUniform = new Uniform(_isMobile ? 0 : OceanConfig.edgeFoamIntensity);
+// Re-enabled on mobile: the iOS jitter this was zeroed for came from deriving
+// oceanLinear off the mediump/16-bit depth buffer at the contact line —
+// calcEdgeFoam() now computes it analytically from the (full-precision)
+// world-space fragment position instead, so that source is gone. The
+// remaining iOS back-rock flicker (z ≈ -4.7..-5.6) is handled separately by
+// edgeFoamFadeStartZMobile/EndZMobile below. Trying it live again alongside
+// the foam-line ring re-enable.
+export const edgeFoamIntensityUniform = new Uniform(OceanConfig.edgeFoamIntensity);
 export const edgeFoamUnderwaterMulUniform = new Uniform(OceanConfig.edgeFoamUnderwaterMul);
 export const edgeFoamColorUniform  = new Uniform(new Vector3(OceanConfig.edgeFoamColor.r, OceanConfig.edgeFoamColor.g, OceanConfig.edgeFoamColor.b));
 

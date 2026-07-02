@@ -334,6 +334,12 @@ import { grassColorBase as _grassColorBase, grassColorTip as _grassColorTip } fr
 let gui: GUI | null = null;
 let visible = false;
 
+/** Shared by the 'H' keydown shortcut and the on-screen tap target below. */
+function toggleVisible(): void {
+    visible = !visible;
+    visible ? gui?.show() : gui?.hide();
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 /** Round to 4 decimal places — enough precision for copy-paste */
@@ -474,10 +480,7 @@ export function Start(): void {
     requestAnimationFrame(tryBuild);
 
     document.addEventListener('keydown', (e: KeyboardEvent) => {
-        if (e.key === 'h' || e.key === 'H') {
-            visible = !visible;
-            visible ? gui?.show() : gui?.hide();
-        }
+        if (e.key === 'h' || e.key === 'H') toggleVisible();
     });
 }
 

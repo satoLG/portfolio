@@ -22,16 +22,27 @@ import {
     WebGLRenderTarget,
 } from "three";
 
+// Duplicated (not imported from Scene.ts) to avoid a circular import — Scene.ts
+// itself imports this module.
+const _isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+
 let depthTarget: WebGLRenderTarget | null = null;
 let depthTexture: DepthTexture | null = null;
 let width = 1;
 let height = 1;
 
-// The foam edge is a soft smoothstep, so it tolerates a half-resolution depth
-// target: a quarter of the depth-buffer fragments + a quarter of the VRAM, with
-// no visible change to the contact line. The ocean shader samples by normalized
-// UV, so the lower-res target is fully transparent to it.
-const DEPTH_SCALE = 0.5;
+// The foam edge is a soft smoothstep, so a half-resolution depth target holds
+// up fine on desktop: a quarter of the depth-buffer fragments + a quarter of
+// the VRAM, no visible change to the contact line. Mobile gets a resolution
+// bump (still well short of full-res) to reduce grazing-angle/silhouette
+// aliasing in the depth read. Filtering stays NEAREST everywhere — LINEAR on
+// a DepthTexture (DEPTH_COMPONENT24) is implementation-defined, not
+// guaranteed filterable under WebGL2/GLES3, and on iOS Safari's ANGLE-Metal
+// backend it silently degrades reads to near-zero, which made calcEdgeFoam()
+// read depthDiff <= 0 everywhere and killed edge foam outright — worse than
+// the flicker it was meant to fix. The ocean shader samples by normalized UV,
+// so either resolution is fully transparent to it.
+const DEPTH_SCALE = _isMobile ? 0.75 : 0.5;
 function scaleDim(v: number): number {
     return Math.max(1, Math.round(v * DEPTH_SCALE));
 }

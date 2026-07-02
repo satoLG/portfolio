@@ -75,14 +75,18 @@ export const edgeFoamIntensity = 0.4200;  // overall brightness of the depth-int
 export const edgeFoamUnderwaterMul = 0.3500;  // dimming factor for the same effect with camera below water (silvery refraction sheen)
 export const edgeFoamColor     = { r: 1.0000, g: 0.9700, b: 1.0000 };
 
-// World-Z fade for edge foam. iOS 16-bit depth buffer causes flicker on back
-// rocks (z ≈ -4.7..-5.6). Fade starts at the pug's world Z (-2.3) where
-// precision is still clean, fully gone 1 unit behind. Desktop is off-scene.
+// World-Z fade for edge foam. Fade starts at the pug's world Z (-2.3) where
+// precision is clean, gone by edgeFoamFadeEndZMobile. Desktop is off-scene.
 // Pug world Z = islandPosition.z (-3.3) + pugOffset.z (+1.0) = -2.3
+// (The real iOS flicker source turned out to be specific unexcluded objects
+// in the depth pre-pass — chest ray planes, fish/jellyfish/particles, the
+// campfire flame sprite — now fixed at the source in Scene.ts's
+// getDepthPrePassExcluded(). This fade is a looser safety margin now, not a
+// load-bearing fix.)
 export const edgeFoamFadeStartZDesktop = -40.0000;
 export const edgeFoamFadeEndZDesktop   = -60.0000;
 export const edgeFoamFadeStartZMobile  = -1.5000;
-export const edgeFoamFadeEndZMobile    = -3.5000;
+export const edgeFoamFadeEndZMobile    = -8.2500;
 
 // ── Reflection ────────────────────────────────────────────────────────────────
 export const reflectionFresnelPower = 0.6500; // lower = visible at more angles
