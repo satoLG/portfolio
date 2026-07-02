@@ -256,6 +256,39 @@ export function setDiagForceIncludeUnderwaterTransparents(v: boolean): void {
     _diagForceIncludeUnderwaterTransparents = v;
 }
 
+// TEMPORARY (see DiagOverlay.ts): coarse "kill switch" buckets — fully hide
+// (not just depth-pre-pass-exclude) groups of models to bisect the iOS
+// edge-foam line by testing whether a real, visible model is the culprit.
+let _diagHideTerrain = false;
+let _diagHideCampFlora = false;
+let _diagHideApples = false;
+let _diagHideMossRocks = false;
+let _diagHideChest = false;
+let _diagHideFishJelly = false;
+export function setDiagHideTerrain(v: boolean): void { _diagHideTerrain = v; }
+export function setDiagHideCampFlora(v: boolean): void { _diagHideCampFlora = v; }
+export function setDiagHideApples(v: boolean): void { _diagHideApples = v; }
+export function setDiagHideMossRocks(v: boolean): void { _diagHideMossRocks = v; }
+export function setDiagHideChest(v: boolean): void { _diagHideChest = v; }
+export function setDiagHideFishJelly(v: boolean): void { _diagHideFishJelly = v; }
+
+function applyDiagOverrides(): void {
+    if (_diagHideTerrain) { Island.island.visible = false; Island.tree.visible = false; }
+    if (_diagHideCampFlora) {
+        Island.firecamp.visible = false; Island.radio.visible = false; Island.sword.visible = false;
+        Island.tent.visible = false; Island.littleRocks.visible = false;
+        Island.bush.visible = false; Island.bushRadio.visible = false;
+        Island.bushRadio2.visible = false; Island.bushPug.visible = false;
+        Island.pug.visible = false;
+    }
+    if (_diagHideApples) { Island.apple1.visible = false; Island.apple2.visible = false; Island.apple3.visible = false; }
+    if (_diagHideMossRocks) { Island.mossRock2a.visible = false; Island.mossRock2b.visible = false; }
+    if (_diagHideChest) { Island.chest.visible = false; }
+    if (_diagHideFishJelly) {
+        for (const t of getUnderwaterTransparentTargets()) t.visible = false;
+    }
+}
+
 function hideDepthPrePassExcluded(): Array<{ obj: Object3D; vis: boolean }> {
     const saved: Array<{ obj: Object3D; vis: boolean }> = [];
     for (const obj of getDepthPrePassExcluded()) {
@@ -1041,6 +1074,13 @@ export function Update(): void
         Bubbles.Update(camera.position.y);
         UnderwaterParticles.Update(camera.position.y);
     }
+
+    // Runs after the visibility gating above, every frame, so it always wins
+    // regardless of what that logic just set. TEMPORARY (see DiagOverlay.ts) —
+    // coarse on/off buckets for brute-force bisecting the iOS edge-foam line
+    // by fully hiding groups of models (not just excluding them from the
+    // depth pre-pass) to test whether a real, visible model is the culprit.
+    applyDiagOverrides();
 
 
     // Sync lights with skybox sun position and intensity

@@ -59,8 +59,13 @@ function makeToggleRow(label: string, onValue: number, uniform: { value: number 
     return row;
 }
 
-let seaFloorExcluded = false;
 let fishFxForcedIn = false;
+let terrainHidden = false;
+let campFloraHidden = false;
+let applesHidden = false;
+let mossRocksHidden = false;
+let chestHidden = false;
+let fishJellyHidden = false;
 
 function makeBoolToggleRow(label: string, getValue: () => boolean, setValue: (v: boolean) => void): HTMLDivElement {
     const row = document.createElement('div');
@@ -137,17 +142,6 @@ function buildPanel(): HTMLDivElement {
 
     el.appendChild(makeToggleRow('Edge Foam', OceanConfig.edgeFoamIntensity, edgeFoamIntensityUniform));
     el.appendChild(makeToggleRow('Ring Foam', OceanConfig.foamIntensity, foamIntensityUniform));
-    // ON = SeaFloor participates in the depth pre-pass (default/normal
-    // behavior). OFF = excluded from it, for testing whether it's a source
-    // of the flicker — does not touch SeaFloor's normal visibility.
-    el.appendChild(makeBoolToggleRow(
-        'SeaFloor Depth',
-        () => !seaFloorExcluded,
-        (included) => {
-            seaFloorExcluded = !included;
-            Scene.setDiagExcludeSeaFloor(seaFloorExcluded);
-        },
-    ));
     // OFF (default) = fish/jellyfish/bubbles/particles excluded from the
     // depth pre-pass (the fix). ON = force them back in, to A/B-confirm
     // they're the flicker source live.
@@ -159,6 +153,34 @@ function buildPanel(): HTMLDivElement {
             Scene.setDiagForceIncludeUnderwaterTransparents(fishFxForcedIn);
         },
     ));
+
+    // Coarse "kill switch" buckets — fully hide (not just depth-pre-pass-
+    // exclude) groups of models to bisect the flicker by testing whether a
+    // real, visible model is the culprit. ON = normal/visible, OFF = hidden.
+    el.appendChild(makeBoolToggleRow('Terrain', () => !terrainHidden, (v) => {
+        terrainHidden = !v;
+        Scene.setDiagHideTerrain(terrainHidden);
+    }));
+    el.appendChild(makeBoolToggleRow('Camp/Flora/Pug', () => !campFloraHidden, (v) => {
+        campFloraHidden = !v;
+        Scene.setDiagHideCampFlora(campFloraHidden);
+    }));
+    el.appendChild(makeBoolToggleRow('Apples', () => !applesHidden, (v) => {
+        applesHidden = !v;
+        Scene.setDiagHideApples(applesHidden);
+    }));
+    el.appendChild(makeBoolToggleRow('Moss Rocks', () => !mossRocksHidden, (v) => {
+        mossRocksHidden = !v;
+        Scene.setDiagHideMossRocks(mossRocksHidden);
+    }));
+    el.appendChild(makeBoolToggleRow('Chest', () => !chestHidden, (v) => {
+        chestHidden = !v;
+        Scene.setDiagHideChest(chestHidden);
+    }));
+    el.appendChild(makeBoolToggleRow('Fish/Jelly', () => !fishJellyHidden, (v) => {
+        fishJellyHidden = !v;
+        Scene.setDiagHideFishJelly(fishJellyHidden);
+    }));
 
     const fadeRow = document.createElement('div');
     fadeRow.style.cssText = `
