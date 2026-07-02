@@ -33,7 +33,10 @@ export const edgeFadeDistance  = 0.5400;
 // Values are -viewDir.y (0 = looking dead horizontal at the horizon, ~1 = down).
 // Full haze at the horizon, fading to none once the view tips below ~End.
 export const horizonFadeStart  = 0.0000;  // -viewDir.y where the haze starts fading out
-export const horizonFadeEnd    = 0.1800;  // -viewDir.y where the haze is fully gone (looking down)
+export const horizonFadeEnd    = 0.0180;  // -viewDir.y where the haze is fully gone (looking down)
+// Dialed to 10% of the original 0.18 reach — this haze was a band-aid for a
+// grazing-angle reflection artifact that has since been fixed at the source.
+// Kept at a sliver rather than removed in case any residual edge case reappears.
 
 // ── Surface Vertex Displacement (near-camera swell) ──────────────────────────
 // Real geometry waves applied ONLY to the strip of ocean in front of the camera
