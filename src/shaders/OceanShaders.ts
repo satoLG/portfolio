@@ -345,15 +345,6 @@ export const surfaceFragment =
         float viewLen = length(viewVec);
         vec3 viewDir = viewVec / viewLen;
 
-        // Horizon haze driven by the view's grazing angle, NOT distance. The
-        // ocean-plane edge and any grazing-reflection speck always sit where the
-        // line of sight is near-horizontal (-viewDir.y -> 0), regardless of how
-        // far the horizon is for the current camera height. Veil that band by
-        // blending the surface to the sky's horizon color + flattening its
-        // normal, so the plane edge dissolves into the sky. 1 at the horizon,
-        // 0 once looking down past _HorizonFadeEnd radians-ish below horizontal.
-        float horizonHaze = 1.0 - smoothstep(_HorizonFadeStart, _HorizonFadeEnd, max(0.0, -viewDir.y));
-
         vec3 normal = texture2D(_NormalMap1, _uv + _WaveVelocity1 * _Time).xyz * 2.0 - 1.0;
         normal += texture2D(_NormalMap2, _uv + _WaveVelocity2 * _Time).xyz * 2.0 - 1.0;
         normal *= _NormalMapStrength;
@@ -361,10 +352,6 @@ export const surfaceFragment =
         normal += rippleNormalOffset;  // Add ripple normal perturbation
         normal += _waveNormal;         // Add near-camera vertex-displacement tilt
         normal = normalize(normal).xzy;
-
-        // Flatten the surface in the horizon band so it reflects the smooth sky
-        // uniformly — kills the grazing-angle reflection speck at its source.
-        normal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), horizonHaze));
 
         sampleDither(gl_FragCoord.xy);
 
@@ -378,6 +365,22 @@ export const surfaceFragment =
 
         if (cameraPosition.y > _elevation)
         {
+            // Horizon haze driven by the view's grazing angle, NOT distance. The
+            // ocean-plane edge and any grazing-reflection speck always sit where the
+            // line of sight is near-horizontal (-viewDir.y -> 0), regardless of how
+            // far the horizon is for the current camera height. Veil that band by
+            // blending the surface to the sky's horizon color + flattening its
+            // normal, so the plane edge dissolves into the sky. 1 at the horizon,
+            // 0 once looking down past _HorizonFadeEnd radians-ish below horizontal.
+            // Scoped to the above-water branch only: viewDir always points down-ish
+            // here (-viewDir.y >= 0). Computing this before the branch split used to
+            // clamp negative -viewDir.y (upward rays, i.e. looking up from
+            // underwater) to 0 via max(0.0, ...) — the same value as "at the
+            // horizon" — which forced full haze (and a dead-flat normal) across the
+            // entire underwater upward view, wiping out the visible wave normal.
+            float horizonHaze = 1.0 - smoothstep(_HorizonFadeStart, _HorizonFadeEnd, max(0.0, -viewDir.y));
+            normal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), horizonHaze));
+
             // fresnelBase: raw Fresnel curve — approaches 0 directly overhead.
             // reflectivity: floored version used for body-color blending only.
             float fresnelBase = pow(1.0 - max(0.0, dot(-viewDir, normal)), _ReflectionFresnelPower);
