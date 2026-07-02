@@ -66,6 +66,8 @@ let applesHidden = false;
 let mossRocksHidden = false;
 let chestHidden = false;
 let fishJellyHidden = false;
+let fireSpriteHidden = false;
+let bushFoliageHidden = false;
 
 function makeBoolToggleRow(label: string, getValue: () => boolean, setValue: (v: boolean) => void): HTMLDivElement {
     const row = document.createElement('div');
@@ -180,6 +182,17 @@ function buildPanel(): HTMLDivElement {
     el.appendChild(makeBoolToggleRow('Fish/Jelly', () => !fishJellyHidden, (v) => {
         fishJellyHidden = !v;
         Scene.setDiagHideFishJelly(fishJellyHidden);
+    }));
+    // Isolated from "Camp/Flora/Pug" above — Fire.fire (a Sprite) is parented
+    // inside firecamp, so that bucket hid it as a side effect. These two test
+    // it, and bush foliage, independently of the rest of that bucket.
+    el.appendChild(makeBoolToggleRow('Fire Sprite', () => !fireSpriteHidden, (v) => {
+        fireSpriteHidden = !v;
+        Scene.setDiagHideFireSprite(fireSpriteHidden);
+    }));
+    el.appendChild(makeBoolToggleRow('Bush Foliage', () => !bushFoliageHidden, (v) => {
+        bushFoliageHidden = !v;
+        Scene.setDiagHideBushFoliage(bushFoliageHidden);
     }));
 
     const fadeRow = document.createElement('div');

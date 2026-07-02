@@ -265,12 +265,16 @@ let _diagHideApples = false;
 let _diagHideMossRocks = false;
 let _diagHideChest = false;
 let _diagHideFishJelly = false;
+let _diagHideFireSprite = false;
+let _diagHideBushFoliage = false;
 export function setDiagHideTerrain(v: boolean): void { _diagHideTerrain = v; }
 export function setDiagHideCampFlora(v: boolean): void { _diagHideCampFlora = v; }
 export function setDiagHideApples(v: boolean): void { _diagHideApples = v; }
 export function setDiagHideMossRocks(v: boolean): void { _diagHideMossRocks = v; }
 export function setDiagHideChest(v: boolean): void { _diagHideChest = v; }
 export function setDiagHideFishJelly(v: boolean): void { _diagHideFishJelly = v; }
+export function setDiagHideFireSprite(v: boolean): void { _diagHideFireSprite = v; }
+export function setDiagHideBushFoliage(v: boolean): void { _diagHideBushFoliage = v; }
 
 function applyDiagOverrides(): void {
     if (_diagHideTerrain) { Island.island.visible = false; Island.tree.visible = false; }
@@ -284,6 +288,16 @@ function applyDiagOverrides(): void {
     if (_diagHideApples) { Island.apple1.visible = false; Island.apple2.visible = false; Island.apple3.visible = false; }
     if (_diagHideMossRocks) { Island.mossRock2a.visible = false; Island.mossRock2b.visible = false; }
     if (_diagHideChest) { Island.chest.visible = false; }
+    // Isolated from the broader Camp/Flora/Pug bucket above: Fire.fire is a
+    // Sprite parented inside firecamp (see Island.firecamp.add(Fire.fire)
+    // below), so hiding firecamp hid it too as a side effect. These two let
+    // it be tested independently of firecamp's own (alpha-free) bonfire mesh
+    // and independently of the other camp props.
+    if (_diagHideFireSprite) { Fire.fire.visible = false; }
+    if (_diagHideBushFoliage) {
+        Island.bush.visible = false; Island.bushRadio.visible = false;
+        Island.bushRadio2.visible = false; Island.bushPug.visible = false;
+    }
     if (_diagHideFishJelly) {
         for (const t of getUnderwaterTransparentTargets()) t.visible = false;
     }
