@@ -55,8 +55,8 @@ export const surfaceWaveSteepness   = 0.3900; // blend of the cross wave layer �
 // wave normal flashes a bright sky reflection that tracks the camera. Fade the
 // whole effect out by camera height above the waterline so it only shows at the
 // crossing, never as a horizon speck.
-export const surfaceWaveHeightFadeStart = 0.1500; // camera |Y| where the swell starts fading out
-export const surfaceWaveHeightFadeEnd   = 0.3000; // camera |Y| where the swell is fully gone
+export const surfaceWaveHeightFadeStart = 0.1500; // camera Y (above water only) where the swell starts fading out
+export const surfaceWaveHeightFadeEnd   = 0.3000; // camera Y (above water only) where the swell is fully gone
 
 // ── Ocean Surface ─────────────────────────────────────────────────────────────
 export const surfaceColor   = { r: 0.0000, g: 1.1800, b: 1.1700 }; // RGB tint (1,1,1 = no tint)
