@@ -323,6 +323,7 @@ let _chestGlowTarget = 0;
 let _chestGlowReady  = false;  // true only after CHEST_GLOW_DELAY_MS has elapsed
 // Chest Zelda-style ray beams
 let _chestRayGroup: Group | null = null;
+export function getChestRayGroup(): Group | null { return _chestRayGroup; }
 export function getChestRayMats(): MeshBasicMaterial[] { return _chestRayMats; }
 const _chestRayMats: MeshBasicMaterial[] = [];
 // Coins stored for live debug-GUI transforms

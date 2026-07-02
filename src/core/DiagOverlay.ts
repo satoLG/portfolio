@@ -1,6 +1,6 @@
 /**
  * DiagOverlay — TEMPORARY on-device diagnostic panel for the iOS edge-foam
- * flicker investigation. Plain DOM, no lil-gui: two on/off toggles + a Z-fade
+ * flicker investigation. Plain DOM, no lil-gui: on/off toggles + a Z-fade
  * stepper, reachable via a small corner tap target (no keyboard needed).
  *
  * Delete this file + its Start() call in main.ts once the final
@@ -8,6 +8,7 @@
  */
 import { edgeFoamIntensityUniform, foamIntensityUniform, edgeFoamFadeEndZUniform } from "../materials/OceanMaterial";
 import * as OceanConfig from "../scene/config/OceanConfig";
+import * as Scene from "./Scene";
 
 const FADE_Z_STEP = 0.25;
 
@@ -58,6 +59,43 @@ function makeToggleRow(label: string, onValue: number, uniform: { value: number 
     return row;
 }
 
+let seaFloorExcluded = false;
+
+function makeBoolToggleRow(label: string, getValue: () => boolean, setValue: (v: boolean) => void): HTMLDivElement {
+    const row = document.createElement('div');
+    row.style.cssText = `display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0;`;
+
+    const text = document.createElement('span');
+    text.textContent = label;
+    text.style.cssText = `font-size: 13px; color: #fff; font-family: sans-serif;`;
+
+    const btn = document.createElement('button');
+    btn.style.cssText = `
+        min-width: 52px;
+        padding: 6px 10px;
+        border-radius: 6px;
+        border: none;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 600;
+        font-family: sans-serif;
+    `;
+    const render = () => {
+        const on = getValue();
+        btn.textContent = on ? 'ON' : 'OFF';
+        btn.style.background = on ? '#2b7cd4' : 'rgba(255,255,255,0.15)';
+    };
+    btn.addEventListener('click', () => {
+        setValue(!getValue());
+        render();
+    });
+    render();
+
+    row.appendChild(text);
+    row.appendChild(btn);
+    return row;
+}
+
 function makeStepButton(delta: number, label: string): HTMLButtonElement {
     const b = document.createElement('button');
     b.textContent = label;
@@ -98,6 +136,17 @@ function buildPanel(): HTMLDivElement {
 
     el.appendChild(makeToggleRow('Edge Foam', OceanConfig.edgeFoamIntensity, edgeFoamIntensityUniform));
     el.appendChild(makeToggleRow('Ring Foam', OceanConfig.foamIntensity, foamIntensityUniform));
+    // ON = SeaFloor participates in the depth pre-pass (default/normal
+    // behavior). OFF = excluded from it, for testing whether it's a source
+    // of the flicker — does not touch SeaFloor's normal visibility.
+    el.appendChild(makeBoolToggleRow(
+        'SeaFloor Depth',
+        () => !seaFloorExcluded,
+        (included) => {
+            seaFloorExcluded = !included;
+            Scene.setDiagExcludeSeaFloor(seaFloorExcluded);
+        },
+    ));
 
     const fadeRow = document.createElement('div');
     fadeRow.style.cssText = `

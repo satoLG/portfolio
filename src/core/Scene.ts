@@ -212,6 +212,11 @@ function restoreVisibility(saved: Array<{ obj: Object3D; vis: boolean }>): void 
 //   - Skybox: covers the whole screen but reads as background (depth >= 0.9999)
 //     anyway — the cleared depth target gives the identical result for free.
 //   - Wind lines: thin above-water ribbons, irrelevant.
+//   - Chest ray planes: decorative additive light beams (opacity driven by
+//     a separate config, currently 0 / disabled), depthWrite:false in their
+//     real material — but the override material ignores that, so left
+//     unexcluded they render as opaque thin quads in the depth-only pass.
+//     Never meant to interact with water, same category as wind lines.
 // Skipping these in the depth-only pass is the bulk of the pre-pass cost.
 function getDepthPrePassExcluded(): Object3D[] {
     _depthExcludedTargets.length = 0;
@@ -219,8 +224,20 @@ function getDepthPrePassExcluded(): Object3D[] {
     if (Island.grassShadowMesh)     _depthExcludedTargets.push(Island.grassShadowMesh);
     if (Skybox.skybox)              _depthExcludedTargets.push(Skybox.skybox);
     if (WindLines.windLinesGroup)   _depthExcludedTargets.push(WindLines.windLinesGroup);
+    if (Island.getChestRayGroup())  _depthExcludedTargets.push(Island.getChestRayGroup()!);
+    // Diagnostic-only (see DiagOverlay.ts): lets the SeaFloor terrain be
+    // excluded from the depth pre-pass live, without touching its normal
+    // visibility, to test whether it's contributing to the iOS edge-foam
+    // flicker. Default off — SeaFloor legitimately interacts with edge foam
+    // near the shore.
+    if (_diagExcludeSeaFloor) {
+        for (const t of SeaFloor.tiles) if (t) _depthExcludedTargets.push(t);
+    }
     return _depthExcludedTargets;
 }
+
+let _diagExcludeSeaFloor = false;
+export function setDiagExcludeSeaFloor(v: boolean): void { _diagExcludeSeaFloor = v; }
 
 function hideDepthPrePassExcluded(): Array<{ obj: Object3D; vis: boolean }> {
     const saved: Array<{ obj: Object3D; vis: boolean }> = [];
