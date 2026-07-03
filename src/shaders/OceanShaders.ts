@@ -435,10 +435,12 @@ export const surfaceFragment =
         float underwaterEdgeFoam = edgeFoamRaw * _EdgeFoamIntensity * _EdgeFoamUnderwaterMul;
         float underwaterFoam = clamp(foam * 0.3 + underwaterEdgeFoam, 0.0, 1.0);
 
-        // Shave a touch of opacity off the surface as seen from below — foam
-        // stays at full strength (it's not scaled by this), only the plain
-        // surface alpha eases back slightly.
-        float underwaterOpacity = 0.9;
+        // Shave a touch of opacity off the surface as seen from below, but only
+        // right around the camera — ease back to fully opaque as the fragment
+        // approaches the horizon. `t` already carries that same near→far /
+        // steep→grazing gradient (it drives the rest of the underwater blend),
+        // so reuse it instead of a flat constant. Foam is unaffected either way.
+        float underwaterOpacity = mix(0.9, 1.0, t);
 
         if (dot(viewDir, normal) < CRITICAL_ANGLE)
         {
