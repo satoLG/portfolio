@@ -437,8 +437,8 @@ export const surfaceFragment =
 
         // Shave a touch of opacity off the surface as seen from below, but only
         // right around the camera — ease back to fully opaque as the fragment
-        // approaches the horizon. `t` already carries that same near→far /
-        // steep→grazing gradient (it drives the rest of the underwater blend),
+        // approaches the horizon. t already carries that same near-far /
+        // steep-grazing gradient (it drives the rest of the underwater blend),
         // so reuse it instead of a flat constant. Foam is unaffected either way.
         float underwaterOpacity = mix(0.9, 1.0, t);
 
