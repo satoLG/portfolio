@@ -118,14 +118,17 @@ export const distortionEdgeFade = 0.0600;
 // ── Underwater screen-space mask (split-screen effect) ──────────────────────
 // Distance (world units) ahead of the camera at which the y=waterlineY probe
 // point is projected to find the on-screen row that separates "above the
-// ocean's line" from "below" it. Smaller = the line races up the screen with
-// very little camera movement near the crossing (the mask can end up
-// covering most of the frame — sky included — while the camera is still only
-// barely below the surface); larger = the line climbs more gradually,
-// tracking how deep the camera actually is. Tune by eye — not derived from
-// FOV, purely an art knob.
-export const underwaterMaskProbeDistance = 10.0000;
-export const underwaterMaskSoftness      = 0.0400; // UV-space width of the soft edge at the line
+// ocean's line" from "below" it. Smaller = the mask sweeps across the full
+// screen with less scroll travel (more dramatic); larger = more gradual.
+// Tune by eye — not derived from FOV, purely an art knob. Used only as a
+// fallback where the depth-based per-pixel mask has no opaque hit (sky, open
+// water, or the depth pre-pass not running this frame).
+export const underwaterMaskProbeDistance = 3.0000;
+export const underwaterMaskSoftness      = 0.0400; // UV-space width of the flat-line fallback's soft edge
+// World-space distance below the waterline a depth-reconstructed pixel must
+// be before the underwater effect reaches full local strength (the per-pixel
+// analog of the old camera-eye fade band).
+export const underwaterMaskFadeDistance  = 0.4500;
 // Dark, saturated navy — a light/pastel tint reads as "whitening" rather than
 // "underwater" once mixed in, even at moderate strength.
 export const underwaterTintColor         = { r: 0.0400, g: 0.1200, b: 0.2600 };

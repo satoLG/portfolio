@@ -19,19 +19,25 @@ import {
     WebGLRenderer,
     Vector2,
     Vector3,
+    Matrix4,
     Camera,
+    PerspectiveCamera,
     MathUtils,
 } from "three";
 import { time } from "../core/Time";
 import {
     distortionStrength, distortionSpeed, distortionScale, distortionEdgeFade,
     underwaterMaskSoftness, underwaterTintColor, underwaterTintStrength,
-    underwaterDarkenAmount,
+    underwaterDarkenAmount, underwaterMaskFadeDistance,
 } from '../scene/config/OceanConfig';
 import {
     sceneColorUniform,
     sceneResolutionUniform,
     captureSceneColor,
+    sceneDepthUniform,
+    cameraNearUniform,
+    cameraFarUniform,
+    waterlineYUniform,
 } from "../materials/OceanMaterial";
 
 // ── Underwater constants ─────────────────────────────────────────────────────
@@ -79,13 +85,34 @@ const fragmentShader = /* glsl */`
     uniform float uPixelSize;
     uniform float uFxaa;        // 1.0 = enabled, 0.0 = disabled (when MSAA is on)
     uniform vec2 uResolution;
-    uniform float uWaterLineUv;      // screen-space row (0 bottom .. 1 top) of the projected ocean line
+    uniform float uWaterLineUv;      // screen-space row (0 bottom .. 1 top) of the projected ocean line (flat-line fallback)
     uniform float uWaterLineSoftness;
     uniform vec3 uTintColor;
     uniform float uTintStrength;
     uniform float uDarkenAmount;
 
+    // Occlusion-aware mask: reconstructs world-space Y per pixel from the
+    // opaque-scene depth buffer, so solid foreground objects (e.g. a pug or
+    // tent standing on dry land) never get treated as "underwater" just
+    // because they happen to sit at the same screen row as the projected
+    // waterline. Falls back to the flat uWaterLineUv row only where there's
+    // no opaque hit (sky, or open water — the ocean mesh itself is never in
+    // this depth texture, see SceneDepth.ts/Ocean.ts's private overlayScene).
+    uniform highp sampler2D uSceneDepth;   // highp required — mediump quantizes badly near depth=1 (see OceanShaders.ts calcEdgeFoam)
+    uniform float uCameraNear;
+    uniform float uCameraFar;
+    uniform float uTanHalfFov;
+    uniform float uAspect;
+    uniform mat4 uCameraMatrixWorld;
+    uniform float uWaterlineY;
+    uniform float uMaskFadeDistance;
+    uniform float uDepthPassActive;   // 1.0 = depth pre-pass ran this frame, 0.0 = flat-line fallback only
+
     varying vec2 vUv;
+
+    float linearizeDepthBuffer(float depth, float near, float far) {
+        return (near * far) / (far * (1.0 - depth) + depth * near);
+    }
 
     // FXAA 3.11 — single-pass luma-based AA. Cheap (~6 texture taps), no extra
     // VRAM. Replaces WebGL MSAA which would cost a multi-sample backbuffer
@@ -139,14 +166,38 @@ const fragmentShader = /* glsl */`
     void main() {
         vec2 uv = vUv;
 
-        // ── Screen-space waterline mask ──────────────────────────────────
-        // 1.0 below the projected ocean line, 0.0 above it, soft transition
-        // across uWaterLineSoftness. Driven purely by where the line sits on
-        // screen — not by the camera's own eye depth — so the effect starts
-        // the instant any sliver of underwater area is visible, regardless
-        // of how submerged the camera itself is.
-        float uvBelow = uWaterLineUv - uv.y;
-        float underwaterMix = clamp(uvBelow / uWaterLineSoftness, 0.0, 1.0);
+        // ── Occlusion-aware underwater mask ──────────────────────────────
+        // Driven purely by whether THIS pixel shows underwater content —
+        // not by the camera's own eye depth — so the effect starts the
+        // instant any sliver of underwater area is visible on screen, at
+        // full local strength, regardless of how submerged the camera
+        // itself is.
+        float underwaterMix;
+        float depthSample = texture2D(uSceneDepth, uv).x;
+        bool hasOpaqueHit = uDepthPassActive > 0.5 && depthSample < 0.9999;
+
+        if (hasOpaqueHit) {
+            // Reconstruct this pixel's world-space Y from the depth buffer
+            // and compare to the waterline — correct regardless of what's
+            // in front of the ocean (pug, tent, rocks, ...), since depth
+            // naturally encodes whatever's actually nearest along this ray.
+            float eyeDepth = linearizeDepthBuffer(depthSample, uCameraNear, uCameraFar);
+            vec2 ndc = uv * 2.0 - 1.0;
+            vec3 viewPos = vec3(
+                ndc.x * eyeDepth * uTanHalfFov * uAspect,
+                ndc.y * eyeDepth * uTanHalfFov,
+                -eyeDepth
+            );
+            float worldY = (uCameraMatrixWorld * vec4(viewPos, 1.0)).y;
+            float below = uWaterlineY - worldY;
+            underwaterMix = clamp(below / uMaskFadeDistance, 0.0, 1.0);
+        } else {
+            // No opaque hit here: sky, open water (the ocean mesh is never
+            // in the depth pre-pass), or the depth pre-pass didn't run this
+            // frame — fall back to the flat analytic waterline row.
+            float uvBelow = uWaterLineUv - uv.y;
+            underwaterMix = clamp(uvBelow / uWaterLineSoftness, 0.0, 1.0);
+        }
 
         // ── Underwater distortion ────────────────────────────────────────
         // Multi-frequency waves per axis at irrational frequency/phase ratios
@@ -225,6 +276,15 @@ export function Start(renderer: WebGLRenderer): void {
             uTintColor: { value: new Vector3(underwaterTintColor.r, underwaterTintColor.g, underwaterTintColor.b) },
             uTintStrength: { value: underwaterTintStrength },
             uDarkenAmount: { value: underwaterDarkenAmount },
+            uSceneDepth: sceneDepthUniform,                // shared with OceanMaterial
+            uCameraNear: cameraNearUniform,                // shared
+            uCameraFar: cameraFarUniform,                  // shared
+            uWaterlineY: waterlineYUniform,                // shared
+            uMaskFadeDistance: { value: underwaterMaskFadeDistance },
+            uDepthPassActive: { value: 0 },
+            uTanHalfFov: { value: 1 },
+            uAspect: { value: 1 },
+            uCameraMatrixWorld: { value: new Matrix4() },
         },
         depthTest: false,
         depthWrite: false
@@ -244,11 +304,31 @@ export function onResize(w: number, h: number): void {
     height = h;
 }
 
-/** Update the screen-space row (0 bottom .. 1 top) the ocean's line projects to. */
+/** Update the screen-space row (0 bottom .. 1 top) the ocean's line projects to
+ *  (flat-line fallback used where the depth-based mask has no opaque hit). */
 export function updateWaterLineUv(uv: number): void {
     if (!material) return;
     material.uniforms.uTime.value = time;
     material.uniforms.uWaterLineUv.value = MathUtils.clamp(uv, 0, 1);
+}
+
+/** Whether the depth pre-pass ran this frame — gates the occlusion-aware
+ *  underwater mask; falls back to the flat waterline row when false. */
+export function setDepthMaskEnabled(active: boolean): void {
+    if (material) material.uniforms.uDepthPassActive.value = active ? 1 : 0;
+}
+
+/** Push the real camera's projection parameters (FOV/aspect/matrixWorld) —
+ *  needed to reconstruct world-space position from the depth buffer, since
+ *  this pass renders its quad with a dedicated orthographic camera, so
+ *  Three's auto-injected matrices don't belong to the real camera. */
+export function updateCameraProjectionUniforms(cam: Camera): void {
+    if (!material) return;
+    const persp = cam as PerspectiveCamera;
+    if (!persp.isPerspectiveCamera) return;
+    material.uniforms.uTanHalfFov.value = Math.tan(MathUtils.degToRad(persp.fov) / 2);
+    material.uniforms.uAspect.value = persp.aspect;
+    (material.uniforms.uCameraMatrixWorld.value as Matrix4).copy(persp.matrixWorld);
 }
 
 /**
