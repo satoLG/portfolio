@@ -113,7 +113,7 @@ export const distortionEdgeFade = 0.0600;
 // Tune by eye — not derived from FOV, purely an art knob.
 export const underwaterMaskProbeDistance = 3.0000;
 export const underwaterMaskSoftness      = 0.0400; // UV-space width of the soft edge at the line
-export const underwaterTintColor         = { r: 0.5500, g: 0.7800, b: 0.9500 }; // blue tint mixed in underwater
+export const underwaterTintColor         = { r: 0.0400, g: 0.1200, b: 0.2600 }; // blue tint mixed in underwater
 export const underwaterTintStrength      = 0.3500; // max mix amount at full mask*amount
 
 // ── Fish / Jellyfish Lighting ───────────────────────────────────────────────
