@@ -306,19 +306,13 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     // for all cleared (depth=1.0) pixels, so the visual result is identical and
     // we save a full scene re-render every frame — the heaviest redundant cost on
     // low-end devices.
-    const depthPassActive = (edgeFoamIntensityUniform.value as number) > 0;
-    if (depthPassActive) {
+    if ((edgeFoamIntensityUniform.value as number) > 0) {
         const depthExcludedVis = hideDepthPrePassExcluded();
         SceneDepth.capture(renderer, scene, camera);
         restoreVisibility(depthExcludedVis);
     }
     sceneDepthUniform.value = SceneDepth.getDepthTexture();
     updateSceneDepthCamera(camera);
-    // The occlusion-aware underwater mask (PostProcess.ts) needs the same
-    // depth texture edge foam uses — gate it on the same live signal so it
-    // automatically falls back to the flat analytic waterline row whenever
-    // the pre-pass didn't run this frame (texture would otherwise be stale).
-    PostProcess.setDepthMaskEnabled(depthPassActive);
 
     PostProcess.renderScene(renderer, scene, camera, () => {
         // Skip the ocean surface pass while sealed inside the cabana — the dome
@@ -731,11 +725,11 @@ async function prewarmGPU(): Promise<void> {
                 // Without this the first real crossing of UNDERWATER_Y_THRESHOLD causes a
                 // pipeline stall on the copyFramebufferToTexture call. The same render
                 // draws the parked creature grid (via the underwater transparent pass),
-                // forcing every clone's buffers to upload. PostProcess.renderScene() now
-                // runs its quad pass unconditionally every frame, so no gate needs
-                // faking here — this render already exercises the full pipeline.
+                // forcing every clone's buffers to upload.
+                PostProcess.updateUnderwaterAmount(camera.position.y);  // sets underwaterAmount > 0
                 renderSceneFrame(true);
                 renderer.getContext().finish();                         // ensure uploads complete before restore
+                PostProcess.updateUnderwaterAmount(100);                // reset to 0 (positive Y → depth < 0)
             } finally {
                 // Parking moved the clones (and acquired jelly PointLight intensity);
                 // restore even if the warm render threw, or the fish/jelly stay frozen
@@ -806,6 +800,7 @@ async function prewarmChestCorridor(): Promise<void> {
         if (typeof (renderer as any).compileAsync === 'function') {
             await (renderer as any).compileAsync(scene, camera);
         }
+        PostProcess.updateUnderwaterAmount(camera.position.y);
         renderSceneFrame(camera.position.y < 0);
     };
 
@@ -821,6 +816,7 @@ async function prewarmChestCorridor(): Promise<void> {
         SeaFloorDecor.config.chestZoomFov,
     );
 
+    PostProcess.updateUnderwaterAmount(100);
     renderer.getContext().finish();
 }
 
@@ -952,9 +948,9 @@ export function Update(): void
     Audio.Update(camera.position.y);
     UI.Update();
     MediaPlayer.Update();
+    PostProcess.updateUnderwaterAmount(camera.position.y);
     WaterLine.Update();
     PostProcess.updateWaterLineUv(WaterLine.getWaterLineUv());
-    PostProcess.updateCameraProjectionUniforms(camera);
 
     // ── Visibility gating ─────────────────────────────────────────────────────
     // Only update systems relevant to the current view (surface vs underwater).

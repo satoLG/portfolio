@@ -37,16 +37,6 @@ export const horizonFadeEnd    = 0.0180;  // -viewDir.y where the haze is fully 
 // Dialed to 10% of the original 0.18 reach — this haze was a band-aid for a
 // grazing-angle reflection artifact that has since been fixed at the source.
 // Kept at a sliver rather than removed in case any residual edge case reappears.
-//
-// Distance gate: the angle-only test above can't tell "the true distant
-// horizon" apart from "nearby water when the camera itself is close to
-// waterlineY" — both present a near-zero grazing angle. Free scroll lets the
-// camera rest right at that crossing now, so without a distance floor the
-// haze veils the near ocean surface (and whatever's visible behind it, like
-// the island) in a bright sky-colored wash. Only genuinely-far fragments get
-// the haze; anything closer than MinDist never does, regardless of angle.
-export const horizonHazeMinDist = 25.0000; // world units — haze never applies closer than this
-export const horizonHazeMaxDist = 50.0000; // world units — haze reaches full angular strength by here
 
 // ── Surface Vertex Displacement (near-camera swell) ──────────────────────────
 // Real geometry waves applied ONLY to the strip of ocean in front of the camera
@@ -120,23 +110,11 @@ export const distortionEdgeFade = 0.0600;
 // point is projected to find the on-screen row that separates "above the
 // ocean's line" from "below" it. Smaller = the mask sweeps across the full
 // screen with less scroll travel (more dramatic); larger = more gradual.
-// Tune by eye — not derived from FOV, purely an art knob. Used only as a
-// fallback where the depth-based per-pixel mask has no opaque hit (sky, open
-// water, or the depth pre-pass not running this frame).
+// Tune by eye — not derived from FOV, purely an art knob.
 export const underwaterMaskProbeDistance = 3.0000;
-export const underwaterMaskSoftness      = 0.0400; // UV-space width of the flat-line fallback's soft edge
-// World-space distance below the waterline a depth-reconstructed pixel must
-// be before the underwater effect reaches full local strength (the per-pixel
-// analog of the old camera-eye fade band).
-export const underwaterMaskFadeDistance  = 0.4500;
-// Dark, saturated navy — a light/pastel tint reads as "whitening" rather than
-// "underwater" once mixed in, even at moderate strength.
-export const underwaterTintColor         = { r: 0.0400, g: 0.1200, b: 0.2600 };
-export const underwaterTintStrength      = 0.3000; // max mix amount toward the tint color
-// Multiplicative pre-darken of the base color before mixing toward the tint,
-// scaled by the same mask — a plain mix() alone still looks like a flat milky
-// veil at partial strength; darkening first reads as genuine murky water.
-export const underwaterDarkenAmount      = 0.3500;
+export const underwaterMaskSoftness      = 0.0400; // UV-space width of the soft edge at the line
+export const underwaterTintColor         = { r: 0.5500, g: 0.7800, b: 0.9500 }; // blue tint mixed in underwater
+export const underwaterTintStrength      = 0.3500; // max mix amount at full mask*amount
 
 // ── Fish / Jellyfish Lighting ───────────────────────────────────────────────
 // Drives the per-jellyfish PointLight (candela-ish intensity + reach in world
