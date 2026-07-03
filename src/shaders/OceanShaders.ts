@@ -86,6 +86,8 @@ export const surfaceFragment =
     uniform float _EdgeFadeDistance;
     uniform float _HorizonFadeStart; // eye distance where the surface starts blending to horizon color
     uniform float _HorizonFadeEnd;   // eye distance where the surface fully matches the horizon color
+    uniform float _HorizonHazeMinDist; // world distance below which the grazing-angle haze never applies
+    uniform float _HorizonHazeMaxDist; // world distance beyond which the haze reaches full angular strength
     uniform float _SurfaceWaveRange; // radius (world units) of the near-camera swell patch discard circle
 
     // Foam mask — top-down island silhouette rendered at runtime
@@ -397,7 +399,18 @@ export const surfaceFragment =
             // underwater) to 0 via max(0.0, ...) — the same value as "at the
             // horizon" — which forced full haze (and a dead-flat normal) across the
             // entire underwater upward view, wiping out the visible wave normal.
-            float horizonHaze = 1.0 - smoothstep(_HorizonFadeStart, _HorizonFadeEnd, max(0.0, -viewDir.y));
+            //
+            // The angle-only test conflates two different things: the TRUE distant
+            // horizon (small angle because the point is far away) and NEARBY water
+            // fragments when the camera itself sits close to waterlineY (small angle
+            // because camera height happens to match the fragment's height, at any
+            // distance — free scroll lets the camera dwell right at this crossing
+            // now). Without a distance gate, that second case veils the near ocean
+            // surface — right in front of whatever's beyond it (e.g. the island) —
+            // in a bright sky-colored haze. Gate the haze by distance too so it only
+            // ever applies to the genuinely-far horizon.
+            float horizonHazeDist = smoothstep(_HorizonHazeMinDist, _HorizonHazeMaxDist, viewLen);
+            float horizonHaze = (1.0 - smoothstep(_HorizonFadeStart, _HorizonFadeEnd, max(0.0, -viewDir.y))) * horizonHazeDist;
             normal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), horizonHaze));
 
             // fresnelBase: raw Fresnel curve — approaches 0 directly overhead.

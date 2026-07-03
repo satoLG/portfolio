@@ -50,6 +50,8 @@ export const edgeFadeDistanceUniform = new Uniform(OceanConfig.edgeFadeDistance)
 
 export const horizonFadeStartUniform = new Uniform(OceanConfig.horizonFadeStart);
 export const horizonFadeEndUniform   = new Uniform(OceanConfig.horizonFadeEnd);
+export const horizonHazeMinDistUniform = new Uniform(OceanConfig.horizonHazeMinDist);
+export const horizonHazeMaxDistUniform = new Uniform(OceanConfig.horizonHazeMaxDist);
 
 // Near-camera vertex displacement (surface swell) — see OceanConfig for meaning
 export const surfaceWaveAmplitudeUniform   = new Uniform(OceanConfig.surfaceWaveAmplitude);
@@ -273,6 +275,8 @@ export function Start(): void
         _EdgeFadeDistance: edgeFadeDistanceUniform,
         _HorizonFadeStart: horizonFadeStartUniform,
         _HorizonFadeEnd: horizonFadeEndUniform,
+        _HorizonHazeMinDist: horizonHazeMinDistUniform,
+        _HorizonHazeMaxDist: horizonHazeMaxDistUniform,
         _CameraForward: new Uniform(cameraForward),
         _SurfaceWaveAmplitude: surfaceWaveAmplitudeUniform,
         _SurfaceWaveLength: surfaceWaveLengthUniform,
