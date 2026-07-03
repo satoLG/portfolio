@@ -435,6 +435,11 @@ export const surfaceFragment =
         float underwaterEdgeFoam = edgeFoamRaw * _EdgeFoamIntensity * _EdgeFoamUnderwaterMul;
         float underwaterFoam = clamp(foam * 0.3 + underwaterEdgeFoam, 0.0, 1.0);
 
+        // Shave a touch of opacity off the surface as seen from below — foam
+        // stays at full strength (it's not scaled by this), only the plain
+        // surface alpha eases back slightly.
+        float underwaterOpacity = 0.9;
+
         if (dot(viewDir, normal) < CRITICAL_ANGLE)
         {
             vec3 r = reflect(viewDir, -normal);
@@ -445,14 +450,14 @@ export const surfaceFragment =
             vec3 foamColor = _EdgeFoamColor;
             vec3 finalColor = mix(mix(rColor, light, t), foamColor, underwaterFoam);
 
-            gl_FragColor = vec4(finalColor, max(edgeFade, underwaterFoam));
+            gl_FragColor = vec4(finalColor, max(edgeFade * underwaterOpacity, underwaterFoam));
             return;
         }
 
         vec3 foamColor = _EdgeFoamColor;
         vec3 finalColor = mix(light, foamColor, underwaterFoam);
 
-        gl_FragColor = vec4(finalColor, max(t * edgeFade, underwaterFoam));
+        gl_FragColor = vec4(finalColor, max(t * edgeFade * underwaterOpacity, underwaterFoam));
     }
 `;
 
