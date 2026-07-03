@@ -725,11 +725,11 @@ async function prewarmGPU(): Promise<void> {
                 // Without this the first real crossing of UNDERWATER_Y_THRESHOLD causes a
                 // pipeline stall on the copyFramebufferToTexture call. The same render
                 // draws the parked creature grid (via the underwater transparent pass),
-                // forcing every clone's buffers to upload.
-                PostProcess.updateUnderwaterAmount(camera.position.y);  // sets underwaterAmount > 0
+                // forcing every clone's buffers to upload. PostProcess.renderScene() now
+                // runs its quad pass unconditionally every frame, so no gate needs
+                // faking here — this render already exercises the full pipeline.
                 renderSceneFrame(true);
                 renderer.getContext().finish();                         // ensure uploads complete before restore
-                PostProcess.updateUnderwaterAmount(100);                // reset to 0 (positive Y → depth < 0)
             } finally {
                 // Parking moved the clones (and acquired jelly PointLight intensity);
                 // restore even if the warm render threw, or the fish/jelly stay frozen
@@ -800,7 +800,6 @@ async function prewarmChestCorridor(): Promise<void> {
         if (typeof (renderer as any).compileAsync === 'function') {
             await (renderer as any).compileAsync(scene, camera);
         }
-        PostProcess.updateUnderwaterAmount(camera.position.y);
         renderSceneFrame(camera.position.y < 0);
     };
 
@@ -816,7 +815,6 @@ async function prewarmChestCorridor(): Promise<void> {
         SeaFloorDecor.config.chestZoomFov,
     );
 
-    PostProcess.updateUnderwaterAmount(100);
     renderer.getContext().finish();
 }
 
@@ -948,7 +946,6 @@ export function Update(): void
     Audio.Update(camera.position.y);
     UI.Update();
     MediaPlayer.Update();
-    PostProcess.updateUnderwaterAmount(camera.position.y);
     WaterLine.Update();
     PostProcess.updateWaterLineUv(WaterLine.getWaterLineUv());
 
@@ -983,7 +980,7 @@ export function Update(): void
         SeaFloor.Update();
         SeaFloorDecor.Update(deltaTime);
         Fish.Update();
-        Bubbles.Update(camera.position.y);
+        Bubbles.Update();
         UnderwaterParticles.Update(camera.position.y);
         // Always tick Island.Update underwater — chest open/close animations,
         // glow fade-out, coin springs, and pug all depend on it.  Wind, radio,
@@ -1031,7 +1028,7 @@ export function Update(): void
         Island.Update(false);
         Fire.Update();
         Fish.Update();
-        Bubbles.Update(camera.position.y);
+        Bubbles.Update();
         UnderwaterParticles.Update(camera.position.y);
     }
 

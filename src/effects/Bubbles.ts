@@ -312,10 +312,15 @@ function getSpawnPosition(): Vector3 | null {
     return _spawnPos;
 }
 
-export function Update(cameraY: number): void {
+export function Update(): void {
     if (!initialized || !_instMesh) return;
 
-    isUnderwater = cameraY < UNDERWATER_Y_THRESHOLD;
+    // Same single source of truth as the screen-space tint/distortion
+    // (PostProcess.ts): the ocean line's projected screen row, not the
+    // camera's own eye depth. Bubbles start appearing the instant any
+    // sliver of underwater area is visible, regardless of how submerged
+    // the camera itself is.
+    isUnderwater = getWaterLineNdcY() > -0.999;
 
     // Update existing bubbles (physics + opacity)
     for (let i = 0; i < bubbles.length; i++) {

@@ -45,7 +45,6 @@ const orthoCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const quadScene = new ThreeScene();
 
 let material: ShaderMaterial | null = null;
-let underwaterAmount = 0;
 let pixelSize = 0;
 let fxaaEnabled = false;
 let initialized = false;
@@ -76,7 +75,6 @@ const fragmentShader = /* glsl */`
     uniform float uSpeed;
     uniform float uScale;
     uniform float uEdgeFade;
-    uniform float uAmount;
     uniform float uPixelSize;
     uniform float uFxaa;        // 1.0 = enabled, 0.0 = disabled (when MSAA is on)
     uniform vec2 uResolution;
@@ -140,13 +138,15 @@ const fragmentShader = /* glsl */`
         vec2 uv = vUv;
 
         // ── Screen-space waterline mask ──────────────────────────────────
-        // 1.0 well below the projected ocean line (fully "underwater" on
-        // screen), 0.0 above it, soft transition across uWaterLineSoftness.
-        // uAmount (camera-depth based) still controls HOW STRONG the effect
-        // is; this mask is what restricts WHERE on screen it shows, instead
-        // of the whole frame warping/tinting at any nonzero depth.
-        float lineMask = 1.0 - smoothstep(uWaterLineUv - uWaterLineSoftness, uWaterLineUv + uWaterLineSoftness, uv.y);
-        float underwaterMix = uAmount * lineMask;
+        // Single source of truth for "where and when" every underwater
+        // effect (distortion, tint here; bubbles separately) applies: the
+        // ocean line's projected screen row, recomputed every frame from
+        // scroll/camera position (see WaterLine.ts) — NOT the camera's own
+        // eye depth. 1.0 below the line, 0.0 above it, soft transition
+        // across uWaterLineSoftness. This is why the effect starts the
+        // instant any sliver of underwater area is visible on screen,
+        // regardless of how submerged the camera itself is.
+        float underwaterMix = 1.0 - smoothstep(uWaterLineUv - uWaterLineSoftness, uWaterLineUv + uWaterLineSoftness, uv.y);
 
         // ── Underwater distortion ────────────────────────────────────────
         // Multi-frequency waves per axis at irrational frequency/phase ratios
@@ -212,7 +212,6 @@ export function Start(renderer: WebGLRenderer): void {
             uSpeed: { value: DISTORTION_SPEED },
             uScale: { value: DISTORTION_SCALE },
             uEdgeFade: { value: DISTORTION_EDGE_FADE },
-            uAmount: { value: 0 },
             uPixelSize: { value: pixelSize },
             uFxaa: { value: fxaaEnabled ? 1.0 : 0.0 },
             uResolution: sceneResolutionUniform,           // shared
@@ -239,18 +238,10 @@ export function onResize(w: number, h: number): void {
     height = h;
 }
 
-/** Update underwater distortion amount based on camera depth. */
-export function updateUnderwaterAmount(cameraY: number): void {
-    if (!material) return;
-    const depth = UNDERWATER_Y_THRESHOLD - cameraY;
-    underwaterAmount = Math.max(0, Math.min(1, depth / 0.5));
-    material.uniforms.uTime.value = time;
-    material.uniforms.uAmount.value = underwaterAmount;
-}
-
 /** Update the screen-space row (0 bottom .. 1 top) the ocean's line projects to. */
 export function updateWaterLineUv(uv: number): void {
     if (!material) return;
+    material.uniforms.uTime.value = time;
     material.uniforms.uWaterLineUv.value = MathUtils.clamp(uv, 0, 1);
 }
 
@@ -261,9 +252,15 @@ export function updateWaterLineUv(uv: number): void {
 export function renderScene(renderer: WebGLRenderer, scene: ThreeScene, camera: Camera, afterBaseRender?: () => void): void {
     renderer.render(scene, camera);
     if (afterBaseRender) afterBaseRender();
-    
-    const needsPostProcess = (underwaterAmount > 0 || pixelSize > 0 || fxaaEnabled);
-    if (!needsPostProcess || !initialized || !material) {
+
+    // Always run: the underwater mask is screen-space (WaterLine's projected
+    // row), so a single scalar can't tell "nothing underwater visible" apart
+    // from "camera fully submerged, whole screen underwater". FXAA is on by
+    // default (antialias defaults off, see Scene.ts), so this pass already
+    // ran unconditionally for almost every user before this — the cost for
+    // anyone with pixelation+FXAA both off and no underwater content on
+    // screen is a straight passthrough (one extra texture sample + copy).
+    if (!initialized || !material) {
         return;
     }
 
