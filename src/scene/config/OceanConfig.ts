@@ -47,16 +47,22 @@ export const surfaceWaveLength      = 3.7000; // wavelength in world units (keep
 export const surfaceWaveSpeed       = 0.6000; // animation speed of the swell
 export const surfaceWaveRange       = 18.0000; // XZ distance from camera over which the waves fade to flat
 export const surfaceWaveForwardBias = 0.6000; // 0 = full radial ring around camera, 1 = only directly ahead
-export const surfaceWaveSteepness   = 0.3900; // blend of the cross wave layer — adds choppiness
+export const surfaceWaveSteepness   = 0.2000; // blend of the cross wave layer — adds choppiness
 // The swell is camera-relative (follows the camera, biased ahead of its
-// heading) and only meant for the moment the camera crosses the waterline. When
-// the camera sits above the surface and looks toward the horizon (e.g. the pug
-// zoom at y~0.43), the region's far edge lands right on the horizon line and its
-// wave normal flashes a bright sky reflection that tracks the camera. Fade the
-// whole effect out by camera height above the waterline so it only shows at the
-// crossing, never as a horizon speck.
-export const surfaceWaveHeightFadeStart = 0.1500; // camera Y (above water only) where the swell starts fading out
-export const surfaceWaveHeightFadeEnd   = 0.3000; // camera Y (above water only) where the swell is fully gone
+// heading) and always active, regardless of camera height — it used to fade
+// out above water (kept only near the crossing) to hide a horizon-reflection
+// speck at the pug zoom's height, but suppressing the ripple isn't the right
+// tool for that anymore now that it's meant to always be visible. Steepness
+// was dialed back instead: the ocean surface doesn't write depth (so it
+// never occludes underwater content drawn after it — see OceanMaterial.ts),
+// which means when the displaced surface folds over itself in screen space
+// at a grazing angle, there's no z-buffer to resolve which fold is nearest —
+// triangles just draw in mesh order, occasionally showing the wrong (farther)
+// fold, including gaps straight through to the sky. Less steepness means a
+// gentler slope, which folds far less readily at the angles this camera
+// actually uses. Not a complete fix (still possible at extreme angles), but
+// a real depth-buffer fix risks breaking fish/bubble occlusion against rocks
+// elsewhere and needs visual verification this environment can't do.
 
 // ── Ocean Surface ─────────────────────────────────────────────────────────────
 export const surfaceColor   = { r: 0.0000, g: 1.1800, b: 1.1700 }; // RGB tint (1,1,1 = no tint)

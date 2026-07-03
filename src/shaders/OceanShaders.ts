@@ -9,8 +9,6 @@ export const surfaceVertex =
     uniform float _SurfaceWaveRange;
     uniform float _SurfaceWaveForwardBias;
     uniform float _SurfaceWaveSteepness;
-    uniform float _SurfaceWaveHeightFadeStart;
-    uniform float _SurfaceWaveHeightFadeEnd;
 
     varying vec2 _worldPos;
     varying vec2 _uv;
@@ -34,15 +32,7 @@ export const surfaceVertex =
         float facing = dot(normalize(toCam + vec2(1e-5)), fwd);
         float fwdMask = mix(1.0, smoothstep(-0.15, 0.55, facing), _SurfaceWaveForwardBias);
 
-        // Fade the swell out as the camera rises above the waterline. The effect
-        // is only for the surface-crossing moment; above the water its far edge
-        // sits on the horizon line and flashes a camera-tracking reflection speck.
-        // Only the positive (above-water) side fades — abs() would also kill the
-        // swell (and its normal contribution) once the camera is submerged,
-        // flattening the surface exactly where it should still ripple.
-        float heightFade = 1.0 - smoothstep(_SurfaceWaveHeightFadeStart, _SurfaceWaveHeightFadeEnd, max(cameraPosition.y, 0.0));
-
-        float mask = distMask * fwdMask * heightFade;
+        float mask = distMask * fwdMask;
 
         float elevation = 0.0;
         _waveNormal = vec3(0.0);
