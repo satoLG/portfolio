@@ -10,6 +10,7 @@ import * as Fish from "../scene/Fish.ts";
 import * as Audio from "./Audio.ts";
 import * as UI from "./UI.ts";
 import * as MediaPlayer from "./MediaPlayer.ts";
+import * as WaterLine from "../effects/WaterLine.ts";
 import * as PostProcess from "../effects/PostProcess.ts";
 import * as Bubbles from "../effects/Bubbles.ts";
 import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
@@ -948,6 +949,8 @@ export function Update(): void
     UI.Update();
     MediaPlayer.Update();
     PostProcess.updateUnderwaterAmount(camera.position.y);
+    WaterLine.Update();
+    PostProcess.updateWaterLineUv(WaterLine.getWaterLineUv());
 
     // ── Visibility gating ─────────────────────────────────────────────────────
     // Only update systems relevant to the current view (surface vs underwater).

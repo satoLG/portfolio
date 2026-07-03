@@ -42,18 +42,18 @@ const aboveWaterBottomY = window.innerWidth <= mobileBreakpointWidth ? cfgAboveW
 const underwaterTopY = window.innerWidth <= mobileBreakpointWidth ? cfgUnderwaterTopYMobile : cfgUnderwaterTopY;   // Top limit underwater (avoid looking at surface from below)
 const underwaterBottomY = -12;  // Bottom camera position (near sea floor)
 
-// Dead zone: camera must not rest between aboveWaterBottomY and underwaterTopY
+// Crossing band between the above-water and underwater zones. Scroll moves
+// freely through it (no snap) — deadZoneMidpoint is only used to derive
+// isUnderwater (the camera-eye-position threshold that audio/interaction
+// gating and the render-path branch key off).
 const deadZoneTop = aboveWaterBottomY;   // 1
 const deadZoneBottom = underwaterTopY;   // -1
 const deadZoneMidpoint = (deadZoneTop + deadZoneBottom) / 2; // 0.0
 
 const scrollSpeed = 0.005;    // How fast scroll moves camera
 const scrollSmooth = 10;      // Smoothing factor
-const snapSmooth = 6;         // Smoothing for dead-zone snap
 let targetY = aboveWaterTopY;   // Target Y position
 let currentY = aboveWaterTopY;  // Current Y position (for smoothing)
-let isScrolling = false;        // Whether user is actively scrolling
-let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
 
 // ============================================
 // INTRO CAMERA DESCENT SETTINGS
@@ -102,11 +102,6 @@ export function enableScroll(): void {
     introActive = true;          // triggers smooth descent in Update()
     introLoadingActive = false;  // loading descent done — hand off to the post-click descent
     scrollEnabled = false;
-    isScrolling = false;
-    if (scrollTimeout) {
-        clearTimeout(scrollTimeout);
-        scrollTimeout = null;
-    }
     targetY = introEndY;  // destination
     // scrollEnabled will be set true once the descent reaches the destination
 }
@@ -447,13 +442,6 @@ export function handleScroll(deltaY: number): void {
     if (webPageMode) {
         // Free scroll across the full range
         targetY = MathUtils.clamp(targetY - deltaY * scrollSpeed, underwaterBottomY, aboveWaterTopY);
-        
-        // Mark as actively scrolling and reset snap timer
-        isScrolling = true;
-        if (scrollTimeout) clearTimeout(scrollTimeout);
-        scrollTimeout = setTimeout(() => {
-            isScrolling = false;
-        }, 150);
     }
 }
 
@@ -784,17 +772,6 @@ export function Update(): void
         } else {
             // NORMAL MODE: Smooth Y scrolling, fixed X and Z
             let smoothFactor = scrollSmooth;
-            
-            // Dead zone snap: when user stops scrolling in the dead zone, snap to nearest edge
-            if (!isScrolling && !introActive && targetY < deadZoneTop && targetY > deadZoneBottom) {
-                // Snap to whichever boundary is closer
-                const snapTarget = targetY >= deadZoneMidpoint ? deadZoneTop : deadZoneBottom;
-                targetY = MathUtils.damp(targetY, snapTarget, snapSmooth, deltaTime);
-                // Snap precisely when very close
-                if (Math.abs(targetY - snapTarget) < 0.01) {
-                    targetY = snapTarget;
-                }
-            }
             
             // Derive underwater state from current position
             isUnderwater = currentY < deadZoneMidpoint;

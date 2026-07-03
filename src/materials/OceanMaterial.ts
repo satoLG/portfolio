@@ -6,6 +6,11 @@ import { SetSkyboxUniforms } from "./SkyboxMaterial";
 import * as OceanConfig from '../scene/config/OceanConfig';
 
 export const surface = new ShaderMaterial();
+// High-tessellation patch that fills the circular hole `surface` discards
+// near the camera, so the near-camera swell's silhouette reads as curved
+// instead of faceted at surfaceWaveLength's scale. Shares `surface`'s live
+// Uniform objects (see Start()) so any tuning of one applies to both.
+export const patch = new ShaderMaterial();
 export const volume = new ShaderMaterial();
 export const object = new ShaderMaterial();
 export const triplanar = new ShaderMaterial();
@@ -324,7 +329,19 @@ export function Start(): void
         _EdgeFoamFadeEndZ: edgeFoamFadeEndZUniform,
     };
     SetSkyboxUniforms(surface);
-    
+
+    // Same shader as `surface`, with OCEAN_PATCH defined so surfaceFragment's
+    // complementary discard keeps the two meshes' pixels from ever
+    // overlapping (see OceanShaders.ts) — otherwise two overlapping
+    // semi-transparent draws would double-alpha-blend into a visible seam.
+    patch.vertexShader = OceanShaders.surfaceVertex;
+    patch.fragmentShader = OceanShaders.surfaceFragment;
+    patch.side = DoubleSide;
+    patch.transparent = true;
+    patch.depthWrite = false;
+    patch.defines = { OCEAN_PATCH: '1' };
+    patch.uniforms = { ...surface.uniforms };  // shares the exact same Uniform instances — live-synced, no clone
+
     volume.vertexShader = OceanShaders.volumeVertex;
     volume.fragmentShader = OceanShaders.volumeFragment;
     volume.uniforms = 

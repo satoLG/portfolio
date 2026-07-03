@@ -10,9 +10,12 @@ export const mobileFov             = 57;       // FOV used when viewport width �
 export const mobileBreakpointWidth = 768;      // px — widths at or below this are treated as mobile
 
 // ── Scroll Y Limits ───────────────────────────────────────────────────────────
-// Higher FOV on mobile means the camera sees more vertically, so the dead-zone
-// limits must be pushed further from the surface to avoid seeing through it.
-export const aboveWaterBottomY       = 1.0000;  // Desktop: lowest Y above water before dead-zone snaps
+// Higher FOV on mobile means the camera sees more vertically, so the crossing
+// band must be pushed further from the surface to avoid seeing through it.
+// Scroll moves freely through this band (no snap) — these bounds only feed
+// isUnderwater's midpoint (Control.ts), the camera-eye threshold used by
+// audio/interaction gating and the render-path branch.
+export const aboveWaterBottomY       = 1.0000;  // Desktop: top edge of the crossing band, above water
 export const aboveWaterBottomYMobile = 1.4000;  // Mobile: raised because wider FOV reveals surface sooner
-export const underwaterTopY          = -1.0000; // Desktop: highest Y underwater before dead-zone snaps
+export const underwaterTopY          = -1.0000; // Desktop: bottom edge of the crossing band, underwater
 export const underwaterTopYMobile    = -1.4000; // Mobile: lowered for the same reason

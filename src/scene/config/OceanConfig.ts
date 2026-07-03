@@ -105,6 +105,17 @@ export const distortionSpeed    = 0.6200;
 export const distortionScale    = 8.5000;
 export const distortionEdgeFade = 0.0600;
 
+// ── Underwater screen-space mask (split-screen effect) ──────────────────────
+// Distance (world units) ahead of the camera at which the y=waterlineY probe
+// point is projected to find the on-screen row that separates "above the
+// ocean's line" from "below" it. Smaller = the mask sweeps across the full
+// screen with less scroll travel (more dramatic); larger = more gradual.
+// Tune by eye — not derived from FOV, purely an art knob.
+export const underwaterMaskProbeDistance = 3.0000;
+export const underwaterMaskSoftness      = 0.0400; // UV-space width of the soft edge at the line
+export const underwaterTintColor         = { r: 0.5500, g: 0.7800, b: 0.9500 }; // blue tint mixed in underwater
+export const underwaterTintStrength      = 0.3500; // max mix amount at full mask*amount
+
 // ── Fish / Jellyfish Lighting ───────────────────────────────────────────────
 // Drives the per-jellyfish PointLight (candela-ish intensity + reach in world
 // units). Material recompiles are avoided by keeping light *count* constant —

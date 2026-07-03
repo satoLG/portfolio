@@ -18,10 +18,15 @@ import {
     Scene as ThreeScene,
     WebGLRenderer,
     Vector2,
+    Vector3,
     Camera,
+    MathUtils,
 } from "three";
 import { time } from "../core/Time";
-import { distortionStrength, distortionSpeed, distortionScale, distortionEdgeFade } from '../scene/config/OceanConfig';
+import {
+    distortionStrength, distortionSpeed, distortionScale, distortionEdgeFade,
+    underwaterMaskSoftness, underwaterTintColor, underwaterTintStrength,
+} from '../scene/config/OceanConfig';
 import {
     sceneColorUniform,
     sceneResolutionUniform,
@@ -75,6 +80,10 @@ const fragmentShader = /* glsl */`
     uniform float uPixelSize;
     uniform float uFxaa;        // 1.0 = enabled, 0.0 = disabled (when MSAA is on)
     uniform vec2 uResolution;
+    uniform float uWaterLineUv;      // screen-space row (0 bottom .. 1 top) of the projected ocean line
+    uniform float uWaterLineSoftness;
+    uniform vec3 uTintColor;
+    uniform float uTintStrength;
 
     varying vec2 vUv;
 
@@ -130,6 +139,15 @@ const fragmentShader = /* glsl */`
     void main() {
         vec2 uv = vUv;
 
+        // ── Screen-space waterline mask ──────────────────────────────────
+        // 1.0 well below the projected ocean line (fully "underwater" on
+        // screen), 0.0 above it, soft transition across uWaterLineSoftness.
+        // uAmount (camera-depth based) still controls HOW STRONG the effect
+        // is; this mask is what restricts WHERE on screen it shows, instead
+        // of the whole frame warping/tinting at any nonzero depth.
+        float lineMask = 1.0 - smoothstep(uWaterLineUv - uWaterLineSoftness, uWaterLineUv + uWaterLineSoftness, uv.y);
+        float underwaterMix = uAmount * lineMask;
+
         // ── Underwater distortion ────────────────────────────────────────
         // Multi-frequency waves per axis at irrational frequency/phase ratios
         // so zero-crossings never align — eliminates static seam lines.
@@ -137,11 +155,11 @@ const fragmentShader = /* glsl */`
         float dx = (sin(uv.y * uScale          + t)           * 0.60
                   + sin(uv.y * uScale * 1.7    + t * 1.3 + 1.9) * 0.25
                   + sin(uv.y * uScale * 3.1    + t * 0.7 + 4.1) * 0.15
-                   ) * uDistortion * uAmount;
+                   ) * uDistortion * underwaterMix;
         float dy = (cos(uv.x * uScale * 0.8    + t * 0.9)        * 0.60
                   + cos(uv.x * uScale * 1.4    + t * 0.6 + 2.7)  * 0.25
                   + cos(uv.x * uScale * 2.6    + t * 1.1 + 5.2)  * 0.15
-                   ) * uDistortion * 0.7 * uAmount;
+                   ) * uDistortion * 0.7 * underwaterMix;
         float edgeDistance = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
         float edgeFade = uEdgeFade <= 0.0 ? 1.0 : smoothstep(0.0, uEdgeFade, edgeDistance);
         uv.x += dx * edgeFade;
@@ -157,11 +175,22 @@ const fragmentShader = /* glsl */`
         }
 
         // ── FXAA (only when MSAA is off; pixelation overrides AA) ────────
+        vec4 color;
         if (uFxaa > 0.5 && uPixelSize < 0.5) {
-            gl_FragColor = fxaa(tDiffuse, uv, 1.0 / uResolution);
+            color = fxaa(tDiffuse, uv, 1.0 / uResolution);
         } else {
-            gl_FragColor = texture2D(tDiffuse, uv);
+            color = texture2D(tDiffuse, uv);
         }
+
+        // ── Underwater blue tint ─────────────────────────────────────────
+        // Same mask as the distortion above, so the tint only touches the
+        // portion of the screen that's actually below the ocean's line —
+        // bubbles/particles are already baked into tDiffuse at this point
+        // (drawn before this pass captures the framebuffer), so they pick
+        // up the tint too without any changes to their own shaders.
+        color.rgb = mix(color.rgb, uTintColor, underwaterMix * uTintStrength);
+
+        gl_FragColor = color;
     }
 `;
 
@@ -187,6 +216,10 @@ export function Start(renderer: WebGLRenderer): void {
             uPixelSize: { value: pixelSize },
             uFxaa: { value: fxaaEnabled ? 1.0 : 0.0 },
             uResolution: sceneResolutionUniform,           // shared
+            uWaterLineUv: { value: 0.5 },
+            uWaterLineSoftness: { value: underwaterMaskSoftness },
+            uTintColor: { value: new Vector3(underwaterTintColor.r, underwaterTintColor.g, underwaterTintColor.b) },
+            uTintStrength: { value: underwaterTintStrength },
         },
         depthTest: false,
         depthWrite: false
@@ -213,6 +246,12 @@ export function updateUnderwaterAmount(cameraY: number): void {
     underwaterAmount = Math.max(0, Math.min(1, depth / 0.5));
     material.uniforms.uTime.value = time;
     material.uniforms.uAmount.value = underwaterAmount;
+}
+
+/** Update the screen-space row (0 bottom .. 1 top) the ocean's line projects to. */
+export function updateWaterLineUv(uv: number): void {
+    if (!material) return;
+    material.uniforms.uWaterLineUv.value = MathUtils.clamp(uv, 0, 1);
 }
 
 /**

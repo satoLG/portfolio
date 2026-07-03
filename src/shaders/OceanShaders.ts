@@ -86,6 +86,7 @@ export const surfaceFragment =
     uniform float _EdgeFadeDistance;
     uniform float _HorizonFadeStart; // eye distance where the surface starts blending to horizon color
     uniform float _HorizonFadeEnd;   // eye distance where the surface fully matches the horizon color
+    uniform float _SurfaceWaveRange; // radius (world units) of the near-camera swell patch discard circle
 
     // Foam mask — top-down island silhouette rendered at runtime
     uniform sampler2D _FoamMask;
@@ -331,9 +332,27 @@ export const surfaceFragment =
 
     void main()
     {
+        // Near-camera wave patch: complementary circular discard. The main
+        // surface discards INSIDE the circle (leaves a hole); the patch mesh
+        // (identical shader, OCEAN_PATCH defined) discards OUTSIDE it and
+        // fills that hole with much finer tessellation so the swell's
+        // silhouette isn't faceted. Both sides use the same _SurfaceWaveRange
+        // radius and cameraPosition — displacement is already 0 there
+        // (distMask hits exactly 0 at _SurfaceWaveRange in the vertex
+        // shader), so the seam is watertight regardless of tessellation, and
+        // the two semi-transparent meshes never double-blend the same pixel.
+        vec2 toCam = _worldPos - cameraPosition.xz;
+        float distSq = dot(toCam, toCam);
+        float radiusSq = _SurfaceWaveRange * _SurfaceWaveRange;
+        #ifdef OCEAN_PATCH
+            if (distSq > radiusSq) discard;
+        #else
+            if (distSq <= radiusSq) discard;
+        #endif
+
         float edgeFade = calcEdgeFade(_worldPos);
         if (edgeFade <= 0.0) discard;
-        
+
         float foam = calcFoam(_worldPos);
         
         // Add ripple normal perturbation with subtle foam

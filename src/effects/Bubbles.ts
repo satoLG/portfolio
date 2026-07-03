@@ -11,6 +11,7 @@ import {
 import { camera, scene, isMobile } from "../core/Scene";
 import { deltaTime, time } from "../core/Time";
 import { UNDERWATER_Y_THRESHOLD } from "./PostProcess";
+import { getWaterLineNdcY } from "./WaterLine";
 import { playDiveSound } from "../core/Audio";
 
 // ============================================
@@ -231,6 +232,7 @@ const _forward = new Vector3();
 const _right = new Vector3();
 const _up = new Vector3();
 const _spawnPos = new Vector3();
+const _screenProj = new Vector3();
 
 // Get a spawn position at given screen coordinates (NDC: -1 to 1)
 function getSpawnPositionAtNDC(ndcX: number, ndcY: number): Vector3 {
@@ -257,11 +259,11 @@ function getSpawnPositionAtNDC(ndcX: number, ndcY: number): Vector3 {
     return _spawnPos;
 }
 
-// Spawn a small group of ambient bubbles at a random screen position
+// Spawn a small group of ambient bubbles just below the visible bottom edge
+// so they drift up into frame instead of popping into existence mid-screen.
 function spawnAmbientBubbleGroup(): void {
-    // Random position on screen (avoid edges)
     const ndcX = (Math.random() - 0.5) * 1.4;
-    const ndcY = (Math.random() - 0.5) * 1.4;
+    const ndcY = -1.0 - Math.random() * 0.15;
 
     // Spawn bubbles close together using the constant
     for (let i = 0; i < AMBIENT_BUBBLE_GROUP_SIZE; i++) {
@@ -342,8 +344,15 @@ export function Update(cameraY: number): void {
         const lifeRatio = b.life / b.maxLife;
         _opacities[i] = Math.min(0.6, lifeRatio * 1.5);
 
-        // Pop at surface
+        // Pop at surface (world-space safety net)
         if (b.y > UNDERWATER_Y_THRESHOLD - 0.05) {
+            b.life = 0;
+        }
+        // Pop if the bubble has risen above the on-screen waterline row — the
+        // world-Y check alone isn't enough once the underwater effect is
+        // split screen-space: a bubble can be well below world Y=0 but still
+        // near the projected line depending on camera position.
+        else if (_screenProj.set(b.x, b.y, b.z).project(camera).y > getWaterLineNdcY() - 0.02) {
             b.life = 0;
         }
 
@@ -383,7 +392,7 @@ export function Update(cameraY: number): void {
         const toSpawn = Math.min(entryBubblesRemaining, ENTRY_BUBBLE_PER_FRAME);
         for (let i = 0; i < toSpawn; i++) {
             const ndcX = (Math.random() - 0.5) * 1.6;
-            const ndcY = (Math.random() - 0.5) * 1.6;
+            const ndcY = -1.0 - Math.random() * 0.15;
             const pos = getSpawnPositionAtNDC(ndcX, ndcY);
             if (pos.y < UNDERWATER_Y_THRESHOLD) {
                 spawnBubble(pos);
