@@ -1,6 +1,6 @@
 import { BufferAttribute, BufferGeometry, Camera, DepthTexture, DoubleSide, Mesh, MeshDepthMaterial, NearestFilter, PlaneGeometry, Raycaster, RGBADepthPacking, Scene, UnsignedIntType, Vector2, WebGLRenderer, WebGLRenderTarget } from "three";
 import * as oceanMaterials from "../materials/OceanMaterial";
-import { camera, isMobile } from "../core/Scene";
+import { camera } from "../core/Scene";
 import { deltaTime } from "../core/Time";
 import * as Audio from "../core/Audio";
 import { isPugZoomActive, isRadioZoomActive } from "../core/Control";
@@ -128,7 +128,10 @@ let surfaceDepthTarget: WebGLRenderTarget | null = null;
 let surfaceDepthTexture: DepthTexture | null = null;
 let _depthW = 1;
 let _depthH = 1;
-const _depthScale = isMobile ? 0.75 : 0.5; // matches SceneDepth.ts's tradeoff
+// Duplicated (not imported from Scene.ts) to avoid a circular import — Scene.ts
+// itself imports this module (same reasoning as SceneDepth.ts's _isMobile).
+const _isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+const _depthScale = _isMobile ? 0.75 : 0.5; // matches SceneDepth.ts's tradeoff
 const _depthSize = new Vector2();
 // side: DoubleSide is required — surface/patch are DoubleSide (visible from
 // both above and below), but MeshDepthMaterial defaults to FrontSide, which
@@ -178,18 +181,24 @@ export function captureSurfaceDepth(renderer: WebGLRenderer, renderCamera: Camer
     const target = _ensureSurfaceDepthTarget(_scaleDepthDim(_depthSize.x), _scaleDepthDim(_depthSize.y));
 
     const wasVolumeVisible = volume.visible;
-    volume.visible = false;
-
     const prevTarget = renderer.getRenderTarget();
     const prevOverride = overlayScene.overrideMaterial;
-    overlayScene.overrideMaterial = _depthOverrideMaterial;
-    renderer.setRenderTarget(target);
-    renderer.clear(true, true, false);
-    renderer.render(overlayScene, renderCamera);
 
-    overlayScene.overrideMaterial = prevOverride;
-    renderer.setRenderTarget(prevTarget);
-    volume.visible = wasVolumeVisible;
+    // try/finally: if render() ever throws (driver/extension quirk), the
+    // renderer must not stay pointed at this off-screen target — otherwise
+    // every frame after this one (including the main scene) would draw into
+    // an invisible texture instead of the canvas, i.e. a permanently black page.
+    try {
+        volume.visible = false;
+        overlayScene.overrideMaterial = _depthOverrideMaterial;
+        renderer.setRenderTarget(target);
+        renderer.clear(true, true, false);
+        renderer.render(overlayScene, renderCamera);
+    } finally {
+        overlayScene.overrideMaterial = prevOverride;
+        renderer.setRenderTarget(prevTarget);
+        volume.visible = wasVolumeVisible;
+    }
 }
 
 export function CompileSurface(renderer: WebGLRenderer, renderCamera: Camera): void {
