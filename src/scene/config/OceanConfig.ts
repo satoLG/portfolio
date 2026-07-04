@@ -111,33 +111,21 @@ export const distortionSpeed    = 0.6200;
 export const distortionScale    = 8.5000;
 export const distortionEdgeFade = 0.0600;
 
-// ── Underwater screen-space mask (split-screen effect) ──────────────────────
-// Distance (world units) ahead of the camera at which the y=waterlineY probe
-// point is projected to find the on-screen row that separates "above the
-// ocean's line" from "below" it. Smaller = the line races up the screen with
-// very little camera movement near the crossing (can end up covering most of
-// the frame, sky included, while the camera is only barely below the
-// surface); larger = the line climbs more gradually, tracking how deep the
-// camera actually is. Tune by eye — not derived from FOV, purely an art knob.
-export const underwaterMaskProbeDistance = 10.0000;
-export const underwaterMaskSoftness      = 0.0400; // UV-space width of the flat-line fallback's soft edge
-// World-space distance below the waterline a depth-reconstructed pixel
-// (island rock, tree, seafloor — any solid geometry) must be before the
-// underwater effect reaches full local strength there. Used only where the
-// depth-based mask has a real hit — see PostProcess.ts.
-export const underwaterMaskFadeDistance  = 0.4500;
-export const underwaterTintColor         = { r: 0.0400, g: 0.1200, b: 0.2600 }; // blue tint mixed in underwater
-export const underwaterTintStrength      = 0.3500; // max mix amount at full mask*amount
-// The angle-based probe line alone never quite guarantees full-screen
-// coverage: most of an underwater view is open water (no solid object for
-// the depth-based mask to grab), which falls to that same probe line, and
-// its climb toward the top of frame gets flatter (not steeper) as the
-// camera goes deeper — pure angle math never actually reaches vertical.
-// Once the camera is unambiguously deep, force full coverage regardless of
-// the angle calculation. Values are POSITIVE depth (world units) below the
-// waterline (i.e. -cameraPosition.y).
-export const underwaterFullCoverageDepthStart = 1.5000; // full coverage starts blending in
-export const underwaterFullCoverageDepthEnd   = 4.0000; // full coverage guaranteed from here down
+// ── Underwater "over/under" tint (world-space, wave-driven) ─────────────────
+// The tint's boundary is a WORLD-SPACE wavy surface, not a screen-space line:
+// PostProcess.ts reconstructs each pixel's world position from the depth buffer
+// and tints everything that lies below surfaceH(xz,t) = waterlineY + amp*swell.
+// The swell reuses the ocean's own two-sine pattern (same directions/phase, via
+// oceanWavePatternGLSL) but with its OWN, broader amplitude/length so the line
+// undulates at every distance — the real surface swell is tiny (0.05) and only
+// exists within ~18u of the camera, so it can't drive a visible line at the
+// distant island. Purely art knobs; tune on the preview via the Debug GUI.
+export const underwaterTintColor      = { r: 0.0400, g: 0.1200, b: 0.2600 }; // single navy tone mixed in underwater
+export const underwaterTintStrength   = 0.3500; // mix amount below the wavy line (uniform — no depth gradient)
+export const underwaterWaveAmplitude  = 0.3500; // world-Y amplitude of the tint boundary swell
+export const underwaterWaveLength     = 10.0000; // world-space wavelength (broad, rolling)
+export const underwaterWaveSpeed      = 0.5000; // animation speed (× time)
+export const underwaterWaveEdge       = 0.0500; // world-Y softness of the boundary (smoothstep half-width)
 
 // ── Fish / Jellyfish Lighting ───────────────────────────────────────────────
 // Drives the per-jellyfish PointLight (candela-ish intensity + reach in world

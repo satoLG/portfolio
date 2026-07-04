@@ -10,14 +10,13 @@ import * as Fish from "../scene/Fish.ts";
 import * as Audio from "./Audio.ts";
 import * as UI from "./UI.ts";
 import * as MediaPlayer from "./MediaPlayer.ts";
-import * as WaterLine from "../effects/WaterLine.ts";
 import * as PostProcess from "../effects/PostProcess.ts";
 import * as Bubbles from "../effects/Bubbles.ts";
 import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
 import * as WindLines from "../effects/WindLines.ts";
 import * as CloudSprites from "../effects/CloudSprites.ts";
 import * as SceneDepth from "../effects/SceneDepth.ts";
-import { sceneDepthUniform, oceanSurfaceDepthUniform, updateSceneDepthCamera, edgeFoamIntensityUniform } from "../materials/OceanMaterial";
+import { sceneDepthUniform, updateSceneDepthCamera } from "../materials/OceanMaterial";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
@@ -301,12 +300,15 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     // Exclude foam-irrelevant heavy geometry (grass, skybox, wind lines) so the
     // pre-pass doesn't re-submit the scene's biggest vertex loads for nothing.
     //
-    // Skip entirely when edge foam intensity is 0 (mobile/low quality default).
-    // The depth texture keeps its last value; calcEdgeFoam() already returns 0
-    // for all cleared (depth=1.0) pixels, so the visual result is identical and
-    // we save a full scene re-render every frame — the heaviest redundant cost on
-    // low-end devices.
-    const depthPassActive = (edgeFoamIntensityUniform.value as number) > 0;
+    // Historically this pass was skipped when edge foam intensity was 0
+    // (mobile/low-quality default). It can't be anymore: the underwater tint
+    // (PostProcess.ts) reconstructs world position from this SAME opaque depth
+    // to decide what's actually below the wavy water surface (so the island's
+    // above-water grass isn't tinted while its submerged rock is). Edge foam is
+    // off on mobile, but the tint is not — so run the pass whenever the ocean
+    // (hence the tint) can be on screen. Still skipped when sealed inside the
+    // cabana: the dome hides the ocean and the camera is above water.
+    const depthPassActive = !Island.isCabanaSealed();
     if (depthPassActive) {
         const depthExcludedVis = hideDepthPrePassExcluded();
         SceneDepth.capture(renderer, scene, camera);
@@ -314,21 +316,9 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     }
     sceneDepthUniform.value = SceneDepth.getDepthTexture();
     updateSceneDepthCamera(camera);
-    // The occlusion-aware underwater mask (PostProcess.ts) reads the same
-    // depth texture edge foam uses — gate it on the same live signal so it
-    // automatically falls back to the flat analytic waterline row whenever
-    // the pre-pass didn't run this frame (texture would otherwise be stale).
+    // Tell the underwater tint whether the depth it needs is valid this frame;
+    // when false (cabana) the tint disables itself instead of reading stale depth.
     PostProcess.setDepthMaskEnabled(depthPassActive);
-
-    // Ocean surface depth capture — the water plane is a real, literally
-    // rendered mesh (just absent from the opaque-scene depth above, by
-    // design), so PostProcess.ts needs its own precise read of where it
-    // actually ends up on screen instead of an analytic approximation.
-    if (depthPassActive && !Island.isCabanaSealed()) {
-        Ocean.captureSurfaceDepth(renderer, camera);
-    }
-    oceanSurfaceDepthUniform.value = Ocean.getSurfaceDepthTexture();
-    PostProcess.setOceanDepthMaskEnabled(depthPassActive && !Island.isCabanaSealed());
 
     PostProcess.renderScene(renderer, scene, camera, () => {
         // Skip the ocean surface pass while sealed inside the cabana — the dome
@@ -962,8 +952,6 @@ export function Update(): void
     Audio.Update(camera.position.y);
     UI.Update();
     MediaPlayer.Update();
-    WaterLine.Update();
-    PostProcess.updateWaterLineUv(WaterLine.getWaterLineUv());
     PostProcess.updateCameraProjectionUniforms(camera);
 
     // ── Visibility gating ─────────────────────────────────────────────────────

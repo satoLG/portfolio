@@ -11,7 +11,6 @@ import {
 import { camera, scene, isMobile } from "../core/Scene";
 import { deltaTime, time } from "../core/Time";
 import { UNDERWATER_Y_THRESHOLD } from "./PostProcess";
-import { getWaterLineNdcY } from "./WaterLine";
 import { playDiveSound } from "../core/Audio";
 
 // ============================================
@@ -232,7 +231,6 @@ const _forward = new Vector3();
 const _right = new Vector3();
 const _up = new Vector3();
 const _spawnPos = new Vector3();
-const _screenProj = new Vector3();
 
 // Get a spawn position at given screen coordinates (NDC: -1 to 1)
 function getSpawnPositionAtNDC(ndcX: number, ndcY: number): Vector3 {
@@ -315,12 +313,12 @@ function getSpawnPosition(): Vector3 | null {
 export function Update(): void {
     if (!initialized || !_instMesh) return;
 
-    // Same single source of truth as the screen-space tint/distortion
-    // (PostProcess.ts): the ocean line's projected screen row, not the
-    // camera's own eye depth. Bubbles start appearing the instant any
-    // sliver of underwater area is visible, regardless of how submerged
-    // the camera itself is.
-    isUnderwater = getWaterLineNdcY() > -0.999;
+    // Spawn the ambient bubble stream once the camera is at or near the water
+    // surface. The tint/distortion boundary is now a world-space wavy surface
+    // (PostProcess.ts) with no cheap per-frame screen row to key off of, so
+    // bubbles gate on the camera's own depth instead — with a small margin so
+    // they begin as the camera approaches the crossing.
+    isUnderwater = camera.position.y < UNDERWATER_Y_THRESHOLD + 1.0;
 
     // Update existing bubbles (physics + opacity)
     for (let i = 0; i < bubbles.length; i++) {
@@ -349,15 +347,10 @@ export function Update(): void {
         const lifeRatio = b.life / b.maxLife;
         _opacities[i] = Math.min(0.6, lifeRatio * 1.5);
 
-        // Pop at surface (world-space safety net)
+        // Pop at the surface. The wavy tint boundary swings only ±underwater
+        // wave amplitude around the waterline, small enough that a flat world-Y
+        // test reads correctly without replicating the wave function on the CPU.
         if (b.y > UNDERWATER_Y_THRESHOLD - 0.05) {
-            b.life = 0;
-        }
-        // Pop if the bubble has risen above the on-screen waterline row — the
-        // world-Y check alone isn't enough once the underwater effect is
-        // split screen-space: a bubble can be well below world Y=0 but still
-        // near the projected line depending on camera position.
-        else if (_screenProj.set(b.x, b.y, b.z).project(camera).y > getWaterLineNdcY() - 0.02) {
             b.life = 0;
         }
 

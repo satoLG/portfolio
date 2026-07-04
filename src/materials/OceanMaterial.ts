@@ -125,11 +125,6 @@ export const waterlineYUniform = new Uniform(OceanConfig.waterlineY);
 // the ocean grazes opaque geometry behind it. Camera near/far feed the
 // `perspectiveDepthToViewZ` helper.
 export const sceneDepthUniform     = new Uniform<Texture | null>(null);
-// The ocean surface's OWN depth (separate from the opaque-scene one above —
-// the ocean mesh is intentionally never in that one). Set from Ocean.ts's
-// captureSurfaceDepth() output each frame; consumed by PostProcess.ts to
-// find precisely where the water plane itself ends up on screen.
-export const oceanSurfaceDepthUniform = new Uniform<Texture | null>(null);
 export const cameraNearUniform     = new Uniform(0.1);
 export const cameraFarUniform      = new Uniform(2000);
 export const edgeFoamWidthUniform  = new Uniform(OceanConfig.edgeFoamWidth);

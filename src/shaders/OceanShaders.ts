@@ -1,6 +1,23 @@
+// ── Shared ocean swell pattern ───────────────────────────────────────────────
+// Single source of truth for the two-sine swell used both by the surface vertex
+// displacement (below) and by the underwater post-process tint (PostProcess.ts),
+// so the tint boundary rides the exact same phase/direction as the real water.
+// Returns the raw (un-amplified) height in ~[-(1+cross), (1+cross)] and writes
+// the analytic horizontal gradient of that raw height into `grad`.
+export const oceanWavePatternGLSL = /* glsl */`
+    float oceanWavePattern(vec2 xz, float t, vec2 dir1, vec2 dir2, float k, float crossW, out vec2 grad) {
+        float phase1 = dot(xz, dir1) * k + t;
+        float phase2 = dot(xz, dir2) * (k * 1.3) - t * 0.85;
+        grad = dir1 * (k * cos(phase1))
+             + dir2 * (k * 1.3 * crossW * cos(phase2));
+        return sin(phase1) + crossW * sin(phase2);
+    }
+`;
+
 export const surfaceVertex =
 /*glsl*/`
     #include <ocean>
+` + oceanWavePatternGLSL + /*glsl*/`
 
     uniform vec3  _CameraForward;
     uniform float _SurfaceWaveAmplitude;
@@ -42,20 +59,16 @@ export const surfaceVertex =
             vec2 dir1 = normalize(_WaveVelocity1 + vec2(1e-5));
             vec2 dir2 = normalize(_WaveVelocity2 + vec2(1e-5));
             float t = _Time * _SurfaceWaveSpeed;
-
-            float phase1 = dot(worldPos.xz, dir1) * k + t;
-            float phase2 = dot(worldPos.xz, dir2) * (k * 1.3) - t * 0.85;
-
             float crossWave = _SurfaceWaveSteepness * 0.6;
-            float h = sin(phase1) + crossWave * sin(phase2);
+
+            vec2 grad;
+            float h = oceanWavePattern(worldPos.xz, t, dir1, dir2, k, crossWave, grad);
             float amp = _SurfaceWaveAmplitude * mask;
             elevation = h * amp;
 
             // Analytic gradient → tangent-space normal offset. The fragment
             // builds normals in a z-up space then swizzles .xzy to world, so
             // (-dH/dx, -dH/dz, 0) maps to the correct world tilt.
-            vec2 grad = dir1 * (k * cos(phase1))
-                      + dir2 * (k * 1.3 * crossWave * cos(phase2));
             grad *= amp;
             _waveNormal = vec3(-grad.x, -grad.y, 0.0);
         }
