@@ -1,6 +1,6 @@
-import { BufferAttribute, BufferGeometry, Camera, Mesh, PlaneGeometry, Raycaster, Scene, Vector2, WebGLRenderer } from "three";
+import { BufferAttribute, BufferGeometry, Camera, DepthTexture, DoubleSide, Mesh, MeshDepthMaterial, NearestFilter, PlaneGeometry, Raycaster, RGBADepthPacking, Scene, UnsignedIntType, Vector2, WebGLRenderer, WebGLRenderTarget } from "three";
 import * as oceanMaterials from "../materials/OceanMaterial";
-import { camera } from "../core/Scene";
+import { camera, isMobile } from "../core/Scene";
 import { deltaTime } from "../core/Time";
 import * as Audio from "../core/Audio";
 import { isPugZoomActive, isRadioZoomActive } from "../core/Control";
@@ -114,6 +114,82 @@ export function RenderSurface(renderer: WebGLRenderer, renderCamera: Camera): vo
     renderer.autoClear = false;
     renderer.render(overlayScene, renderCamera);
     renderer.autoClear = prevAutoClear;
+}
+
+// ── Ocean surface depth capture ─────────────────────────────────────────────
+// The ocean surface is a real, literally rendered plane — but it lives in its
+// own private overlayScene and is intentionally absent from SceneDepth's
+// opaque-scene capture (used for edge foam), so nothing outside this module
+// can tell where it actually ends up on screen. PostProcess.ts needs exactly
+// that (to know precisely where "the water" is on screen, not an analytic
+// approximation of an idealized flat plane), so capture it separately here —
+// same depth-only MeshDepthMaterial-override technique as SceneDepth.ts.
+let surfaceDepthTarget: WebGLRenderTarget | null = null;
+let surfaceDepthTexture: DepthTexture | null = null;
+let _depthW = 1;
+let _depthH = 1;
+const _depthScale = isMobile ? 0.75 : 0.5; // matches SceneDepth.ts's tradeoff
+const _depthSize = new Vector2();
+// side: DoubleSide is required — surface/patch are DoubleSide (visible from
+// both above and below), but MeshDepthMaterial defaults to FrontSide, which
+// would cull the back faces exactly when looking up at the surface from
+// underwater: the single most common case this capture exists for.
+const _depthOverrideMaterial = new MeshDepthMaterial({ depthPacking: RGBADepthPacking, side: DoubleSide });
+
+function _scaleDepthDim(v: number): number {
+    return Math.max(1, Math.round(v * _depthScale));
+}
+
+function _ensureSurfaceDepthTarget(w: number, h: number): WebGLRenderTarget {
+    if (surfaceDepthTarget && _depthW === w && _depthH === h) return surfaceDepthTarget;
+    if (surfaceDepthTarget) surfaceDepthTarget.dispose();
+    if (surfaceDepthTexture) surfaceDepthTexture.dispose();
+
+    surfaceDepthTexture = new DepthTexture(w, h);
+    surfaceDepthTexture.type = UnsignedIntType;
+    surfaceDepthTexture.minFilter = NearestFilter;
+    surfaceDepthTexture.magFilter = NearestFilter;
+
+    surfaceDepthTarget = new WebGLRenderTarget(w, h, {
+        depthTexture: surfaceDepthTexture,
+        depthBuffer: true,
+        minFilter: NearestFilter,
+        magFilter: NearestFilter,
+    });
+    _depthW = w;
+    _depthH = h;
+    return surfaceDepthTarget;
+}
+
+/** Get the ocean surface's own depth texture. May be null pre-Start(). */
+export function getSurfaceDepthTexture(): DepthTexture | null {
+    return surfaceDepthTexture;
+}
+
+/**
+ * Render just the ocean surface + near-camera patch (not the underwater fog
+ * volume box, which would trivially "hit" almost everywhere and defeat the
+ * purpose) into a dedicated depth target. Call once per frame, any time
+ * after Update() has positioned the patch for this frame.
+ */
+export function captureSurfaceDepth(renderer: WebGLRenderer, renderCamera: Camera): void {
+    if (!surface.visible) return;
+    renderer.getDrawingBufferSize(_depthSize);
+    const target = _ensureSurfaceDepthTarget(_scaleDepthDim(_depthSize.x), _scaleDepthDim(_depthSize.y));
+
+    const wasVolumeVisible = volume.visible;
+    volume.visible = false;
+
+    const prevTarget = renderer.getRenderTarget();
+    const prevOverride = overlayScene.overrideMaterial;
+    overlayScene.overrideMaterial = _depthOverrideMaterial;
+    renderer.setRenderTarget(target);
+    renderer.clear(true, true, false);
+    renderer.render(overlayScene, renderCamera);
+
+    overlayScene.overrideMaterial = prevOverride;
+    renderer.setRenderTarget(prevTarget);
+    volume.visible = wasVolumeVisible;
 }
 
 export function CompileSurface(renderer: WebGLRenderer, renderCamera: Camera): void {

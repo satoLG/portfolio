@@ -17,7 +17,7 @@ import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
 import * as WindLines from "../effects/WindLines.ts";
 import * as CloudSprites from "../effects/CloudSprites.ts";
 import * as SceneDepth from "../effects/SceneDepth.ts";
-import { sceneDepthUniform, updateSceneDepthCamera, edgeFoamIntensityUniform } from "../materials/OceanMaterial";
+import { sceneDepthUniform, oceanSurfaceDepthUniform, updateSceneDepthCamera, edgeFoamIntensityUniform } from "../materials/OceanMaterial";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
@@ -319,6 +319,16 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     // automatically falls back to the flat analytic waterline row whenever
     // the pre-pass didn't run this frame (texture would otherwise be stale).
     PostProcess.setDepthMaskEnabled(depthPassActive);
+
+    // Ocean surface depth capture — the water plane is a real, literally
+    // rendered mesh (just absent from the opaque-scene depth above, by
+    // design), so PostProcess.ts needs its own precise read of where it
+    // actually ends up on screen instead of an analytic approximation.
+    if (depthPassActive && !Island.isCabanaSealed()) {
+        Ocean.captureSurfaceDepth(renderer, camera);
+    }
+    oceanSurfaceDepthUniform.value = Ocean.getSurfaceDepthTexture();
+    PostProcess.setOceanDepthMaskEnabled(depthPassActive && !Island.isCabanaSealed());
 
     PostProcess.renderScene(renderer, scene, camera, () => {
         // Skip the ocean surface pass while sealed inside the cabana — the dome
