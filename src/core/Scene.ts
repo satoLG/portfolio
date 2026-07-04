@@ -306,13 +306,19 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     // for all cleared (depth=1.0) pixels, so the visual result is identical and
     // we save a full scene re-render every frame — the heaviest redundant cost on
     // low-end devices.
-    if ((edgeFoamIntensityUniform.value as number) > 0) {
+    const depthPassActive = (edgeFoamIntensityUniform.value as number) > 0;
+    if (depthPassActive) {
         const depthExcludedVis = hideDepthPrePassExcluded();
         SceneDepth.capture(renderer, scene, camera);
         restoreVisibility(depthExcludedVis);
     }
     sceneDepthUniform.value = SceneDepth.getDepthTexture();
     updateSceneDepthCamera(camera);
+    // The occlusion-aware underwater mask (PostProcess.ts) reads the same
+    // depth texture edge foam uses — gate it on the same live signal so it
+    // automatically falls back to the flat analytic waterline row whenever
+    // the pre-pass didn't run this frame (texture would otherwise be stale).
+    PostProcess.setDepthMaskEnabled(depthPassActive);
 
     PostProcess.renderScene(renderer, scene, camera, () => {
         // Skip the ocean surface pass while sealed inside the cabana — the dome
@@ -948,6 +954,7 @@ export function Update(): void
     MediaPlayer.Update();
     WaterLine.Update();
     PostProcess.updateWaterLineUv(WaterLine.getWaterLineUv());
+    PostProcess.updateCameraProjectionUniforms(camera);
 
     // ── Visibility gating ─────────────────────────────────────────────────────
     // Only update systems relevant to the current view (surface vs underwater).

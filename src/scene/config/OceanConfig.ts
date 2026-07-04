@@ -120,9 +120,24 @@ export const distortionEdgeFade = 0.0600;
 // surface); larger = the line climbs more gradually, tracking how deep the
 // camera actually is. Tune by eye — not derived from FOV, purely an art knob.
 export const underwaterMaskProbeDistance = 10.0000;
-export const underwaterMaskSoftness      = 0.0400; // UV-space width of the soft edge at the line
+export const underwaterMaskSoftness      = 0.0400; // UV-space width of the flat-line fallback's soft edge
+// World-space distance below the waterline a depth-reconstructed pixel
+// (island rock, tree, seafloor — any solid geometry) must be before the
+// underwater effect reaches full local strength there. Used only where the
+// depth-based mask has a real hit — see PostProcess.ts.
+export const underwaterMaskFadeDistance  = 0.4500;
 export const underwaterTintColor         = { r: 0.0400, g: 0.1200, b: 0.2600 }; // blue tint mixed in underwater
 export const underwaterTintStrength      = 0.3500; // max mix amount at full mask*amount
+// The angle-based probe line alone never quite guarantees full-screen
+// coverage: most of an underwater view is open water (no solid object for
+// the depth-based mask to grab), which falls to that same probe line, and
+// its climb toward the top of frame gets flatter (not steeper) as the
+// camera goes deeper — pure angle math never actually reaches vertical.
+// Once the camera is unambiguously deep, force full coverage regardless of
+// the angle calculation. Values are POSITIVE depth (world units) below the
+// waterline (i.e. -cameraPosition.y).
+export const underwaterFullCoverageDepthStart = 1.5000; // full coverage starts blending in
+export const underwaterFullCoverageDepthEnd   = 4.0000; // full coverage guaranteed from here down
 
 // ── Fish / Jellyfish Lighting ───────────────────────────────────────────────
 // Drives the per-jellyfish PointLight (candela-ish intensity + reach in world
