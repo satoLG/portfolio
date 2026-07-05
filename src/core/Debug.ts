@@ -147,7 +147,6 @@ import {
     pug,
     tent,
     dogBed,
-    littleRocks,
     apple1,
     apple2,
     apple3,
@@ -775,7 +774,6 @@ function buildGUI(): void {
                 `export const pugOffset      = { x: ${f(pug.position.x - ip.x)}, y: ${f(pug.position.y - ip.y)}, z: ${f(pug.position.z - ip.z)} };`,
                 `export const tentOffset     = { x: ${f(tent.position.x - ip.x)}, y: ${f(tent.position.y - ip.y)}, z: ${f(tent.position.z - ip.z)} };`,
                 `export const dogBedOffset      = { x: ${f(dogBed.position.x - ip.x)}, y: ${f(dogBed.position.y - ip.y)}, z: ${f(dogBed.position.z - ip.z)} };`,
-                `export const littleRocksOffset = { x: ${f(littleRocks.position.x - ip.x)}, y: ${f(littleRocks.position.y - ip.y)}, z: ${f(littleRocks.position.z - ip.z)} };`,
                 `export const phoneOffset       = { x: ${f(Island.phone.position.x - ip.x)}, y: ${f(Island.phone.position.y - ip.y)}, z: ${f(Island.phone.position.z - ip.z)} };`,
                 `export const apple1Offset      = { x: ${f(apple1.position.x - ip.x)}, y: ${f(apple1.position.y - ip.y)}, z: ${f(apple1.position.z - ip.z)} };`,
                 `export const apple2Offset      = { x: ${f(apple2.position.x - ip.x)}, y: ${f(apple2.position.y - ip.y)}, z: ${f(apple2.position.z - ip.z)} };`,
@@ -806,7 +804,6 @@ function buildGUI(): void {
                 `export const pugScale         = ${f(pug.scale.x)};`,
                 `export const tentScale        = ${f(tent.scale.x)};`,
                 `export const dogBedScale      = ${f(dogBed.scale.x)};`,
-                `export const littleRocksScale = ${f(littleRocks.scale.x)};`,
                 `export const phoneScale       = ${f(Island.phone.scale.x)};`,
                 `export const apple1Scale      = ${f(apple1.scale.x)};`,
                 `export const apple2Scale      = ${f(apple2.scale.x)};`,
@@ -835,7 +832,6 @@ function buildGUI(): void {
                 `export const pugRotY        = ${f(pug.rotation.y)};`,
                 `export const tentRotY       = ${f(tent.rotation.y)};`,
                 `export const dogBedRotY     = ${f(dogBed.rotation.y)};`,
-                `export const littleRocksRot = { x: ${f(littleRocks.rotation.x)}, y: ${f(littleRocks.rotation.y)}, z: ${f(littleRocks.rotation.z)} };`,
                 `export const phoneRot       = { x: ${f(Island.phone.rotation.x)}, y: ${f(Island.phone.rotation.y)}, z: ${f(Island.phone.rotation.z)} };`,
                 `export const apple1RotY     = ${f(apple1.rotation.y)};`,
                 `export const apple2RotY     = ${f(apple2.rotation.y)};`,
@@ -927,9 +923,7 @@ function buildGUI(): void {
                 `export const EXCL_R_BONFIRE = ${exclRadii.bonfire.toFixed(2)};`,
                 `export const EXCL_R_TENT    = ${exclRadii.tent.toFixed(2)};   // custom tent — increase to push grass further out`,
                 `export const EXCL_R_TREE    = ${exclRadii.tree.toFixed(2)};`,
-                `export const EXCL_R_PUG     = ${exclRadii.pug.toFixed(2)};`,
                 `export const EXCL_R_RADIO   = ${exclRadii.radio.toFixed(2)};`,
-                `export const EXCL_R_ROCKS   = ${exclRadii.rocks.toFixed(2)};`,
                 ``,
                 `// ── Fire light ───────────────────────────────────────────────────────────────────`,
                 `export const FIRE_LIGHT_INTENSITY = ${fireLightConfig.intensity.toFixed(2)};   // Base intensity multiplier (before flicker)`,
@@ -1278,7 +1272,7 @@ function buildGUI(): void {
         // Exclusion radii
         const exclFolder = foliageFolder.addFolder('Exclusion Radii');
         exclFolder.close();
-        (['bonfire', 'tent', 'tree', 'pug', 'radio', 'rocks'] as const).forEach(key => {
+        (['bonfire', 'tent', 'tree', 'radio'] as const).forEach(key => {
             exclFolder.add(exclRadii, key, 0, 1.5, 0.01)
                 .name(key.charAt(0).toUpperCase() + key.slice(1))
                 .listen()
@@ -1423,7 +1417,6 @@ function buildGUI(): void {
             .onChange((v: number) => setIslandRockMatchGreenStrength(v));
         rockMatchFolder.close();
     }
-    addObjectFolder(surfaceFolder, 'Little Rocks', littleRocks, { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
 
     {
         const mossRocksFolder = surfaceFolder.addFolder('Moss Rocks');

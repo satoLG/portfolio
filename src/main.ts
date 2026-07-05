@@ -5,7 +5,6 @@ import * as CONTROL from "./core/Control";
 import * as UI from "./core/UI";
 import * as CABANA_EXIT from "./core/CabanaExit";
 import * as DEBUG from "./core/Debug";
-import * as GRASS_COLOR_PICKER from "./core/GrassColorPicker";
 import * as SETTINGS from "./shaders/Settings"
 import "./style.css";
 
@@ -30,7 +29,6 @@ CONTROL.Start();
 UI.Start();
 CABANA_EXIT.Start();
 DEBUG.Start();
-GRASS_COLOR_PICKER.Start();
 
 requestAnimationFrame(UpdateFrame);
 
