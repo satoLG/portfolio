@@ -127,8 +127,6 @@ export interface BladeConfig {
     heightVariation: number;
     /** Minimum blade scale at island edge (0=invisible, 1=full size) */
     minEdgeScale: number;
-    /** Width of the blade tip as a fraction of its base width (0=sharp point, 1=no taper). Rounds off the top. */
-    tipWidthFactor: number;
 }
 
 const DEFAULT_BLADE_CONFIG: BladeConfig = {
@@ -138,8 +136,11 @@ const DEFAULT_BLADE_CONFIG: BladeConfig = {
     bladeHeight: 0.085,
     heightVariation: 0.50,
     minEdgeScale: 0.25,
-    tipWidthFactor: 0.45,
 };
+
+// Number of arc segments used to dome the top of each blade. Higher = rounder,
+// but more triangles. 4 gives a smooth-enough half-circle cap for tiny blades.
+const CAP_SEGS = 4;
 
 /**
  * Seeded pseudo-random number generator (mulberry32).
@@ -164,11 +165,11 @@ export const grassColorTip  = new Color(GRASS_COLOR_TIP);
 
 /**
  * Build a single merged BufferGeometry containing all grass blades.
- * Each blade = a tapered quad (4 vertices, 2 triangles). Shape: two base
- * corners at ground level + two narrower top corners at center+height, giving
- * a blunt, rounded-looking tip instead of a sharp point. Random Y-rotation
- * per blade preserves varied normals so PBR lighting (fire PointLight,
- * directional sun) works correctly — no billboard rotation needed.
+ * Each blade = a flat card: a rectangular body topped with a semicircular
+ * dome (CAP_SEGS arc segments), so the tip reads as genuinely rounded rather
+ * than a sharp point or a flat/square edge. Random Y-rotation per blade
+ * preserves varied normals so PBR lighting (fire PointLight, directional sun)
+ * works correctly — no billboard rotation needed.
  * Blades near the island edge are scaled down via the per-point edgeFactor.
  */
 export function buildGrassGeometry(
@@ -180,9 +181,21 @@ export function buildGrassGeometry(
     const cfg = { ...DEFAULT_BLADE_CONFIG, ...config };
     const totalBlades = spawnPoints.length * cfg.bladesPerPoint;
 
-    // Each blade = a tapered quad (2 triangles): wide base, narrower rounded-off top
-    const vertsPerBlade   = 4;
-    const indicesPerBlade = 6;
+    // Each blade = rectangular body + semicircular dome cap.
+    //   verts   = 2 base + 1 right shoulder + (CAP_SEGS-1) arc + 1 left shoulder
+    //   indices = 2 body tris + (CAP_SEGS-1) cap-fan tris
+    const vertsPerBlade   = CAP_SEGS + 3;
+    const indicesPerBlade = 6 + (CAP_SEGS - 1) * 3;
+
+    // Precompute the dome arc (interior points only, shoulders handled explicitly).
+    // Angle sweeps from the right shoulder (0) to the left shoulder (π).
+    const capCos: number[] = [];
+    const capSin: number[] = [];
+    for (let k = 1; k < CAP_SEGS; k++) {
+        const a = (k / CAP_SEGS) * Math.PI;
+        capCos.push(Math.cos(a));
+        capSin.push(Math.sin(a));
+    }
 
     const positions    = new Float32Array(totalBlades * vertsPerBlade * 3);
     const normals      = new Float32Array(totalBlades * vertsPerBlade * 3);
@@ -228,9 +241,9 @@ export function buildGrassGeometry(
             const faceNx = -sinA;
             const faceNz =  cosA;
 
-            // Tip width tapers down from the base width instead of closing to a point,
-            // giving the blade a blunt, rounded-looking top rather than a sharp spike.
-            const wTip = w * cfg.tipWidthFactor;
+            // Dome cap: shoulders sit at hBody, the arc bulges up to full height h.
+            const capR  = Math.min(w, h * 0.5);
+            const hBody = h - capR;
 
             // Vertex colors — base colour at roots, tip colour at apex
             const baseStyle = 0.5 + r * 0.8;
@@ -246,53 +259,45 @@ export function buildGrassGeometry(
 
             const baseVi = vi;
 
-            // v0: bottom-left
-            let p = vi * 3, c = vi * 2;
-            positions[p    ] = cx - cosA * w;
-            positions[p + 1] = baseY;
-            positions[p + 2] = cz - sinA * w;
-            normals[p    ] = faceNx; normals[p + 1] = 0.0; normals[p + 2] = faceNz;
-            colors[p    ] = baseR;  colors[p + 1] = baseG; colors[p + 2] = baseB;
-            bladeCenters[c] = cx; bladeCenters[c + 1] = cz;
-            tipness[vi] = 0.0; vi++;
+            // Emit one vertex. `u` = offset along the blade's width axis, `yl` =
+            // local height (0..h). Colour + wind sway (tipness) both ramp with height;
+            // `up` tilts the normal skyward for cap verts so they catch overhead sun.
+            const emit = (u: number, yl: number, up: boolean): void => {
+                const p = vi * 3, c = vi * 2;
+                positions[p    ] = cx + cosA * u;
+                positions[p + 1] = baseY + yl;
+                positions[p + 2] = cz + sinA * u;
+                if (up) { normals[p] = faceNx * 0.8; normals[p + 1] = 0.4; normals[p + 2] = faceNz * 0.8; }
+                else    { normals[p] = faceNx;       normals[p + 1] = 0.0; normals[p + 2] = faceNz;       }
+                const t = h > 0 ? yl / h : 0.0;
+                colors[p    ] = baseR + (tipR - baseR) * t;
+                colors[p + 1] = baseG + (tipG - baseG) * t;
+                colors[p + 2] = baseB + (tipB - baseB) * t;
+                bladeCenters[c] = cx; bladeCenters[c + 1] = cz;
+                tipness[vi] = t;
+                vi++;
+            };
 
-            // v1: bottom-right
-            p = vi * 3; c = vi * 2;
-            positions[p    ] = cx + cosA * w;
-            positions[p + 1] = baseY;
-            positions[p + 2] = cz + sinA * w;
-            normals[p    ] = faceNx; normals[p + 1] = 0.0; normals[p + 2] = faceNz;
-            colors[p    ] = baseR;  colors[p + 1] = baseG; colors[p + 2] = baseB;
-            bladeCenters[c] = cx; bladeCenters[c + 1] = cz;
-            tipness[vi] = 0.0; vi++;
+            // Body: two base corners + two shoulders (right emitted here, left last).
+            emit(-w, 0.0,   false);  // base-left
+            emit( w, 0.0,   false);  // base-right
+            emit( w, hBody, false);  // shoulder-right
+            // Dome arc interior points (right → left)
+            for (let k = 0; k < CAP_SEGS - 1; k++) {
+                emit(w * capCos[k], hBody + capR * capSin[k], true);
+            }
+            emit(-w, hBody, false);  // shoulder-left (last vertex)
 
-            // v2: top-right (tip row, tapered inward — blunt/rounded top instead of a point)
-            // Normal tilted slightly upward so the top catches overhead sun naturally
-            p = vi * 3; c = vi * 2;
-            positions[p    ] = cx + cosA * wTip;
-            positions[p + 1] = baseY + h;
-            positions[p + 2] = cz + sinA * wTip;
-            normals[p    ] = faceNx * 0.8; normals[p + 1] = 0.4; normals[p + 2] = faceNz * 0.8;
-            colors[p    ] = tipR;  colors[p + 1] = tipG;  colors[p + 2] = tipB;
-            bladeCenters[c] = cx; bladeCenters[c + 1] = cz;
-            tipness[vi] = 1.0; vi++;
-
-            // v3: top-left (tip row)
-            p = vi * 3; c = vi * 2;
-            positions[p    ] = cx - cosA * wTip;
-            positions[p + 1] = baseY + h;
-            positions[p + 2] = cz - sinA * wTip;
-            normals[p    ] = faceNx * 0.8; normals[p + 1] = 0.4; normals[p + 2] = faceNz * 0.8;
-            colors[p    ] = tipR;  colors[p + 1] = tipG;  colors[p + 2] = tipB;
-            bladeCenters[c] = cx; bladeCenters[c + 1] = cz;
-            tipness[vi] = 1.0; vi++;
-
-            indices[ii++] = baseVi;
-            indices[ii++] = baseVi + 1;
-            indices[ii++] = baseVi + 2;
-            indices[ii++] = baseVi;
-            indices[ii++] = baseVi + 2;
-            indices[ii++] = baseVi + 3;
+            const shoulderL = baseVi + vertsPerBlade - 1;
+            // Body quad
+            indices[ii++] = baseVi; indices[ii++] = baseVi + 1; indices[ii++] = baseVi + 2;
+            indices[ii++] = baseVi; indices[ii++] = baseVi + 2; indices[ii++] = shoulderL;
+            // Cap fan from shoulder-right (baseVi+2) across the arc to shoulder-left
+            for (let j = baseVi + 3; j < shoulderL; j++) {
+                indices[ii++] = baseVi + 2;
+                indices[ii++] = j;
+                indices[ii++] = j + 1;
+            }
         }
     }
 

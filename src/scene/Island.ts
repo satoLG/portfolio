@@ -1971,6 +1971,25 @@ export function respawnFoliage(_which: FoliageCluster = 'grass'): void {
     console.log(`[Island] Respawned grass: ${_grassSpawnPoints.length} spawn points`);
 }
 
+/**
+ * Rebuilds only the grass geometry from the already-cached spawn points —
+ * no re-raycast, no random re-placement, so blades keep their positions.
+ * Cheap enough to call live while dragging a colour picker: it re-bakes the
+ * per-vertex colours (which read from grassColorBase/grassColorTip) in place.
+ */
+export function rebuildGrassGeometry(): void {
+    if (!_grassUniforms || _grassSpawnPoints.length === 0) return;
+    if (proceduralGrassMesh) {
+        proceduralGrassMesh.geometry.dispose();
+        threeScene.remove(proceduralGrassMesh);
+    }
+    proceduralGrassMesh = createGrassMesh(
+        _grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment,
+        { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight },
+    );
+    threeScene.add(proceduralGrassMesh);
+}
+
 // TREE WIND SETTINGS - easily tweakable
 const TREE_WIND_STRENGTH = 0.03;    // TWEAK: How much leaves sway (0.05-0.3)
 const TREE_WIND_SPEED = 0.5;       // TWEAK: Speed of wind oscillation (0.5-3.0)
