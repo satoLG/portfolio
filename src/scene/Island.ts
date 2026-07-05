@@ -69,6 +69,11 @@ import {
     GRASS_SHADOW_SPREAD       as GRASS_SHADOW_SPREAD_CFG,
     GRASS_WOBBLE_STRENGTH     as GRASS_WOBBLE_STRENGTH_CFG,
     GRASS_MAX_HEIGHT          as GRASS_MAX_HEIGHT_CFG,
+    GRASS_EDGE_DROOP,
+    GRASS_EDGE_DROOP_DROP,
+    GRASS_EDGE_RING_ANGLES,
+    GRASS_EDGE_RING_ROWS,
+    GRASS_EDGE_RING_STEP,
     APPLE_WIND_STRENGTH       as APPLE_WIND_STRENGTH_CFG,
     APPLE_SWING_STIFFNESS,
     APPLE_SWING_DAMPING,
@@ -195,8 +200,10 @@ export let proceduralGrassMesh: Mesh | null = null;
 let _perlinTexture: ReturnType<typeof createPerlinTexture> | null = null;
 let _grassUniforms: GrassUniforms | null = null;
 
-// Procedural grass spawn points (cached for respawning)
-let _grassSpawnPoints: Array<{ x: number; z: number; y: number; edgeFactor: number }> = [];
+// Procedural grass spawn points (cached for respawning).
+// dirX/dirZ = outward horizontal unit vector (away from island centre), used to
+// drape edge blades over the rim.
+let _grassSpawnPoints: Array<{ x: number; z: number; y: number; edgeFactor: number; dirX: number; dirZ: number }> = [];
 
 // Store tree leaves for wind animation
 const treeLeaves: Object3D[] = [];
@@ -255,6 +262,14 @@ function computeEdgeFactor(wx: number, wz: number): number {
         if (_spawnRaycaster.intersectObjects(islandMeshes, false).length > 0) hits++;
     }
     return hits / 4;
+}
+
+/** Outward horizontal unit vector from the island centre to (wx,wz). Used to
+ *  point edge blades' droop away from the centre, over the rim. */
+function outwardDir(wx: number, wz: number): { dirX: number; dirZ: number } {
+    const dx = wx - islandPosition.x, dz = wz - islandPosition.z;
+    const len = Math.hypot(dx, dz);
+    return len > 1e-4 ? { dirX: dx / len, dirZ: dz / len } : { dirX: 0, dirZ: 0 };
 }
 
 /**
@@ -1937,6 +1952,60 @@ const SPAWN_BBOX = {
 // ─── Runtime respawn ─────────────────────────────────────────────────────────
 export type FoliageCluster = 'grass';
 
+/**
+ * Marches outward from the island centre along GRASS_EDGE_RING_ANGLES directions
+ * to find the rim crest (last XZ whose downward ray still hits the island), then
+ * seeds a few rows of grass inward from it. These points carry an outward dir so
+ * their blades drape over the rim, hiding the hard edge and following the slope.
+ * Runs the full circle — the back half is simply never seen by the camera.
+ */
+function pushEdgeRingSpawnPoints(placed: Array<{ x: number; z: number }>): void {
+    if (islandMeshes.length === 0) return;
+    const cx0 = islandPosition.x, cz0 = islandPosition.z;
+    const R_MIN = 0.3, R_MAX = 3.0, R_STEP = 0.03;
+
+    for (let a = 0; a < GRASS_EDGE_RING_ANGLES; a++) {
+        const ang = (a / GRASS_EDGE_RING_ANGLES) * Math.PI * 2;
+        const dx = Math.cos(ang), dz = Math.sin(ang);
+
+        // Find the rim: the furthest radius whose downward ray still hits the island.
+        let rimR = -1;
+        for (let r = R_MIN; r <= R_MAX; r += R_STEP) {
+            _spawnOrigin.set(cx0 + dx * r, 5, cz0 + dz * r);
+            _spawnRaycaster.set(_spawnOrigin, _spawnDown);
+            if (_spawnRaycaster.intersectObjects(islandMeshes, false).length > 0) rimR = r;
+            else break;
+        }
+        if (rimR < 0) continue;
+
+        for (let row = 0; row < GRASS_EDGE_RING_ROWS; row++) {
+            const rr = rimR - row * GRASS_EDGE_RING_STEP;
+            if (rr <= 0) break;
+            const wx = cx0 + dx * rr, wz = cz0 + dz * rr;
+
+            // Keep clear of surface objects and don't stack on placed patches.
+            let blocked = false;
+            for (const zone of SPAWN_EXCLUSION_ZONES) {
+                const ex = wx - zone.x, ez = wz - zone.z;
+                if (ex * ex + ez * ez < zone.r * zone.r) { blocked = true; break; }
+            }
+            if (blocked) continue;
+            for (const p of placed) {
+                const px = wx - p.x, pz = wz - p.z;
+                if (px * px + pz * pz < PATCH_MIN_SPACING * PATCH_MIN_SPACING) { blocked = true; break; }
+            }
+            if (blocked) continue;
+
+            placed.push({ x: wx, z: wz });
+            _grassSpawnPoints.push({
+                x: wx, z: wz, y: getSurfaceY(wx, wz),
+                edgeFactor: computeEdgeFactor(wx, wz),
+                ...outwardDir(wx, wz),
+            });
+        }
+    }
+}
+
 export function respawnFoliage(_which: FoliageCluster = 'grass'): void {
     if (!_perlinTexture) { console.warn('respawnFoliage: procedural system not ready'); return; }
 
@@ -1949,17 +2018,20 @@ export function respawnFoliage(_which: FoliageCluster = 'grass'): void {
             const wz = SPAWN_BBOX.zMin + Math.random() * (SPAWN_BBOX.zMax - SPAWN_BBOX.zMin);
             if (!isValidSpawnPos(wx, wz, foliageSpawnPlaced)) continue;
             foliageSpawnPlaced.push({ x: wx, z: wz });
-            _grassSpawnPoints.push({ x: wx, z: wz, y: getSurfaceY(wx, wz), edgeFactor: computeEdgeFactor(wx, wz) });
+            _grassSpawnPoints.push({ x: wx, z: wz, y: getSurfaceY(wx, wz), edgeFactor: computeEdgeFactor(wx, wz), ...outwardDir(wx, wz) });
             break;
         }
     }
+
+    // Dedicated rim ring so the perimeter is densely covered and draped.
+    pushEdgeRingSpawnPoints(foliageSpawnPlaced);
 
     if (proceduralGrassMesh) {
         proceduralGrassMesh.geometry.dispose();
         threeScene.remove(proceduralGrassMesh);
     }
     if (_grassUniforms) {
-        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment, { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight });
+        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment, { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight, edgeDroop: GRASS_EDGE_DROOP, edgeDroopDrop: GRASS_EDGE_DROOP_DROP });
         threeScene.add(proceduralGrassMesh);
     }
     buildShadowFloor(_grassSpawnPoints);
@@ -1980,7 +2052,7 @@ export function rebuildGrassGeometry(): void {
     }
     proceduralGrassMesh = createGrassMesh(
         _grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment,
-        { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight },
+        { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight, edgeDroop: GRASS_EDGE_DROOP, edgeDroopDrop: GRASS_EDGE_DROOP_DROP },
     );
     threeScene.add(proceduralGrassMesh);
 }
@@ -3103,10 +3175,13 @@ export function Start(): void {
                 const wz = SPAWN_BBOX.zMin + Math.random() * (SPAWN_BBOX.zMax - SPAWN_BBOX.zMin);
                 if (!isValidSpawnPos(wx, wz, foliageSpawnPlaced)) continue;
                 foliageSpawnPlaced.push({ x: wx, z: wz });
-                _grassSpawnPoints.push({ x: wx, z: wz, y: getSurfaceY(wx, wz), edgeFactor: computeEdgeFactor(wx, wz) });
+                _grassSpawnPoints.push({ x: wx, z: wz, y: getSurfaceY(wx, wz), edgeFactor: computeEdgeFactor(wx, wz), ...outwardDir(wx, wz) });
                 break;
             }
         }
+
+        // Dedicated rim ring so the perimeter is densely covered and draped.
+        pushEdgeRingSpawnPoints(foliageSpawnPlaced);
 
         // ── Create grass uniforms (shared with existing scene uniforms) ─
         _grassUniforms = {
@@ -3125,7 +3200,7 @@ export function Start(): void {
             uYOffset:       new Uniform(grassYOffset),
         };
 
-        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment, { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight });
+        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment, { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight, edgeDroop: GRASS_EDGE_DROOP, edgeDroopDrop: GRASS_EDGE_DROOP_DROP });
         threeScene.add(proceduralGrassMesh);
         console.log(`[ProceduralGrass] ${_grassSpawnPoints.length} spawn points → ${_grassSpawnPoints.length * 40} blades (1 draw call)`);
 

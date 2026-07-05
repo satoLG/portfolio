@@ -151,14 +151,21 @@ export const FOLIAGE_WIND_STRENGTH = 0.0350;
 export const GRASS_WOBBLE_STRENGTH  = 0.034;  // constant base sway
 export const GRASS_MAX_HEIGHT       = 0.055;  // max blade height
 export const GRASS_EDGE_FALLOFF_RADIUS = 0.05;   // probe radius for edge blade taper
-export const GRASS_MIN_EDGE_SCALE      = 0.21;   // minimum blade scale at island edge (0–1)
+export const GRASS_MIN_EDGE_SCALE      = 0.80;   // minimum blade scale at island edge (0–1) — keep blades tall to cover the rim
 export const GRASS_SHADOW_OPACITY      = 0.00;   // alpha of dark AO floor under grass
 export const GRASS_SHADOW_COLOR        = '#0d1a05'; // sRGB dark green-black
 export const GRASS_SHADOW_Y_OFFSET     = 0.009;  // Y below average surface (negative = lower than blades)
 export const GRASS_SHADOW_SPREAD       = 1.04;   // disc radius scale (1.0 = cluster width)
 
+// ── Edge draping (grass covering the island rim / lateral slope) ───────────────
+export const GRASS_EDGE_DROOP       = 0.038;  // world units an edge blade tip leans outward over the rim
+export const GRASS_EDGE_DROOP_DROP  = 0.022;  // world units an edge blade tip drops in Y as it droops
+export const GRASS_EDGE_RING_ANGLES = 64;     // spawn samples around the perimeter
+export const GRASS_EDGE_RING_ROWS   = 2;      // rows of grass marched inward from the rim crest
+export const GRASS_EDGE_RING_STEP   = 0.06;   // world spacing between edge rows
+
 // ── Spawn edge padding ────────────────────────────────────────────────────────
-export const SURFACE_EDGE_PADDING = 0.200;
+export const SURFACE_EDGE_PADDING = 0.050;   // small so interior scatter reaches close to the rim
 
 // ── Exclusion zone radii (grass spawn clearance around each surface object) ───
 export const EXCL_R_BONFIRE = 0.42;

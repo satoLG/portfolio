@@ -127,6 +127,12 @@ export interface BladeConfig {
     heightVariation: number;
     /** Minimum blade scale at island edge (0=invisible, 1=full size) */
     minEdgeScale: number;
+    /** How far (world units) an edge blade's tip leans outward, away from the
+     *  island centre, following the lateral slope. Scales with edge proximity. */
+    edgeDroop: number;
+    /** How much (world units) an edge blade's tip drops in Y as it droops over
+     *  the rim. Scales with edge proximity. */
+    edgeDroopDrop: number;
 }
 
 const DEFAULT_BLADE_CONFIG: BladeConfig = {
@@ -136,6 +142,8 @@ const DEFAULT_BLADE_CONFIG: BladeConfig = {
     bladeHeight: 0.085,
     heightVariation: 0.50,
     minEdgeScale: 0.25,
+    edgeDroop: 0.0,
+    edgeDroopDrop: 0.0,
 };
 
 // Number of arc segments used to dome the top of each blade. Higher = rounder,
@@ -173,7 +181,7 @@ export const grassColorTip  = new Color(GRASS_COLOR_TIP);
  * Blades near the island edge are scaled down via the per-point edgeFactor.
  */
 export function buildGrassGeometry(
-    spawnPoints: Array<{ x: number; z: number; y?: number; edgeFactor?: number }>,
+    spawnPoints: Array<{ x: number; z: number; y?: number; edgeFactor?: number; dirX?: number; dirZ?: number }>,
     worldY: number,
     config: Partial<BladeConfig> = {},
     seed = 42,
@@ -215,6 +223,14 @@ export function buildGrassGeometry(
         // Smooth edge taper: 0 at edge → cfg.minEdgeScale blend → 1 at centre
         const ef         = sp.edgeFactor !== undefined ? sp.edgeFactor : 1.0;
         const edgeScale  = lerp(cfg.minEdgeScale, 1.0, ef);
+
+        // Edge droop — the closer to the rim (ef→0), the more the blade tips lean
+        // outward (dirX/dirZ point away from island centre) and drop in Y, so they
+        // follow the lateral slope and drape over the hard edge.
+        const droopAmt = 1.0 - ef;
+        const outX  = (sp.dirX ?? 0) * cfg.edgeDroop     * droopAmt;
+        const outZ  = (sp.dirZ ?? 0) * cfg.edgeDroop     * droopAmt;
+        const dropY =                  cfg.edgeDroopDrop * droopAmt;
 
         for (let b = 0; b < cfg.bladesPerPoint; b++) {
             // Random offset within spread radius
@@ -264,12 +280,14 @@ export function buildGrassGeometry(
             // `up` tilts the normal skyward for cap verts so they catch overhead sun.
             const emit = (u: number, yl: number, up: boolean): void => {
                 const p = vi * 3, c = vi * 2;
-                positions[p    ] = cx + cosA * u;
-                positions[p + 1] = baseY + yl;
-                positions[p + 2] = cz + sinA * u;
+                const t = h > 0 ? yl / h : 0.0;
+                // Droop leans the upper part of the blade outward + down (t ramps
+                // 0 at the root → 1 at the tip) so edge blades bend over the rim.
+                positions[p    ] = cx + cosA * u + outX  * t;
+                positions[p + 1] = baseY + yl    - dropY * t;
+                positions[p + 2] = cz + sinA * u + outZ  * t;
                 if (up) { normals[p] = faceNx * 0.8; normals[p + 1] = 0.4; normals[p + 2] = faceNz * 0.8; }
                 else    { normals[p] = faceNx;       normals[p + 1] = 0.0; normals[p + 2] = faceNz;       }
-                const t = h > 0 ? yl / h : 0.0;
                 colors[p    ] = baseR + (tipR - baseR) * t;
                 colors[p + 1] = baseG + (tipG - baseG) * t;
                 colors[p + 2] = baseB + (tipB - baseB) * t;
