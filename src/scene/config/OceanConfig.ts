@@ -120,14 +120,16 @@ export const distortionEdgeFade = 0.0600;
 // undulates at every distance — the real surface swell is tiny (0.05) and only
 // exists within ~18u of the camera, so it can't drive a visible line at the
 // distant island. Purely art knobs; tune on the preview via the Debug GUI.
-// The tint boundary reuses the REAL surface wave (amplitude/length/speed/range/
-// direction — see surfaceWave* above) so it's phase-locked to the rendered water.
-// These are the only effect-specific knobs:
-export const underwaterTintColor       = { r: 0.0400, g: 0.1200, b: 0.2600 }; // single navy tone mixed in underwater
-export const underwaterTintStrength    = 0.3500; // mix amount below the wavy line (uniform — no depth gradient)
-export const underwaterWaveGain        = 4.0000; // × the real wave amplitude — how much MORE the line swings (in-phase)
-export const underwaterLineHeightOffset = 0.0000; // shifts the boundary up/down relative to the waterline
-export const underwaterWaveEdge        = 0.0500; // world-Y softness of the boundary (smoothstep half-width)
+// Screen-space over/under line. The effect tints everything BELOW a wavy line
+// (the ocean surface projected uLineDistance ahead of the level scroll camera);
+// the ripple reuses the real surface wave shape (length/speed/direction) so it
+// stays in phase with the rendered water. Purely 2D — no depth/geometry.
+export const underwaterTintColor        = { r: 0.0400, g: 0.1200, b: 0.2600 }; // single navy tone mixed in underwater
+export const underwaterTintStrength     = 0.3500; // mix amount below the line (uniform — no depth gradient)
+export const underwaterLineDistance     = 2.5000; // world distance the line is projected ahead — smaller = line sits lower/off-screen when above water (0% at the top of the scroll on both FOVs), 50% at the waterline crossing
+export const underwaterLineHeightOffset = 0.0000; // extra NDC nudge of the line up/down
+export const underwaterLineWobbleGain   = 0.0800; // NDC amplitude of the line's ripple (how much it undulates)
+export const underwaterLineEdge         = 0.0200; // NDC softness of the boundary (smoothstep half-width)
 
 // ── Fish / Jellyfish Lighting ───────────────────────────────────────────────
 // Drives the per-jellyfish PointLight (candela-ish intensity + reach in world

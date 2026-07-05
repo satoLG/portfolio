@@ -307,9 +307,10 @@ import {
     setDistortionEdgeFade as setUnderwaterEdgeFade,
     setUnderwaterTintStrength,
     setUnderwaterTintColor,
-    setUnderwaterWaveGain,
+    setUnderwaterLineDistance,
     setUnderwaterLineHeightOffset,
-    setUnderwaterWaveEdge,
+    setUnderwaterLineWobbleGain,
+    setUnderwaterLineEdge,
 } from '../effects/PostProcess';
 import {
     distortionStrength as DISTORTION_STRENGTH,
@@ -318,9 +319,10 @@ import {
     distortionEdgeFade as DISTORTION_EDGE_FADE,
     underwaterTintColor as UNDERWATER_TINT_COLOR,
     underwaterTintStrength as UNDERWATER_TINT_STRENGTH,
-    underwaterWaveGain as UNDERWATER_WAVE_GAIN,
+    underwaterLineDistance as UNDERWATER_LINE_DISTANCE,
     underwaterLineHeightOffset as UNDERWATER_LINE_HEIGHT_OFFSET,
-    underwaterWaveEdge as UNDERWATER_WAVE_EDGE,
+    underwaterLineWobbleGain as UNDERWATER_LINE_WOBBLE_GAIN,
+    underwaterLineEdge as UNDERWATER_LINE_EDGE,
     rippleSpeed as RIPPLE_SPEED,
     rippleLifetime as RIPPLE_LIFETIME,
     rippleWidth as RIPPLE_WIDTH,
@@ -736,9 +738,10 @@ function buildGUI(): void {
         edgeFade:   DISTORTION_EDGE_FADE,
         tintStrength: UNDERWATER_TINT_STRENGTH,
         tintColor:  { r: UNDERWATER_TINT_COLOR.r, g: UNDERWATER_TINT_COLOR.g, b: UNDERWATER_TINT_COLOR.b },
-        waveGain:   UNDERWATER_WAVE_GAIN,
+        lineDistance: UNDERWATER_LINE_DISTANCE,
         lineHeight: UNDERWATER_LINE_HEIGHT_OFFSET,
-        waveEdge:   UNDERWATER_WAVE_EDGE,
+        wobbleGain: UNDERWATER_LINE_WOBBLE_GAIN,
+        lineEdge:   UNDERWATER_LINE_EDGE,
     };
 
     // ── Foliage color state (hoisted here so copyConfig can read it) ─────────────
@@ -1050,11 +1053,12 @@ function buildGUI(): void {
                 `export const distortionSpeed    = ${f(_fogState.speed)};`,
                 `export const distortionScale    = ${f(_fogState.scale)};`,
                 `export const distortionEdgeFade = ${f(_fogState.edgeFade)};`,
-                `export const underwaterTintColor       = { r: ${f(_fogState.tintColor.r)}, g: ${f(_fogState.tintColor.g)}, b: ${f(_fogState.tintColor.b)} }; // single navy tone mixed in underwater`,
-                `export const underwaterTintStrength    = ${f(_fogState.tintStrength)}; // mix amount below the wavy line (uniform — no depth gradient)`,
-                `export const underwaterWaveGain        = ${f(_fogState.waveGain)}; // × the real wave amplitude — how much MORE the line swings (in-phase)`,
-                `export const underwaterLineHeightOffset = ${f(_fogState.lineHeight)}; // shifts the boundary up/down relative to the waterline`,
-                `export const underwaterWaveEdge        = ${f(_fogState.waveEdge)}; // world-Y softness of the boundary (smoothstep half-width)`,
+                `export const underwaterTintColor        = { r: ${f(_fogState.tintColor.r)}, g: ${f(_fogState.tintColor.g)}, b: ${f(_fogState.tintColor.b)} }; // single navy tone mixed in underwater`,
+                `export const underwaterTintStrength     = ${f(_fogState.tintStrength)}; // mix amount below the line (uniform — no depth gradient)`,
+                `export const underwaterLineDistance     = ${f(_fogState.lineDistance)}; // world distance the line is projected ahead — sets height/sensitivity vs scroll`,
+                `export const underwaterLineHeightOffset = ${f(_fogState.lineHeight)}; // extra NDC nudge of the line up/down`,
+                `export const underwaterLineWobbleGain   = ${f(_fogState.wobbleGain)}; // NDC amplitude of the line's ripple (how much it undulates)`,
+                `export const underwaterLineEdge         = ${f(_fogState.lineEdge)}; // NDC softness of the boundary (smoothstep half-width)`,
                 ``,
                 `// ── Fish / Jellyfish Lighting ───────────────────────────────────────────────`,
                 `// Drives the per-jellyfish PointLight (candela-ish intensity + reach in world`,
@@ -2034,12 +2038,14 @@ function buildGUI(): void {
         set edgeFade(v)  { _fogState.edgeFade = v; setUnderwaterEdgeFade(v); },
         get tintStrength() { return _fogState.tintStrength; },
         set tintStrength(v){ _fogState.tintStrength = v; setUnderwaterTintStrength(v); },
-        get waveGain()   { return _fogState.waveGain; },
-        set waveGain(v)  { _fogState.waveGain = v; setUnderwaterWaveGain(v); },
+        get lineDistance() { return _fogState.lineDistance; },
+        set lineDistance(v){ _fogState.lineDistance = v; setUnderwaterLineDistance(v); },
         get lineHeight() { return _fogState.lineHeight; },
         set lineHeight(v){ _fogState.lineHeight = v; setUnderwaterLineHeightOffset(v); },
-        get waveEdge()   { return _fogState.waveEdge; },
-        set waveEdge(v)  { _fogState.waveEdge = v; setUnderwaterWaveEdge(v); },
+        get wobbleGain() { return _fogState.wobbleGain; },
+        set wobbleGain(v){ _fogState.wobbleGain = v; setUnderwaterLineWobbleGain(v); },
+        get lineEdge()   { return _fogState.lineEdge; },
+        set lineEdge(v)  { _fogState.lineEdge = v; setUnderwaterLineEdge(v); },
     };
 
     fogFolder.add(fogProxy, 'absR',  0, 1,    0.001 ).name('Absorption R').listen();
@@ -2062,10 +2068,11 @@ function buildGUI(): void {
         _fogState.tintColor.r = c.r; _fogState.tintColor.g = c.g; _fogState.tintColor.b = c.b;
         setUnderwaterTintColor(c.r, c.g, c.b);
     });
-    lineFolder.add(fogProxy, 'tintStrength', 0, 1,    0.001).name('Tint Strength').listen();
-    lineFolder.add(fogProxy, 'waveGain',   0, 20,     0.1  ).name('Undulation Gain').listen();
-    lineFolder.add(fogProxy, 'lineHeight', -3, 3,     0.01 ).name('Line Height Offset').listen();
-    lineFolder.add(fogProxy, 'waveEdge',   0.001, 0.5, 0.001).name('Edge Softness').listen();
+    lineFolder.add(fogProxy, 'tintStrength',  0, 1,     0.001).name('Tint Strength').listen();
+    lineFolder.add(fogProxy, 'lineDistance',  0.2, 15,  0.05 ).name('Line Distance').listen();
+    lineFolder.add(fogProxy, 'lineHeight',   -1, 1,     0.005).name('Line Height Offset').listen();
+    lineFolder.add(fogProxy, 'wobbleGain',    0, 0.5,   0.005).name('Wobble Gain').listen();
+    lineFolder.add(fogProxy, 'lineEdge',      0.001, 0.2, 0.001).name('Edge Softness').listen();
     lineFolder.close();
 
     fogFolder.close();

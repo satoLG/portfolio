@@ -16,7 +16,7 @@ import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
 import * as WindLines from "../effects/WindLines.ts";
 import * as CloudSprites from "../effects/CloudSprites.ts";
 import * as SceneDepth from "../effects/SceneDepth.ts";
-import { sceneDepthUniform, updateSceneDepthCamera } from "../materials/OceanMaterial";
+import { sceneDepthUniform, updateSceneDepthCamera, edgeFoamIntensityUniform } from "../materials/OceanMaterial";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
@@ -300,15 +300,12 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     // Exclude foam-irrelevant heavy geometry (grass, skybox, wind lines) so the
     // pre-pass doesn't re-submit the scene's biggest vertex loads for nothing.
     //
-    // Historically this pass was skipped when edge foam intensity was 0
-    // (mobile/low-quality default). It can't be anymore: the underwater tint
-    // (PostProcess.ts) reconstructs world position from this SAME opaque depth
-    // to decide what's actually below the wavy water surface (so the island's
-    // above-water grass isn't tinted while its submerged rock is). Edge foam is
-    // off on mobile, but the tint is not — so run the pass whenever the ocean
-    // (hence the tint) can be on screen. Still skipped when sealed inside the
-    // cabana: the dome hides the ocean and the camera is above water.
-    const depthPassActive = !Island.isCabanaSealed();
+    // Skip entirely when edge foam intensity is 0 (mobile/low quality default).
+    // The depth texture keeps its last value; calcEdgeFoam() already returns 0
+    // for all cleared (depth=1.0) pixels, so the visual result is identical and
+    // we save a full scene re-render every frame. The underwater tint no longer
+    // needs this depth — it is a pure screen-space over/under line (PostProcess.ts).
+    const depthPassActive = (edgeFoamIntensityUniform.value as number) > 0;
     if (depthPassActive) {
         const depthExcludedVis = hideDepthPrePassExcluded();
         SceneDepth.capture(renderer, scene, camera);
@@ -316,9 +313,6 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     }
     sceneDepthUniform.value = SceneDepth.getDepthTexture();
     updateSceneDepthCamera(camera);
-    // Tell the underwater tint whether the depth it needs is valid this frame;
-    // when false (cabana) the tint disables itself instead of reading stale depth.
-    PostProcess.setDepthMaskEnabled(depthPassActive);
 
     PostProcess.renderScene(renderer, scene, camera, () => {
         // Skip the ocean surface pass while sealed inside the cabana — the dome
