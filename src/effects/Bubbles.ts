@@ -10,7 +10,7 @@ import {
 } from "three";
 import { camera, scene, isMobile } from "../core/Scene";
 import { deltaTime, time } from "../core/Time";
-import { UNDERWATER_Y_THRESHOLD } from "./PostProcess";
+import { UNDERWATER_Y_THRESHOLD, getLineNdcY } from "./PostProcess";
 import { playDiveSound } from "../core/Audio";
 
 // ============================================
@@ -25,6 +25,7 @@ export const BUBBLE_LIFETIME = 2.5;       // Seconds before fade
 export const BUBBLE_SPAWN_RATE = 0.02;    // Seconds between spawns
 export const BUBBLE_SPAWN_DISTANCE = 0.8; // Distance from camera to spawn
 export const BUBBLE_SPREAD = 0.25;        // Random spread at spawn
+export const BUBBLE_LINE_FADE_BAND = 0.18; // NDC band below the ocean line over which a rising bubble fades out before popping at it
 
 // Ambient underwater bubble settings
 export const AMBIENT_BUBBLE_INTERVAL = 1.4;   // Seconds between ambient bubble groups
@@ -231,6 +232,7 @@ const _forward = new Vector3();
 const _right = new Vector3();
 const _up = new Vector3();
 const _spawnPos = new Vector3();
+const _screenProj = new Vector3();
 
 // Get a spawn position at given screen coordinates (NDC: -1 to 1)
 function getSpawnPositionAtNDC(ndcX: number, ndcY: number): Vector3 {
@@ -257,11 +259,11 @@ function getSpawnPositionAtNDC(ndcX: number, ndcY: number): Vector3 {
     return _spawnPos;
 }
 
-// Spawn a small group of ambient bubbles at a random screen position
+// Spawn a small group of ambient bubbles just below the visible bottom edge
+// so they drift up into frame instead of popping into existence mid-screen.
 function spawnAmbientBubbleGroup(): void {
-    // Random position on screen (avoid edges)
     const ndcX = (Math.random() - 0.5) * 1.4;
-    const ndcY = (Math.random() - 0.5) * 1.4;
+    const ndcY = -1.0 - Math.random() * 0.15;
 
     // Spawn bubbles close together using the constant
     for (let i = 0; i < AMBIENT_BUBBLE_GROUP_SIZE; i++) {
@@ -310,10 +312,14 @@ function getSpawnPosition(): Vector3 | null {
     return _spawnPos;
 }
 
-export function Update(cameraY: number): void {
+export function Update(): void {
     if (!initialized || !_instMesh) return;
 
-    isUnderwater = cameraY < UNDERWATER_Y_THRESHOLD;
+    // Same source of truth as the screen-space over/under effect (PostProcess.ts):
+    // the ocean line's projected screen row. Bubbles run whenever that line is on
+    // screen (i.e. the effect is showing), not off the bottom, regardless of the
+    // camera's own depth.
+    isUnderwater = getLineNdcY(camera.position.y) > -1.0;
 
     // Update existing bubbles (physics + opacity)
     for (let i = 0; i < bubbles.length; i++) {
@@ -338,18 +344,26 @@ export function Update(cameraY: number): void {
         // Age
         b.life -= deltaTime;
 
-        // Fade out
+        // Age-based fade
         const lifeRatio = b.life / b.maxLife;
-        _opacities[i] = Math.min(0.6, lifeRatio * 1.5);
+        let opacity = Math.max(0.0, Math.min(0.6, lifeRatio * 1.5));
 
-        // Pop at surface
-        if (b.y > UNDERWATER_Y_THRESHOLD - 0.05) {
+        // Screen-space clip to the ocean line (the top of the effect): fade the
+        // bubble out as it approaches the line and pop it the instant it reaches
+        // the line, so it rises up to the line and gradually vanishes there but
+        // NEVER passes it. Purely screen-space, so it behaves identically whether
+        // the line sits low (camera above water) or high (submerged) — it's the
+        // same projected line PostProcess draws. The world-Y check is only a far
+        // safety net (a bubble should never be well above the surface).
+        const bubbleNdcY = _screenProj.set(b.x, b.y, b.z).project(camera).y;
+        const gap = getLineNdcY(camera.position.y) - bubbleNdcY; // >0 below the line, <0 past it
+        if (gap <= 0.0 || b.y > UNDERWATER_Y_THRESHOLD + 2.0) {
             b.life = 0;
+            opacity = 0;
+        } else {
+            opacity *= Math.min(1.0, gap / BUBBLE_LINE_FADE_BAND);
         }
-
-        if (b.life <= 0) {
-            _opacities[i] = 0;
-        }
+        _opacities[i] = opacity;
     }
 
     // Batch-update instance matrices (position + uniform scale)
@@ -383,7 +397,7 @@ export function Update(cameraY: number): void {
         const toSpawn = Math.min(entryBubblesRemaining, ENTRY_BUBBLE_PER_FRAME);
         for (let i = 0; i < toSpawn; i++) {
             const ndcX = (Math.random() - 0.5) * 1.6;
-            const ndcY = (Math.random() - 0.5) * 1.6;
+            const ndcY = -1.0 - Math.random() * 0.15;
             const pos = getSpawnPositionAtNDC(ndcX, ndcY);
             if (pos.y < UNDERWATER_Y_THRESHOLD) {
                 spawnBubble(pos);

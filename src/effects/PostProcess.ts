@@ -18,15 +18,32 @@ import {
     Scene as ThreeScene,
     WebGLRenderer,
     Vector2,
+    Vector3,
+    Matrix4,
     Camera,
+    PerspectiveCamera,
+    MathUtils,
 } from "three";
 import { time } from "../core/Time";
-import { distortionStrength, distortionSpeed, distortionScale, distortionEdgeFade } from '../scene/config/OceanConfig';
+import {
+    distortionStrength, distortionSpeed, distortionScale, distortionEdgeFade,
+    underwaterTintColor, underwaterTintStrength,
+    underwaterLineDistance, underwaterLineHeightOffset, underwaterLineWobbleGain, underwaterLineEdge,
+} from '../scene/config/OceanConfig';
 import {
     sceneColorUniform,
     sceneResolutionUniform,
     captureSceneColor,
+    waterlineYUniform,
+    // Surface wave uniforms — shared by reference so the ocean line ripples in
+    // phase with the rendered ocean surface (auto-synced with any GUI tweak).
+    surfaceWaveLengthUniform,
+    surfaceWaveSpeedUniform,
+    surfaceWaveSteepnessUniform,
+    waveVelocity1Uniform,
+    waveVelocity2Uniform,
 } from "../materials/OceanMaterial";
+import { oceanWavePatternGLSL } from "../shaders/OceanShaders";
 
 // ── Underwater constants ─────────────────────────────────────────────────────
 export const UNDERWATER_Y_THRESHOLD = 0.0;
@@ -40,7 +57,6 @@ const orthoCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const quadScene = new ThreeScene();
 
 let material: ShaderMaterial | null = null;
-let underwaterAmount = 0;
 let pixelSize = 0;
 let fxaaEnabled = false;
 let initialized = false;
@@ -71,12 +87,67 @@ const fragmentShader = /* glsl */`
     uniform float uSpeed;
     uniform float uScale;
     uniform float uEdgeFade;
-    uniform float uAmount;
     uniform float uPixelSize;
     uniform float uFxaa;        // 1.0 = enabled, 0.0 = disabled (when MSAA is on)
     uniform vec2 uResolution;
+    uniform vec3 uTintColor;
+    uniform float uTintStrength;
+
+    // Underwater "over/under" mask — pure SCREEN-SPACE, no depth, no geometry.
+    // There is a single "ocean line" across the screen: the water surface (y≈0,
+    // wavy) projected a fixed distance uLineDistance in front of the camera.
+    // Everything BELOW that line gets the effect; everything above is untouched.
+    // Because the scroll camera is level (pitch 0, only its height Y changes),
+    // the line's screen row follows a simple projection of (waterY - camY): it
+    // sits off the bottom of the screen while the camera is well above water
+    // (→ 0% effect), rises to centre at the surface (over/under), and climbs off
+    // the top once submerged (→ 100%). The line ripples in phase with the real
+    // ocean waves by sampling the shared surface-wave pattern per column.
+    uniform float uTanHalfFov;
+    uniform float uAspect;
+    uniform mat4 uCameraMatrixWorld;
+    uniform float uWaterlineY;
+    // Shared surface-wave uniforms (same references as OceanMaterial.surface) —
+    // only the shape (wavelength/speed/direction/steepness) is reused, so the
+    // line's ripple stays in phase with the rendered water.
+    uniform float uWaveLen;
+    uniform float uWaveSpeed;
+    uniform float uWaveSteepness;
+    uniform vec2  uWaveDir1;
+    uniform vec2  uWaveDir2;
+    // Effect-only knobs:
+    uniform float uLineDistance;         // world distance ahead the ocean line is projected from (sensitivity/height)
+    uniform float uLineHeightOffset;     // extra NDC nudge of the line up/down
+    uniform float uLineWobbleGain;       // NDC amplitude of the line's ripple
+    uniform float uLineEdge;             // NDC half-width of the soft boundary
 
     varying vec2 vUv;
+` + oceanWavePatternGLSL + /* glsl */`
+    // Screen row (NDC y, -1 bottom .. +1 top) of the wavy ocean line at a given
+    // screen column (ndcX). Level-camera projection of the water surface a fixed
+    // distance ahead — no depth buffer involved.
+    float oceanLineNdcY(float ndcX) {
+        vec3 camPos = uCameraMatrixWorld[3].xyz;
+        vec2 fwdXZ = normalize(-uCameraMatrixWorld[2].xz + vec2(1e-5));
+        vec2 rightXZ = normalize(uCameraMatrixWorld[0].xz + vec2(1e-5));
+
+        // World XZ the ocean line occupies for this column, uLineDistance ahead.
+        vec2 worldXZ = camPos.xz
+                     + fwdXZ * uLineDistance
+                     + rightXZ * (ndcX * uLineDistance * uTanHalfFov * uAspect);
+
+        float k = 6.2831853 / max(uWaveLen, 0.01);
+        float t = uTime * uWaveSpeed;
+        vec2 dir1 = normalize(uWaveDir1 + vec2(1e-5));
+        vec2 dir2 = normalize(uWaveDir2 + vec2(1e-5));
+        vec2 g;
+        float wave = oceanWavePattern(worldXZ, t, dir1, dir2, k, uWaveSteepness * 0.6, g);
+
+        // Project (surfaceY - camY) at distance uLineDistance to an NDC row, then
+        // ripple it in phase with the real waves.
+        float baseNdc = (uWaterlineY - camPos.y) / max(uLineDistance * uTanHalfFov, 1e-4);
+        return baseNdc + uLineHeightOffset + uLineWobbleGain * wave;
+    }
 
     // FXAA 3.11 — single-pass luma-based AA. Cheap (~6 texture taps), no extra
     // VRAM. Replaces WebGL MSAA which would cost a multi-sample backbuffer
@@ -130,6 +201,13 @@ const fragmentShader = /* glsl */`
     void main() {
         vec2 uv = vUv;
 
+        // ── Underwater mask (screen-space over/under line) ─────────────────
+        // Everything below the wavy ocean line gets the effect, everything above
+        // is untouched — no depth, no geometry, purely 2D relative to the camera.
+        float lineNdcY = oceanLineNdcY(uv.x * 2.0 - 1.0);
+        float pixelNdcY = uv.y * 2.0 - 1.0;
+        float underwaterMix = 1.0 - smoothstep(lineNdcY - uLineEdge, lineNdcY + uLineEdge, pixelNdcY);
+
         // ── Underwater distortion ────────────────────────────────────────
         // Multi-frequency waves per axis at irrational frequency/phase ratios
         // so zero-crossings never align — eliminates static seam lines.
@@ -137,11 +215,11 @@ const fragmentShader = /* glsl */`
         float dx = (sin(uv.y * uScale          + t)           * 0.60
                   + sin(uv.y * uScale * 1.7    + t * 1.3 + 1.9) * 0.25
                   + sin(uv.y * uScale * 3.1    + t * 0.7 + 4.1) * 0.15
-                   ) * uDistortion * uAmount;
+                   ) * uDistortion * underwaterMix;
         float dy = (cos(uv.x * uScale * 0.8    + t * 0.9)        * 0.60
                   + cos(uv.x * uScale * 1.4    + t * 0.6 + 2.7)  * 0.25
                   + cos(uv.x * uScale * 2.6    + t * 1.1 + 5.2)  * 0.15
-                   ) * uDistortion * 0.7 * uAmount;
+                   ) * uDistortion * 0.7 * underwaterMix;
         float edgeDistance = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
         float edgeFade = uEdgeFade <= 0.0 ? 1.0 : smoothstep(0.0, uEdgeFade, edgeDistance);
         uv.x += dx * edgeFade;
@@ -157,11 +235,22 @@ const fragmentShader = /* glsl */`
         }
 
         // ── FXAA (only when MSAA is off; pixelation overrides AA) ────────
+        vec4 color;
         if (uFxaa > 0.5 && uPixelSize < 0.5) {
-            gl_FragColor = fxaa(tDiffuse, uv, 1.0 / uResolution);
+            color = fxaa(tDiffuse, uv, 1.0 / uResolution);
         } else {
-            gl_FragColor = texture2D(tDiffuse, uv);
+            color = texture2D(tDiffuse, uv);
         }
+
+        // ── Underwater blue tint ─────────────────────────────────────────
+        // Same mask as the distortion above, so the tint only touches the
+        // portion of the screen that's actually below the ocean's line —
+        // bubbles/particles are already baked into tDiffuse at this point
+        // (drawn before this pass captures the framebuffer), so they pick
+        // up the tint too without any changes to their own shaders.
+        color.rgb = mix(color.rgb, uTintColor, underwaterMix * uTintStrength);
+
+        gl_FragColor = color;
     }
 `;
 
@@ -183,10 +272,27 @@ export function Start(renderer: WebGLRenderer): void {
             uSpeed: { value: DISTORTION_SPEED },
             uScale: { value: DISTORTION_SCALE },
             uEdgeFade: { value: DISTORTION_EDGE_FADE },
-            uAmount: { value: 0 },
             uPixelSize: { value: pixelSize },
             uFxaa: { value: fxaaEnabled ? 1.0 : 0.0 },
             uResolution: sceneResolutionUniform,           // shared
+            uTintColor: { value: new Vector3(underwaterTintColor.r, underwaterTintColor.g, underwaterTintColor.b) },
+            uTintStrength: { value: underwaterTintStrength },
+            uWaterlineY: waterlineYUniform,                // shared
+            uTanHalfFov: { value: 1 },
+            uAspect: { value: 1 },
+            uCameraMatrixWorld: { value: new Matrix4() },
+            // Surface-wave uniforms shared by reference — the ocean line ripples
+            // in phase with the rendered water; any Debug-GUI wave tweak flows through.
+            uWaveLen: surfaceWaveLengthUniform,
+            uWaveSpeed: surfaceWaveSpeedUniform,
+            uWaveSteepness: surfaceWaveSteepnessUniform,
+            uWaveDir1: waveVelocity1Uniform,
+            uWaveDir2: waveVelocity2Uniform,
+            // Effect-only knobs:
+            uLineDistance: { value: underwaterLineDistance },
+            uLineHeightOffset: { value: underwaterLineHeightOffset },
+            uLineWobbleGain: { value: underwaterLineWobbleGain },
+            uLineEdge: { value: underwaterLineEdge },
         },
         depthTest: false,
         depthWrite: false
@@ -206,13 +312,33 @@ export function onResize(w: number, h: number): void {
     height = h;
 }
 
-/** Update underwater distortion amount based on camera depth. */
-export function updateUnderwaterAmount(cameraY: number): void {
+/** Screen row (NDC y, -1 bottom .. +1 top) of the ocean line at screen centre
+ *  for a given camera height — the same base projection the shader uses (minus
+ *  the per-column ripple). Bubbles use it to know when the effect is on screen
+ *  and to clip themselves at the line. Returns -1 (off the bottom) pre-init. */
+export function getLineNdcY(camY: number): number {
+    if (!material) return -1;
+    const u = material.uniforms;
+    const tanHalfFov = u.uTanHalfFov.value as number;
+    const dist = u.uLineDistance.value as number;
+    const waterY = u.uWaterlineY.value as number;
+    const offset = u.uLineHeightOffset.value as number;
+    return (waterY - camY) / Math.max(dist * tanHalfFov, 1e-4) + offset;
+}
+
+/** Push the real camera's projection parameters (FOV/aspect/matrixWorld) plus
+ *  the animation clock — needed to project the ocean line and ripple it in
+ *  phase with the waves. This pass renders its quad with a dedicated
+ *  orthographic camera, so Three's auto-injected matrices don't belong to the
+ *  real camera; we supply them explicitly. Called once per frame. */
+export function updateCameraProjectionUniforms(cam: Camera): void {
     if (!material) return;
-    const depth = UNDERWATER_Y_THRESHOLD - cameraY;
-    underwaterAmount = Math.max(0, Math.min(1, depth / 0.5));
     material.uniforms.uTime.value = time;
-    material.uniforms.uAmount.value = underwaterAmount;
+    const persp = cam as PerspectiveCamera;
+    if (!persp.isPerspectiveCamera) return;
+    material.uniforms.uTanHalfFov.value = Math.tan(MathUtils.degToRad(persp.fov) / 2);
+    material.uniforms.uAspect.value = persp.aspect;
+    (material.uniforms.uCameraMatrixWorld.value as Matrix4).copy(persp.matrixWorld);
 }
 
 /**
@@ -222,9 +348,14 @@ export function updateUnderwaterAmount(cameraY: number): void {
 export function renderScene(renderer: WebGLRenderer, scene: ThreeScene, camera: Camera, afterBaseRender?: () => void): void {
     renderer.render(scene, camera);
     if (afterBaseRender) afterBaseRender();
-    
-    const needsPostProcess = (underwaterAmount > 0 || pixelSize > 0 || fxaaEnabled);
-    if (!needsPostProcess || !initialized || !material) {
+
+    // Always run: the underwater tint is computed per-pixel in the shader from
+    // the wavy water surface, so there's no cheap CPU-side scalar to gate on.
+    // FXAA is on by default (antialias defaults off, see Scene.ts), so this pass
+    // already ran unconditionally for almost every user anyway — the cost for
+    // anyone with pixelation+FXAA both off and nothing underwater on screen is a
+    // straight passthrough (one extra texture sample + copy).
+    if (!initialized || !material) {
         return;
     }
 
@@ -257,6 +388,32 @@ export function setDistortionScale(v: number): void {
 
 export function setDistortionEdgeFade(v: number): void {
     if (material) material.uniforms.uEdgeFade.value = v;
+}
+
+// ── Underwater tint / wavy-boundary setters ──────────────────────────────────
+
+export function setUnderwaterTintStrength(v: number): void {
+    if (material) material.uniforms.uTintStrength.value = v;
+}
+
+export function setUnderwaterTintColor(r: number, g: number, b: number): void {
+    if (material) (material.uniforms.uTintColor.value as Vector3).set(r, g, b);
+}
+
+export function setUnderwaterLineDistance(v: number): void {
+    if (material) material.uniforms.uLineDistance.value = v;
+}
+
+export function setUnderwaterLineHeightOffset(v: number): void {
+    if (material) material.uniforms.uLineHeightOffset.value = v;
+}
+
+export function setUnderwaterLineWobbleGain(v: number): void {
+    if (material) material.uniforms.uLineWobbleGain.value = v;
+}
+
+export function setUnderwaterLineEdge(v: number): void {
+    if (material) material.uniforms.uLineEdge.value = v;
 }
 
 // ── GPU prewarm ──────────────────────────────────────────────────────────────

@@ -6,6 +6,11 @@ import { SetSkyboxUniforms } from "./SkyboxMaterial";
 import * as OceanConfig from '../scene/config/OceanConfig';
 
 export const surface = new ShaderMaterial();
+// High-tessellation patch that fills the circular hole `surface` discards
+// near the camera, so the near-camera swell's silhouette reads as curved
+// instead of faceted at surfaceWaveLength's scale. Shares `surface`'s live
+// Uniform objects (see Start()) so any tuning of one applies to both.
+export const patch = new ShaderMaterial();
 export const volume = new ShaderMaterial();
 export const object = new ShaderMaterial();
 export const triplanar = new ShaderMaterial();
@@ -53,8 +58,6 @@ export const surfaceWaveSpeedUniform       = new Uniform(OceanConfig.surfaceWave
 export const surfaceWaveRangeUniform       = new Uniform(OceanConfig.surfaceWaveRange);
 export const surfaceWaveForwardBiasUniform = new Uniform(OceanConfig.surfaceWaveForwardBias);
 export const surfaceWaveSteepnessUniform   = new Uniform(OceanConfig.surfaceWaveSteepness);
-export const surfaceWaveHeightFadeStartUniform = new Uniform(OceanConfig.surfaceWaveHeightFadeStart);
-export const surfaceWaveHeightFadeEndUniform   = new Uniform(OceanConfig.surfaceWaveHeightFadeEnd);
 
 // Foam mask — generated at runtime from island silhouette
 export const foamMaskUniform         = new Uniform(null as Texture | null);         // Top-down silhouette texture
@@ -275,8 +278,6 @@ export function Start(): void
         _SurfaceWaveRange: surfaceWaveRangeUniform,
         _SurfaceWaveForwardBias: surfaceWaveForwardBiasUniform,
         _SurfaceWaveSteepness: surfaceWaveSteepnessUniform,
-        _SurfaceWaveHeightFadeStart: surfaceWaveHeightFadeStartUniform,
-        _SurfaceWaveHeightFadeEnd: surfaceWaveHeightFadeEndUniform,
         _FoamMask: foamMaskUniform,
         _FoamMaskCenter: foamMaskCenterUniform,
         _FoamMaskSize: foamMaskSizeUniform,
@@ -324,7 +325,19 @@ export function Start(): void
         _EdgeFoamFadeEndZ: edgeFoamFadeEndZUniform,
     };
     SetSkyboxUniforms(surface);
-    
+
+    // Same shader as `surface`, with OCEAN_PATCH defined so surfaceFragment's
+    // complementary discard keeps the two meshes' pixels from ever
+    // overlapping (see OceanShaders.ts) — otherwise two overlapping
+    // semi-transparent draws would double-alpha-blend into a visible seam.
+    patch.vertexShader = OceanShaders.surfaceVertex;
+    patch.fragmentShader = OceanShaders.surfaceFragment;
+    patch.side = DoubleSide;
+    patch.transparent = true;
+    patch.depthWrite = false;
+    patch.defines = { OCEAN_PATCH: '1' };
+    patch.uniforms = { ...surface.uniforms };  // shares the exact same Uniform instances — live-synced, no clone
+
     volume.vertexShader = OceanShaders.volumeVertex;
     volume.fragmentShader = OceanShaders.volumeFragment;
     volume.uniforms = 

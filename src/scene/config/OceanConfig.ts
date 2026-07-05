@@ -33,7 +33,10 @@ export const edgeFadeDistance  = 0.5400;
 // Values are -viewDir.y (0 = looking dead horizontal at the horizon, ~1 = down).
 // Full haze at the horizon, fading to none once the view tips below ~End.
 export const horizonFadeStart  = 0.0000;  // -viewDir.y where the haze starts fading out
-export const horizonFadeEnd    = 0.1800;  // -viewDir.y where the haze is fully gone (looking down)
+export const horizonFadeEnd    = 0.0180;  // -viewDir.y where the haze is fully gone (looking down)
+// Dialed to 10% of the original 0.18 reach — this haze was a band-aid for a
+// grazing-angle reflection artifact that has since been fixed at the source.
+// Kept at a sliver rather than removed in case any residual edge case reappears.
 
 // ── Surface Vertex Displacement (near-camera swell) ──────────────────────────
 // Real geometry waves applied ONLY to the strip of ocean in front of the camera
@@ -44,16 +47,22 @@ export const surfaceWaveLength      = 3.7000; // wavelength in world units (keep
 export const surfaceWaveSpeed       = 0.6000; // animation speed of the swell
 export const surfaceWaveRange       = 18.0000; // XZ distance from camera over which the waves fade to flat
 export const surfaceWaveForwardBias = 0.6000; // 0 = full radial ring around camera, 1 = only directly ahead
-export const surfaceWaveSteepness   = 0.3900; // blend of the cross wave layer — adds choppiness
+export const surfaceWaveSteepness   = 0.2000; // blend of the cross wave layer — adds choppiness
 // The swell is camera-relative (follows the camera, biased ahead of its
-// heading) and only meant for the moment the camera crosses the waterline. When
-// the camera sits above the surface and looks toward the horizon (e.g. the pug
-// zoom at y~0.43), the region's far edge lands right on the horizon line and its
-// wave normal flashes a bright sky reflection that tracks the camera. Fade the
-// whole effect out by camera height above the waterline so it only shows at the
-// crossing, never as a horizon speck.
-export const surfaceWaveHeightFadeStart = 0.1500; // camera |Y| where the swell starts fading out
-export const surfaceWaveHeightFadeEnd   = 0.3000; // camera |Y| where the swell is fully gone
+// heading) and always active, regardless of camera height — it used to fade
+// out above water (kept only near the crossing) to hide a horizon-reflection
+// speck at the pug zoom's height, but suppressing the ripple isn't the right
+// tool for that anymore now that it's meant to always be visible. Steepness
+// was dialed back instead: the ocean surface doesn't write depth (so it
+// never occludes underwater content drawn after it — see OceanMaterial.ts),
+// which means when the displaced surface folds over itself in screen space
+// at a grazing angle, there's no z-buffer to resolve which fold is nearest —
+// triangles just draw in mesh order, occasionally showing the wrong (farther)
+// fold, including gaps straight through to the sky. Less steepness means a
+// gentler slope, which folds far less readily at the angles this camera
+// actually uses. Not a complete fix (still possible at extreme angles), but
+// a real depth-buffer fix risks breaking fish/bubble occlusion against rocks
+// elsewhere and needs visual verification this environment can't do.
 
 // ── Ocean Surface ─────────────────────────────────────────────────────────────
 export const surfaceColor   = { r: 0.0000, g: 1.1800, b: 1.1700 }; // RGB tint (1,1,1 = no tint)
@@ -101,6 +110,19 @@ export const distortionStrength = 0.0115;
 export const distortionSpeed    = 0.6200;
 export const distortionScale    = 8.5000;
 export const distortionEdgeFade = 0.0600;
+
+// ── Underwater "over/under" tint (screen-space line) ────────────────────────
+// The effect tints everything BELOW a wavy line — the ocean surface projected
+// uLineDistance ahead of the level scroll camera (PostProcess.ts). The ripple
+// reuses the real surface wave shape (length/speed/direction) so it stays in
+// phase with the rendered water. Purely 2D — no depth/geometry. Values below
+// were tuned on the preview via the "Underwater Line" Debug GUI.
+export const underwaterTintColor        = { r: 0.0400, g: 0.1200, b: 0.2600 }; // single navy tone mixed in underwater
+export const underwaterTintStrength     = 0.3500; // mix amount below the line (uniform — no depth gradient)
+export const underwaterLineDistance     = 1.9000; // world distance the line is projected ahead — smaller = line sits lower/off-screen when above water (0% at the top of the scroll on both FOVs), 50% at the waterline crossing
+export const underwaterLineHeightOffset = 0.0400; // extra NDC nudge of the line up/down
+export const underwaterLineWobbleGain   = 0.0550; // NDC amplitude of the line's ripple (how much it undulates)
+export const underwaterLineEdge         = 0.2000; // NDC softness of the boundary (smoothstep half-width)
 
 // ── Fish / Jellyfish Lighting ───────────────────────────────────────────────
 // Drives the per-jellyfish PointLight (candela-ish intensity + reach in world

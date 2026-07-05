@@ -1,6 +1,23 @@
+// ── Shared ocean swell pattern ───────────────────────────────────────────────
+// Single source of truth for the two-sine swell used both by the surface vertex
+// displacement (below) and by the underwater post-process tint (PostProcess.ts),
+// so the tint boundary rides the exact same phase/direction as the real water.
+// Returns the raw (un-amplified) height in ~[-(1+cross), (1+cross)] and writes
+// the analytic horizontal gradient of that raw height into `grad`.
+export const oceanWavePatternGLSL = /* glsl */`
+    float oceanWavePattern(vec2 xz, float t, vec2 dir1, vec2 dir2, float k, float crossW, out vec2 grad) {
+        float phase1 = dot(xz, dir1) * k + t;
+        float phase2 = dot(xz, dir2) * (k * 1.3) - t * 0.85;
+        grad = dir1 * (k * cos(phase1))
+             + dir2 * (k * 1.3 * crossW * cos(phase2));
+        return sin(phase1) + crossW * sin(phase2);
+    }
+`;
+
 export const surfaceVertex =
 /*glsl*/`
     #include <ocean>
+` + oceanWavePatternGLSL + /*glsl*/`
 
     uniform vec3  _CameraForward;
     uniform float _SurfaceWaveAmplitude;
@@ -9,8 +26,6 @@ export const surfaceVertex =
     uniform float _SurfaceWaveRange;
     uniform float _SurfaceWaveForwardBias;
     uniform float _SurfaceWaveSteepness;
-    uniform float _SurfaceWaveHeightFadeStart;
-    uniform float _SurfaceWaveHeightFadeEnd;
 
     varying vec2 _worldPos;
     varying vec2 _uv;
@@ -34,12 +49,7 @@ export const surfaceVertex =
         float facing = dot(normalize(toCam + vec2(1e-5)), fwd);
         float fwdMask = mix(1.0, smoothstep(-0.15, 0.55, facing), _SurfaceWaveForwardBias);
 
-        // Fade the swell out as the camera rises above the waterline. The effect
-        // is only for the surface-crossing moment; above the water its far edge
-        // sits on the horizon line and flashes a camera-tracking reflection speck.
-        float heightFade = 1.0 - smoothstep(_SurfaceWaveHeightFadeStart, _SurfaceWaveHeightFadeEnd, abs(cameraPosition.y));
-
-        float mask = distMask * fwdMask * heightFade;
+        float mask = distMask * fwdMask;
 
         float elevation = 0.0;
         _waveNormal = vec3(0.0);
@@ -49,20 +59,16 @@ export const surfaceVertex =
             vec2 dir1 = normalize(_WaveVelocity1 + vec2(1e-5));
             vec2 dir2 = normalize(_WaveVelocity2 + vec2(1e-5));
             float t = _Time * _SurfaceWaveSpeed;
-
-            float phase1 = dot(worldPos.xz, dir1) * k + t;
-            float phase2 = dot(worldPos.xz, dir2) * (k * 1.3) - t * 0.85;
-
             float crossWave = _SurfaceWaveSteepness * 0.6;
-            float h = sin(phase1) + crossWave * sin(phase2);
+
+            vec2 grad;
+            float h = oceanWavePattern(worldPos.xz, t, dir1, dir2, k, crossWave, grad);
             float amp = _SurfaceWaveAmplitude * mask;
             elevation = h * amp;
 
             // Analytic gradient → tangent-space normal offset. The fragment
             // builds normals in a z-up space then swizzles .xzy to world, so
             // (-dH/dx, -dH/dz, 0) maps to the correct world tilt.
-            vec2 grad = dir1 * (k * cos(phase1))
-                      + dir2 * (k * 1.3 * crossWave * cos(phase2));
             grad *= amp;
             _waveNormal = vec3(-grad.x, -grad.y, 0.0);
         }
@@ -83,6 +89,7 @@ export const surfaceFragment =
     uniform float _EdgeFadeDistance;
     uniform float _HorizonFadeStart; // eye distance where the surface starts blending to horizon color
     uniform float _HorizonFadeEnd;   // eye distance where the surface fully matches the horizon color
+    uniform float _SurfaceWaveRange; // radius (world units) of the near-camera swell patch discard circle
 
     // Foam mask — top-down island silhouette rendered at runtime
     uniform sampler2D _FoamMask;
@@ -328,9 +335,27 @@ export const surfaceFragment =
 
     void main()
     {
+        // Near-camera wave patch: complementary circular discard. The main
+        // surface discards INSIDE the circle (leaves a hole); the patch mesh
+        // (identical shader, OCEAN_PATCH defined) discards OUTSIDE it and
+        // fills that hole with much finer tessellation so the swell's
+        // silhouette isn't faceted. Both sides use the same _SurfaceWaveRange
+        // radius and cameraPosition — displacement is already 0 there
+        // (distMask hits exactly 0 at _SurfaceWaveRange in the vertex
+        // shader), so the seam is watertight regardless of tessellation, and
+        // the two semi-transparent meshes never double-blend the same pixel.
+        vec2 toCam = _worldPos - cameraPosition.xz;
+        float distSq = dot(toCam, toCam);
+        float radiusSq = _SurfaceWaveRange * _SurfaceWaveRange;
+        #ifdef OCEAN_PATCH
+            if (distSq > radiusSq) discard;
+        #else
+            if (distSq <= radiusSq) discard;
+        #endif
+
         float edgeFade = calcEdgeFade(_worldPos);
         if (edgeFade <= 0.0) discard;
-        
+
         float foam = calcFoam(_worldPos);
         
         // Add ripple normal perturbation with subtle foam
@@ -342,15 +367,6 @@ export const surfaceFragment =
         float viewLen = length(viewVec);
         vec3 viewDir = viewVec / viewLen;
 
-        // Horizon haze driven by the view's grazing angle, NOT distance. The
-        // ocean-plane edge and any grazing-reflection speck always sit where the
-        // line of sight is near-horizontal (-viewDir.y -> 0), regardless of how
-        // far the horizon is for the current camera height. Veil that band by
-        // blending the surface to the sky's horizon color + flattening its
-        // normal, so the plane edge dissolves into the sky. 1 at the horizon,
-        // 0 once looking down past _HorizonFadeEnd radians-ish below horizontal.
-        float horizonHaze = 1.0 - smoothstep(_HorizonFadeStart, _HorizonFadeEnd, max(0.0, -viewDir.y));
-
         vec3 normal = texture2D(_NormalMap1, _uv + _WaveVelocity1 * _Time).xyz * 2.0 - 1.0;
         normal += texture2D(_NormalMap2, _uv + _WaveVelocity2 * _Time).xyz * 2.0 - 1.0;
         normal *= _NormalMapStrength;
@@ -358,10 +374,6 @@ export const surfaceFragment =
         normal += rippleNormalOffset;  // Add ripple normal perturbation
         normal += _waveNormal;         // Add near-camera vertex-displacement tilt
         normal = normalize(normal).xzy;
-
-        // Flatten the surface in the horizon band so it reflects the smooth sky
-        // uniformly — kills the grazing-angle reflection speck at its source.
-        normal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), horizonHaze));
 
         sampleDither(gl_FragCoord.xy);
 
@@ -375,6 +387,22 @@ export const surfaceFragment =
 
         if (cameraPosition.y > _elevation)
         {
+            // Horizon haze driven by the view's grazing angle, NOT distance. The
+            // ocean-plane edge and any grazing-reflection speck always sit where the
+            // line of sight is near-horizontal (-viewDir.y -> 0), regardless of how
+            // far the horizon is for the current camera height. Veil that band by
+            // blending the surface to the sky's horizon color + flattening its
+            // normal, so the plane edge dissolves into the sky. 1 at the horizon,
+            // 0 once looking down past _HorizonFadeEnd radians-ish below horizontal.
+            // Scoped to the above-water branch only: viewDir always points down-ish
+            // here (-viewDir.y >= 0). Computing this before the branch split used to
+            // clamp negative -viewDir.y (upward rays, i.e. looking up from
+            // underwater) to 0 via max(0.0, ...) — the same value as "at the
+            // horizon" — which forced full haze (and a dead-flat normal) across the
+            // entire underwater upward view, wiping out the visible wave normal.
+            float horizonHaze = 1.0 - smoothstep(_HorizonFadeStart, _HorizonFadeEnd, max(0.0, -viewDir.y));
+            normal = normalize(mix(normal, vec3(0.0, 1.0, 0.0), horizonHaze));
+
             // fresnelBase: raw Fresnel curve — approaches 0 directly overhead.
             // reflectivity: floored version used for body-color blending only.
             float fresnelBase = pow(1.0 - max(0.0, dot(-viewDir, normal)), _ReflectionFresnelPower);
@@ -429,6 +457,13 @@ export const surfaceFragment =
         float underwaterEdgeFoam = edgeFoamRaw * _EdgeFoamIntensity * _EdgeFoamUnderwaterMul;
         float underwaterFoam = clamp(foam * 0.3 + underwaterEdgeFoam, 0.0, 1.0);
 
+        // Shave a touch of opacity off the surface as seen from below, but only
+        // right around the camera — ease back to fully opaque as the fragment
+        // approaches the horizon. t already carries that same near-far /
+        // steep-grazing gradient (it drives the rest of the underwater blend),
+        // so reuse it instead of a flat constant. Foam is unaffected either way.
+        float underwaterOpacity = mix(0.9, 1.0, t);
+
         if (dot(viewDir, normal) < CRITICAL_ANGLE)
         {
             vec3 r = reflect(viewDir, -normal);
@@ -439,14 +474,14 @@ export const surfaceFragment =
             vec3 foamColor = _EdgeFoamColor;
             vec3 finalColor = mix(mix(rColor, light, t), foamColor, underwaterFoam);
 
-            gl_FragColor = vec4(finalColor, max(edgeFade, underwaterFoam));
+            gl_FragColor = vec4(finalColor, max(edgeFade * underwaterOpacity, underwaterFoam));
             return;
         }
 
         vec3 foamColor = _EdgeFoamColor;
         vec3 finalColor = mix(light, foamColor, underwaterFoam);
 
-        gl_FragColor = vec4(finalColor, max(t * edgeFade, underwaterFoam));
+        gl_FragColor = vec4(finalColor, max(t * edgeFade * underwaterOpacity, underwaterFoam));
     }
 `;
 

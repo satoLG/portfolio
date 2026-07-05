@@ -4,6 +4,7 @@ import { camera } from "../core/Scene";
 import { deltaTime } from "../core/Time";
 import * as Audio from "../core/Audio";
 import { isPugZoomActive, isRadioZoomActive } from "../core/Control";
+import { surfaceWaveRange } from "./config/OceanConfig";
 import { island, firecamp, tree, bush, bushRadio, bushRadio2, bushPug, radio, sword, pug, tent, dogBed, phone } from "./Island";
 
 // All solid island objects that should occlude ripple clicks.
@@ -12,11 +13,19 @@ const _islandBlockers = () => [island, firecamp, tree, bush, bushRadio, bushRadi
 
 export const surface = new Mesh();
 export const volume = new Mesh();
+// High-tessellation patch that follows the camera XZ each frame — fills the
+// circular hole `surface`'s shader discards near the camera so the swell's
+// silhouette reads as curved instead of faceted (see OceanShaders.ts).
+export const patchMesh = new Mesh();
 const overlayScene = new Scene();
 
 const oceanWidth = 400;
 const oceanDepth = 400;
 const oceanVolumeDepth = 100;
+// Square footprint sized to fully contain the circular discard radius
+// (surfaceWaveRange) used by the complementary discard in surfaceFragment.
+const patchSize = surfaceWaveRange * 2;
+const patchSegs = 96; // ~0.42 unit spacing → ~9 segments per surfaceWaveLength (3.7), smooth
 
 // Ripple interaction
 const raycaster = new Raycaster();
@@ -81,9 +90,19 @@ export function Start(): void
     volume.parent = surface;
     surface.add(volume);
     overlayScene.add(surface);
-    
+
     surface.position.set(0, 0, -halfDepth);
-    
+
+    const patchGeometry = new PlaneGeometry(patchSize, patchSize, patchSegs, patchSegs);
+    patchGeometry.rotateX(-Math.PI / 2);
+    patchMesh.geometry = patchGeometry;
+    patchMesh.material = oceanMaterials.patch;
+    patchMesh.receiveShadow = false;
+    patchMesh.renderOrder = 1; // defensive; the complementary discard makes overlap impossible either way
+    // Sibling of `surface`, not a child — must NOT inherit surface's -halfDepth
+    // Z offset. Positioned directly in world space each frame in Update().
+    overlayScene.add(patchMesh);
+
     // Setup ripple interaction
     setupRippleInteraction();
 }
@@ -178,7 +197,11 @@ export function setOceanSegments(segs: 64 | 128 | 256): void {
 }
 
 export function Update(): void
-{   
+{
     // Update ripples
     oceanMaterials.updateRipples(deltaTime);
+
+    // Keep the high-tessellation swell patch centered on the camera's XZ so
+    // it always covers the same circle the main surface discards.
+    patchMesh.position.set(camera.position.x, 0, camera.position.z);
 }

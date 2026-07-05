@@ -189,9 +189,20 @@ function getUnderwaterTransparentTargets(): Object3D[] {
     return _underwaterTransparentTargets;
 }
 
-function hideUnderwaterTransparents(): Array<{ obj: Object3D; vis: boolean }> {
+// Bubbles alone — bright effect particles that must sit OVER the ocean surface
+// as soon as the over/under line is on screen (so the semi-transparent surface
+// doesn't paint over them), even while the camera is still above the waterline.
+// Fish and ambient particles are intentionally NOT here: above water they read
+// as underwater content seen THROUGH the surface and must stay in the main
+// render so the surface shader blurs/tints them.
+function getBubbleTargets(): Object3D[] {
+    const bubbles = Bubbles.getRenderable();
+    return bubbles ? [bubbles] : [];
+}
+
+function hideTargets(targets: Object3D[]): Array<{ obj: Object3D; vis: boolean }> {
     const saved: Array<{ obj: Object3D; vis: boolean }> = [];
-    for (const obj of getUnderwaterTransparentTargets()) {
+    for (const obj of targets) {
         saved.push({ obj, vis: obj.visible });
         obj.visible = false;
     }
@@ -233,15 +244,13 @@ function getDepthPrePassExcluded(): Object3D[] {
     if (WindLines.windLinesGroup)   _depthExcludedTargets.push(WindLines.windLinesGroup);
     if (Island.getChestRayGroup())  _depthExcludedTargets.push(Island.getChestRayGroup()!);
     if (Fire.fire)                  _depthExcludedTargets.push(Fire.fire);
-    // Fish/jellyfish/bubbles/underwater particles: same depthWrite=false-
-    // override bug already fixed for the underwater-dive path below (see
-    // hideUnderwaterTransparents) — but that hide only runs when
-    // useUnderwaterTransparentPass is true (camera underwater). Above water,
-    // these stay visible=true and get swept into the depth pre-pass,
-    // painting stray/flickering foam wherever one drifts. Excluded here too,
-    // unconditionally — this hide/restore is scoped tightly around
-    // SceneDepth.capture() alone and doesn't interact with the separate
-    // underwater-transparent render path.
+    // Fish/jellyfish/bubbles/underwater particles must be kept out of the depth
+    // pre-pass: the override MeshDepthMaterial forces depthWrite=true over their
+    // own depthWrite=false, so they'd write into the foam depth target and paint
+    // stray/flickering foam wherever one drifts. The after-ocean render path
+    // (renderSceneFrame) only hides SOME of them SOME of the time, so exclude ALL
+    // of them here unconditionally — this hide/restore is scoped tightly around
+    // SceneDepth.capture() alone and doesn't interact with that render path.
     for (const t of getUnderwaterTransparentTargets()) _depthExcludedTargets.push(t);
     return _depthExcludedTargets;
 }
@@ -281,16 +290,21 @@ function renderOnlyUnderwaterTransparents(savedTargets: Array<{ obj: Object3D; v
     restoreVisibility(savedChildren);
 }
 
-function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
-    // Hide the underwater transparents (fish, bubbles, particles) BEFORE the
-    // depth pre-pass. The pre-pass uses scene.overrideMaterial = MeshDepthMaterial,
-    // which forces depthWrite=true and so OVERRIDES these objects' own
-    // depthWrite=false — they'd otherwise write depth into the foam depth target
-    // while floating in open water. The edge foam reads that depth as "ocean
-    // meeting an object" and paints stray foam wherever a bubble/particle/fish
-    // drifts, flickering even with the camera still and worst on the first dive
-    // (the entry bubble burst). They are re-rendered separately after the ocean.
-    const underwaterTransparentVis = useUnderwaterTransparentPass ? hideUnderwaterTransparents() : null;
+function renderSceneFrame(deepUnderwater: boolean, effectOnScreen: boolean): void {
+    // Choose which transparents get re-drawn AFTER the ocean surface (so it
+    // doesn't paint over them). They're hidden here BEFORE the main render and
+    // re-rendered in the afterBaseRender callback below.
+    //  - camera truly underwater  → all of them (fish/particles/bubbles) sit
+    //    clear on top; the volume fog would otherwise swallow them.
+    //  - camera above water, over/under line on screen → ONLY bubbles. Fish and
+    //    particles stay in the main render so the ocean surface shader blurs and
+    //    tints them (they read as underwater content seen through the surface).
+    //    Moving them after the surface here is what made their blur vanish
+    //    mid-scroll. (All transparents are excluded from the depth pre-pass
+    //    separately, via getDepthPrePassExcluded, so foam is unaffected either way.)
+    const underwaterTransparentVis = deepUnderwater
+        ? hideTargets(getUnderwaterTransparentTargets())
+        : (effectOnScreen ? hideTargets(getBubbleTargets()) : null);
 
     // Pre-pass: capture opaque scene depth into SceneDepth's depth target so
     // the ocean shader can do depth-intersection foam in this frame. Must run
@@ -303,9 +317,10 @@ function renderSceneFrame(useUnderwaterTransparentPass: boolean): void {
     // Skip entirely when edge foam intensity is 0 (mobile/low quality default).
     // The depth texture keeps its last value; calcEdgeFoam() already returns 0
     // for all cleared (depth=1.0) pixels, so the visual result is identical and
-    // we save a full scene re-render every frame — the heaviest redundant cost on
-    // low-end devices.
-    if ((edgeFoamIntensityUniform.value as number) > 0) {
+    // we save a full scene re-render every frame. The underwater tint no longer
+    // needs this depth — it is a pure screen-space over/under line (PostProcess.ts).
+    const depthPassActive = (edgeFoamIntensityUniform.value as number) > 0;
+    if (depthPassActive) {
         const depthExcludedVis = hideDepthPrePassExcluded();
         SceneDepth.capture(renderer, scene, camera);
         restoreVisibility(depthExcludedVis);
@@ -724,11 +739,11 @@ async function prewarmGPU(): Promise<void> {
                 // Without this the first real crossing of UNDERWATER_Y_THRESHOLD causes a
                 // pipeline stall on the copyFramebufferToTexture call. The same render
                 // draws the parked creature grid (via the underwater transparent pass),
-                // forcing every clone's buffers to upload.
-                PostProcess.updateUnderwaterAmount(camera.position.y);  // sets underwaterAmount > 0
-                renderSceneFrame(true);
+                // forcing every clone's buffers to upload. PostProcess.renderScene() now
+                // runs its quad pass unconditionally every frame, so no gate needs
+                // faking here — this render already exercises the full pipeline.
+                renderSceneFrame(true, true);
                 renderer.getContext().finish();                         // ensure uploads complete before restore
-                PostProcess.updateUnderwaterAmount(100);                // reset to 0 (positive Y → depth < 0)
             } finally {
                 // Parking moved the clones (and acquired jelly PointLight intensity);
                 // restore even if the warm render threw, or the fish/jelly stay frozen
@@ -799,8 +814,7 @@ async function prewarmChestCorridor(): Promise<void> {
         if (typeof (renderer as any).compileAsync === 'function') {
             await (renderer as any).compileAsync(scene, camera);
         }
-        PostProcess.updateUnderwaterAmount(camera.position.y);
-        renderSceneFrame(camera.position.y < 0);
+        renderSceneFrame(camera.position.y < 0, camera.position.y < 0);
     };
 
     await renderAt(new Vector3(-0.1, -6.9, 1.78), mainFov);
@@ -815,7 +829,6 @@ async function prewarmChestCorridor(): Promise<void> {
         SeaFloorDecor.config.chestZoomFov,
     );
 
-    PostProcess.updateUnderwaterAmount(100);
     renderer.getContext().finish();
 }
 
@@ -947,7 +960,7 @@ export function Update(): void
     Audio.Update(camera.position.y);
     UI.Update();
     MediaPlayer.Update();
-    PostProcess.updateUnderwaterAmount(camera.position.y);
+    PostProcess.updateCameraProjectionUniforms(camera);
 
     // ── Visibility gating ─────────────────────────────────────────────────────
     // Only update systems relevant to the current view (surface vs underwater).
@@ -980,7 +993,7 @@ export function Update(): void
         SeaFloor.Update();
         SeaFloorDecor.Update(deltaTime);
         Fish.Update();
-        Bubbles.Update(camera.position.y);
+        Bubbles.Update();
         UnderwaterParticles.Update(camera.position.y);
         // Always tick Island.Update underwater — chest open/close animations,
         // glow fade-out, coin springs, and pug all depend on it.  Wind, radio,
@@ -1028,7 +1041,7 @@ export function Update(): void
         Island.Update(false);
         Fire.Update();
         Fish.Update();
-        Bubbles.Update(camera.position.y);
+        Bubbles.Update();
         UnderwaterParticles.Update(camera.position.y);
     }
 
@@ -1081,7 +1094,14 @@ export function Update(): void
     // with NoBlending punches transparent holes), matching henryjeff's architecture.
     // PostProcess.renderScene wraps renderer.render() with post-processing
     // (pixelation + underwater distortion).
-    renderSceneFrame(isUnderwater);
+    //
+    // Two gates (see renderSceneFrame): fish/particles render after the ocean
+    // surface only once the camera is truly underwater (isUnderwater, y<0) so the
+    // surface keeps blurring them while viewed from above; bubbles render after
+    // the surface as soon as the over/under line is on screen — the same gate
+    // they spawn on — so the surface never paints over them.
+    const underwaterEffectOnScreen = PostProcess.getLineNdcY(camera.position.y) > -1.0;
+    renderSceneFrame(isUnderwater, underwaterEffectOnScreen);
     // Clouds are sky-only — skip them while sealed inside the cabana.
     if (!Island.isCabanaSealed()) CloudSprites.Render(renderer, camera);
 
