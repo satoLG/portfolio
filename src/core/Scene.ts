@@ -1080,7 +1080,15 @@ export function Update(): void
     // with NoBlending punches transparent holes), matching henryjeff's architecture.
     // PostProcess.renderScene wraps renderer.render() with post-processing
     // (pixelation + underwater distortion).
-    renderSceneFrame(isUnderwater);
+    //
+    // Draw the underwater transparents (bubbles/fish/particles) AFTER the ocean
+    // surface whenever the over/under effect is on screen — the SAME line-based
+    // gate the bubbles spawn on — not only once the camera drops below y=0.
+    // Otherwise bubbles that appear while the camera is still above the waterline
+    // go through the above-water path and the semi-transparent ocean surface
+    // paints over them everywhere except in front of the island.
+    const underwaterEffectOnScreen = PostProcess.getLineNdcY(camera.position.y) > -1.0;
+    renderSceneFrame(isUnderwater || underwaterEffectOnScreen);
     // Clouds are sky-only — skip them while sealed inside the cabana.
     if (!Island.isCabanaSealed()) CloudSprites.Render(renderer, camera);
 
