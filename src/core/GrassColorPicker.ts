@@ -32,67 +32,70 @@ export function Start(): void {
     const tipHex0  = "#" + grassColorTip.getHexString();
 
     // ── Panel shell ──────────────────────────────────────────────────────────
+    // Anchored top-center over the sky so it never covers the island/grass, and
+    // kept small + translucent so the scene reads through it.
     const panel = document.createElement("div");
     panel.style.cssText = [
         "position:fixed",
-        "left:12px",
-        "bottom:calc(12px + env(safe-area-inset-bottom, 0px))",
+        "top:calc(52px + env(safe-area-inset-top, 0px))",
+        "left:50%",
+        "transform:translateX(-50%)",
         "z-index:99999",
-        "font:12px/1.4 system-ui, -apple-system, sans-serif",
+        "font:10px/1.3 system-ui, -apple-system, sans-serif",
         "color:#f0f0f0",
-        "background:rgba(20,24,20,0.82)",
-        "backdrop-filter:blur(6px)",
-        "-webkit-backdrop-filter:blur(6px)",
-        "border:1px solid rgba(255,255,255,0.14)",
-        "border-radius:10px",
-        "padding:10px 12px",
-        "box-shadow:0 4px 18px rgba(0,0,0,0.35)",
+        "background:rgba(18,22,18,0.5)",
+        "backdrop-filter:blur(5px)",
+        "-webkit-backdrop-filter:blur(5px)",
+        "border:1px solid rgba(255,255,255,0.12)",
+        "border-radius:8px",
+        "padding:5px 7px",
+        "box-shadow:0 2px 10px rgba(0,0,0,0.3)",
         "user-select:none",
         "touch-action:manipulation",
     ].join(";");
 
     // Header row with a collapse toggle
     const header = document.createElement("div");
-    header.style.cssText = "display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer";
+    header.style.cssText = "display:flex;align-items:center;gap:6px;margin-bottom:5px;cursor:pointer";
     const title = document.createElement("span");
-    title.textContent = "🌿 Cor da grama";
-    title.style.cssText = "font-weight:600;letter-spacing:0.2px";
+    title.textContent = "🌿 grama";
+    title.style.cssText = "font-weight:600;letter-spacing:0.2px;opacity:0.9";
     const chevron = document.createElement("span");
     chevron.textContent = "▾";
-    chevron.style.cssText = "margin-left:auto;opacity:0.7";
+    chevron.style.cssText = "margin-left:auto;opacity:0.6";
     header.append(title, chevron);
 
     const body = document.createElement("div");
-    body.style.cssText = "display:flex;flex-direction:column;gap:8px";
+    body.style.cssText = "display:flex;flex-direction:column;gap:5px";
 
     // Build one labelled row: colour swatch + editable hex readout, kept in sync.
     function makeRow(label: string, initialHex: string, onChange: (hex: string) => void) {
         const row = document.createElement("div");
-        row.style.cssText = "display:flex;align-items:center;gap:8px";
+        row.style.cssText = "display:flex;align-items:center;gap:6px";
 
         const name = document.createElement("span");
         name.textContent = label;
-        name.style.cssText = "width:44px;opacity:0.85";
+        name.style.cssText = "width:34px;opacity:0.85";
 
         const swatch = document.createElement("input");
         swatch.type = "color";
         swatch.value = initialHex;
         swatch.style.cssText =
-            "width:34px;height:26px;padding:0;border:none;border-radius:6px;background:none;cursor:pointer";
+            "width:24px;height:20px;padding:0;border:none;border-radius:5px;background:none;cursor:pointer";
 
         const hex = document.createElement("input");
         hex.type = "text";
         hex.value = initialHex;
         hex.spellcheck = false;
         hex.style.cssText = [
-            "width:88px",
-            "font:12px ui-monospace, SFMono-Regular, Menlo, monospace",
+            "width:66px",
+            "font:10px ui-monospace, SFMono-Regular, Menlo, monospace",
             "text-transform:lowercase",
             "color:#f0f0f0",
             "background:rgba(255,255,255,0.08)",
             "border:1px solid rgba(255,255,255,0.15)",
-            "border-radius:6px",
-            "padding:4px 6px",
+            "border-radius:5px",
+            "padding:3px 5px",
         ].join(";");
 
         // Swatch drag → update hex text + apply
