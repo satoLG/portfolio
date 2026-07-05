@@ -120,12 +120,14 @@ export const distortionEdgeFade = 0.0600;
 // undulates at every distance — the real surface swell is tiny (0.05) and only
 // exists within ~18u of the camera, so it can't drive a visible line at the
 // distant island. Purely art knobs; tune on the preview via the Debug GUI.
-export const underwaterTintColor      = { r: 0.0400, g: 0.1200, b: 0.2600 }; // single navy tone mixed in underwater
-export const underwaterTintStrength   = 0.3500; // mix amount below the wavy line (uniform — no depth gradient)
-export const underwaterWaveAmplitude  = 0.3500; // world-Y amplitude of the tint boundary swell
-export const underwaterWaveLength     = 10.0000; // world-space wavelength (broad, rolling)
-export const underwaterWaveSpeed      = 0.5000; // animation speed (× time)
-export const underwaterWaveEdge       = 0.0500; // world-Y softness of the boundary (smoothstep half-width)
+// The tint boundary reuses the REAL surface wave (amplitude/length/speed/range/
+// direction — see surfaceWave* above) so it's phase-locked to the rendered water.
+// These are the only effect-specific knobs:
+export const underwaterTintColor       = { r: 0.0400, g: 0.1200, b: 0.2600 }; // single navy tone mixed in underwater
+export const underwaterTintStrength    = 0.3500; // mix amount below the wavy line (uniform — no depth gradient)
+export const underwaterWaveGain        = 4.0000; // × the real wave amplitude — how much MORE the line swings (in-phase)
+export const underwaterLineHeightOffset = 0.0000; // shifts the boundary up/down relative to the waterline
+export const underwaterWaveEdge        = 0.0500; // world-Y softness of the boundary (smoothstep half-width)
 
 // ── Fish / Jellyfish Lighting ───────────────────────────────────────────────
 // Drives the per-jellyfish PointLight (candela-ish intensity + reach in world

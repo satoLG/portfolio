@@ -28,8 +28,7 @@ import { time } from "../core/Time";
 import {
     distortionStrength, distortionSpeed, distortionScale, distortionEdgeFade,
     underwaterTintColor, underwaterTintStrength,
-    underwaterWaveAmplitude, underwaterWaveLength, underwaterWaveSpeed, underwaterWaveEdge,
-    waveVelocity1, waveVelocity2,
+    underwaterWaveEdge, underwaterWaveGain, underwaterLineHeightOffset,
 } from '../scene/config/OceanConfig';
 import {
     sceneColorUniform,
@@ -39,6 +38,16 @@ import {
     cameraNearUniform,
     cameraFarUniform,
     waterlineYUniform,
+    // Surface wave uniforms — shared by reference so the tint boundary rides the
+    // exact same swell as the rendered ocean surface (auto-synced with any GUI tweak).
+    surfaceWaveAmplitudeUniform,
+    surfaceWaveLengthUniform,
+    surfaceWaveSpeedUniform,
+    surfaceWaveRangeUniform,
+    surfaceWaveForwardBiasUniform,
+    surfaceWaveSteepnessUniform,
+    waveVelocity1Uniform,
+    waveVelocity2Uniform,
 } from "../materials/OceanMaterial";
 import { oceanWavePatternGLSL } from "../shaders/OceanShaders";
 
@@ -92,13 +101,13 @@ const fragmentShader = /* glsl */`
 
     // Underwater "over/under" mask — world-space, wave-driven (Crest/Cyanilux
     // style). Per pixel we reconstruct a WORLD position from the opaque scene
-    // depth and tint everything that lies below the wavy water surface
-    // surfaceH(xz,t) = uWaterlineY + uWaveAmp * swell(xz,t). The swell reuses the
-    // ocean's own two-sine pattern (oceanWavePattern, shared from OceanShaders)
-    // but with its own broad amplitude/length so the line undulates at every
-    // distance — the real surface swell is tiny and near-camera-only. Using true
-    // world position (not a screen row) means the island's above-water grass is
-    // never tinted while its submerged rock is, and the waterline rides the swell.
+    // depth and tint solid geometry that lies below the wavy water surface
+    // (and the whole screen once the camera itself is submerged). The surface
+    // height replicates the EXACT ocean surface vertex displacement — same
+    // pattern, amplitude, wavelength, speed, direction, camera-relative distance
+    // and forward masks — by reusing the surface's own wave uniforms, so the
+    // tint boundary rides the real water in perfect sync. uWaveGain lets the
+    // line swing more than the (tiny, 0.05) real swell while staying phase-locked.
     uniform highp sampler2D uSceneDepth;   // highp required — mediump quantizes badly near depth=1 (see OceanShaders.ts calcEdgeFoam)
     uniform float uCameraNear;
     uniform float uCameraFar;
@@ -107,11 +116,18 @@ const fragmentShader = /* glsl */`
     uniform mat4 uCameraMatrixWorld;
     uniform float uWaterlineY;
     uniform float uDepthPassActive;      // 1.0 = opaque-scene depth pre-pass ran this frame (mask valid)
+    // Shared surface-wave uniforms (same references as OceanMaterial.surface):
     uniform float uWaveAmp;
     uniform float uWaveLen;
     uniform float uWaveSpeed;
+    uniform float uWaveRange;
+    uniform float uWaveForwardBias;
+    uniform float uWaveSteepness;
     uniform vec2  uWaveDir1;
     uniform vec2  uWaveDir2;
+    // Effect-only knobs:
+    uniform float uWaveGain;             // × the real amplitude (line waves more than the water, in-phase)
+    uniform float uLineHeightOffset;     // shifts the boundary up/down relative to the waterline
     uniform float uWaveEdge;             // world-Y half-width of the soft boundary
 
     varying vec2 vUv;
@@ -133,15 +149,30 @@ const fragmentShader = /* glsl */`
         return (uCameraMatrixWorld * vec4(viewPos, 1.0)).xyz;
     }
 
-    // World-space height of the wavy water surface at an XZ position.
+    // World-space height of the ocean surface at an XZ position — a faithful
+    // replica of surfaceVertex's displacement (see OceanShaders.ts), including
+    // the camera-relative distance + forward masks, so this line IS the real
+    // water surface (× uWaveGain for a taller-but-in-phase boundary).
     float waterSurfaceHeight(vec2 xz) {
-        float t = uTime * uWaveSpeed;
+        vec3 camPos = uCameraMatrixWorld[3].xyz;
+        vec2 fwdWorld = -uCameraMatrixWorld[2].xz;   // camera forward (world -Z axis), XZ only
+
+        vec2 toCam = xz - camPos.xz;
+        float camDist = length(toCam);
+        float distMask = 1.0 - smoothstep(0.0, uWaveRange, camDist);
+        vec2 fwd = normalize(fwdWorld + vec2(1e-5));
+        float facing = dot(normalize(toCam + vec2(1e-5)), fwd);
+        float fwdMask = mix(1.0, smoothstep(-0.15, 0.55, facing), uWaveForwardBias);
+        float mask = distMask * fwdMask;
+
         float k = 6.2831853 / max(uWaveLen, 0.01);
+        float t = uTime * uWaveSpeed;
         vec2 dir1 = normalize(uWaveDir1 + vec2(1e-5));
         vec2 dir2 = normalize(uWaveDir2 + vec2(1e-5));
         vec2 g;
-        float h = oceanWavePattern(xz, t, dir1, dir2, k, 0.6, g);
-        return uWaterlineY + uWaveAmp * h;
+        float h = oceanWavePattern(xz, t, dir1, dir2, k, uWaveSteepness * 0.6, g);
+
+        return uWaterlineY + uLineHeightOffset + uWaveAmp * uWaveGain * mask * h;
     }
 
     // FXAA 3.11 — single-pass luma-based AA. Cheap (~6 texture taps), no extra
@@ -197,37 +228,27 @@ const fragmentShader = /* glsl */`
         vec2 uv = vUv;
 
         // ── Underwater mask (world-space, wave-driven) ─────────────────────
-        // "belowAmount" = how far (world-Y) the thing this pixel sees sits
-        // below the wavy water surface. >0 underwater, <0 above; a soft band
-        // of ±uWaveEdge around 0 gives the anti-aliased, wave-following line.
+        // The camera-submerged check comes FIRST: once the eyes are below the
+        // wavy surface the whole view is underwater (uniform tint), so
+        // above-water objects seen from below don't get a half-tinted fringe.
+        // Otherwise (camera above water) only SOLID geometry below the wavy
+        // surface is tinted — the island's submerged rock, with a waterline
+        // that rides the real swell. Open water / sky (no depth hit) is left
+        // untouched: the ocean's own material already colours it, and tinting
+        // it drew a hard, unnatural horizon line.
         float underwaterMix = 0.0;
         if (uDepthPassActive > 0.5) {
             vec3 camPos = uCameraMatrixWorld[3].xyz;
-            float depthSample = texture2D(uSceneDepth, uv).x;
-            float belowAmount;
-
-            if (depthSample < 0.9999) {
-                // Solid geometry (island rock, tree, seafloor): reconstruct its
-                // world position and compare its Y to the wavy surface right
-                // above it. This is what makes the island's waterline wavy.
-                float eyeDepth = linearizeDepthBuffer(depthSample, uCameraNear, uCameraFar);
-                vec3 P = worldPosFromEyeDepth(eyeDepth, uv);
-                belowAmount = waterSurfaceHeight(P.xz) - P.y;
+            if (camPos.y < waterSurfaceHeight(camPos.xz)) {
+                underwaterMix = 1.0;
             } else {
-                // No geometry (open water / sky). Classify by the view ray.
-                vec3 rd = normalize(worldPosFromEyeDepth(1.0, uv) - camPos);
-                if (camPos.y < waterSurfaceHeight(camPos.xz)) {
-                    belowAmount = 1.0e3;                 // camera submerged → whole view underwater
-                } else {
-                    // Above water: everything below the (flat, far) sea horizon
-                    // is open sea, everything above is sky. The 60x makes it a
-                    // thin soft line at rd.y = 0 (eye level, correct for a level
-                    // camera); the island's waterline gets its waviness from the
-                    // geometry branch above, where waves actually read on screen.
-                    belowAmount = (-rd.y) * 60.0;
+                float depthSample = texture2D(uSceneDepth, uv).x;
+                if (depthSample < 0.9999) {
+                    float eyeDepth = linearizeDepthBuffer(depthSample, uCameraNear, uCameraFar);
+                    vec3 P = worldPosFromEyeDepth(eyeDepth, uv);
+                    underwaterMix = smoothstep(-uWaveEdge, uWaveEdge, waterSurfaceHeight(P.xz) - P.y);
                 }
             }
-            underwaterMix = smoothstep(-uWaveEdge, uWaveEdge, belowAmount);
         }
 
         // ── Underwater distortion ────────────────────────────────────────
@@ -307,12 +328,21 @@ export function Start(renderer: WebGLRenderer): void {
             uTanHalfFov: { value: 1 },
             uAspect: { value: 1 },
             uCameraMatrixWorld: { value: new Matrix4() },
-            uWaveAmp: { value: underwaterWaveAmplitude },
-            uWaveLen: { value: underwaterWaveLength },
-            uWaveSpeed: { value: underwaterWaveSpeed },
+            // Surface-wave uniforms shared by reference — the tint boundary
+            // stays perfectly in sync with the rendered ocean surface, and any
+            // Debug-GUI change to the real waves flows through automatically.
+            uWaveAmp: surfaceWaveAmplitudeUniform,
+            uWaveLen: surfaceWaveLengthUniform,
+            uWaveSpeed: surfaceWaveSpeedUniform,
+            uWaveRange: surfaceWaveRangeUniform,
+            uWaveForwardBias: surfaceWaveForwardBiasUniform,
+            uWaveSteepness: surfaceWaveSteepnessUniform,
+            uWaveDir1: waveVelocity1Uniform,
+            uWaveDir2: waveVelocity2Uniform,
+            // Effect-only knobs:
+            uWaveGain: { value: underwaterWaveGain },
+            uLineHeightOffset: { value: underwaterLineHeightOffset },
             uWaveEdge: { value: underwaterWaveEdge },
-            uWaveDir1: { value: new Vector2(waveVelocity1.x, waveVelocity1.y) },
-            uWaveDir2: { value: new Vector2(waveVelocity2.x, waveVelocity2.y) },
         },
         depthTest: false,
         depthWrite: false
@@ -414,16 +444,12 @@ export function setUnderwaterTintColor(r: number, g: number, b: number): void {
     if (material) (material.uniforms.uTintColor.value as Vector3).set(r, g, b);
 }
 
-export function setUnderwaterWaveAmplitude(v: number): void {
-    if (material) material.uniforms.uWaveAmp.value = v;
+export function setUnderwaterWaveGain(v: number): void {
+    if (material) material.uniforms.uWaveGain.value = v;
 }
 
-export function setUnderwaterWaveLength(v: number): void {
-    if (material) material.uniforms.uWaveLen.value = v;
-}
-
-export function setUnderwaterWaveSpeed(v: number): void {
-    if (material) material.uniforms.uWaveSpeed.value = v;
+export function setUnderwaterLineHeightOffset(v: number): void {
+    if (material) material.uniforms.uLineHeightOffset.value = v;
 }
 
 export function setUnderwaterWaveEdge(v: number): void {

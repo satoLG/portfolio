@@ -307,9 +307,8 @@ import {
     setDistortionEdgeFade as setUnderwaterEdgeFade,
     setUnderwaterTintStrength,
     setUnderwaterTintColor,
-    setUnderwaterWaveAmplitude,
-    setUnderwaterWaveLength,
-    setUnderwaterWaveSpeed,
+    setUnderwaterWaveGain,
+    setUnderwaterLineHeightOffset,
     setUnderwaterWaveEdge,
 } from '../effects/PostProcess';
 import {
@@ -319,9 +318,8 @@ import {
     distortionEdgeFade as DISTORTION_EDGE_FADE,
     underwaterTintColor as UNDERWATER_TINT_COLOR,
     underwaterTintStrength as UNDERWATER_TINT_STRENGTH,
-    underwaterWaveAmplitude as UNDERWATER_WAVE_AMPLITUDE,
-    underwaterWaveLength as UNDERWATER_WAVE_LENGTH,
-    underwaterWaveSpeed as UNDERWATER_WAVE_SPEED,
+    underwaterWaveGain as UNDERWATER_WAVE_GAIN,
+    underwaterLineHeightOffset as UNDERWATER_LINE_HEIGHT_OFFSET,
     underwaterWaveEdge as UNDERWATER_WAVE_EDGE,
     rippleSpeed as RIPPLE_SPEED,
     rippleLifetime as RIPPLE_LIFETIME,
@@ -738,9 +736,8 @@ function buildGUI(): void {
         edgeFade:   DISTORTION_EDGE_FADE,
         tintStrength: UNDERWATER_TINT_STRENGTH,
         tintColor:  { r: UNDERWATER_TINT_COLOR.r, g: UNDERWATER_TINT_COLOR.g, b: UNDERWATER_TINT_COLOR.b },
-        waveAmp:    UNDERWATER_WAVE_AMPLITUDE,
-        waveLen:    UNDERWATER_WAVE_LENGTH,
-        waveSpeed:  UNDERWATER_WAVE_SPEED,
+        waveGain:   UNDERWATER_WAVE_GAIN,
+        lineHeight: UNDERWATER_LINE_HEIGHT_OFFSET,
         waveEdge:   UNDERWATER_WAVE_EDGE,
     };
 
@@ -1053,12 +1050,11 @@ function buildGUI(): void {
                 `export const distortionSpeed    = ${f(_fogState.speed)};`,
                 `export const distortionScale    = ${f(_fogState.scale)};`,
                 `export const distortionEdgeFade = ${f(_fogState.edgeFade)};`,
-                `export const underwaterTintColor      = { r: ${f(_fogState.tintColor.r)}, g: ${f(_fogState.tintColor.g)}, b: ${f(_fogState.tintColor.b)} }; // single navy tone mixed in underwater`,
-                `export const underwaterTintStrength   = ${f(_fogState.tintStrength)}; // mix amount below the wavy line (uniform — no depth gradient)`,
-                `export const underwaterWaveAmplitude  = ${f(_fogState.waveAmp)}; // world-Y amplitude of the tint boundary swell`,
-                `export const underwaterWaveLength     = ${f(_fogState.waveLen)}; // world-space wavelength (broad, rolling)`,
-                `export const underwaterWaveSpeed      = ${f(_fogState.waveSpeed)}; // animation speed (× time)`,
-                `export const underwaterWaveEdge       = ${f(_fogState.waveEdge)}; // world-Y softness of the boundary (smoothstep half-width)`,
+                `export const underwaterTintColor       = { r: ${f(_fogState.tintColor.r)}, g: ${f(_fogState.tintColor.g)}, b: ${f(_fogState.tintColor.b)} }; // single navy tone mixed in underwater`,
+                `export const underwaterTintStrength    = ${f(_fogState.tintStrength)}; // mix amount below the wavy line (uniform — no depth gradient)`,
+                `export const underwaterWaveGain        = ${f(_fogState.waveGain)}; // × the real wave amplitude — how much MORE the line swings (in-phase)`,
+                `export const underwaterLineHeightOffset = ${f(_fogState.lineHeight)}; // shifts the boundary up/down relative to the waterline`,
+                `export const underwaterWaveEdge        = ${f(_fogState.waveEdge)}; // world-Y softness of the boundary (smoothstep half-width)`,
                 ``,
                 `// ── Fish / Jellyfish Lighting ───────────────────────────────────────────────`,
                 `// Drives the per-jellyfish PointLight (candela-ish intensity + reach in world`,
@@ -2038,12 +2034,10 @@ function buildGUI(): void {
         set edgeFade(v)  { _fogState.edgeFade = v; setUnderwaterEdgeFade(v); },
         get tintStrength() { return _fogState.tintStrength; },
         set tintStrength(v){ _fogState.tintStrength = v; setUnderwaterTintStrength(v); },
-        get waveAmp()    { return _fogState.waveAmp; },
-        set waveAmp(v)   { _fogState.waveAmp = v; setUnderwaterWaveAmplitude(v); },
-        get waveLen()    { return _fogState.waveLen; },
-        set waveLen(v)   { _fogState.waveLen = v; setUnderwaterWaveLength(v); },
-        get waveSpeed()  { return _fogState.waveSpeed; },
-        set waveSpeed(v) { _fogState.waveSpeed = v; setUnderwaterWaveSpeed(v); },
+        get waveGain()   { return _fogState.waveGain; },
+        set waveGain(v)  { _fogState.waveGain = v; setUnderwaterWaveGain(v); },
+        get lineHeight() { return _fogState.lineHeight; },
+        set lineHeight(v){ _fogState.lineHeight = v; setUnderwaterLineHeightOffset(v); },
         get waveEdge()   { return _fogState.waveEdge; },
         set waveEdge(v)  { _fogState.waveEdge = v; setUnderwaterWaveEdge(v); },
     };
@@ -2056,18 +2050,23 @@ function buildGUI(): void {
     fogFolder.add(fogProxy, 'speed',      0, 5,     0.01  ).name('Distortion Speed').listen();
     fogFolder.add(fogProxy, 'scale',      0, 30,    0.1   ).name('Distortion Scale').listen();
     fogFolder.add(fogProxy, 'edgeFade',   0, 0.2,   0.001 ).name('Distortion Edge Fade').listen();
-    // Over/under underwater tint (world-space, wave-driven boundary)
+
+    // ── Underwater Line (over/under tint boundary) ────────────────────────────
+    // Focused controls for the wavy blue waterline. The undulation itself is
+    // driven by the REAL ocean waves (Waves folder → Displace Amplitude/Range/…)
+    // so it stays in sync; these knobs shape only the tint on top of that.
+    const lineFolder = fogFolder.addFolder('Underwater Line');
     const _tintColorHex = { hex: `#${new Color(_fogState.tintColor.r, _fogState.tintColor.g, _fogState.tintColor.b).getHexString()}` };
-    fogFolder.addColor(_tintColorHex, 'hex').name('Tint Color').onChange((hex: string) => {
+    lineFolder.addColor(_tintColorHex, 'hex').name('Tint Color').onChange((hex: string) => {
         const c = new Color(hex);
         _fogState.tintColor.r = c.r; _fogState.tintColor.g = c.g; _fogState.tintColor.b = c.b;
         setUnderwaterTintColor(c.r, c.g, c.b);
     });
-    fogFolder.add(fogProxy, 'tintStrength', 0, 1,   0.001 ).name('Tint Strength').listen();
-    fogFolder.add(fogProxy, 'waveAmp',   0, 2,      0.01  ).name('Waterline Wave Amp').listen();
-    fogFolder.add(fogProxy, 'waveLen',   1, 40,     0.1   ).name('Waterline Wave Length').listen();
-    fogFolder.add(fogProxy, 'waveSpeed', 0, 3,      0.01  ).name('Waterline Wave Speed').listen();
-    fogFolder.add(fogProxy, 'waveEdge',  0.001, 0.5, 0.001).name('Waterline Edge Soft').listen();
+    lineFolder.add(fogProxy, 'tintStrength', 0, 1,    0.001).name('Tint Strength').listen();
+    lineFolder.add(fogProxy, 'waveGain',   0, 20,     0.1  ).name('Undulation Gain').listen();
+    lineFolder.add(fogProxy, 'lineHeight', -3, 3,     0.01 ).name('Line Height Offset').listen();
+    lineFolder.add(fogProxy, 'waveEdge',   0.001, 0.5, 0.001).name('Edge Softness').listen();
+    lineFolder.close();
 
     fogFolder.close();
 
