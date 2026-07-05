@@ -25,6 +25,7 @@ export const BUBBLE_LIFETIME = 2.5;       // Seconds before fade
 export const BUBBLE_SPAWN_RATE = 0.02;    // Seconds between spawns
 export const BUBBLE_SPAWN_DISTANCE = 0.8; // Distance from camera to spawn
 export const BUBBLE_SPREAD = 0.25;        // Random spread at spawn
+export const BUBBLE_LINE_FADE_BAND = 0.18; // NDC band below the ocean line over which a rising bubble fades out before popping at it
 
 // Ambient underwater bubble settings
 export const AMBIENT_BUBBLE_INTERVAL = 1.4;   // Seconds between ambient bubble groups
@@ -343,22 +344,26 @@ export function Update(): void {
         // Age
         b.life -= deltaTime;
 
-        // Fade out
+        // Age-based fade
         const lifeRatio = b.life / b.maxLife;
-        _opacities[i] = Math.min(0.6, lifeRatio * 1.5);
+        let opacity = Math.max(0.0, Math.min(0.6, lifeRatio * 1.5));
 
-        // Pop at the surface: world-Y safety net, plus a screen-space clip so a
-        // bubble never rises visually above the ocean line (the top of the
-        // effect). Matches PostProcess's projected line so bubbles stay below it.
-        if (b.y > UNDERWATER_Y_THRESHOLD - 0.05) {
+        // Screen-space clip to the ocean line (the top of the effect): fade the
+        // bubble out as it approaches the line and pop it the instant it reaches
+        // the line, so it rises up to the line and gradually vanishes there but
+        // NEVER passes it. Purely screen-space, so it behaves identically whether
+        // the line sits low (camera above water) or high (submerged) — it's the
+        // same projected line PostProcess draws. The world-Y check is only a far
+        // safety net (a bubble should never be well above the surface).
+        const bubbleNdcY = _screenProj.set(b.x, b.y, b.z).project(camera).y;
+        const gap = getLineNdcY(camera.position.y) - bubbleNdcY; // >0 below the line, <0 past it
+        if (gap <= 0.0 || b.y > UNDERWATER_Y_THRESHOLD + 2.0) {
             b.life = 0;
-        } else if (_screenProj.set(b.x, b.y, b.z).project(camera).y > getLineNdcY(camera.position.y) - 0.02) {
-            b.life = 0;
+            opacity = 0;
+        } else {
+            opacity *= Math.min(1.0, gap / BUBBLE_LINE_FADE_BAND);
         }
-
-        if (b.life <= 0) {
-            _opacities[i] = 0;
-        }
+        _opacities[i] = opacity;
     }
 
     // Batch-update instance matrices (position + uniform scale)
