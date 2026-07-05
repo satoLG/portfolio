@@ -127,6 +127,8 @@ export interface BladeConfig {
     heightVariation: number;
     /** Minimum blade scale at island edge (0=invisible, 1=full size) */
     minEdgeScale: number;
+    /** Width of the blade tip as a fraction of its base width (0=sharp point, 1=no taper). Rounds off the top. */
+    tipWidthFactor: number;
 }
 
 const DEFAULT_BLADE_CONFIG: BladeConfig = {
@@ -136,6 +138,7 @@ const DEFAULT_BLADE_CONFIG: BladeConfig = {
     bladeHeight: 0.085,
     heightVariation: 0.50,
     minEdgeScale: 0.25,
+    tipWidthFactor: 0.45,
 };
 
 /**
@@ -161,8 +164,9 @@ export const grassColorTip  = new Color(GRASS_COLOR_TIP);
 
 /**
  * Build a single merged BufferGeometry containing all grass blades.
- * Each blade = 1 tall triangle (3 vertices, 1 triangle). Shape: two base
- * corners at ground level + one apex at center+height. Random Y-rotation
+ * Each blade = a tapered quad (4 vertices, 2 triangles). Shape: two base
+ * corners at ground level + two narrower top corners at center+height, giving
+ * a blunt, rounded-looking tip instead of a sharp point. Random Y-rotation
  * per blade preserves varied normals so PBR lighting (fire PointLight,
  * directional sun) works correctly — no billboard rotation needed.
  * Blades near the island edge are scaled down via the per-point edgeFactor.
@@ -176,9 +180,9 @@ export function buildGrassGeometry(
     const cfg = { ...DEFAULT_BLADE_CONFIG, ...config };
     const totalBlades = spawnPoints.length * cfg.bladesPerPoint;
 
-    // Each blade = 1 triangle = 3 vertices, 3 indices
-    const vertsPerBlade   = 3;
-    const indicesPerBlade = 3;
+    // Each blade = a tapered quad (2 triangles): wide base, narrower rounded-off top
+    const vertsPerBlade   = 4;
+    const indicesPerBlade = 6;
 
     const positions    = new Float32Array(totalBlades * vertsPerBlade * 3);
     const normals      = new Float32Array(totalBlades * vertsPerBlade * 3);
@@ -224,6 +228,10 @@ export function buildGrassGeometry(
             const faceNx = -sinA;
             const faceNz =  cosA;
 
+            // Tip width tapers down from the base width instead of closing to a point,
+            // giving the blade a blunt, rounded-looking top rather than a sharp spike.
+            const wTip = w * cfg.tipWidthFactor;
+
             // Vertex colors — base colour at roots, tip colour at apex
             const baseStyle = 0.5 + r * 0.8;
             tmpColor.copy(grassColorBase).multiplyScalar(baseStyle);
@@ -258,12 +266,22 @@ export function buildGrassGeometry(
             bladeCenters[c] = cx; bladeCenters[c + 1] = cz;
             tipness[vi] = 0.0; vi++;
 
-            // v2: apex (tip, centred horizontally)
-            // Normal tilted slightly upward so tip catches overhead sun naturally
+            // v2: top-right (tip row, tapered inward — blunt/rounded top instead of a point)
+            // Normal tilted slightly upward so the top catches overhead sun naturally
             p = vi * 3; c = vi * 2;
-            positions[p    ] = cx;
+            positions[p    ] = cx + cosA * wTip;
             positions[p + 1] = baseY + h;
-            positions[p + 2] = cz;
+            positions[p + 2] = cz + sinA * wTip;
+            normals[p    ] = faceNx * 0.8; normals[p + 1] = 0.4; normals[p + 2] = faceNz * 0.8;
+            colors[p    ] = tipR;  colors[p + 1] = tipG;  colors[p + 2] = tipB;
+            bladeCenters[c] = cx; bladeCenters[c + 1] = cz;
+            tipness[vi] = 1.0; vi++;
+
+            // v3: top-left (tip row)
+            p = vi * 3; c = vi * 2;
+            positions[p    ] = cx - cosA * wTip;
+            positions[p + 1] = baseY + h;
+            positions[p + 2] = cz - sinA * wTip;
             normals[p    ] = faceNx * 0.8; normals[p + 1] = 0.4; normals[p + 2] = faceNz * 0.8;
             colors[p    ] = tipR;  colors[p + 1] = tipG;  colors[p + 2] = tipB;
             bladeCenters[c] = cx; bladeCenters[c + 1] = cz;
@@ -272,6 +290,9 @@ export function buildGrassGeometry(
             indices[ii++] = baseVi;
             indices[ii++] = baseVi + 1;
             indices[ii++] = baseVi + 2;
+            indices[ii++] = baseVi;
+            indices[ii++] = baseVi + 2;
+            indices[ii++] = baseVi + 3;
         }
     }
 

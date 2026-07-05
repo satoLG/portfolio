@@ -148,14 +148,14 @@ export const GOLDEN_APPLE_LIGHT_DECAY       = 2.00;
 // ── Foliage ────────────────────────────────────────────────────────────
 export const GRASS_COUNT          = 204;
 export const GRASS_Y_OFFSET        = 0.0000;
-export const GRASS_COLOR_BASE      = '#3c550b'; // sRGB hex
-export const GRASS_COLOR_TIP       = '#50671d';  // sRGB hex
+export const GRASS_COLOR_BASE      = '#293c00'; // sRGB hex — matches ISLAND_SURFACE_GRASS_COLOR so blades read as an extension of the island floor
+export const GRASS_COLOR_TIP       = '#31480a';  // sRGB hex — barely lighter than base, just enough to keep tip shading readable
 export const FOLIAGE_WIND_STRENGTH = 0.0350;
 export const GRASS_WOBBLE_STRENGTH  = 0.034;  // constant base sway
 export const GRASS_MAX_HEIGHT       = 0.055;  // max blade height
 export const GRASS_EDGE_FALLOFF_RADIUS = 0.05;   // probe radius for edge blade taper
 export const GRASS_MIN_EDGE_SCALE      = 0.21;   // minimum blade scale at island edge (0–1)
-export const GRASS_SHADOW_OPACITY      = 0.20;   // alpha of dark AO floor under grass
+export const GRASS_SHADOW_OPACITY      = 0.00;   // alpha of dark AO floor under grass
 export const GRASS_SHADOW_COLOR        = '#0d1a05'; // sRGB dark green-black
 export const GRASS_SHADOW_Y_OFFSET     = 0.009;  // Y below average surface (negative = lower than blades)
 export const GRASS_SHADOW_SPREAD       = 1.04;   // disc radius scale (1.0 = cluster width)
