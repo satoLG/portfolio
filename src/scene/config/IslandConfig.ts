@@ -165,6 +165,7 @@ export const GRASS_EDGE_RING_ROWS   = 2;      // rows of top grass marched inwar
 export const GRASS_EDGE_RING_STEP   = 0.06;   // world spacing between top edge rows
 export const GRASS_EDGE_SIDE_DEPTH  = 0.22;   // how far down the vertical rim face to cover (capped at waterline)
 export const GRASS_EDGE_SIDE_STEP   = 0.055;  // vertical spacing between side-face grass rows
+export const GRASS_EDGE_SIDE_TILT   = 0.0000; // radians; tilts descending side blades down(+)/up(-)
 
 // ── Spawn edge padding ────────────────────────────────────────────────────────
 export const SURFACE_EDGE_PADDING = 0.050;   // small so interior scatter reaches close to the rim

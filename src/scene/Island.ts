@@ -76,6 +76,7 @@ import {
     GRASS_EDGE_RING_STEP,
     GRASS_EDGE_SIDE_DEPTH,
     GRASS_EDGE_SIDE_STEP,
+    GRASS_EDGE_SIDE_TILT,
     APPLE_WIND_STRENGTH       as APPLE_WIND_STRENGTH_CFG,
     APPLE_SWING_STIFFNESS,
     APPLE_SWING_DAMPING,
@@ -180,6 +181,20 @@ export let grassShadowYOffset     = GRASS_SHADOW_Y_OFFSET_CFG;
 export let grassShadowSpread      = GRASS_SHADOW_SPREAD_CFG;
 export let grassWobbleStrength    = GRASS_WOBBLE_STRENGTH_CFG;
 export let grassMaxHeight         = GRASS_MAX_HEIGHT_CFG;
+
+// Rim & side-face grass params — runtime-mutable so the debug GUI can tune them
+// live (each change triggers a respawn). Kept separate from the top-surface
+// scatter controls above (padding / falloff / min edge scale).
+export const grassEdge = {
+    droop:      GRASS_EDGE_DROOP,        // world units a top-edge blade leans out over the rim
+    droopDrop:  GRASS_EDGE_DROOP_DROP,   // world units that leaning tip drops in Y
+    ringAngles: GRASS_EDGE_RING_ANGLES,  // perimeter sample count
+    ringRows:   GRASS_EDGE_RING_ROWS,    // top grass rows marched inward from the crest
+    ringStep:   GRASS_EDGE_RING_STEP,    // spacing between those top rows
+    sideDepth:  GRASS_EDGE_SIDE_DEPTH,   // how far down the vertical face to cover
+    sideStep:   GRASS_EDGE_SIDE_STEP,    // vertical spacing of side-face rows
+    sideTilt:   GRASS_EDGE_SIDE_TILT,    // radians; tilts descending blades down(+)/up(-)
+};
 
 export function setGrassEdgeFalloffRadius(v: number): void { grassEdgeFalloffRadius = Math.max(0, v); }
 export function setGrassMinEdgeScale(v: number): void      { grassMinEdgeScale = Math.max(0, Math.min(1, v)); }
@@ -1980,8 +1995,8 @@ function pushEdgeRingSpawnPoints(placed: Array<{ x: number; z: number }>): void 
         return false;
     };
 
-    for (let a = 0; a < GRASS_EDGE_RING_ANGLES; a++) {
-        const ang = (a / GRASS_EDGE_RING_ANGLES) * Math.PI * 2;
+    for (let a = 0; a < grassEdge.ringAngles; a++) {
+        const ang = (a / grassEdge.ringAngles) * Math.PI * 2;
         const dx = Math.cos(ang), dz = Math.sin(ang);
 
         // Find the rim crest: furthest radius whose downward ray still hits the island.
@@ -1995,8 +2010,8 @@ function pushEdgeRingSpawnPoints(placed: Array<{ x: number; z: number }>): void 
         if (rimR < 0) continue;
 
         // ── Top rows: grass on the flat lip, growing up, draped outward over the rim.
-        for (let row = 0; row < GRASS_EDGE_RING_ROWS; row++) {
-            const rr = rimR - row * GRASS_EDGE_RING_STEP;
+        for (let row = 0; row < grassEdge.ringRows; row++) {
+            const rr = rimR - row * grassEdge.ringStep;
             if (rr <= 0) break;
             const wx = cx0 + dx * rr, wz = cz0 + dz * rr;
 
@@ -2020,7 +2035,7 @@ function pushEdgeRingSpawnPoints(placed: Array<{ x: number; z: number }>): void 
         // hit the outer wall. Grass there grows along the wall's outward normal, so
         // it points sideways/out (not up) and hides the green model band.
         const outsideR = rimR + 0.25;
-        for (let d = GRASS_EDGE_SIDE_STEP; d <= GRASS_EDGE_SIDE_DEPTH; d += GRASS_EDGE_SIDE_STEP) {
+        for (let d = grassEdge.sideStep; d <= grassEdge.sideDepth; d += grassEdge.sideStep) {
             const y = crestY - d;
             if (y < waterY + 0.01) break;   // stay above the waterline
 
@@ -2078,7 +2093,7 @@ export function respawnFoliage(_which: FoliageCluster = 'grass'): void {
         threeScene.remove(proceduralGrassMesh);
     }
     if (_grassUniforms) {
-        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment, { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight, edgeDroop: GRASS_EDGE_DROOP, edgeDroopDrop: GRASS_EDGE_DROOP_DROP });
+        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment, { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight, edgeDroop: grassEdge.droop, edgeDroopDrop: grassEdge.droopDrop, sideTilt: grassEdge.sideTilt });
         threeScene.add(proceduralGrassMesh);
     }
     buildShadowFloor(_grassSpawnPoints);
@@ -2099,7 +2114,7 @@ export function rebuildGrassGeometry(): void {
     }
     proceduralGrassMesh = createGrassMesh(
         _grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment,
-        { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight, edgeDroop: GRASS_EDGE_DROOP, edgeDroopDrop: GRASS_EDGE_DROOP_DROP },
+        { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight, edgeDroop: grassEdge.droop, edgeDroopDrop: grassEdge.droopDrop, sideTilt: grassEdge.sideTilt },
     );
     threeScene.add(proceduralGrassMesh);
 }
@@ -3247,7 +3262,7 @@ export function Start(): void {
             uYOffset:       new Uniform(grassYOffset),
         };
 
-        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment, { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight, edgeDroop: GRASS_EDGE_DROOP, edgeDroopDrop: GRASS_EDGE_DROOP_DROP });
+        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment, { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight, edgeDroop: grassEdge.droop, edgeDroopDrop: grassEdge.droopDrop, sideTilt: grassEdge.sideTilt });
         threeScene.add(proceduralGrassMesh);
         console.log(`[ProceduralGrass] ${_grassSpawnPoints.length} spawn points → ${_grassSpawnPoints.length * 40} blades (1 draw call)`);
 

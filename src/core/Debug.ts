@@ -916,8 +916,18 @@ function buildGUI(): void {
                 `export const GRASS_SHADOW_Y_OFFSET     = ${Island.grassShadowYOffset.toFixed(3)};  // Y below average surface (negative = lower than blades)`,
                 `export const GRASS_SHADOW_SPREAD       = ${Island.grassShadowSpread.toFixed(2)};   // disc radius scale (1.0 = cluster width)`,
                 ``,
+                `// ── Edge draping (grass covering the island rim / lateral slope) ───────────────`,
+                `export const GRASS_EDGE_DROOP       = ${Island.grassEdge.droop.toFixed(3)};  // world units a top-edge blade tip leans outward over the rim`,
+                `export const GRASS_EDGE_DROOP_DROP  = ${Island.grassEdge.droopDrop.toFixed(3)};  // world units a top-edge blade tip drops in Y as it droops`,
+                `export const GRASS_EDGE_RING_ANGLES = ${Math.round(Island.grassEdge.ringAngles)};     // perimeter samples (top rows + vertical-side rows)`,
+                `export const GRASS_EDGE_RING_ROWS   = ${Math.round(Island.grassEdge.ringRows)};      // rows of top grass marched inward from the rim crest`,
+                `export const GRASS_EDGE_RING_STEP   = ${Island.grassEdge.ringStep.toFixed(3)};   // world spacing between top edge rows`,
+                `export const GRASS_EDGE_SIDE_DEPTH  = ${Island.grassEdge.sideDepth.toFixed(3)};   // how far down the vertical rim face to cover (capped at waterline)`,
+                `export const GRASS_EDGE_SIDE_STEP   = ${Island.grassEdge.sideStep.toFixed(3)};  // vertical spacing between side-face grass rows`,
+                `export const GRASS_EDGE_SIDE_TILT   = ${Island.grassEdge.sideTilt.toFixed(4)}; // radians; tilts descending side blades down(+)/up(-)`,
+                ``,
                 `// ── Spawn edge padding ────────────────────────────────────────────────────────`,
-                `export const SURFACE_EDGE_PADDING = ${Island.grassEdgePadding.toFixed(3)};`,
+                `export const SURFACE_EDGE_PADDING = ${Island.grassEdgePadding.toFixed(3)};   // small so interior scatter reaches close to the rim`,
                 ``,
                 `// ── Exclusion zone radii (grass spawn clearance around each surface object) ───`,
                 `export const EXCL_R_BONFIRE = ${exclRadii.bonfire.toFixed(2)};`,
@@ -1177,9 +1187,9 @@ function buildGUI(): void {
         const countProxy = { get count() { return Island.GRASS_COUNT; }, set count(v: number) { setGrassCount(v); doRespawn(); } };
         foliageFolder.add(countProxy, 'count', 0, 400, 1).name('Count').listen();
 
-        // Edge padding
+        // Edge padding (top surface only — how far the flat-top scatter stays from the rim)
         const paddingProxy = { get pad() { return r(grassEdgePadding); }, set pad(v: number) { setGrassEdgePadding(v); } };
-        foliageFolder.add(paddingProxy, 'pad', 0, 0.5, 0.01).name('Edge Padding').listen();
+        foliageFolder.add(paddingProxy, 'pad', 0, 0.5, 0.01).name('Top: Edge Padding').listen();
 
         // Y offset
         const yProxy = { get y() { return r(grassYOffset); }, set y(v: number) { setGrassYOffset(v); } };
@@ -1231,14 +1241,14 @@ function buildGUI(): void {
             get radius() { return r(grassEdgeFalloffRadius); },
             set radius(v: number) { setGrassEdgeFalloffRadius(v); doRespawn(); },
         };
-        foliageFolder.add(edgeFalloffProxy, 'radius', 0, 0.8, 0.01).name('Edge Falloff Radius').listen();
+        foliageFolder.add(edgeFalloffProxy, 'radius', 0, 0.8, 0.01).name('Top: Falloff Radius').listen();
 
         // Minimum blade scale applied at the island perimeter
         const minScaleProxy = {
             get scale() { return r(grassMinEdgeScale); },
             set scale(v: number) { setGrassMinEdgeScale(v); doRespawn(); },
         };
-        foliageFolder.add(minScaleProxy, 'scale', 0, 1, 0.01).name('Min Edge Scale').listen();
+        foliageFolder.add(minScaleProxy, 'scale', 0, 1, 0.01).name('Top: Min Edge Scale').listen();
 
         // Shadow floor opacity — live, no respawn needed
         const shadowProxy = {
@@ -1268,6 +1278,24 @@ function buildGUI(): void {
 
         // Respawn button
         foliageFolder.add({ respawn: () => respawnFoliage('grass') }, 'respawn').name('Respawn Grass');
+
+        // ── Rim & Sides — the perimeter ring + the grass clothing the vertical face ──
+        const rimFolder = foliageFolder.addFolder('Rim & Sides');
+        const ge = Island.grassEdge;
+        rimFolder.add(ge, 'ringAngles', 8, 160, 1).name('Ring Angles').listen().onChange(doRespawn);
+        rimFolder.add(ge, 'ringRows',   0, 6,   1).name('Top Rows').listen().onChange(doRespawn);
+        rimFolder.add(ge, 'ringStep',   0.01, 0.2, 0.005).name('Top Row Step').listen().onChange(doRespawn);
+        rimFolder.add(ge, 'droop',      0, 0.15, 0.002).name('Top Droop Out').listen().onChange(doRespawn);
+        rimFolder.add(ge, 'droopDrop',  0, 0.15, 0.002).name('Top Droop Down').listen().onChange(doRespawn);
+        rimFolder.add(ge, 'sideDepth',  0, 0.6, 0.01).name('Side Depth ↓').listen().onChange(doRespawn);
+        rimFolder.add(ge, 'sideStep',   0.02, 0.15, 0.005).name('Side Row Step').listen().onChange(doRespawn);
+        // Side tilt exposed in degrees (stored in radians): down (+) / up (-)
+        const sideTiltProxy = {
+            get deg() { return r(ge.sideTilt * 180 / Math.PI); },
+            set deg(v: number) { ge.sideTilt = v * Math.PI / 180; doRespawn(); },
+        };
+        rimFolder.add(sideTiltProxy, 'deg', -90, 90, 1).name('Side Tilt°').listen();
+        rimFolder.close();
 
         // Exclusion radii
         const exclFolder = foliageFolder.addFolder('Exclusion Radii');

@@ -133,6 +133,10 @@ export interface BladeConfig {
     /** How much (world units) an edge blade's tip drops in Y as it droops over
      *  the rim. Scales with edge proximity. */
     edgeDroopDrop: number;
+    /** Extra tilt (radians) applied to the growth axis of side-face blades,
+     *  rotating them down (+) or up (-) from the pure outward normal. Scales
+     *  with how horizontal the surface normal is, so top blades are unaffected. */
+    sideTilt: number;
 }
 
 const DEFAULT_BLADE_CONFIG: BladeConfig = {
@@ -144,6 +148,7 @@ const DEFAULT_BLADE_CONFIG: BladeConfig = {
     minEdgeScale: 0.25,
     edgeDroop: 0.0,
     edgeDroopDrop: 0.0,
+    sideTilt: 0.0,
 };
 
 // Number of arc segments used to dome the top of each blade. Higher = rounder,
@@ -230,6 +235,30 @@ export function buildGrassGeometry(
         let UPx = sp.nx ?? 0, UPy = sp.ny ?? 1, UPz = sp.nz ?? 0;
         const upLen = Math.hypot(UPx, UPy, UPz) || 1;
         UPx /= upLen; UPy /= upLen; UPz /= upLen;
+
+        // Side tilt — rotate the growth axis down/up around the horizontal axis that
+        // runs along the wall (perp to UP and world-up). Weighted by "sideness"
+        // (1 - UPy) so it only bends the outward-pointing side blades, not top grass.
+        if (cfg.sideTilt !== 0.0) {
+            const sideness = Math.max(0, Math.min(1, 1 - UPy));
+            if (sideness > 0.001) {
+                // A = normalize(worldUp × UP) — horizontal, tangent to the wall.
+                let ax = UPz, ay = 0, az = -UPx;           // (0,1,0) × UP
+                const al = Math.hypot(ax, ay, az) || 1;
+                ax /= al; ay /= al; az /= al;
+                const ta = cfg.sideTilt * sideness;
+                const ct = Math.cos(ta), st = Math.sin(ta);
+                // Rodrigues with A ⟂ UP: UP' = UP·cosθ + (A × UP)·sinθ
+                const cxx = ay * UPz - az * UPy;
+                const cyy = az * UPx - ax * UPz;
+                const czz = ax * UPy - ay * UPx;
+                UPx = UPx * ct + cxx * st;
+                UPy = UPy * ct + cyy * st;
+                UPz = UPz * ct + czz * st;
+                const l2 = Math.hypot(UPx, UPy, UPz) || 1;
+                UPx /= l2; UPy /= l2; UPz /= l2;
+            }
+        }
 
         // Orthonormal tangent basis (T1, T2) spanning the surface plane at this point.
         let refx = 0, refy = 1, refz = 0;
