@@ -158,11 +158,13 @@ export const GRASS_SHADOW_Y_OFFSET     = 0.009;  // Y below average surface (neg
 export const GRASS_SHADOW_SPREAD       = 1.04;   // disc radius scale (1.0 = cluster width)
 
 // ── Edge draping (grass covering the island rim / lateral slope) ───────────────
-export const GRASS_EDGE_DROOP       = 0.038;  // world units an edge blade tip leans outward over the rim
-export const GRASS_EDGE_DROOP_DROP  = 0.022;  // world units an edge blade tip drops in Y as it droops
-export const GRASS_EDGE_RING_ANGLES = 64;     // spawn samples around the perimeter
-export const GRASS_EDGE_RING_ROWS   = 2;      // rows of grass marched inward from the rim crest
-export const GRASS_EDGE_RING_STEP   = 0.06;   // world spacing between edge rows
+export const GRASS_EDGE_DROOP       = 0.038;  // world units a top-edge blade tip leans outward over the rim
+export const GRASS_EDGE_DROOP_DROP  = 0.022;  // world units a top-edge blade tip drops in Y as it droops
+export const GRASS_EDGE_RING_ANGLES = 56;     // perimeter samples (top rows + vertical-side rows)
+export const GRASS_EDGE_RING_ROWS   = 2;      // rows of top grass marched inward from the rim crest
+export const GRASS_EDGE_RING_STEP   = 0.06;   // world spacing between top edge rows
+export const GRASS_EDGE_SIDE_DEPTH  = 0.22;   // how far down the vertical rim face to cover (capped at waterline)
+export const GRASS_EDGE_SIDE_STEP   = 0.055;  // vertical spacing between side-face grass rows
 
 // ── Spawn edge padding ────────────────────────────────────────────────────────
 export const SURFACE_EDGE_PADDING = 0.050;   // small so interior scatter reaches close to the rim

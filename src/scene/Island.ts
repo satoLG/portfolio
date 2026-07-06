@@ -1,4 +1,4 @@
-import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, SphereGeometry, DoubleSide, BackSide, MeshBasicMaterial, Box3, MeshStandardMaterial, ShaderChunk, Plane } from "three";
+import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Matrix3, Raycaster, SpriteMaterial, Sprite, CanvasTexture, AdditiveBlending, AnimationMixer, AnimationClip, AnimationAction, LoopRepeat, LoopOnce, MeshDepthMaterial, RGBADepthPacking, PointLight, Color, MathUtils, PlaneGeometry, SphereGeometry, DoubleSide, BackSide, MeshBasicMaterial, Box3, MeshStandardMaterial, ShaderChunk, Plane } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { config as sfDecorConfig } from './SeaFloorDecor';
@@ -74,6 +74,8 @@ import {
     GRASS_EDGE_RING_ANGLES,
     GRASS_EDGE_RING_ROWS,
     GRASS_EDGE_RING_STEP,
+    GRASS_EDGE_SIDE_DEPTH,
+    GRASS_EDGE_SIDE_STEP,
     APPLE_WIND_STRENGTH       as APPLE_WIND_STRENGTH_CFG,
     APPLE_SWING_STIFFNESS,
     APPLE_SWING_DAMPING,
@@ -202,8 +204,10 @@ let _grassUniforms: GrassUniforms | null = null;
 
 // Procedural grass spawn points (cached for respawning).
 // dirX/dirZ = outward horizontal unit vector (away from island centre), used to
-// drape edge blades over the rim.
-let _grassSpawnPoints: Array<{ x: number; z: number; y: number; edgeFactor: number; dirX: number; dirZ: number }> = [];
+// drape top-edge blades over the rim.
+// nx/ny/nz = surface normal the blade grows along (defaults to up on the top
+// surface; set to the outward side normal for blades on the vertical rim face).
+let _grassSpawnPoints: Array<{ x: number; z: number; y: number; edgeFactor: number; dirX: number; dirZ: number; nx?: number; ny?: number; nz?: number }> = [];
 
 // Store tree leaves for wind animation
 const treeLeaves: Object3D[] = [];
@@ -215,6 +219,9 @@ const islandMeshes: Mesh[] = [];
 const _spawnRaycaster = new Raycaster();
 const _spawnOrigin    = new Vector3();
 const _spawnDown      = new Vector3(0, -1, 0);
+const _sideDir        = new Vector3();   // horizontal inward ray for side-face sampling
+const _sideNormalMat  = new Matrix3();   // object → world normal transform
+const _sideNormal     = new Vector3();
 let islandLowestY = islandPosition.y;
 
 export function getLowestY(): number {
@@ -1963,44 +1970,84 @@ function pushEdgeRingSpawnPoints(placed: Array<{ x: number; z: number }>): void 
     if (islandMeshes.length === 0) return;
     const cx0 = islandPosition.x, cz0 = islandPosition.z;
     const R_MIN = 0.3, R_MAX = 3.0, R_STEP = 0.03;
+    const waterY = waterlineYUniform.value as number;
+
+    const nearExcluded = (wx: number, wz: number): boolean => {
+        for (const zone of SPAWN_EXCLUSION_ZONES) {
+            const ex = wx - zone.x, ez = wz - zone.z;
+            if (ex * ex + ez * ez < zone.r * zone.r) return true;
+        }
+        return false;
+    };
 
     for (let a = 0; a < GRASS_EDGE_RING_ANGLES; a++) {
         const ang = (a / GRASS_EDGE_RING_ANGLES) * Math.PI * 2;
         const dx = Math.cos(ang), dz = Math.sin(ang);
 
-        // Find the rim: the furthest radius whose downward ray still hits the island.
-        let rimR = -1;
+        // Find the rim crest: furthest radius whose downward ray still hits the island.
+        let rimR = -1, crestY = 0;
         for (let r = R_MIN; r <= R_MAX; r += R_STEP) {
             _spawnOrigin.set(cx0 + dx * r, 5, cz0 + dz * r);
             _spawnRaycaster.set(_spawnOrigin, _spawnDown);
-            if (_spawnRaycaster.intersectObjects(islandMeshes, false).length > 0) rimR = r;
-            else break;
+            const hits = _spawnRaycaster.intersectObjects(islandMeshes, false);
+            if (hits.length > 0) { rimR = r; crestY = hits[0].point.y; } else break;
         }
         if (rimR < 0) continue;
 
+        // ── Top rows: grass on the flat lip, growing up, draped outward over the rim.
         for (let row = 0; row < GRASS_EDGE_RING_ROWS; row++) {
             const rr = rimR - row * GRASS_EDGE_RING_STEP;
             if (rr <= 0) break;
             const wx = cx0 + dx * rr, wz = cz0 + dz * rr;
 
-            // Keep clear of surface objects and don't stack on placed patches.
-            let blocked = false;
-            for (const zone of SPAWN_EXCLUSION_ZONES) {
-                const ex = wx - zone.x, ez = wz - zone.z;
-                if (ex * ex + ez * ez < zone.r * zone.r) { blocked = true; break; }
-            }
-            if (blocked) continue;
+            if (nearExcluded(wx, wz)) continue;
+            let tooClose = false;
             for (const p of placed) {
                 const px = wx - p.x, pz = wz - p.z;
-                if (px * px + pz * pz < PATCH_MIN_SPACING * PATCH_MIN_SPACING) { blocked = true; break; }
+                if (px * px + pz * pz < PATCH_MIN_SPACING * PATCH_MIN_SPACING) { tooClose = true; break; }
             }
-            if (blocked) continue;
+            if (tooClose) continue;
 
             placed.push({ x: wx, z: wz });
             _grassSpawnPoints.push({
                 x: wx, z: wz, y: getSurfaceY(wx, wz),
                 edgeFactor: computeEdgeFactor(wx, wz),
                 ...outwardDir(wx, wz),
+            });
+        }
+
+        // ── Side face: march down the vertical rim, casting horizontally inward to
+        // hit the outer wall. Grass there grows along the wall's outward normal, so
+        // it points sideways/out (not up) and hides the green model band.
+        const outsideR = rimR + 0.25;
+        for (let d = GRASS_EDGE_SIDE_STEP; d <= GRASS_EDGE_SIDE_DEPTH; d += GRASS_EDGE_SIDE_STEP) {
+            const y = crestY - d;
+            if (y < waterY + 0.01) break;   // stay above the waterline
+
+            _spawnOrigin.set(cx0 + dx * outsideR, y, cz0 + dz * outsideR);
+            _sideDir.set(-dx, 0, -dz);       // horizontal, toward the centre
+            _spawnRaycaster.set(_spawnOrigin, _sideDir);
+            const hits = _spawnRaycaster.intersectObjects(islandMeshes, false);
+            if (hits.length === 0) continue;
+            const hit = hits[0];
+            if (!hit.face) continue;
+
+            _sideNormalMat.getNormalMatrix((hit.object as Mesh).matrixWorld);
+            _sideNormal.copy(hit.face.normal).applyMatrix3(_sideNormalMat).normalize();
+            let nx = _sideNormal.x, ny = _sideNormal.y, nz = _sideNormal.z;
+            if (nx * dx + nz * dz < 0) { nx = -nx; ny = -ny; nz = -nz; }  // force outward
+            // Keep only the visible vertical band — skip the flat top and the underside.
+            if (ny > 0.80 || ny < -0.30) continue;
+
+            const hx = hit.point.x, hy = hit.point.y, hz = hit.point.z;
+            if (hy < waterY + 0.005 || nearExcluded(hx, hz)) continue;
+
+            // Not added to `placed`: side points stack vertically under the top rows.
+            _grassSpawnPoints.push({
+                x: hx, z: hz, y: hy,
+                edgeFactor: 0.0,
+                dirX: dx, dirZ: dz,
+                nx, ny, nz,
             });
         }
     }
