@@ -24,15 +24,15 @@ import * as PhoneScreen from '../core/PhoneScreen';
 import { UNDERWATER_Y_THRESHOLD } from "../effects/PostProcess";
 import {
     islandPosition, firecampOffset, treeOffset, bushOffset, bushRadioOffset, bushRadio2Offset, bushPugOffset, radioOffset, swordOffset,
-    pugOffset, tentOffset, dogBedOffset, littleRocksOffset, phoneOffset,
+    pugOffset, tentOffset, dogBedOffset, phoneOffset,
     apple1Offset, apple2Offset, apple3Offset,
     mossRock2aOffset, mossRock2bOffset,
     foldingTrayTableOffset, tentDogBedOffset, rugRoundOffset, lanternOffset, dogBowlOffset, dogBiscuitOffset,
-    islandScale, firecampScale, treeScale, bushScale, bushRadioScale, bushRadio2Scale, bushPugScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, littleRocksScale, phoneScale,
+    islandScale, firecampScale, treeScale, bushScale, bushRadioScale, bushRadio2Scale, bushPugScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, phoneScale,
     apple1Scale, apple2Scale, apple3Scale,
     mossRock2aScale, mossRock2bScale,
     foldingTrayTableScale, tentDogBedScale, rugRoundScale, lanternScale, dogBowlScale, dogBiscuitScale,
-    treeRotY, bushRotY, bushRadioRotY, bushRadio2RotY, bushPugRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, littleRocksRot, phoneRot,
+    treeRotY, bushRotY, bushRadioRotY, bushRadio2RotY, bushPugRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, phoneRot,
     apple1RotY, apple2RotY, apple3RotY,
     mossRock2aRot, mossRock2bRot,
     foldingTrayTableRot, tentDogBedRot, rugRoundRot, lanternRot, dogBowlRot, dogBiscuitRot,
@@ -60,7 +60,7 @@ import {
     bushFlowerColor, bushRadioFlowerColor, bushRadio2FlowerColor, bushPugFlowerColor,
     GRASS_COUNT  as GRASS_COUNT_CFG,
     SURFACE_EDGE_PADDING,
-    EXCL_R_BONFIRE, EXCL_R_TENT, EXCL_R_TREE, EXCL_R_PUG, EXCL_R_RADIO, EXCL_R_ROCKS,
+    EXCL_R_BONFIRE, EXCL_R_TENT, EXCL_R_TREE, EXCL_R_RADIO,
     GRASS_EDGE_FALLOFF_RADIUS as GRASS_EDGE_FALLOFF_RADIUS_CFG,
     GRASS_MIN_EDGE_SCALE      as GRASS_MIN_EDGE_SCALE_CFG,
     GRASS_SHADOW_OPACITY      as GRASS_SHADOW_OPACITY_CFG,
@@ -139,7 +139,6 @@ export function isCabanaSealed(): boolean {
 }
 
 export const dogBed = new Group();
-export const littleRocks = new Group();
 export const phone = new Group();
 export const chest = new Group();
 export const apple1 = new Group();
@@ -1879,9 +1878,7 @@ const SPAWN_EXCLUSION_ZONES: ExclusionZone[] = [
     { x:  0.00,  z: -2.90, r: EXCL_R_BONFIRE },  // Bonfire + sword + campfire footprint
     { x:  0.48,  z: -3.65, r: EXCL_R_TENT    },  // Custom tent
     { x: -0.35,  z: -3.60, r: EXCL_R_TREE    },  // Tree trunk
-    { x:  0.65,  z: -2.30, r: EXCL_R_PUG     },  // Pug
     { x: -0.65,  z: -3.10, r: EXCL_R_RADIO   },  // Radio
-    { x:  0.32,  z: -2.60, r: EXCL_R_ROCKS   },  // Little rocks + phone
 ];
 
 /** Mutable live exclusion radii — mutated by the debug GUI, read by isValidSpawnPos() */
@@ -1889,16 +1886,14 @@ export const exclRadii = {
     bonfire: EXCL_R_BONFIRE,
     tent:    EXCL_R_TENT,
     tree:    EXCL_R_TREE,
-    pug:     EXCL_R_PUG,
     radio:   EXCL_R_RADIO,
-    rocks:   EXCL_R_ROCKS,
 };
 
 /** Update both the live object and the corresponding zone entry, then respawn all foliage. */
 export function setExclRadius(key: keyof typeof exclRadii, v: number): void {
     exclRadii[key] = v;
     const IDX: Record<keyof typeof exclRadii, number> = {
-        bonfire: 0, tent: 1, tree: 2, pug: 3, radio: 4, rocks: 5,
+        bonfire: 0, tent: 1, tree: 2, radio: 3,
     };
     SPAWN_EXCLUSION_ZONES[IDX[key]].r = v;
 }
@@ -1969,6 +1964,25 @@ export function respawnFoliage(_which: FoliageCluster = 'grass'): void {
     }
     buildShadowFloor(_grassSpawnPoints);
     console.log(`[Island] Respawned grass: ${_grassSpawnPoints.length} spawn points`);
+}
+
+/**
+ * Rebuilds only the grass geometry from the already-cached spawn points —
+ * no re-raycast, no random re-placement, so blades keep their positions.
+ * Cheap enough to call live while dragging a colour picker: it re-bakes the
+ * per-vertex colours (which read from grassColorBase/grassColorTip) in place.
+ */
+export function rebuildGrassGeometry(): void {
+    if (!_grassUniforms || _grassSpawnPoints.length === 0) return;
+    if (proceduralGrassMesh) {
+        proceduralGrassMesh.geometry.dispose();
+        threeScene.remove(proceduralGrassMesh);
+    }
+    proceduralGrassMesh = createGrassMesh(
+        _grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment,
+        { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight },
+    );
+    threeScene.add(proceduralGrassMesh);
 }
 
 // TREE WIND SETTINGS - easily tweakable
@@ -2647,7 +2661,7 @@ function loadCabanaInterior(): void {
     _loadSurfaceProp('models/surface/dog_bowl.glb',           dogBowl,          dogBowlOffset,          dogBowlScale,          dogBowlRot,          opts);
     _loadSurfaceProp('models/surface/dog_biscuit.glb',        dogBiscuit,       dogBiscuitOffset,       dogBiscuitScale,       dogBiscuitRot,       opts);
 
-    // Phone model — sits on the little rocks inside the cabana.
+    // Phone model — inside the cabana.
     cabanaLoader.load(
         'models/overall/phone.glb',
         (gltf) => {
@@ -3294,32 +3308,6 @@ export function Start(): void {
         },
         undefined,
         (error) => { console.error('Error loading tent:', error); }
-    );
-
-    // Load little rocks (between pug and firecamp — phone leans on them)
-    loader.load(
-        'models/surface/little_rocks.glb',
-        (gltf) => {
-            applyOceanLightingToModel(gltf.scene);
-            gltf.scene.traverse((child) => {
-                if ((child as any).isMesh) {
-                    child.castShadow = true;
-                    (child as any).receiveShadow = true;
-                }
-            });
-            littleRocks.add(gltf.scene);
-            littleRocks.position.set(
-                islandPosition.x + littleRocksOffset.x,
-                islandPosition.y + littleRocksOffset.y,
-                islandPosition.z + littleRocksOffset.z
-            );
-            littleRocks.scale.setScalar(littleRocksScale);
-            littleRocks.rotation.set(littleRocksRot.x, littleRocksRot.y, littleRocksRot.z);
-            threeScene.add(littleRocks);
-            console.log('Little rocks loaded');
-        },
-        undefined,
-        (error) => { console.error('Error loading little rocks:', error); }
     );
 
     // Moss rocks at the back of the island. Each rock gets the apple-style

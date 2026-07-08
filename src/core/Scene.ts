@@ -873,7 +873,7 @@ function _matRoots(): Array<Object3D | null | undefined> {
         Island.radio, Island.sword, Island.pug, Island.dogBed,
         Island.apple1, Island.apple2, Island.apple3,
         Island.mossRock1, Island.mossRock2a, Island.mossRock2b, Island.mossRock3a, Island.mossRock3b, Island.mossRock3c,
-        Island.littleRocks, Island.tent, Island.chest,
+        Island.tent, Island.chest,
         Island.foldingTrayTable, Island.tentDogBed, Island.rugRound, Island.lantern, Island.dogBowl, Island.dogBiscuit, Island.phone,
         SeaFloorDecor.decorGroup,
     ];
@@ -1004,7 +1004,7 @@ export function Update(): void
         // Show surface, hide underwater.
         // When sealed inside the cabana, the reverse dome hides the outside world,
         // so we also stop rendering it entirely (the big perf win). The interior
-        // (tent, lazy-loaded props, little rocks, dome) stays visible — handled by
+        // (tent, lazy-loaded props, dome) stays visible — handled by
         // Island.Update. Un-sealing flips this back the same frame (instant return).
         const cabanaSealed = Island.isCabanaSealed();
         const showOutside = !cabanaSealed;
