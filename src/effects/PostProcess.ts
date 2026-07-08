@@ -19,6 +19,7 @@ import {
     WebGLRenderer,
     Vector2,
     Vector3,
+    Vector4,
     Matrix4,
     Camera,
     PerspectiveCamera,
@@ -92,6 +93,15 @@ const fragmentShader = /* glsl */`
     uniform vec2 uResolution;
     uniform vec3 uTintColor;
     uniform float uTintStrength;
+
+    // Distortion "quiet rect" — a screen-space rectangle (UV min/max) where the
+    // underwater wave displacement is damped to uQuietMul. Used by the CSS3D
+    // card carousel: its punched alpha holes must stay registered with the DOM
+    // behind the canvas, and full-strength distortion would shear them apart.
+    uniform vec4 uQuietRect;     // xy = min UV, zw = max UV
+    uniform float uQuietMul;     // residual distortion inside the rect
+    uniform float uQuietFeather; // UV half-width of the soft edge
+    uniform float uQuietOn;      // 1.0 = active
 
     // Underwater "over/under" mask — pure SCREEN-SPACE, no depth, no geometry.
     // There is a single "ocean line" across the screen: the water surface (y≈0,
@@ -222,6 +232,17 @@ const fragmentShader = /* glsl */`
                    ) * uDistortion * 0.7 * underwaterMix;
         float edgeDistance = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
         float edgeFade = uEdgeFade <= 0.0 ? 1.0 : smoothstep(0.0, uEdgeFade, edgeDistance);
+
+        // Damp the displacement inside the quiet rect (see uniform docs above).
+        if (uQuietOn > 0.5) {
+            vec2 qLo = smoothstep(uQuietRect.xy - uQuietFeather, uQuietRect.xy + uQuietFeather, vUv);
+            vec2 qHi = 1.0 - smoothstep(uQuietRect.zw - uQuietFeather, uQuietRect.zw + uQuietFeather, vUv);
+            float quiet = qLo.x * qLo.y * qHi.x * qHi.y;
+            float quietMul = mix(1.0, uQuietMul, quiet);
+            dx *= quietMul;
+            dy *= quietMul;
+        }
+
         uv.x += dx * edgeFade;
         uv.y += dy * edgeFade;
 
@@ -293,6 +314,11 @@ export function Start(renderer: WebGLRenderer): void {
             uLineHeightOffset: { value: underwaterLineHeightOffset },
             uLineWobbleGain: { value: underwaterLineWobbleGain },
             uLineEdge: { value: underwaterLineEdge },
+            // Distortion quiet rect (driven by CardCarousel):
+            uQuietRect: { value: new Vector4(0, 0, 0, 0) },
+            uQuietMul: { value: 0.12 },
+            uQuietFeather: { value: 0.06 },
+            uQuietOn: { value: 0 },
         },
         depthTest: false,
         depthWrite: false
@@ -388,6 +414,15 @@ export function setDistortionScale(v: number): void {
 
 export function setDistortionEdgeFade(v: number): void {
     if (material) material.uniforms.uEdgeFade.value = v;
+}
+
+/** Screen-space rectangle (UV space) where the underwater distortion is damped
+ *  so the CSS3D card carousel's punched holes stay registered with the DOM.
+ *  Called once per frame by CardCarousel.Update. */
+export function setDistortionQuietRect(minU: number, minV: number, maxU: number, maxV: number, on: boolean): void {
+    if (!material) return;
+    (material.uniforms.uQuietRect.value as Vector4).set(minU, minV, maxU, maxV);
+    material.uniforms.uQuietOn.value = on ? 1 : 0;
 }
 
 // ── Underwater tint / wavy-boundary setters ──────────────────────────────────

@@ -2790,3 +2790,69 @@ body.day-mode .ct-body::after {
 @media (max-width: 767px) {
     .cabana-exit-btn { bottom: 24px; width: 52px; height: 52px; }
 }
+
+/* ── CSS3D Ocean Card Carousel (effects/CardCarousel.ts) ─────────────────────
+   The cards live BEHIND the WebGL canvas and only show through per-pixel
+   alpha holes punched by the carousel's mask planes. Whatever paints outside
+   a punched region is simply never seen — so glows here are free to overflow.
+   NOTE: the ::before pill insets are driven by --oc-pill-x / --oc-pill-y,
+   set from PILL_PAD_X / PILL_PAD_Y in CardCarousel.ts (single source). */
+
+.ocean-carousel {
+    position: relative;
+    pointer-events: none;
+}
+
+.ocean-card {
+    position: absolute;
+    left: 0;
+    top: 0;
+    box-sizing: border-box;
+    border-style: solid;
+    border-color: rgba(255, 255, 255, 0.92);
+    background: transparent;   /* interior stays unpunched → live 3D scene */
+    color: #fff;
+    font-family: 'Wotfard', ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    will-change: transform;
+    pointer-events: none;
+    /* Base glow — overwritten per-frame by the jellyfish-light response */
+    box-shadow:
+        0 0 9px rgba(153, 217, 255, 0.4),
+        inset 0 0 8px rgba(153, 217, 255, 0.3);
+}
+
+.ocean-card .oc-blk {
+    position: absolute;
+    white-space: nowrap;
+    color: #fff;
+    text-shadow:
+        0 0 6px rgba(255, 255, 255, 0.9),
+        0 0 16px rgba(150, 215, 255, 0.65);
+}
+
+/* Soft light pool behind each text line — fills the punched pill so its
+   corners read as glow instead of dead black. Must track the mask pill:
+   pill rect = text block rect expanded by the pads below. */
+.ocean-card .oc-blk::before {
+    content: '';
+    position: absolute;
+    left: calc(-1 * var(--oc-pill-x, 18px));
+    right: calc(-1 * var(--oc-pill-x, 18px));
+    top: calc(-1 * var(--oc-pill-y, 12px));
+    bottom: calc(-1 * var(--oc-pill-y, 12px));
+    border-radius: 999px;
+    background: radial-gradient(ellipse closest-side,
+        rgba(150, 210, 255, 0.16),
+        rgba(150, 210, 255, 0) 78%);
+    z-index: -1;
+    pointer-events: none;
+}
+
+.ocean-card .oc-line {
+    position: absolute;
+    height: 2px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.55);
+    box-shadow: 0 0 8px rgba(170, 225, 255, 0.8);
+}

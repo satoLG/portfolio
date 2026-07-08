@@ -8,6 +8,7 @@ import { defaultCameraX, defaultCameraZ, defaultFov, mobileFov, mobileBreakpoint
 import { phoneZoomHeight, phoneZoomTilt, phoneZoomPitch, phoneZoomFov } from '../scene/config/PhoneConfig';
 import { cabanaCamX, cabanaCamY, cabanaCamZ, cabanaPhi, cabanaPitch, cabanaFov, cabanaCamXMobile, cabanaCamYMobile, cabanaCamZMobile, cabanaPhiMobile, cabanaPitchMobile, cabanaFovMobile, cabanaArriveDist } from '../scene/config/CabanaConfig';
 import { mountIframe as mountPhoneIframe, unmountIframe as unmountPhoneIframe } from './PhoneScreen';
+import { isCarouselDragging } from '../effects/CardCarousel';
 import { config as sfDecorConfig } from '../scene/SeaFloorDecor';
 import { isDialogActive } from './Dialog';
 
@@ -429,6 +430,9 @@ export function handleScroll(deltaY: number): void {
     // safety below also prevents the "3 attempts → forceExitZoom" escape hatch
     // from firing mid-dialog (which orphaned the dialog and bugged everything).
     if (isDialogActive()) return;
+    // Dragging the underwater card carousel — the horizontal swipe's vertical
+    // component must not also scroll the camera (covers wheel + touch paths).
+    if (isCarouselDragging()) return;
     if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside') {
         // Safety: user is trying to scroll while a zoom flag is active.
         // Increment a counter — if they keep scrolling, force-clear the stuck zoom.

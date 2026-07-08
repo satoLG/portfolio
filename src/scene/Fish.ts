@@ -869,6 +869,33 @@ export function getDownloadFraction(): number {
     return Math.min(fishModelsLoaded / 4, 1);
 }
 
+// ── Active jellyfish lights (consumed by effects/CardCarousel) ───────────────
+// Snapshot of every jellyfish PointLight that is currently contributing light
+// (intensity already includes day/night + underwater visibility, so consumers
+// get 0-length results during the day for free). The array and its slots are
+// reused across calls — treat the result as read-only and don't hold on to it.
+export interface ActiveJellyLight { x: number; y: number; z: number; color: Color; intensity: number; }
+const _jellyLightsOut: ActiveJellyLight[] = [];
+export function getActiveJellyLights(): ActiveJellyLight[] {
+    let n = 0;
+    for (let i = 0; i < activeFish.length; i++) {
+        const pool = activeFish[i].pool;
+        if (!pool.isJellyfish || !pool.light) continue;
+        if (pool.light.intensity <= 0.01 || !pool.group.visible) continue;
+        if (n >= _jellyLightsOut.length) {
+            _jellyLightsOut.push({ x: 0, y: 0, z: 0, color: new Color(), intensity: 0 });
+        }
+        const slot = _jellyLightsOut[n++];
+        slot.x = pool.light.position.x;
+        slot.y = pool.light.position.y;
+        slot.z = pool.light.position.z;
+        slot.color.copy(pool.lightColor);
+        slot.intensity = pool.light.intensity;
+    }
+    _jellyLightsOut.length = n;
+    return _jellyLightsOut;
+}
+
 /** Debug snapshot — used by `window.__diag()` to inspect fish state. */
 export function getDiagState() {
     let visibleFish = 0, visibleJellies = 0, nanX = 0;
