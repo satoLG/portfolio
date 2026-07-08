@@ -177,8 +177,10 @@ let playerContainer: HTMLDivElement | null = null;
 // CSS3D panel — the player floats in the scene, anchored to the radio and
 // billboarded to face the camera (see effects/CSS3DPanel).
 let playerPanel: CSS3DPanel | null = null;
-const PLAYER_PX_PER_UNIT = 360;   // bigger = smaller panel in-scene (tweak to taste)
-const PLAYER_ANCHOR_UP   = 0.50;  // world units above the radio origin
+// Bigger = smaller panel in-scene. High enough that the 320px DOM is scaled
+// DOWN (crisp) rather than up (blurry) at the radio-zoom framing. Tweak to resize.
+const PLAYER_PX_PER_UNIT = 620;
+const PLAYER_ANCHOR_UP   = 0.40;  // world units above the radio origin (tweak height)
 const _radioWorld = new Vector3();
 
 // Wavesurfer instance

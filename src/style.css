@@ -2814,6 +2814,16 @@ body.day-mode .ct-body::after {
 .css3d-panel-content {
     position: relative;
     display: block;
+    width: max-content;   /* shrink-wrap the hosted panel */
+}
+
+/* Force any hosted panel into normal flow (their base styles are position:fixed
+   screen overlays) so the wrapper sizes to them and stays aligned with the
+   punch hole. */
+.css3d-panel-content > * {
+    position: relative !important;
+    inset: auto !important;
+    margin: 0 !important;
 }
 
 /* Media player, hosted in a panel — neutralise the screen-space rules */
@@ -2846,13 +2856,11 @@ body.day-mode .css3d-panel-content .media-player.expanded {
     -webkit-backdrop-filter: none;
 }
 
-/* Coin tooltip, hosted in a panel */
+/* Coin tooltip, hosted in a panel. Authored at ~2.4x its screen-overlay size (a
+   "supersample") so the CSS3D plane scales it DOWN — crisp, not upscaled/blurry.
+   Keep these in sync with radiusPx in CoinTooltip.ts. */
 .css3d-panel-content #coin-tooltip {
-    position: relative;
     display: block;
-    inset: auto;
-    left: auto;
-    top: auto;
     z-index: auto;
 }
 
@@ -2860,9 +2868,28 @@ body.day-mode .css3d-panel-content .media-player.expanded {
     background: rgba(18, 34, 52, 0.94);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    border-radius: 34px;
+    padding: 22px 32px;
+    gap: 22px;
     box-shadow:
-        0 4px 20px rgba(0, 0, 0, 0.45),
-        0 0 16px rgba(120, 180, 230, 0.20);
+        0 8px 34px rgba(0, 0, 0, 0.45),
+        0 0 30px rgba(120, 180, 230, 0.20);
+}
+
+.css3d-panel-content .ct-icon {
+    width: 66px;
+    height: 66px;
+    border-radius: 14px;
+}
+
+.css3d-panel-content .ct-name {
+    font-size: 33px;
+    letter-spacing: 0.01em;
+}
+
+.css3d-panel-content .ct-external {
+    width: 28px;
+    height: 28px;
 }
 
 body.day-mode .css3d-panel-content .ct-body {

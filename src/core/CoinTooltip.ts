@@ -50,9 +50,15 @@ const COINS = [
     },
 ] as const;
 
-// World-space vertical offset so the pill floats just above the coin.
-const TOOLTIP_Y_OFFSET = 0.14;
-const TOOLTIP_PX_PER_UNIT = 260;   // bigger = smaller pill in-scene (tweak to taste)
+// World-space vertical offset so the pill floats above the coin. The chest zoom
+// is telephoto (~fov 27), so a small world offset reads as a big screen gap —
+// nudge this if the pill sits too close to / too far from the coin.
+const TOOLTIP_Y_OFFSET = 0.18;
+// Bigger = smaller pill in-scene. High value on purpose: the DOM is authored
+// large (see the .css3d-panel-content #coin-tooltip rules — a "supersample" so
+// the raster stays crisp) and scaled DOWN into the scene, which is what makes it
+// sharp instead of upscaled/blurry. Tweak this to resize the pill.
+const TOOLTIP_PX_PER_UNIT = 2200;
 
 // ─── DOM / panel ───────────────────────────────────────────────────────────────
 
@@ -66,11 +72,11 @@ function _ensurePanel(): CSS3DPanel {
 
     _panel = new CSS3DPanel({
         pxPerUnit: TOOLTIP_PX_PER_UNIT,
-        radiusPx: 14,
+        radiusPx: 34,   // matches the supersized .ct-body border-radius (CSS)
         // Touch: modal so tapping the pill opens the link. Desktop: the coin
         // click already opens the link, so keep the scene interactive.
         modal: IS_TOUCH_DEVICE,
-        maskPad: 8,
+        maskPad: 14,
     });
 
     const body = document.createElement('div');

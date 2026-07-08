@@ -299,9 +299,15 @@ export class CSS3DPanel {
         }
         if (!this._visible) return;
 
-        // Measure content each frame (playlist expand, i18n, day/night can resize).
-        const w = this.content.offsetWidth;
-        const h = this.content.offsetHeight;
+        // Measure the hosted panel element each frame (playlist expand, i18n,
+        // day/night can resize). We measure the FIRST CHILD — the real panel —
+        // not `.content`: a hosted panel with position:fixed/absolute (the media
+        // player's base style) is out of `.content`'s flow, collapsing it to
+        // 0×0. The panel element's own offset box is transform-independent and
+        // always valid. Fall back to `.content` if there's no child yet.
+        const measured = (this.content.firstElementChild as HTMLElement) ?? this.content;
+        const w = measured.offsetWidth;
+        const h = measured.offsetHeight;
         if (w > 0 && h > 0 && (Math.abs(w - this._lastW) > 0.5 || Math.abs(h - this._lastH) > 0.5)) {
             this._lastW = w; this._lastH = h;
             this.wrapper.style.width = `${w}px`;
