@@ -471,6 +471,13 @@ function _getCoinScreenPos(i: number): { x: number; y: number } | null {
     };
 }
 
+/** World-space position of a coin — the CSS3D tooltip panel anchors here. */
+function _getCoinWorldPos(i: number): { x: number; y: number; z: number } | null {
+    if (!_chestCoins[i]) return null;
+    _coinScreenVec.setFromMatrixPosition(_chestCoins[i].matrixWorld);
+    return { x: _coinScreenVec.x, y: _coinScreenVec.y, z: _coinScreenVec.z };
+}
+
 export function updateChestGlowTransform(): void {
     if (!chestGlowLight) return;
     chestGlowLight.position.set(sfDecorConfig.chestGlowX, sfDecorConfig.chestGlowY, sfDecorConfig.chestGlowZ);
@@ -4412,8 +4419,8 @@ function setupCoinInteraction(): void {
             _hoveredCoinIdx = hit;
             if (hit >= 0) {
                 canvas.style.cursor = 'pointer';
-                const pos = _getCoinScreenPos(hit);
-                if (pos) CoinTooltip.showCoinTooltip(hit, pos.x, pos.y);
+                const pos = _getCoinWorldPos(hit);
+                if (pos) CoinTooltip.showCoinTooltip(hit, pos.x, pos.y, pos.z);
             } else {
                 canvas.style.cursor = '';
                 CoinTooltip.hideCoinTooltip();
@@ -4468,10 +4475,10 @@ function setupCoinInteraction(): void {
                 _selectedCoinIdx = hit;
                 _coinBounceVels[hit] = 6; // kick the spring upward
             }
-            const pos = _getCoinScreenPos(hit);
+            const pos = _getCoinWorldPos(hit);
             if (pos) {
                 _mobileJustOpened = true;
-                CoinTooltip.showCoinTooltip(hit, pos.x, pos.y);
+                CoinTooltip.showCoinTooltip(hit, pos.x, pos.y, pos.z);
                 setTimeout(() => { _mobileJustOpened = false; }, 60);
             }
         }
@@ -5003,8 +5010,8 @@ export function Update(isUnderwater = false): void {
         } else {
             const ttIdx = CoinTooltip.getCoinTooltipIdx();
             if (ttIdx >= 0) {
-                const pos = _getCoinScreenPos(ttIdx);
-                if (pos) CoinTooltip.repositionCoinTooltip(pos.x, pos.y);
+                const pos = _getCoinWorldPos(ttIdx);
+                if (pos) CoinTooltip.repositionCoinTooltip(pos.x, pos.y, pos.z);
             }
         }
     }

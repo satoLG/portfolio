@@ -17,6 +17,7 @@ import * as WindLines from "../effects/WindLines.ts";
 import * as CloudSprites from "../effects/CloudSprites.ts";
 import * as SceneDepth from "../effects/SceneDepth.ts";
 import * as CardCarousel from "../effects/CardCarousel.ts";
+import * as CSS3DPanel from "../effects/CSS3DPanel.ts";
 import { sceneDepthUniform, updateSceneDepthCamera, edgeFoamIntensityUniform } from "../materials/OceanMaterial";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
@@ -253,6 +254,7 @@ function getDepthPrePassExcluded(): Object3D[] {
     // the foam depth target. They live deep underwater (y≈-6) but excluding
     // them is one push and removes the risk entirely.
     _depthExcludedTargets.push(CardCarousel.getOccluderGroup());
+    _depthExcludedTargets.push(CSS3DPanel.getOccluderGroup());
     // Fish/jellyfish/bubbles/underwater particles must be kept out of the depth
     // pre-pass: the override MeshDepthMaterial forces depthWrite=true over their
     // own depthWrite=false, so they'd write into the foam depth target and paint
@@ -607,6 +609,11 @@ export function Start(): void
     // being erased by them.
     CardCarousel.Start(scene, cssScene);
     CardCarousel.applyPixelSize(pixelSizeValue);
+
+    // In-scene CSS3D panels (media player + coin tooltips). Same add-before-fish
+    // ordering rule as the carousel — the punch planes must precede the
+    // depthWrite:false jellyfish in the transparent pass.
+    CSS3DPanel.Start(scene, cssScene);
 
     // Initialize fish
     Fish.Start();
@@ -1089,6 +1096,9 @@ export function Update(): void
     // Card carousel: advance the track, sync DOM + punch-mesh transforms and
     // update the post-process distortion quiet rect — also pre-render work.
     CardCarousel.Update();
+    // In-scene panels: billboard, advance open animation, sync punch holes —
+    // must run BEFORE the WebGL render so the holes are correct this frame.
+    CSS3DPanel.preRender(camera);
 
     // Update projection matrix every frame (matches Henry's Renderer.update())
     camera.updateProjectionMatrix();
@@ -1132,6 +1142,9 @@ export function Update(): void
 
     // Pointer-events + CSS3D update
     PhoneScreen.render(camera);
+    // In-scene panels claim the canvas pointer-events last (after PhoneScreen,
+    // the other writer) so a visible modal panel receives clicks.
+    CSS3DPanel.syncCanvasPointer();
 
     // Single CSS3D render using the scaled CSS camera
     cssRenderer.render(cssScene, cssCamera);
