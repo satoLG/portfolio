@@ -127,15 +127,6 @@ export interface BladeConfig {
     heightVariation: number;
     /** Minimum blade scale at island edge (0=invisible, 1=full size) */
     minEdgeScale: number;
-    /** Extra tilt (radians) applied to the growth axis of side-face blades,
-     *  rotating them down (+) or up (-) from the pure outward normal. Scales
-     *  with how horizontal the surface normal is, so top blades are unaffected. */
-    sideTilt: number;
-    /** Width multiplier for side-face blades (wider = fewer slivers, fills more). */
-    sideWidthMul: number;
-    /** Max random facing jitter (radians) for side blades. They otherwise face
-     *  up/out toward the camera; small jitter adds variety without edge-on slivers. */
-    sideFaceJitter: number;
 }
 
 const DEFAULT_BLADE_CONFIG: BladeConfig = {
@@ -145,9 +136,6 @@ const DEFAULT_BLADE_CONFIG: BladeConfig = {
     bladeHeight: 0.085,
     heightVariation: 0.50,
     minEdgeScale: 0.25,
-    sideTilt: 0.0,
-    sideWidthMul: 1.0,
-    sideFaceJitter: 0.5,
 };
 
 // Number of arc segments used to dome the top of each blade. Higher = rounder,
@@ -179,14 +167,13 @@ export const grassColorTip  = new Color(GRASS_COLOR_TIP);
  * Build a single merged BufferGeometry containing all grass blades.
  * Each blade = a flat card: a rectangular body topped with a semicircular
  * dome (CAP_SEGS arc segments), so the tip reads as genuinely rounded rather
- * than a sharp point or a flat/square edge. Random rotation per blade
+ * than a sharp point or a flat/square edge. Random Y-rotation per blade
  * preserves varied normals so PBR lighting (fire PointLight, directional sun)
  * works correctly — no billboard rotation needed.
- * Each blade grows along its spawn point's surface normal (nx,ny,nz, default up),
- * so blades on the island's vertical sides point outward instead of straight up.
+ * Blades near the island edge are scaled down via the per-point edgeFactor.
  */
 export function buildGrassGeometry(
-    spawnPoints: Array<{ x: number; z: number; y?: number; edgeFactor?: number; height?: number; side?: boolean; nx?: number; ny?: number; nz?: number }>,
+    spawnPoints: Array<{ x: number; z: number; y?: number; edgeFactor?: number }>,
     worldY: number,
     config: Partial<BladeConfig> = {},
     seed = 42,
@@ -229,85 +216,30 @@ export function buildGrassGeometry(
         const ef         = sp.edgeFactor !== undefined ? sp.edgeFactor : 1.0;
         const edgeScale  = lerp(cfg.minEdgeScale, 1.0, ef);
 
-        // Growth axis = surface normal (defaults to straight up). Blades grow along
-        // it, so on the island's vertical sides they point outward instead of up.
-        let UPx = sp.nx ?? 0, UPy = sp.ny ?? 1, UPz = sp.nz ?? 0;
-        const upLen = Math.hypot(UPx, UPy, UPz) || 1;
-        UPx /= upLen; UPy /= upLen; UPz /= upLen;
-
-        // Side tilt — rotate the growth axis down/up around the horizontal axis that
-        // runs along the wall (perp to UP and world-up). Weighted by "sideness"
-        // (1 - UPy) so it only bends the outward-pointing side blades, not top grass.
-        if (cfg.sideTilt !== 0.0) {
-            const sideness = Math.max(0, Math.min(1, 1 - UPy));
-            if (sideness > 0.001) {
-                // A = normalize(worldUp × UP) — horizontal, tangent to the wall.
-                let ax = UPz, ay = 0, az = -UPx;           // (0,1,0) × UP
-                const al = Math.hypot(ax, ay, az) || 1;
-                ax /= al; ay /= al; az /= al;
-                const ta = cfg.sideTilt * sideness;
-                const ct = Math.cos(ta), st = Math.sin(ta);
-                // Rodrigues with A ⟂ UP: UP' = UP·cosθ + (A × UP)·sinθ
-                const cxx = ay * UPz - az * UPy;
-                const cyy = az * UPx - ax * UPz;
-                const czz = ax * UPy - ay * UPx;
-                UPx = UPx * ct + cxx * st;
-                UPy = UPy * ct + cyy * st;
-                UPz = UPz * ct + czz * st;
-                const l2 = Math.hypot(UPx, UPy, UPz) || 1;
-                UPx /= l2; UPy /= l2; UPz /= l2;
-            }
-        }
-
-        // Orthonormal tangent basis (T1, T2) spanning the surface plane at this point.
-        let refx = 0, refy = 1, refz = 0;
-        if (Math.abs(UPy) > 0.99) { refx = 1; refy = 0; refz = 0; }  // avoid ref ∥ UP
-        let t1x = refy * UPz - refz * UPy;
-        let t1y = refz * UPx - refx * UPz;
-        let t1z = refx * UPy - refy * UPx;
-        const t1l = Math.hypot(t1x, t1y, t1z) || 1;
-        t1x /= t1l; t1y /= t1l; t1z /= t1l;
-        const t2x = UPy * t1z - UPz * t1y;   // T2 = UP × T1 (already unit)
-        const t2y = UPz * t1x - UPx * t1z;
-        const t2z = UPx * t1y - UPy * t1x;
-
-        // Per-point base height (side-face grass carries its own height override).
-        const bladeH = sp.height ?? cfg.bladeHeight;
-
         for (let b = 0; b < cfg.bladesPerPoint; b++) {
-            // Spread within the tangent plane so blades hug the surface (even on sides).
+            // Random offset within spread radius
             const spreadAngle = rng() * Math.PI * 2;
             const dist        = rng() * cfg.spreadRadius;
-            const so = Math.cos(spreadAngle) * dist, sc = Math.sin(spreadAngle) * dist;
-            const cx = sp.x + t1x * so + t2x * sc;
-            const cy = baseY + t1y * so + t2y * sc;
-            const cz = sp.z + t1z * so + t2z * sc;
+            const cx = sp.x + Math.cos(spreadAngle) * dist;
+            const cz = sp.z + Math.sin(spreadAngle) * dist;
 
             // Per-blade height / width variation
             const r = rng();
-            const h = bladeH * edgeScale * (1.0 - cfg.heightVariation + r * cfg.heightVariation);
-            const widthMul = sp.side ? cfg.sideWidthMul : 1.0;
-            const w = cfg.bladeWidth * widthMul * edgeScale * (0.8 + rng() * 0.4);
+            const h = cfg.bladeHeight * edgeScale * (1.0 - cfg.heightVariation + r * cfg.heightVariation);
+            const w = cfg.bladeWidth  * edgeScale * (0.8 + rng() * 0.4);
 
-            // Width axis W = tangent basis rotated around UP. Top blades rotate
-            // freely; side blades stay near T1 (the horizontal-tangential axis) so
-            // their flat face points up/out toward the camera instead of edge-on.
-            const rotY = sp.side ? (rng() * 2 - 1) * cfg.sideFaceJitter : rng() * Math.PI * 2;
-            const cw = Math.cos(rotY), sw = Math.sin(rotY);
-            const Wx = t1x * cw + t2x * sw;
-            const Wy = t1y * cw + t2y * sw;
-            const Wz = t1z * cw + t2z * sw;
+            // Random facing direction
+            const rotY = rng() * Math.PI * 2;
+            const cosA = Math.cos(rotY);
+            const sinA = Math.sin(rotY);
 
-            // Face normal = cross(W, UP) (unit; W ⟂ UP).
-            const faceNx = Wy * UPz - Wz * UPy;
-            const faceNy = Wz * UPx - Wx * UPz;
-            const faceNz = Wx * UPy - Wy * UPx;
-            // Cap normal tilts from the face toward the growth axis so tips catch light.
-            let cnx = faceNx * 0.8 + UPx * 0.4;
-            let cny = faceNy * 0.8 + UPy * 0.4;
-            let cnz = faceNz * 0.8 + UPz * 0.4;
-            const cnl = Math.hypot(cnx, cny, cnz) || 1;
-            cnx /= cnl; cny /= cnl; cnz /= cnl;
+            // Face normal: perpendicular to blade direction in XZ.
+            // Derived from cross(edge1, edge2) where:
+            //   edge1 = v1-v0 = (2*cosA*w, 0, 2*sinA*w)
+            //   edge2 = v2-v0 = (cosA*w,   h, sinA*w)
+            //   cross  = (-2*sinA*w*h, 0, 2*cosA*w*h)  →  normalise → (-sinA, 0, cosA)
+            const faceNx = -sinA;
+            const faceNz =  cosA;
 
             // Dome cap: shoulders sit at hBody, the arc bulges up to full height h.
             const capR  = Math.min(w, h * 0.5);
@@ -327,17 +259,17 @@ export function buildGrassGeometry(
 
             const baseVi = vi;
 
-            // Emit one vertex. `u` = offset along the blade's width axis W, `yl` =
-            // height along the growth axis UP (0..h). Colour + wind sway (tipness)
-            // both ramp with height; `up` uses the skyward-tilted cap normal.
+            // Emit one vertex. `u` = offset along the blade's width axis, `yl` =
+            // local height (0..h). Colour + wind sway (tipness) both ramp with height;
+            // `up` tilts the normal skyward for cap verts so they catch overhead sun.
             const emit = (u: number, yl: number, up: boolean): void => {
                 const p = vi * 3, c = vi * 2;
+                positions[p    ] = cx + cosA * u;
+                positions[p + 1] = baseY + yl;
+                positions[p + 2] = cz + sinA * u;
+                if (up) { normals[p] = faceNx * 0.8; normals[p + 1] = 0.4; normals[p + 2] = faceNz * 0.8; }
+                else    { normals[p] = faceNx;       normals[p + 1] = 0.0; normals[p + 2] = faceNz;       }
                 const t = h > 0 ? yl / h : 0.0;
-                positions[p    ] = cx + Wx * u + UPx * yl;
-                positions[p + 1] = cy + Wy * u + UPy * yl;
-                positions[p + 2] = cz + Wz * u + UPz * yl;
-                if (up) { normals[p] = cnx;    normals[p + 1] = cny;    normals[p + 2] = cnz;    }
-                else    { normals[p] = faceNx; normals[p + 1] = faceNy; normals[p + 2] = faceNz; }
                 colors[p    ] = baseR + (tipR - baseR) * t;
                 colors[p + 1] = baseG + (tipG - baseG) * t;
                 colors[p + 2] = baseB + (tipB - baseB) * t;
