@@ -127,12 +127,6 @@ export interface BladeConfig {
     heightVariation: number;
     /** Minimum blade scale at island edge (0=invisible, 1=full size) */
     minEdgeScale: number;
-    /** How far (world units) an edge blade's tip leans outward, away from the
-     *  island centre, following the lateral slope. Scales with edge proximity. */
-    edgeDroop: number;
-    /** How much (world units) an edge blade's tip drops in Y as it droops over
-     *  the rim. Scales with edge proximity. */
-    edgeDroopDrop: number;
     /** Extra tilt (radians) applied to the growth axis of side-face blades,
      *  rotating them down (+) or up (-) from the pure outward normal. Scales
      *  with how horizontal the surface normal is, so top blades are unaffected. */
@@ -146,8 +140,6 @@ const DEFAULT_BLADE_CONFIG: BladeConfig = {
     bladeHeight: 0.085,
     heightVariation: 0.50,
     minEdgeScale: 0.25,
-    edgeDroop: 0.0,
-    edgeDroopDrop: 0.0,
     sideTilt: 0.0,
 };
 
@@ -187,7 +179,7 @@ export const grassColorTip  = new Color(GRASS_COLOR_TIP);
  * so blades on the island's vertical sides point outward instead of straight up.
  */
 export function buildGrassGeometry(
-    spawnPoints: Array<{ x: number; z: number; y?: number; edgeFactor?: number; dirX?: number; dirZ?: number; nx?: number; ny?: number; nz?: number }>,
+    spawnPoints: Array<{ x: number; z: number; y?: number; edgeFactor?: number; height?: number; nx?: number; ny?: number; nz?: number }>,
     worldY: number,
     config: Partial<BladeConfig> = {},
     seed = 42,
@@ -272,12 +264,8 @@ export function buildGrassGeometry(
         const t2y = UPz * t1x - UPx * t1z;
         const t2z = UPx * t1y - UPy * t1x;
 
-        // Edge droop — only for up-facing (top) blades; side blades already point
-        // outward via their normal, so scale the droop by how vertical UP is (UPy).
-        const droopAmt = (1.0 - ef) * Math.max(0, UPy);
-        const outX  = (sp.dirX ?? 0) * cfg.edgeDroop     * droopAmt;
-        const outZ  = (sp.dirZ ?? 0) * cfg.edgeDroop     * droopAmt;
-        const dropY =                  cfg.edgeDroopDrop * droopAmt;
+        // Per-point base height (side-face grass carries its own height override).
+        const bladeH = sp.height ?? cfg.bladeHeight;
 
         for (let b = 0; b < cfg.bladesPerPoint; b++) {
             // Spread within the tangent plane so blades hug the surface (even on sides).
@@ -290,7 +278,7 @@ export function buildGrassGeometry(
 
             // Per-blade height / width variation
             const r = rng();
-            const h = cfg.bladeHeight * edgeScale * (1.0 - cfg.heightVariation + r * cfg.heightVariation);
+            const h = bladeH * edgeScale * (1.0 - cfg.heightVariation + r * cfg.heightVariation);
             const w = cfg.bladeWidth  * edgeScale * (0.8 + rng() * 0.4);
 
             // Width axis W = tangent basis rotated randomly around UP.
@@ -335,10 +323,9 @@ export function buildGrassGeometry(
             const emit = (u: number, yl: number, up: boolean): void => {
                 const p = vi * 3, c = vi * 2;
                 const t = h > 0 ? yl / h : 0.0;
-                // Droop leans the upper part outward + down (t: 0 root → 1 tip).
-                positions[p    ] = cx + Wx * u + UPx * yl + outX  * t;
-                positions[p + 1] = cy + Wy * u + UPy * yl - dropY * t;
-                positions[p + 2] = cz + Wz * u + UPz * yl + outZ  * t;
+                positions[p    ] = cx + Wx * u + UPx * yl;
+                positions[p + 1] = cy + Wy * u + UPy * yl;
+                positions[p + 2] = cz + Wz * u + UPz * yl;
                 if (up) { normals[p] = cnx;    normals[p + 1] = cny;    normals[p + 2] = cnz;    }
                 else    { normals[p] = faceNx; normals[p + 1] = faceNy; normals[p + 2] = faceNz; }
                 colors[p    ] = baseR + (tipR - baseR) * t;
