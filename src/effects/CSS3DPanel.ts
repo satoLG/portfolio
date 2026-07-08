@@ -46,11 +46,13 @@ import {
     Scene as ThreeScene,
     ShaderMaterial,
     Vector2,
+    Vector3,
 } from 'three';
 // Runtime-only access inside functions — same import-cycle pattern as
 // CardCarousel/PhoneScreen (see the alias note in Fish.ts).
 import { CSS_SCALE, camera as sceneCamera, cssRenderer, renderer } from '../core/Scene';
 import { deltaTime } from '../core/Time';
+import { setDistortionQuietRect } from './PostProcess';
 
 // ─── Manager state ─────────────────────────────────────────────────────────────
 
@@ -62,6 +64,8 @@ let _initialized = false;
 
 const _raycaster = new Raycaster();
 const _ndc = new Vector2();
+const _cornerA = new Vector3();
+const _cornerB = new Vector3();
 
 /** The WebGL punch group — Scene.ts excludes it from the foam depth pre-pass. */
 export function getOccluderGroup(): Group {
@@ -92,10 +96,20 @@ export function Start(glScene: ThreeScene, cssScene: ThreeScene): void {
 }
 
 /** Per-frame, at PRE-RENDER time (before the WebGL scene is drawn, so the punch
- *  holes are in place). Billboards every panel, advances its open animation and
- *  syncs the DOM + occluder transforms. */
+ *  holes are in place). Billboards every panel, advances its open animation,
+ *  syncs the DOM + occluder transforms and claims the distortion quiet-rect
+ *  slots (1..2 — slot 0 is the carousel's) so the underwater wave displacement
+ *  never shears a punched hole off its static DOM. */
 export function preRender(cam: PerspectiveCamera): void {
-    for (const p of _panels) p._frame(cam);
+    let quietSlot = 1;
+    for (const p of _panels) {
+        p._frame(cam);
+        if (quietSlot <= 2 && p.isVisible() && p._writeQuietRect(cam, quietSlot)) {
+            quietSlot++;
+        }
+    }
+    // Clear any slots not claimed this frame.
+    for (let s = quietSlot; s <= 2; s++) setDistortionQuietRect(s, 0, 0, 0, 0, false);
 }
 
 /** Per-frame, AFTER PhoneScreen.render (the other writer of canvas
@@ -121,6 +135,12 @@ export interface PanelOptions {
     modal?: boolean;
     /** Extra mask dilation (px) around the rounded rect — covers soft edges. */
     maskPad?: number;
+    /** Known CSS-px size of the hosted content. Seeds the punch mask/occluder so
+     *  the panel is CORRECT FROM FRAME 1 without depending on DOM measurement
+     *  (which is fragile inside the CSS3D subtree — the element only enters the
+     *  document on the CSS renderer's first visible render). Live measurement
+     *  still refines it afterwards, but can never zero it out. */
+    initialSize?: { w: number; h: number };
 }
 
 // easeOutBack — the subtle overshoot that gives the open/close a "pop".
@@ -152,6 +172,8 @@ export class CSS3DPanel {
     private _openTarget = 0;   // 0 closed, 1 open
     private _openT = 0;        // eased 0..1
     private _lastW = 0; private _lastH = 0;
+    private _zeroMeasureFrames = 0;   // diagnostic — warn if DOM never measures
+    private _warnedZero = false;
     private _onOutsideClick: ((e: PointerEvent) => void) | null = null;
     private _onClosed: (() => void) | null = null;
 
@@ -162,6 +184,10 @@ export class CSS3DPanel {
         this.maskPad = opts.maskPad ?? 6;
         this._modal = opts.modal ?? false;
         this.dismissOnOutsideClick = this._modal;
+        if (opts.initialSize) {
+            this._lastW = opts.initialSize.w;
+            this._lastH = opts.initialSize.h;
+        }
 
         // wrapper (transform owned by CSS3DRenderer) → inner (open-scale) → content
         this.wrapper = document.createElement('div');
@@ -247,6 +273,12 @@ export class CSS3DPanel {
         // Bridge the frame gap so offsetWidth/Height measure correctly this frame
         // (CSS3DRenderer only flips display on its own render, which is later).
         this.wrapper.style.display = '';
+        // Seeded/known size → punch mask + wrapper are valid from frame 1, with
+        // no dependence on DOM measurement (see PanelOptions.initialSize).
+        if (this._lastW > 0 && this._lastH > 0) {
+            this._applySize(this._lastW, this._lastH);
+        }
+        this._zeroMeasureFrames = 0;
     }
 
     close(onClosed?: () => void): void {
@@ -303,18 +335,36 @@ export class CSS3DPanel {
         // day/night can resize). We measure the FIRST CHILD — the real panel —
         // not `.content`: a hosted panel with position:fixed/absolute (the media
         // player's base style) is out of `.content`'s flow, collapsing it to
-        // 0×0. The panel element's own offset box is transform-independent and
-        // always valid. Fall back to `.content` if there's no child yet.
+        // 0×0. A zero measurement NEVER shrinks the panel — the seeded
+        // initialSize (or last good measurement) keeps it visible; measurement
+        // only refines. If the DOM measures 0 for a sustained stretch, something
+        // upstream is hiding it — say so in the console instead of failing mute.
         const measured = (this.content.firstElementChild as HTMLElement) ?? this.content;
         const w = measured.offsetWidth;
         const h = measured.offsetHeight;
-        if (w > 0 && h > 0 && (Math.abs(w - this._lastW) > 0.5 || Math.abs(h - this._lastH) > 0.5)) {
-            this._lastW = w; this._lastH = h;
-            this.wrapper.style.width = `${w}px`;
-            this.wrapper.style.height = `${h}px`;
-            this._bakeMask(w, h);
+        if (w > 0 && h > 0) {
+            this._zeroMeasureFrames = 0;
+            if (Math.abs(w - this._lastW) > 0.5 || Math.abs(h - this._lastH) > 0.5) {
+                this._applySize(w, h);
+            }
+        } else if (++this._zeroMeasureFrames === 60 && !this._warnedZero) {
+            this._warnedZero = true;
+            let blocker = measured.isConnected ? '' : 'element is not attached to the document';
+            if (!blocker) {
+                for (let el: HTMLElement | null = measured; el; el = el.parentElement) {
+                    if (getComputedStyle(el).display === 'none') {
+                        blocker = `display:none on <${el.tagName.toLowerCase()} class="${el.className}">`;
+                        break;
+                    }
+                }
+            }
+            console.warn(
+                `[CSS3DPanel] hosted DOM measures 0x0 after 60 visible frames` +
+                (blocker ? ` — cause: ${blocker}` : ' — no display:none found; check layout'),
+                measured,
+            );
         }
-        const w2 = this._lastW || w, h2 = this._lastH || h;
+        const w2 = this._lastW, h2 = this._lastH;
         if (w2 <= 0 || h2 <= 0) return;
 
         // Eased visual scale (with a little pop) drives BOTH DOM and occluder.
@@ -342,6 +392,53 @@ export class CSS3DPanel {
         this.cssObject.visible = false;
         this.occluder.visible = false;
         this.wrapper.style.display = 'none';
+    }
+
+    /** Commit a content size: wrapper box + punch mask. */
+    private _applySize(w: number, h: number): void {
+        this._lastW = w;
+        this._lastH = h;
+        this.wrapper.style.width = `${w}px`;
+        this.wrapper.style.height = `${h}px`;
+        this._bakeMask(w, h);
+    }
+
+    /** Project this panel's screen rect into a distortion quiet-rect slot.
+     *  The plane is billboarded (screen-parallel), so the rect is just the
+     *  projected centre ± the projected half-extents along the camera axes.
+     *  Returns false (slot not consumed) when off-screen. */
+    _writeQuietRect(cam: PerspectiveCamera, slot: number): boolean {
+        const halfW = ((this._lastW / 2 + this.maskPad) / this.pxPerUnit);
+        const halfH = ((this._lastH / 2 + this.maskPad) / this.pxPerUnit);
+        if (halfW <= 0 || halfH <= 0) return false;
+
+        const e = cam.matrixWorld.elements;
+        // camera right = (e0,e1,e2), camera up = (e4,e5,e6)
+        _cornerA.set(
+            this._wx - e[0] * halfW - e[4] * halfH,
+            this._wy - e[1] * halfW - e[5] * halfH,
+            this._wz - e[2] * halfW - e[6] * halfH,
+        ).project(cam);
+        const zNdc = _cornerA.z;
+        _cornerB.set(
+            this._wx + e[0] * halfW + e[4] * halfH,
+            this._wy + e[1] * halfW + e[5] * halfH,
+            this._wz + e[2] * halfW + e[6] * halfH,
+        ).project(cam);
+
+        if (zNdc >= 1 ||
+            Math.max(_cornerA.y, _cornerB.y) < -1.05 || Math.min(_cornerA.y, _cornerB.y) > 1.05 ||
+            Math.max(_cornerA.x, _cornerB.x) < -1.05 || Math.min(_cornerA.x, _cornerB.x) > 1.05) {
+            return false;
+        }
+
+        const minU = MathUtils.clamp((Math.min(_cornerA.x, _cornerB.x) + 1) / 2, 0, 1);
+        const maxU = MathUtils.clamp((Math.max(_cornerA.x, _cornerB.x) + 1) / 2, 0, 1);
+        const minV = MathUtils.clamp((Math.min(_cornerA.y, _cornerB.y) + 1) / 2, 0, 1);
+        const maxV = MathUtils.clamp((Math.max(_cornerA.y, _cornerB.y) + 1) / 2, 0, 1);
+        if (maxU <= minU || maxV <= minV) return false;
+        setDistortionQuietRect(slot, minU, minV, maxU, maxV, true);
+        return true;
     }
 
     private _bakeMask(w: number, h: number): void {

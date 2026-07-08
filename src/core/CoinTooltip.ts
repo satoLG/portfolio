@@ -77,6 +77,8 @@ function _ensurePanel(): CSS3DPanel {
         // click already opens the link, so keep the scene interactive.
         modal: IS_TOUCH_DEVICE,
         maskPad: 14,
+        // Rough supersized-pill size — refined by live measurement per coin name.
+        initialSize: { w: 300, h: 110 },
     });
 
     const body = document.createElement('div');

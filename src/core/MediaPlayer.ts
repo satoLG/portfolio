@@ -536,6 +536,10 @@ function createPlayerUI(): void {
         radiusPx: 12,
         modal: true,
         maskPad: 8,
+        // Known .media-player.expanded size (width fixed in CSS; height ≈ header
+        // + body at rest). Seeds the punch so the panel shows even before/without
+        // a DOM measurement; live measurement refines it (playlist expand etc.).
+        initialSize: { w: 320, h: 400 },
     });
     playerPanel.content.appendChild(playerContainer);
     playerPanel.setOnOutsideClick(() => { if (isExpanded) collapsePlayer(); });

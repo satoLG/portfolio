@@ -382,7 +382,7 @@ export function Update(): void {
         if (!_active) {
             cancelDrag();
             setCursor('');
-            setDistortionQuietRect(0, 0, 0, 0, false);
+            setDistortionQuietRect(0, 0, 0, 0, 0, false);
         }
     }
     if (!_active) return;
@@ -504,7 +504,7 @@ function updateQuietRect(): void {
 
     // Behind the camera or fully off-screen → no quiet zone.
     if (zNdc >= 1 || Math.max(y0, y1) < -1.05 || Math.min(y0, y1) > 1.05) {
-        setDistortionQuietRect(0, 0, 0, 0, false);
+        setDistortionQuietRect(0, 0, 0, 0, 0, false);
         return;
     }
 
@@ -512,7 +512,7 @@ function updateQuietRect(): void {
     const maxU = MathUtils.clamp((Math.max(x0, x1) + 1) / 2, 0, 1);
     const minV = MathUtils.clamp((Math.min(y0, y1) + 1) / 2, 0, 1);
     const maxV = MathUtils.clamp((Math.max(y0, y1) + 1) / 2, 0, 1);
-    setDistortionQuietRect(minU, minV, maxU, maxV, maxU > minU && maxV > minV);
+    setDistortionQuietRect(0, minU, minV, maxU, maxV, maxU > minU && maxV > minV);
 }
 
 // ─── Interaction ──────────────────────────────────────────────────────────────
