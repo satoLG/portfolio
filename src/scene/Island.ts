@@ -74,6 +74,9 @@ import {
     GRASS_EDGE_SIDE_STEP,
     GRASS_EDGE_SIDE_HEIGHT,
     GRASS_EDGE_SIDE_TILT,
+    GRASS_EDGE_SIDE_WIDTH,
+    GRASS_EDGE_SIDE_CURVE,
+    GRASS_EDGE_SIDE_JITTER,
     APPLE_WIND_STRENGTH       as APPLE_WIND_STRENGTH_CFG,
     APPLE_SWING_STIFFNESS,
     APPLE_SWING_DAMPING,
@@ -184,10 +187,13 @@ export let grassMaxHeight         = GRASS_MAX_HEIGHT_CFG;
 // the top surface is handled by the normal scatter above.
 export const grassEdge = {
     sideCount:  GRASS_EDGE_SIDE_COUNT,   // perimeter sample count (density)
-    sideDepth:  GRASS_EDGE_SIDE_DEPTH,   // how far down the vertical face to cover
+    sideDepth:  GRASS_EDGE_SIDE_DEPTH,   // vertical span of the grass band
     sideStep:   GRASS_EDGE_SIDE_STEP,    // vertical spacing of side-face rows
     sideHeight: GRASS_EDGE_SIDE_HEIGHT,  // blade height for side grass
     sideTilt:   GRASS_EDGE_SIDE_TILT,    // radians; tilts side blades down(+)/up(-)
+    sideWidth:  GRASS_EDGE_SIDE_WIDTH,   // width multiplier for side blades
+    sideCurve:  GRASS_EDGE_SIDE_CURVE,   // taper of blade height toward band edges
+    sideJitter: GRASS_EDGE_SIDE_JITTER,  // radians; random facing jitter
 };
 
 export function setGrassEdgeFalloffRadius(v: number): void { grassEdgeFalloffRadius = Math.max(0, v); }
@@ -215,7 +221,7 @@ let _grassUniforms: GrassUniforms | null = null;
 // height   = per-point blade height override (side-face grass uses its own).
 // nx/ny/nz = surface normal the blade grows along (defaults to up on the top
 // surface; set to the outward side normal for blades on the vertical rim face).
-let _grassSpawnPoints: Array<{ x: number; z: number; y: number; edgeFactor: number; height?: number; nx?: number; ny?: number; nz?: number }> = [];
+let _grassSpawnPoints: Array<{ x: number; z: number; y: number; edgeFactor: number; height?: number; side?: boolean; nx?: number; ny?: number; nz?: number }> = [];
 
 // Store tree leaves for wind animation
 const treeLeaves: Object3D[] = [];
@@ -2000,6 +2006,7 @@ function pushEdgeSideSpawnPoints(): void {
 
         // March down the outer wall, casting horizontally inward to hit it.
         const outsideR = rimR + 0.35;
+        const span = Math.max(0.001, grassEdge.sideDepth);
         for (let d = step * 0.5; d <= grassEdge.sideDepth; d += step) {
             const y = crestY - d;
             if (y < waterY + 0.005) break;   // stay above the waterline
@@ -2022,10 +2029,16 @@ function pushEdgeSideSpawnPoints(): void {
             const hx = hit.point.x, hy = hit.point.y, hz = hit.point.z;
             if (hy < waterY + 0.003 || nearExcluded(hx, hz)) continue;
 
+            // Growth curve: blades taper toward the band's top & bottom edges (like
+            // the smaller blades at the top-grass perimeter). frac 0=crest → 1=bottom.
+            const frac  = Math.min(1, d / span);
+            const taper = 1 - grassEdge.sideCurve * (1 - Math.sin(Math.PI * frac));
+
             _grassSpawnPoints.push({
                 x: hx, z: hz, y: hy,
                 edgeFactor: 1.0,               // full-size blades (no top-edge taper)
-                height: grassEdge.sideHeight,
+                height: grassEdge.sideHeight * taper,
+                side: true,
                 nx, ny, nz,
             });
         }
@@ -2057,7 +2070,7 @@ export function respawnFoliage(_which: FoliageCluster = 'grass'): void {
         threeScene.remove(proceduralGrassMesh);
     }
     if (_grassUniforms) {
-        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment, { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight, sideTilt: grassEdge.sideTilt });
+        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment, { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight, sideTilt: grassEdge.sideTilt, sideWidthMul: grassEdge.sideWidth, sideFaceJitter: grassEdge.sideJitter });
         threeScene.add(proceduralGrassMesh);
     }
     buildShadowFloor(_grassSpawnPoints);
@@ -2078,7 +2091,7 @@ export function rebuildGrassGeometry(): void {
     }
     proceduralGrassMesh = createGrassMesh(
         _grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment,
-        { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight, sideTilt: grassEdge.sideTilt },
+        { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight, sideTilt: grassEdge.sideTilt, sideWidthMul: grassEdge.sideWidth, sideFaceJitter: grassEdge.sideJitter },
     );
     threeScene.add(proceduralGrassMesh);
 }
@@ -3226,7 +3239,7 @@ export function Start(): void {
             uYOffset:       new Uniform(grassYOffset),
         };
 
-        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment, { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight, sideTilt: grassEdge.sideTilt });
+        proceduralGrassMesh = createGrassMesh(_grassSpawnPoints, GRASS_Y, _grassUniforms, oceanLightingPars, oceanLightingFragment, { minEdgeScale: grassMinEdgeScale, bladeHeight: grassMaxHeight, sideTilt: grassEdge.sideTilt, sideWidthMul: grassEdge.sideWidth, sideFaceJitter: grassEdge.sideJitter });
         threeScene.add(proceduralGrassMesh);
         console.log(`[ProceduralGrass] ${_grassSpawnPoints.length} spawn points → ${_grassSpawnPoints.length * 40} blades (1 draw call)`);
 

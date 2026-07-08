@@ -917,11 +917,14 @@ function buildGUI(): void {
                 `export const GRASS_SHADOW_SPREAD       = ${Island.grassShadowSpread.toFixed(2)};   // disc radius scale (1.0 = cluster width)`,
                 ``,
                 `// ── Side-face grass (vertical grass clothing the island's lateral rim) ─────────`,
-                `export const GRASS_EDGE_SIDE_COUNT  = ${Math.round(Island.grassEdge.sideCount)};     // samples around the perimeter (density)`,
-                `export const GRASS_EDGE_SIDE_DEPTH  = ${Island.grassEdge.sideDepth.toFixed(3)};   // how far down the vertical face to cover (capped at waterline)`,
-                `export const GRASS_EDGE_SIDE_STEP   = ${Island.grassEdge.sideStep.toFixed(3)};  // vertical spacing between side-face rows`,
-                `export const GRASS_EDGE_SIDE_HEIGHT = ${Island.grassEdge.sideHeight.toFixed(3)};  // blade height for side grass`,
-                `export const GRASS_EDGE_SIDE_TILT   = ${Island.grassEdge.sideTilt.toFixed(4)}; // radians; tilts side blades down(+)/up(-)`,
+                `export const GRASS_EDGE_SIDE_COUNT   = ${Math.round(Island.grassEdge.sideCount)};     // samples around the perimeter (density)`,
+                `export const GRASS_EDGE_SIDE_DEPTH   = ${Island.grassEdge.sideDepth.toFixed(3)};   // vertical span of the grass band (capped at waterline)`,
+                `export const GRASS_EDGE_SIDE_STEP    = ${Island.grassEdge.sideStep.toFixed(3)};  // vertical spacing between side-face rows`,
+                `export const GRASS_EDGE_SIDE_HEIGHT  = ${Island.grassEdge.sideHeight.toFixed(3)};  // blade height for side grass`,
+                `export const GRASS_EDGE_SIDE_TILT    = ${Island.grassEdge.sideTilt.toFixed(4)}; // radians; tilts side blades down(+)/up(-)`,
+                `export const GRASS_EDGE_SIDE_WIDTH   = ${Island.grassEdge.sideWidth.toFixed(2)};    // width multiplier for side blades (fills / fewer slivers)`,
+                `export const GRASS_EDGE_SIDE_CURVE   = ${Island.grassEdge.sideCurve.toFixed(2)};    // taper of blade height toward the band's top/bottom edges`,
+                `export const GRASS_EDGE_SIDE_JITTER  = ${Island.grassEdge.sideJitter.toFixed(2)};    // radians; random facing jitter for side blades`,
                 ``,
                 `// ── Spawn edge padding ────────────────────────────────────────────────────────`,
                 `export const SURFACE_EDGE_PADDING = ${Island.grassEdgePadding.toFixed(3)};   // small so interior scatter reaches close to the rim`,
@@ -1279,16 +1282,24 @@ function buildGUI(): void {
         // ── Side Grass — the vertical grass clothing the island's lateral face ──────
         const sideFolder = foliageFolder.addFolder('Side Grass');
         const ge = Island.grassEdge;
-        sideFolder.add(ge, 'sideCount',  8, 200, 1).name('Count').listen().onChange(doRespawn);
+        sideFolder.add(ge, 'sideCount',  8, 220, 1).name('Count').listen().onChange(doRespawn);
         sideFolder.add(ge, 'sideHeight', 0.01, 0.3, 0.005).name('Height').listen().onChange(doRespawn);
-        sideFolder.add(ge, 'sideDepth',  0, 0.6, 0.01).name('Depth ↓').listen().onChange(doRespawn);
+        sideFolder.add(ge, 'sideWidth',  0.5, 5, 0.1).name('Width').listen().onChange(doRespawn);
+        sideFolder.add(ge, 'sideDepth',  0, 0.6, 0.01).name('Vertical Span').listen().onChange(doRespawn);
         sideFolder.add(ge, 'sideStep',   0.015, 0.15, 0.005).name('Row Density').listen().onChange(doRespawn);
+        sideFolder.add(ge, 'sideCurve',  0, 1, 0.05).name('End Taper').listen().onChange(doRespawn);
         // Tilt exposed in degrees (stored in radians): down (+) / up (-)
         const sideTiltProxy = {
             get deg() { return r(ge.sideTilt * 180 / Math.PI); },
             set deg(v: number) { ge.sideTilt = v * Math.PI / 180; doRespawn(); },
         };
         sideFolder.add(sideTiltProxy, 'deg', -90, 90, 1).name('Angle°').listen();
+        // Facing jitter exposed in degrees (stored in radians)
+        const sideJitterProxy = {
+            get deg() { return r(ge.sideJitter * 180 / Math.PI); },
+            set deg(v: number) { ge.sideJitter = v * Math.PI / 180; doRespawn(); },
+        };
+        sideFolder.add(sideJitterProxy, 'deg', 0, 90, 1).name('Facing Jitter°').listen();
         sideFolder.close();
 
         // Exclusion radii

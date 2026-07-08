@@ -131,6 +131,11 @@ export interface BladeConfig {
      *  rotating them down (+) or up (-) from the pure outward normal. Scales
      *  with how horizontal the surface normal is, so top blades are unaffected. */
     sideTilt: number;
+    /** Width multiplier for side-face blades (wider = fewer slivers, fills more). */
+    sideWidthMul: number;
+    /** Max random facing jitter (radians) for side blades. They otherwise face
+     *  up/out toward the camera; small jitter adds variety without edge-on slivers. */
+    sideFaceJitter: number;
 }
 
 const DEFAULT_BLADE_CONFIG: BladeConfig = {
@@ -141,6 +146,8 @@ const DEFAULT_BLADE_CONFIG: BladeConfig = {
     heightVariation: 0.50,
     minEdgeScale: 0.25,
     sideTilt: 0.0,
+    sideWidthMul: 1.0,
+    sideFaceJitter: 0.5,
 };
 
 // Number of arc segments used to dome the top of each blade. Higher = rounder,
@@ -179,7 +186,7 @@ export const grassColorTip  = new Color(GRASS_COLOR_TIP);
  * so blades on the island's vertical sides point outward instead of straight up.
  */
 export function buildGrassGeometry(
-    spawnPoints: Array<{ x: number; z: number; y?: number; edgeFactor?: number; height?: number; nx?: number; ny?: number; nz?: number }>,
+    spawnPoints: Array<{ x: number; z: number; y?: number; edgeFactor?: number; height?: number; side?: boolean; nx?: number; ny?: number; nz?: number }>,
     worldY: number,
     config: Partial<BladeConfig> = {},
     seed = 42,
@@ -279,10 +286,13 @@ export function buildGrassGeometry(
             // Per-blade height / width variation
             const r = rng();
             const h = bladeH * edgeScale * (1.0 - cfg.heightVariation + r * cfg.heightVariation);
-            const w = cfg.bladeWidth  * edgeScale * (0.8 + rng() * 0.4);
+            const widthMul = sp.side ? cfg.sideWidthMul : 1.0;
+            const w = cfg.bladeWidth * widthMul * edgeScale * (0.8 + rng() * 0.4);
 
-            // Width axis W = tangent basis rotated randomly around UP.
-            const rotY = rng() * Math.PI * 2;
+            // Width axis W = tangent basis rotated around UP. Top blades rotate
+            // freely; side blades stay near T1 (the horizontal-tangential axis) so
+            // their flat face points up/out toward the camera instead of edge-on.
+            const rotY = sp.side ? (rng() * 2 - 1) * cfg.sideFaceJitter : rng() * Math.PI * 2;
             const cw = Math.cos(rotY), sw = Math.sin(rotY);
             const Wx = t1x * cw + t2x * sw;
             const Wy = t1y * cw + t2y * sw;
