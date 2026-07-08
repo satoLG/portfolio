@@ -76,9 +76,16 @@ function _ensurePanel(): CSS3DPanel {
         // Touch: modal so tapping the pill opens the link. Desktop: the coin
         // click already opens the link, so keep the scene interactive.
         modal: IS_TOUCH_DEVICE,
-        maskPad: 14,
+        maskPad: 16,
         // Rough supersized-pill size — refined by live measurement per coin name.
         initialSize: { w: 300, h: 110 },
+        // Transparent like the carousel: only the outline + icon + label are
+        // punched, so the scene shows through the pill body.
+        transparent: true,
+        inkSelectors: ['.ct-icon', '.ct-name', '.ct-external'],
+        inkPad: 7,
+        inkRadius: 12,
+        inkBorderBand: 4,
     });
 
     const body = document.createElement('div');

@@ -2837,23 +2837,47 @@ body.day-mode .ct-body::after {
 }
 
 .css3d-panel-content .media-player.expanded {
-    /* Solid fill (no live scene behind the DOM to blur) + a soft rim glow so it
-       reads as a lit panel floating in the water. */
-    background: rgba(28, 32, 40, 0.92);
+    /* Transparent like the carousel — only the outline + content boxes are
+       punched, so the live scene shows through the gaps. The interior fill and
+       header gradient are dropped; a bright rim + text shadows keep it legible. */
+    background: transparent;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    border: 1.5px solid rgba(200, 225, 255, 0.9);
     box-shadow:
-        0 6px 30px rgba(0, 0, 0, 0.5),
-        0 0 20px rgba(120, 180, 230, 0.18);
+        0 0 10px rgba(150, 210, 255, 0.5),
+        inset 0 0 10px rgba(150, 210, 255, 0.25);
     /* Fixed px cap (viewport-relative units are meaningless in the scene) so the
        playlist scrolls inside the panel instead of stretching it arbitrarily. */
     max-height: 560px;
 }
 
+/* Drop the header gradient — only its buttons are punched now */
+.css3d-panel-content .player-header-bar {
+    background: transparent;
+    border-bottom: none;
+}
+
+/* Legibility over the live scene (no panel fill behind the text now) */
+.css3d-panel-content .player-title,
+.css3d-panel-content .player-artist,
+.css3d-panel-content .time-current,
+.css3d-panel-content .time-total {
+    text-shadow: 0 0 6px rgba(0, 0, 0, 0.85), 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
 body.day-mode .css3d-panel-content .media-player.expanded {
-    background: rgba(205, 207, 212, 0.94);
+    background: transparent;
+    border-color: rgba(40, 70, 110, 0.7);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+}
+
+body.day-mode .css3d-panel-content .player-title,
+body.day-mode .css3d-panel-content .player-artist,
+body.day-mode .css3d-panel-content .time-current,
+body.day-mode .css3d-panel-content .time-total {
+    text-shadow: 0 0 6px rgba(255, 255, 255, 0.9), 0 1px 2px rgba(255, 255, 255, 0.95);
 }
 
 /* Coin tooltip, hosted in a panel. Authored at ~2.4x its screen-overlay size (a
@@ -2865,15 +2889,18 @@ body.day-mode .css3d-panel-content .media-player.expanded {
 }
 
 .css3d-panel-content .ct-body {
-    background: rgba(18, 34, 52, 0.94);
+    /* Transparent — only the outline + icon + label are punched (scene shows
+       through the pill body). Bright rim + text shadow keep it readable. */
+    background: transparent;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    border: 1.5px solid rgba(200, 225, 255, 0.9);
     border-radius: 34px;
     padding: 22px 32px;
     gap: 22px;
     box-shadow:
-        0 8px 34px rgba(0, 0, 0, 0.45),
-        0 0 30px rgba(120, 180, 230, 0.20);
+        0 0 12px rgba(150, 210, 255, 0.5),
+        inset 0 0 10px rgba(150, 210, 255, 0.22);
 }
 
 .css3d-panel-content .ct-icon {
@@ -2885,6 +2912,7 @@ body.day-mode .css3d-panel-content .media-player.expanded {
 .css3d-panel-content .ct-name {
     font-size: 33px;
     letter-spacing: 0.01em;
+    text-shadow: 0 0 7px rgba(0, 0, 0, 0.9), 0 1px 3px rgba(0, 0, 0, 0.95);
 }
 
 .css3d-panel-content .ct-external {
@@ -2893,9 +2921,14 @@ body.day-mode .css3d-panel-content .media-player.expanded {
 }
 
 body.day-mode .css3d-panel-content .ct-body {
-    background: rgba(214, 216, 220, 0.95);
+    background: transparent;
+    border-color: rgba(40, 70, 110, 0.7);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+}
+
+body.day-mode .css3d-panel-content .ct-name {
+    text-shadow: 0 0 7px rgba(255, 255, 255, 0.9), 0 1px 2px rgba(255, 255, 255, 0.95);
 }
 
 /* Tail dropped for the in-scene tooltip — the pill floats above the coin and

@@ -6,6 +6,7 @@ import { camera, pixelSizeValue } from "./Scene";
 import { radio } from "../scene/Island";
 import { Vector3 } from "three";
 import { CSS3DPanel } from "../effects/CSS3DPanel";
+import { islandPosition, radioOffset } from "../scene/config/IslandConfig";
 import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse, getAudioContext, getMasterDestination, getMusicVolume, isMusicMuted } from "./Audio";
 import { zoomToRadio, zoomOutFromRadio } from "./Control";
 import WaveSurfer from 'wavesurfer.js';
@@ -180,8 +181,13 @@ let playerPanel: CSS3DPanel | null = null;
 // Bigger = smaller panel in-scene. High enough that the 320px DOM is scaled
 // DOWN (crisp) rather than up (blurry) at the radio-zoom framing. Tweak to resize.
 const PLAYER_PX_PER_UNIT = 620;
-const PLAYER_ANCHOR_UP   = 0.40;  // world units above the radio origin (tweak height)
-const _radioWorld = new Vector3();
+const PLAYER_ANCHOR_UP   = 0.80;  // world units above the radio (tweak height)
+// Anchor to the radio's REST position (config), NOT radio.getWorldPosition():
+// the radio bounces to the music beat, and following the live transform made
+// the whole panel jitter, which made the buttons hard to hit.
+const RADIO_REST_X = islandPosition.x + radioOffset.x;
+const RADIO_REST_Y = islandPosition.y + radioOffset.y;
+const RADIO_REST_Z = islandPosition.z + radioOffset.z;
 
 // Wavesurfer instance
 let wavesurfer: WaveSurfer | null = null;
@@ -535,11 +541,24 @@ function createPlayerUI(): void {
         pxPerUnit: PLAYER_PX_PER_UNIT,
         radiusPx: 12,
         modal: true,
-        maskPad: 8,
+        maskPad: 10,
         // Known .media-player.expanded size (width fixed in CSS; height ≈ header
         // + body at rest). Seeds the punch so the panel shows even before/without
         // a DOM measurement; live measurement refines it (playlist expand etc.).
         initialSize: { w: 320, h: 400 },
+        // Transparent like the carousel: punch only the outline + the content
+        // boxes, so the live scene shows through the gaps. Buttons/links stay
+        // interactive (modal) — the punch is purely visual.
+        transparent: true,
+        inkSelectors: [
+            '.player-close', '.player-playlist-toggle',
+            '.player-cover', '.player-title', '.player-artist',
+            '#waveform', '.time-current', '.time-total',
+            '.player-btn', '.playlist-items',
+        ],
+        inkPad: 6,
+        inkRadius: 10,
+        inkBorderBand: 4,
     });
     playerPanel.content.appendChild(playerContainer);
     playerPanel.setOnOutsideClick(() => { if (isExpanded) collapsePlayer(); });
@@ -1309,12 +1328,11 @@ function updateWaveformColors(): void {
 let isAnimating = false;  // Block resize during expand/collapse animation
 const ANIM_DURATION = 400;  // ms — panel pop duration (waveform right-sizes after)
 
-/** Anchor the CSS3D panel at the radio's world position (+ a small up offset).
- *  Called on expand and every frame while open so it tracks the radio. */
+/** Anchor the CSS3D panel above the radio's REST position (static — see the
+ *  RADIO_REST_* note). Fixed pose so the panel never jitters with the beat. */
 function syncPanelAnchor(): void {
-    if (!playerPanel || !radio || radio.children.length === 0) return;
-    radio.getWorldPosition(_radioWorld);
-    playerPanel.setWorldPosition(_radioWorld.x, _radioWorld.y + PLAYER_ANCHOR_UP, _radioWorld.z);
+    if (!playerPanel) return;
+    playerPanel.setWorldPosition(RADIO_REST_X, RADIO_REST_Y + PLAYER_ANCHOR_UP, RADIO_REST_Z);
 }
 
 export function expandPlayer(): void {

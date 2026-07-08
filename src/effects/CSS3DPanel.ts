@@ -141,6 +141,21 @@ export interface PanelOptions {
      *  document on the CSS renderer's first visible render). Live measurement
      *  still refines it afterwards, but can never zero it out. */
     initialSize?: { w: number; h: number };
+    /** Transparent ("ink") mode — like the carousel cards: punch ONLY the panel
+     *  outline + the given content elements, leaving the interior UNPUNCHED so
+     *  the live 3D scene shows through the gaps (the canvas stays opaque there).
+     *  Without this the whole rounded rect is punched (opaque panel over the
+     *  page background). */
+    transparent?: boolean;
+    /** In transparent mode: CSS selectors (queried on the hosted element) whose
+     *  boxes are punched so their DOM shows. Gaps between them show the scene. */
+    inkSelectors?: string[];
+    /** In transparent mode: px padding + corner radius of each punched ink box. */
+    inkPad?: number;
+    inkRadius?: number;
+    /** In transparent mode: also punch the panel's rounded-rect outline as a
+     *  stroke (reveals the DOM border). Width is the stroke band in px. */
+    inkBorderBand?: number;
 }
 
 // easeOutBack — the subtle overshoot that gives the open/close a "pop".
@@ -164,6 +179,11 @@ export class CSS3DPanel {
     private pxPerUnit: number;
     private radiusPx: number;
     private maskPad: number;
+    private _transparent: boolean;
+    private _inkSelectors: string[];
+    private _inkPad: number;
+    private _inkRadius: number;
+    private _inkBorderBand: number;
     readonly dismissOnOutsideClick: boolean;
     private _modal: boolean;
 
@@ -172,6 +192,7 @@ export class CSS3DPanel {
     private _openTarget = 0;   // 0 closed, 1 open
     private _openT = 0;        // eased 0..1
     private _lastW = 0; private _lastH = 0;
+    private _lastInkSig = -1;          // transparent mode: re-bake when ink layout shifts
     private _zeroMeasureFrames = 0;   // diagnostic — warn if DOM never measures
     private _warnedZero = false;
     private _onOutsideClick: ((e: PointerEvent) => void) | null = null;
@@ -182,6 +203,11 @@ export class CSS3DPanel {
         this.pxPerUnit = opts.pxPerUnit ?? 340;
         this.radiusPx = opts.radiusPx ?? 14;
         this.maskPad = opts.maskPad ?? 6;
+        this._transparent = opts.transparent ?? false;
+        this._inkSelectors = opts.inkSelectors ?? [];
+        this._inkPad = opts.inkPad ?? 6;
+        this._inkRadius = opts.inkRadius ?? 10;
+        this._inkBorderBand = opts.inkBorderBand ?? 3;
         this._modal = opts.modal ?? false;
         this.dismissOnOutsideClick = this._modal;
         if (opts.initialSize) {
@@ -346,6 +372,11 @@ export class CSS3DPanel {
             this._zeroMeasureFrames = 0;
             if (Math.abs(w - this._lastW) > 0.5 || Math.abs(h - this._lastH) > 0.5) {
                 this._applySize(w, h);
+            } else if (this._transparent) {
+                // Same size, but the interior layout can still settle (image load,
+                // playlist toggle, i18n) — re-bake the ink mask when it shifts.
+                const sig = this._inkSignature();
+                if (sig !== this._lastInkSig) this._bakeMask(this._lastW, this._lastH);
             }
         } else if (++this._zeroMeasureFrames === 60 && !this._warnedZero) {
             this._warnedZero = true;
@@ -451,14 +482,89 @@ export class CSS3DPanel {
         if (!ctx) return;
         ctx.clearRect(0, 0, cw, ch);
         ctx.fillStyle = '#fff';
-        const r = Math.min(this.radiusPx, w / 2, h / 2);
-        // Filled rounded rect inset by `pad` — the punched hole is exactly the
-        // panel's rounded silhouette (the pad is only a filtering margin).
-        roundRectPath(ctx, pad, pad, w, h, r);
-        ctx.fill();
+        ctx.strokeStyle = '#fff';
+
+        if (this._transparent) {
+            this._bakeInkMask(ctx, w, h);
+        } else {
+            // Filled rounded rect inset by `pad` — the punched hole is exactly the
+            // panel's rounded silhouette (the pad is only a filtering margin).
+            const r = Math.min(this.radiusPx, w / 2, h / 2);
+            roundRectPath(ctx, pad, pad, w, h, r);
+            ctx.fill();
+        }
         this.maskTexture.needsUpdate = true;
         try { renderer.initTexture(this.maskTexture); } catch { /* pre-GL */ }
     }
+
+    /** Transparent mode: punch ONLY the panel outline + the ink-selector boxes,
+     *  leaving the interior unpunched so the live scene shows through. Element
+     *  boxes are measured in LAYOUT coords (offsetLeft/Top chain) — transform-
+     *  independent — relative to the hosted panel element. */
+    private _bakeInkMask(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+        const pad = this.maskPad;
+        const panelEl = this.content.firstElementChild as HTMLElement | null;
+
+        // Border ring — a stroke over the panel's rounded outline reveals the DOM
+        // border + a little glow margin on each side.
+        if (this._inkBorderBand > 0) {
+            const r = Math.min(this.radiusPx, w / 2, h / 2);
+            roundRectPath(ctx, pad, pad, w, h, r);
+            ctx.lineWidth = this._inkBorderBand * 2;
+            ctx.lineJoin = 'round';
+            ctx.stroke();
+        }
+
+        // Ink boxes — each content element's layout rect, rounded + padded.
+        if (panelEl) {
+            for (const sel of this._inkSelectors) {
+                const els = panelEl.querySelectorAll<HTMLElement>(sel);
+                for (let i = 0; i < els.length; i++) {
+                    const el = els[i];
+                    if (el.offsetWidth <= 0 || el.offsetHeight <= 0) continue;
+                    const box = layoutRectWithin(el, panelEl);
+                    const ip = this._inkPad;
+                    const bw = box.width + 2 * ip;
+                    const bh = box.height + 2 * ip;
+                    roundRectPath(ctx, pad + box.left - ip, pad + box.top - ip, bw, bh, this._inkRadius);
+                    ctx.fill();
+                }
+            }
+        }
+        this._lastInkSig = this._inkSignature();
+    }
+
+    /** Cheap hash of the ink elements' layout boxes — changes when the interior
+     *  reflows, triggering a re-bake (transparent mode only). */
+    private _inkSignature(): number {
+        const panelEl = this.content.firstElementChild as HTMLElement | null;
+        if (!panelEl) return 0;
+        let sig = 0;
+        for (const sel of this._inkSelectors) {
+            const els = panelEl.querySelectorAll<HTMLElement>(sel);
+            for (let i = 0; i < els.length; i++) {
+                const el = els[i];
+                sig = (sig * 31 + el.offsetLeft + el.offsetTop * 7 + el.offsetWidth * 13 + el.offsetHeight * 17) | 0;
+            }
+        }
+        return sig;
+    }
+}
+
+/** Sum offsetLeft/offsetTop up the offsetParent chain to get an element's box in
+ *  `ancestor`'s layout space (transform-independent). `ancestor` must be
+ *  positioned so it's in the offsetParent chain. Punched elements are not inside
+ *  scrolled regions, so scroll offsets are ignored for simplicity. */
+function layoutRectWithin(el: HTMLElement, ancestor: HTMLElement): { left: number; top: number; width: number; height: number } {
+    let left = 0, top = 0;
+    let node: HTMLElement | null = el;
+    let guard = 0;
+    while (node && node !== ancestor && guard++ < 32) {
+        left += node.offsetLeft;
+        top += node.offsetTop;
+        node = node.offsetParent as HTMLElement | null;
+    }
+    return { left, top, width: el.offsetWidth, height: el.offsetHeight };
 }
 
 function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
