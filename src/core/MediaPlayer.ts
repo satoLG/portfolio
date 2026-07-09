@@ -180,12 +180,12 @@ let playerContainer: HTMLDivElement | null = null;
 let playerPanel: CSS3DPanel | null = null;
 // Bigger = smaller panel in-scene. High enough that the 320px DOM is scaled
 // DOWN (crisp) rather than up (blurry) at the radio-zoom framing. Tweak to resize.
-const PLAYER_PX_PER_UNIT = 620;
+const PLAYER_PX_PER_UNIT = 545;
 // With anchor:'top' this is where the panel's TOP edge sits; the body extends
 // downward from here (and further growth — playlist — also goes down, kept
 // off the island by the max-height cap in CSS). 1.15 puts the top just under
 // the radio-zoom frustum ceiling (~1.46wu at fov 50.5, 1.5wu away).
-const PLAYER_ANCHOR_UP   = 1.15;  // world units above the radio (tweak height)
+const PLAYER_ANCHOR_UP   = 0.90;  // world units above the radio (tweak height)
 // Anchor to the radio's REST position (config), NOT radio.getWorldPosition():
 // the radio bounces to the music beat, and following the live transform made
 // the whole panel jitter, which made the buttons hard to hit.
@@ -1285,7 +1285,7 @@ function updateWaveformColors(): void {
 }
 
 let isAnimating = false;  // Block resize during expand/collapse animation
-const ANIM_DURATION = 400;  // ms — panel pop duration (waveform right-sizes after)
+const ANIM_DURATION = 700;  // ms — full line+panel sequence (waveform right-sizes after)
 
 /** Anchor the CSS3D panel above the radio's REST position (static — see the
  *  RADIO_REST_* note). Fixed pose so the panel never jitters with the beat.

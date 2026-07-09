@@ -181,6 +181,18 @@ function easeOutBack(t: number): number {
     const x = t - 1;
     return 1 + c3 * x * x * x + c1 * x * x;
 }
+function smoothstep(a: number, b: number, x: number): number {
+    const t = MathUtils.clamp((x - a) / (b - a), 0, 1);
+    return t * t * (3 - 2 * t);
+}
+
+// Two-phase open/close timeline (the whole sequence runs over SEQ_DURATION
+// seconds). Open: the connector LINE rises over [0, LINE_END], then the panel
+// bounces in over [PANEL_START, 1]. Close plays it in reverse (panel out first,
+// then the line retracts). Sequential — line fully up before the panel appears.
+const SEQ_DURATION = 0.7;
+const LINE_END = 0.5;
+const PANEL_START = 0.5;
 
 export class CSS3DPanel {
     /** Drop your interactive DOM in here. */
@@ -204,6 +216,7 @@ export class CSS3DPanel {
     private _inkBounds: boolean;
     private _anchor: 'center' | 'top';
     private _inkBakedBoxes = 0;       // ink boxes punched on the last bake
+    private _inkMaxB = 0;             // ink bbox bottom (design px) — connector attach point
     private _zeroInkWarnCountdown = 60;
     // Connector line (bottom-centre of the panel → linked model)
     private _connectorLine: Line | null = null;
@@ -404,11 +417,11 @@ export class CSS3DPanel {
     // ── Per-frame ────────────────────────────────────────────────────────────
 
     _frame(cam: PerspectiveCamera): void {
-        // Advance the open animation.
-        const speed = 14;
-        this._openT = MathUtils.damp(this._openT, this._openTarget, speed, deltaTime);
-        if (this._openTarget === 1 && this._openT > 0.999) this._openT = 1;
-        if (this._openTarget === 0 && this._openT < 0.001) {
+        // Advance the two-phase timeline (time-based, so the line and panel keep
+        // their sequential timing regardless of frame rate).
+        const dir = this._openTarget === 1 ? 1 : -1;
+        this._openT = MathUtils.clamp(this._openT + dir * deltaTime / SEQ_DURATION, 0, 1);
+        if (this._openTarget === 0 && this._openT <= 0) {
             if (this._visible) {
                 this._applyHidden();
                 const cb = this._onClosed; this._onClosed = null;
@@ -486,22 +499,27 @@ export class CSS3DPanel {
         const w2 = this._lastW, h2 = this._lastH;
         if (w2 <= 0 || h2 <= 0) return;
 
-        // Eased visual scale (with a little pop) drives BOTH DOM and occluder.
-        const s = this._openTarget === 1 ? easeOutBack(this._openT) : this._openT;
+        // Two phases: line rises [0, LINE_END], panel bounces in [PANEL_START, 1].
+        const lineProgress = smoothstep(0, LINE_END, this._openT);
+        const panelProgress = MathUtils.clamp((this._openT - PANEL_START) / (1 - PANEL_START), 0, 1);
+        const s = Math.max(0, easeOutBack(panelProgress));   // 0 during the line phase
+
         this.inner.style.transform = `scale(${s})`;
-        this.inner.style.opacity = `${MathUtils.clamp(this._openT * 1.4, 0, 1)}`;
+        this.inner.style.opacity = `${MathUtils.clamp(panelProgress * 1.6, 0, 1)}`;
 
         // 'top' anchor: the anchor point is the panel's TOP edge — the centre
-        // sits half the (unscaled) height below it, so height growth (playlist
-        // expanding) extends downward and the top edge stays put.
+        // sits half the (unscaled) height below it, so height growth extends
+        // downward and the top edge stays put.
         const cy = this._anchor === 'top'
             ? this._wy - (h2 / 2) / this.pxPerUnit
             : this._wy;
 
-        // Billboard both layers to face the camera.
+        // Billboard the DOM (kept visible at scale 0 through the line phase so it
+        // stays measurable and the mask is baked before the panel pops in).
         this.cssObject.position.set(this._wx * CSS_SCALE, cy * CSS_SCALE, this._wz * CSS_SCALE);
         this.cssObject.quaternion.copy(cam.quaternion);
         this.cssObject.scale.set(CSS_SCALE / this.pxPerUnit, CSS_SCALE / this.pxPerUnit, 1);
+        this.cssObject.visible = true;
 
         const pad = this.maskPad;
         const worldW = ((w2 + 2 * pad) / this.pxPerUnit) * s;
@@ -509,19 +527,24 @@ export class CSS3DPanel {
         this.occluder.position.set(this._wx, cy, this._wz);
         this.occluder.quaternion.copy(cam.quaternion);
         this.occluder.scale.set(worldW, worldH, 1);
-        this.occluder.visible = true;
-        this.cssObject.visible = true;
+        this.occluder.visible = s > 0.001;   // no punch while the line is still rising
 
-        // Connector line: panel bottom-centre → linked model target. Fades with
-        // the open animation.
+        // Connector line: grows UP from the model to the panel's ink bottom.
         if (this._connectorLine && this._connectorGeom && this._connectorMat && this._hasConnectorTarget) {
-            const bottomY = cy - worldH / 2;
-            const pos = this._connectorGeom.getAttribute('position') as Float32BufferAttribute;
-            pos.setXYZ(0, this._wx, bottomY, this._wz);
-            pos.setXYZ(1, this._ctx, this._cty, this._ctz);
-            pos.needsUpdate = true;
-            this._connectorMat.opacity = MathUtils.clamp(this._openT * 1.4, 0, 1) * 0.9;
-            this._connectorLine.visible = true;
+            // Ink bottom at FULL scale (fixed) — where the line lands and the
+            // panel then bounces in. _inkMaxB is the punched region's bottom in
+            // design px; fall back to the full height.
+            const maxB = this._inkMaxB > 0 ? this._inkMaxB : h2;
+            const inkBottomY = cy + (h2 / 2 - maxB) / this.pxPerUnit;
+            const tx = MathUtils.lerp(this._ctx, this._wx, lineProgress);
+            const ty = MathUtils.lerp(this._cty, inkBottomY, lineProgress);
+            const tz = MathUtils.lerp(this._ctz, this._wz, lineProgress);
+            const posAttr = this._connectorGeom.getAttribute('position') as Float32BufferAttribute;
+            posAttr.setXYZ(0, this._ctx, this._cty, this._ctz);   // fixed at the model
+            posAttr.setXYZ(1, tx, ty, tz);                        // rising/retracting top
+            posAttr.needsUpdate = true;
+            this._connectorMat.opacity = Math.min(1, lineProgress * 6) * 0.85;
+            this._connectorLine.visible = lineProgress > 0.001;
         }
     }
 
@@ -673,8 +696,10 @@ export class CSS3DPanel {
                 );
                 ctx.fill();
                 this._inkBakedBoxes++;
+                this._inkMaxB = maxB + ip;   // ink bottom (design px) for the connector
             }
         } else {
+            let maxB = 0;
             for (const sel of this._inkSelectors) {
                 const els = panelEl.querySelectorAll<HTMLElement>(sel);
                 for (let i = 0; i < els.length; i++) {
@@ -690,8 +715,10 @@ export class CSS3DPanel {
                     );
                     ctx.fill();
                     this._inkBakedBoxes++;
+                    maxB = Math.max(maxB, box.top + box.height);
                 }
             }
+            if (maxB > 0) this._inkMaxB = maxB + ip;
         }
         this._lastInkSig = this._inkSignature();
     }
