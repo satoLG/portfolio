@@ -560,9 +560,11 @@ function createPlayerUI(): void {
             '#waveform', '.time-current', '.time-total',
             '.player-btn', '.playlist-items',
         ],
-        inkPad: 6,
-        inkRadius: 10,
-        inkBorderBand: 4,
+        // Generous pad: covers iOS WebKit layout-px snapping (object scale ~8 →
+        // content can sit up to ~8px off the punched box on iPhones).
+        inkPad: 10,
+        inkRadius: 12,
+        inkBorderBand: 5,
         // Top edge stays fixed; playlist expansion grows DOWNWARD only.
         anchor: 'top',
     });

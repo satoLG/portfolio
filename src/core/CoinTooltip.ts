@@ -83,9 +83,9 @@ function _ensurePanel(): CSS3DPanel {
         // punched, so the scene shows through the pill body.
         transparent: true,
         inkSelectors: ['.ct-icon', '.ct-name', '.ct-external'],
-        inkPad: 7,
-        inkRadius: 12,
-        inkBorderBand: 4,
+        inkPad: 10,
+        inkRadius: 14,
+        inkBorderBand: 5,
     });
 
     const body = document.createElement('div');

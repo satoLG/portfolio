@@ -374,31 +374,24 @@ export class CSS3DPanel {
         // only refines. If the DOM measures 0 for a sustained stretch, something
         // upstream is hiding it — say so in the console instead of failing mute.
         const measured = (this.content.firstElementChild as HTMLElement) ?? this.content;
-        const w = measured.offsetWidth;
-        const h = measured.offsetHeight;
+        let w = measured.offsetWidth;
+        let h = measured.offsetHeight;
+        if (w <= 0 || h <= 0) {
+            // offset* proved unreliable inside the CSS3D subtree on some
+            // engines. The RENDERED rect is the ground truth: its aspect equals
+            // the CSS-px aspect (one uniform transform on a billboarded plane),
+            // and the CSS-px WIDTH is stable (seeded / CSS-fixed), so the
+            // height follows from the ratio.
+            const r = measured.getBoundingClientRect();
+            if (r.width >= 1 && r.height >= 1 && this._lastW > 0) {
+                w = this._lastW;
+                h = this._lastW * (r.height / r.width);
+            }
+        }
         if (w > 0 && h > 0) {
             this._zeroMeasureFrames = 0;
             if (Math.abs(w - this._lastW) > 0.5 || Math.abs(h - this._lastH) > 0.5) {
                 this._applySize(w, h);
-            } else if (this._transparent) {
-                // Same size, but the interior layout can still settle (image load,
-                // playlist toggle, i18n) — re-bake the ink mask when it shifts.
-                // Also retries automatically while no ink box has landed yet
-                // (the DOM only attaches on the CSS renderer's first render).
-                const sig = this._inkSignature();
-                if (sig !== this._lastInkSig || this._inkBakedBoxes === 0) {
-                    this._bakeMask(this._lastW, this._lastH);
-                }
-                if (this._inkBakedBoxes === 0 && this._zeroInkWarnCountdown-- === 0) {
-                    console.warn(
-                        '[CSS3DPanel] transparent mode: no ink boxes punched after 60 ' +
-                        'visible frames — content will be invisible. Selector hits:',
-                        this._inkSelectors.map(sel => {
-                            const host = this.content.firstElementChild as HTMLElement | null;
-                            return `${sel}: ${host ? host.querySelectorAll(sel).length : 'no host'}`;
-                        }).join(', '),
-                    );
-                }
             }
         } else if (++this._zeroMeasureFrames === 60 && !this._warnedZero) {
             this._warnedZero = true;
@@ -416,6 +409,33 @@ export class CSS3DPanel {
                 (blocker ? ` — cause: ${blocker}` : ' — no display:none found; check layout'),
                 measured,
             );
+        }
+
+        // Transparent mode: keep the ink mask in sync with the interior layout
+        // (image load, playlist toggle, i18n) and RETRY while no ink box has
+        // landed yet — the DOM only attaches on the CSS renderer's first
+        // render, so the open()-time bake is always ring-only. Deliberately
+        // OUTSIDE the measurement branch above: it must run off the seeded
+        // size even when offset* measurement fails (the rect-ratio bake in
+        // _bakeInkMask works on the rendered element regardless).
+        if (this._transparent && this._lastW > 0 && this._lastH > 0) {
+            const sig = this._inkSignature();
+            if (sig !== this._lastInkSig || this._inkBakedBoxes === 0) {
+                this._bakeMask(this._lastW, this._lastH);
+            }
+            if (this._inkBakedBoxes === 0 && this._zeroInkWarnCountdown-- === 0) {
+                const host = this.content.firstElementChild as HTMLElement | null;
+                const hr = host?.getBoundingClientRect();
+                console.warn(
+                    '[CSS3DPanel] transparent mode: no ink boxes punched after 60 ' +
+                    `visible frames — content will be invisible. hostRect=` +
+                    `${hr ? `${hr.width.toFixed(1)}x${hr.height.toFixed(1)}` : 'none'} ` +
+                    `offset=${measured.offsetWidth}x${measured.offsetHeight}. Selector hits: ` +
+                    this._inkSelectors.map(sel =>
+                        `${sel}: ${host ? host.querySelectorAll(sel).length : 'no host'}`,
+                    ).join(', '),
+                );
+            }
         }
         const w2 = this._lastW, h2 = this._lastH;
         if (w2 <= 0 || h2 <= 0) return;
