@@ -373,21 +373,14 @@ export class CSS3DPanel {
         // initialSize (or last good measurement) keeps it visible; measurement
         // only refines. If the DOM measures 0 for a sustained stretch, something
         // upstream is hiding it — say so in the console instead of failing mute.
+        // offsetWidth/Height are LAYOUT px — immune to the CSS3D 3D transform
+        // (unlike getBoundingClientRect, which is unreliable inside a preserve-3d
+        // subtree: some ancestors' transforms are applied, some aren't). This is
+        // the DOM equivalent of the carousel's "known layout" that never measures
+        // the rendered box.
         const measured = (this.content.firstElementChild as HTMLElement) ?? this.content;
-        let w = measured.offsetWidth;
-        let h = measured.offsetHeight;
-        if (w <= 0 || h <= 0) {
-            // offset* proved unreliable inside the CSS3D subtree on some
-            // engines. The RENDERED rect is the ground truth: its aspect equals
-            // the CSS-px aspect (one uniform transform on a billboarded plane),
-            // and the CSS-px WIDTH is stable (seeded / CSS-fixed), so the
-            // height follows from the ratio.
-            const r = measured.getBoundingClientRect();
-            if (r.width >= 1 && r.height >= 1 && this._lastW > 0) {
-                w = this._lastW;
-                h = this._lastW * (r.height / r.width);
-            }
-        }
+        const w = measured.offsetWidth;
+        const h = measured.offsetHeight;
         if (w > 0 && h > 0) {
             this._zeroMeasureFrames = 0;
             if (Math.abs(w - this._lastW) > 0.5 || Math.abs(h - this._lastH) > 0.5) {
@@ -551,11 +544,13 @@ export class CSS3DPanel {
     /** Transparent mode: punch ONLY the panel outline + the ink-selector boxes,
      *  leaving the interior unpunched so the live scene shows through.
      *
-     *  Element boxes come from getBoundingClientRect RATIOS against the hosted
-     *  panel's own rect. The panel plane is billboarded (screen-parallel), so
-     *  every element shares one uniform 2D transform — dividing by the panel
-     *  rect cancels it exactly. This is robust where layout-based measurement
-     *  (offsetParent chains) proved fragile inside the CSS3D subtree. */
+     *  Element boxes come from LAYOUT coords (offsetLeft/Top up the offsetParent
+     *  chain + offsetWidth/Height) — the same "design px" space as the mask (w×h
+     *  = the hosted element's own offsetWidth/Height). These are immune to the
+     *  CSS3D 3D transform, whereas getBoundingClientRect is unreliable inside a
+     *  preserve-3d subtree (it applies some ancestor transforms and not others,
+     *  so the boxes landed in the wrong place — the empty-outline bug). This is
+     *  the DOM equivalent of the carousel's known-layout mask. */
     private _bakeInkMask(ctx: CanvasRenderingContext2D, w: number, h: number): void {
         const pad = this.maskPad;
         const panelEl = this.content.firstElementChild as HTMLElement | null;
@@ -572,26 +567,20 @@ export class CSS3DPanel {
         }
 
         if (!panelEl) return;
-        const pRect = panelEl.getBoundingClientRect();
-        if (pRect.width < 1 || pRect.height < 1) return;  // detached/hidden — retried next frame
-        const sx = w / pRect.width;
-        const sy = h / pRect.height;
-
         for (const sel of this._inkSelectors) {
             const els = panelEl.querySelectorAll<HTMLElement>(sel);
             for (let i = 0; i < els.length; i++) {
-                const r = els[i].getBoundingClientRect();
-                if (r.width < 0.5 || r.height < 0.5) continue;
-                const left = (r.left - pRect.left) * sx;
-                const top = (r.top - pRect.top) * sy;
-                const bw = r.width * sx;
-                const bh = r.height * sy;
+                const el = els[i];
+                if (el.offsetWidth < 0.5 || el.offsetHeight < 0.5) continue;
+                const box = layoutRectWithin(el, panelEl);
                 const ip = this._inkPad;
+                const bw = box.width + 2 * ip;
+                const bh = box.height + 2 * ip;
                 roundRectPath(
                     ctx,
-                    pad + left - ip, pad + top - ip,
-                    bw + 2 * ip, bh + 2 * ip,
-                    Math.min(this._inkRadius, (bh + 2 * ip) / 2),
+                    pad + box.left - ip, pad + box.top - ip,
+                    bw, bh,
+                    Math.min(this._inkRadius, bh / 2),
                 );
                 ctx.fill();
                 this._inkBakedBoxes++;
@@ -600,27 +589,38 @@ export class CSS3DPanel {
         this._lastInkSig = this._inkSignature();
     }
 
-    /** Cheap hash of the ink elements' boxes (bounding-rect ratios, quantised) —
-     *  changes when the interior reflows, triggering a re-bake. */
+    /** Cheap hash of the ink elements' layout boxes — changes when the interior
+     *  reflows (image load, playlist, i18n), triggering a re-bake. */
     private _inkSignature(): number {
         const panelEl = this.content.firstElementChild as HTMLElement | null;
         if (!panelEl) return 0;
-        const pRect = panelEl.getBoundingClientRect();
-        if (pRect.width < 1 || pRect.height < 1) return 0;
         let sig = 0;
         for (const sel of this._inkSelectors) {
             const els = panelEl.querySelectorAll<HTMLElement>(sel);
             for (let i = 0; i < els.length; i++) {
-                const r = els[i].getBoundingClientRect();
-                const l = Math.round(((r.left - pRect.left) / pRect.width) * 512);
-                const t = Math.round(((r.top - pRect.top) / pRect.height) * 512);
-                const ww = Math.round((r.width / pRect.width) * 512);
-                const hh = Math.round((r.height / pRect.height) * 512);
-                sig = (sig * 31 + l + t * 7 + ww * 13 + hh * 17) | 0;
+                const el = els[i];
+                const box = layoutRectWithin(el, panelEl);
+                sig = (sig * 31 + box.left + box.top * 7 + box.width * 13 + box.height * 17) | 0;
             }
         }
         return sig;
     }
+}
+
+/** Sum offsetLeft/offsetTop up the offsetParent chain to get an element's box in
+ *  `ancestor`'s LAYOUT space (transform-independent — the whole point). The
+ *  hosted panel is forced position:relative, so it's in the chain. Punched
+ *  elements aren't inside scrolled sub-regions, so scroll is ignored. */
+function layoutRectWithin(el: HTMLElement, ancestor: HTMLElement): { left: number; top: number; width: number; height: number } {
+    let left = 0, top = 0;
+    let node: HTMLElement | null = el;
+    let guard = 0;
+    while (node && node !== ancestor && guard++ < 32) {
+        left += node.offsetLeft;
+        top += node.offsetTop;
+        node = node.offsetParent as HTMLElement | null;
+    }
+    return { left, top, width: el.offsetWidth, height: el.offsetHeight };
 }
 
 
