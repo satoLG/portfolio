@@ -74,6 +74,17 @@ const PLANE_Z = -2.0;   // fish/jelly z band is [-4, 0] → half pass in front, 
 // a desktop viewport (crisp text without giant raster layers).
 const PX_PER_UNIT = 320;
 
+// DOM supersample factor — the DOM is authored DOM_SS× larger and the CSS3D
+// object scale drops from 16 to 16/DOM_SS. iOS WebKit (Safari AND Chrome —
+// same engine) positions/rasterises content on the layout-px grid, so a
+// CSS3DObject scale of 16 turned 1px layout snapping into ~16px on-screen
+// displacement of the card text (the skewed-content bug). At scale 4 the snap
+// error is ≤4px, hidden inside the mask dilation. Same class of iOS precision
+// fix as PhoneScreen's CSS_SCALE (which targets scale ≈ 1 at phone distance).
+// NOTE: only DOM px are multiplied — the punch masks, world sizes and all
+// interaction math stay in "design px" (PX_PER_UNIT space).
+const DOM_SS = 4;
+
 // Card geometry (CSS px). Card world height 500/320 ≈ 1.56 — fits inside the
 // 2-unit fish band with room for the bob.
 const CARD_W = 384;
@@ -165,8 +176,10 @@ function buildBlocks(c: CardContent): BlockSpec[] {
     return blocks;
 }
 
-function blockFont(b: BlockSpec): string {
-    return `${b.weight} ${b.size}px ${FONT_STACK}`;
+/** Font shorthand. `ss` = px multiplier: DOM_SS for DOM styles, 1 for mask
+ *  measurement (font metrics scale linearly, so pills stay registered). */
+function blockFont(b: BlockSpec, ss = 1): string {
+    return `${b.weight} ${b.size * ss}px ${FONT_STACK}`;
 }
 
 // ─── INTERNALS ────────────────────────────────────────────────────────────────
@@ -248,15 +261,17 @@ export function Start(glScene: ThreeScene, cssScene: ThreeScene): void {
     screenEl.className = 'ocean-carousel';
     screenEl.style.width = '0px';
     screenEl.style.height = '0px';
-    screenEl.style.setProperty('--oc-pill-x', `${PILL_PAD_X}px`);
-    screenEl.style.setProperty('--oc-pill-y', `${PILL_PAD_Y}px`);
+    screenEl.style.setProperty('--oc-pill-x', `${PILL_PAD_X * DOM_SS}px`);
+    screenEl.style.setProperty('--oc-pill-y', `${PILL_PAD_Y * DOM_SS}px`);
 
     cssObject = new CSS3DObject(screenEl);
     // The CSS3DObject constructor forces pointerEvents:'auto' on the element;
     // all interaction here is raycast-driven through the canvas, so undo it.
     screenEl.style.pointerEvents = 'none';
     cssObject.position.set(PLANE_X * CSS_SCALE, PLANE_Y * CSS_SCALE, PLANE_Z * CSS_SCALE);
-    cssObject.scale.set(CSS_SCALE / PX_PER_UNIT, CSS_SCALE / PX_PER_UNIT, 1);
+    // DOM is authored DOM_SS× larger → object scale is DOM_SS× smaller (iOS
+    // WebKit layout-grid snapping fix — see the DOM_SS docs).
+    cssObject.scale.set(CSS_SCALE / (PX_PER_UNIT * DOM_SS), CSS_SCALE / (PX_PER_UNIT * DOM_SS), 1);
     cssObject.visible = false;
     cssScene.add(cssObject);
 
@@ -273,26 +288,28 @@ export function Start(glScene: ThreeScene, cssScene: ThreeScene): void {
         const content = CARD_CONTENTS[i % CARD_CONTENTS.length];
         const blocks = buildBlocks(content);
 
-        // DOM card
+        // DOM card — every px is authored at DOM_SS× (see the DOM_SS docs); the
+        // smaller object scale brings it back to the same world/screen size.
         const el = document.createElement('div');
         el.className = 'ocean-card';
-        el.style.width = `${CARD_W}px`;
-        el.style.height = `${CARD_H}px`;
-        el.style.borderWidth = `${BORDER_PX}px`;
-        el.style.borderRadius = `${CARD_RADIUS}px`;
+        el.style.width = `${CARD_W * DOM_SS}px`;
+        el.style.height = `${CARD_H * DOM_SS}px`;
+        el.style.borderWidth = `${BORDER_PX * DOM_SS}px`;
+        el.style.borderRadius = `${CARD_RADIUS * DOM_SS}px`;
         for (const b of blocks) {
             const bl = document.createElement('div');
             bl.className = b.kind === 'line' ? 'oc-line' : 'oc-blk';
-            bl.style.left = `${b.x}px`;
-            bl.style.top = `${b.y}px`;
+            bl.style.left = `${b.x * DOM_SS}px`;
+            bl.style.top = `${b.y * DOM_SS}px`;
             if (b.kind === 'line') {
-                bl.style.width = `${b.w}px`;
+                bl.style.width = `${b.w * DOM_SS}px`;
+                bl.style.height = `${2 * DOM_SS}px`;
             } else {
                 bl.textContent = b.text;
-                bl.style.font = blockFont(b);
-                bl.style.lineHeight = `${b.lineH}px`;
-                bl.style.height = `${b.lineH}px`;
-                bl.style.letterSpacing = `${b.letterSpacing}px`;
+                bl.style.font = blockFont(b, DOM_SS);
+                bl.style.lineHeight = `${b.lineH * DOM_SS}px`;
+                bl.style.height = `${b.lineH * DOM_SS}px`;
+                bl.style.letterSpacing = `${b.letterSpacing * DOM_SS}px`;
                 bl.style.opacity = `${b.alpha}`;
             }
             el.appendChild(bl);
@@ -409,7 +426,8 @@ export function Update(): void {
         card.mesh.visible = onScreen;
         if (!onScreen) {
             // Park far off-screen so the browser skips compositing work too.
-            card.el.style.transform = `translate3d(${xPx - CARD_W / 2}px, ${-CARD_H / 2}px, 0px)`;
+            card.el.style.transform =
+                `translate3d(${(xPx - CARD_W / 2) * DOM_SS}px, ${(-CARD_H / 2) * DOM_SS}px, 0px)`;
             continue;
         }
 
@@ -420,9 +438,9 @@ export function Update(): void {
         const targetScale = (i === hoverIndex ? HOVER_SCALE : 1) + card.clickPulse * 0.05;
         card.scale = MathUtils.damp(card.scale, targetScale, SCALE_SMOOTH, deltaTime);
 
-        // DOM (CSS px, y-down, rotate() is clockwise on screen)
+        // DOM (CSS px ×DOM_SS, y-down, rotate() is clockwise on screen)
         card.el.style.transform =
-            `translate3d(${xPx - CARD_W / 2}px, ${bobY - CARD_H / 2}px, 0px) ` +
+            `translate3d(${(xPx - CARD_W / 2) * DOM_SS}px, ${(bobY - CARD_H / 2) * DOM_SS}px, 0px) ` +
             `rotate(${rotDeg}deg) scale(${card.scale})`;
 
         // Punch mesh (world units, y-up → flip Y and rotation direction)
@@ -485,8 +503,8 @@ function updateJellyGlow(card: CardState, xPx: number): void {
     const outer = (0.4 + 0.5 * influence).toFixed(3);
     const inner = (0.3 + 0.4 * influence).toFixed(3);
     card.el.style.boxShadow =
-        `0 0 ${Math.round(9 + 10 * influence)}px rgba(${gr}, ${gg}, ${gb}, ${outer}), ` +
-        `inset 0 0 ${Math.round(8 + 8 * influence)}px rgba(${gr}, ${gg}, ${gb}, ${inner})`;
+        `0 0 ${Math.round((9 + 10 * influence) * DOM_SS)}px rgba(${gr}, ${gg}, ${gb}, ${outer}), ` +
+        `inset 0 0 ${Math.round((8 + 8 * influence) * DOM_SS)}px rgba(${gr}, ${gg}, ${gb}, ${inner})`;
 }
 
 // ─── Distortion quiet rect ────────────────────────────────────────────────────

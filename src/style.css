@@ -2949,6 +2949,8 @@ body.day-mode .css3d-panel-content .ct-name {
     pointer-events: none;
 }
 
+/* NOTE: px values below are in DOM-supersampled space (×DOM_SS = 4 in
+   CardCarousel.ts — iOS WebKit precision fix). Design px × 4. */
 .ocean-card {
     position: absolute;
     left: 0;
@@ -2964,8 +2966,8 @@ body.day-mode .css3d-panel-content .ct-name {
     pointer-events: none;
     /* Base glow — overwritten per-frame by the jellyfish-light response */
     box-shadow:
-        0 0 9px rgba(153, 217, 255, 0.4),
-        inset 0 0 8px rgba(153, 217, 255, 0.3);
+        0 0 36px rgba(153, 217, 255, 0.4),
+        inset 0 0 32px rgba(153, 217, 255, 0.3);
 }
 
 .ocean-card .oc-blk {
@@ -2973,8 +2975,8 @@ body.day-mode .css3d-panel-content .ct-name {
     white-space: nowrap;
     color: #fff;
     text-shadow:
-        0 0 6px rgba(255, 255, 255, 0.9),
-        0 0 16px rgba(150, 215, 255, 0.65);
+        0 0 24px rgba(255, 255, 255, 0.9),
+        0 0 64px rgba(150, 215, 255, 0.65);
 }
 
 /* Soft light pool behind each text line — fills the punched pill so its
@@ -2997,8 +2999,8 @@ body.day-mode .css3d-panel-content .ct-name {
 
 .ocean-card .oc-line {
     position: absolute;
-    height: 2px;
-    border-radius: 2px;
+    height: 8px;        /* overridden inline (2 × DOM_SS) — kept as fallback */
+    border-radius: 8px;
     background: rgba(255, 255, 255, 0.55);
-    box-shadow: 0 0 8px rgba(170, 225, 255, 0.8);
+    box-shadow: 0 0 32px rgba(170, 225, 255, 0.8);
 }

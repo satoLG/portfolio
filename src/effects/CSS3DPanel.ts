@@ -156,6 +156,10 @@ export interface PanelOptions {
     /** In transparent mode: also punch the panel's rounded-rect outline as a
      *  stroke (reveals the DOM border). Width is the stroke band in px. */
     inkBorderBand?: number;
+    /** Vertical anchoring of setWorldPosition's point: 'center' (default) or
+     *  'top' — the anchor is the panel's TOP edge and any height growth
+     *  (playlist expanding, etc.) extends DOWNWARD, keeping the top fixed. */
+    anchor?: 'center' | 'top';
 }
 
 // easeOutBack — the subtle overshoot that gives the open/close a "pop".
@@ -184,6 +188,9 @@ export class CSS3DPanel {
     private _inkPad: number;
     private _inkRadius: number;
     private _inkBorderBand: number;
+    private _anchor: 'center' | 'top';
+    private _inkBakedBoxes = 0;       // ink boxes punched on the last bake
+    private _zeroInkWarnCountdown = 60;
     readonly dismissOnOutsideClick: boolean;
     private _modal: boolean;
 
@@ -208,6 +215,7 @@ export class CSS3DPanel {
         this._inkPad = opts.inkPad ?? 6;
         this._inkRadius = opts.inkRadius ?? 10;
         this._inkBorderBand = opts.inkBorderBand ?? 3;
+        this._anchor = opts.anchor ?? 'center';
         this._modal = opts.modal ?? false;
         this.dismissOnOutsideClick = this._modal;
         if (opts.initialSize) {
@@ -375,8 +383,22 @@ export class CSS3DPanel {
             } else if (this._transparent) {
                 // Same size, but the interior layout can still settle (image load,
                 // playlist toggle, i18n) — re-bake the ink mask when it shifts.
+                // Also retries automatically while no ink box has landed yet
+                // (the DOM only attaches on the CSS renderer's first render).
                 const sig = this._inkSignature();
-                if (sig !== this._lastInkSig) this._bakeMask(this._lastW, this._lastH);
+                if (sig !== this._lastInkSig || this._inkBakedBoxes === 0) {
+                    this._bakeMask(this._lastW, this._lastH);
+                }
+                if (this._inkBakedBoxes === 0 && this._zeroInkWarnCountdown-- === 0) {
+                    console.warn(
+                        '[CSS3DPanel] transparent mode: no ink boxes punched after 60 ' +
+                        'visible frames — content will be invisible. Selector hits:',
+                        this._inkSelectors.map(sel => {
+                            const host = this.content.firstElementChild as HTMLElement | null;
+                            return `${sel}: ${host ? host.querySelectorAll(sel).length : 'no host'}`;
+                        }).join(', '),
+                    );
+                }
             }
         } else if (++this._zeroMeasureFrames === 60 && !this._warnedZero) {
             this._warnedZero = true;
@@ -403,15 +425,22 @@ export class CSS3DPanel {
         this.inner.style.transform = `scale(${s})`;
         this.inner.style.opacity = `${MathUtils.clamp(this._openT * 1.4, 0, 1)}`;
 
+        // 'top' anchor: the anchor point is the panel's TOP edge — the centre
+        // sits half the (unscaled) height below it, so height growth (playlist
+        // expanding) extends downward and the top edge stays put.
+        const cy = this._anchor === 'top'
+            ? this._wy - (h2 / 2) / this.pxPerUnit
+            : this._wy;
+
         // Billboard both layers to face the camera.
-        this.cssObject.position.set(this._wx * CSS_SCALE, this._wy * CSS_SCALE, this._wz * CSS_SCALE);
+        this.cssObject.position.set(this._wx * CSS_SCALE, cy * CSS_SCALE, this._wz * CSS_SCALE);
         this.cssObject.quaternion.copy(cam.quaternion);
         this.cssObject.scale.set(CSS_SCALE / this.pxPerUnit, CSS_SCALE / this.pxPerUnit, 1);
 
         const pad = this.maskPad;
         const worldW = ((w2 + 2 * pad) / this.pxPerUnit) * s;
         const worldH = ((h2 + 2 * pad) / this.pxPerUnit) * s;
-        this.occluder.position.set(this._wx, this._wy, this._wz);
+        this.occluder.position.set(this._wx, cy, this._wz);
         this.occluder.quaternion.copy(cam.quaternion);
         this.occluder.scale.set(worldW, worldH, 1);
         this.occluder.visible = true;
@@ -442,18 +471,20 @@ export class CSS3DPanel {
         const halfW = ((this._lastW / 2 + this.maskPad) / this.pxPerUnit);
         const halfH = ((this._lastH / 2 + this.maskPad) / this.pxPerUnit);
         if (halfW <= 0 || halfH <= 0) return false;
+        // Same anchor-adjusted centre the occluder uses (see _frame).
+        const cy = this._anchor === 'top' ? this._wy - (this._lastH / 2) / this.pxPerUnit : this._wy;
 
         const e = cam.matrixWorld.elements;
         // camera right = (e0,e1,e2), camera up = (e4,e5,e6)
         _cornerA.set(
             this._wx - e[0] * halfW - e[4] * halfH,
-            this._wy - e[1] * halfW - e[5] * halfH,
+            cy - e[1] * halfW - e[5] * halfH,
             this._wz - e[2] * halfW - e[6] * halfH,
         ).project(cam);
         const zNdc = _cornerA.z;
         _cornerB.set(
             this._wx + e[0] * halfW + e[4] * halfH,
-            this._wy + e[1] * halfW + e[5] * halfH,
+            cy + e[1] * halfW + e[5] * halfH,
             this._wz + e[2] * halfW + e[6] * halfH,
         ).project(cam);
 
@@ -498,12 +529,17 @@ export class CSS3DPanel {
     }
 
     /** Transparent mode: punch ONLY the panel outline + the ink-selector boxes,
-     *  leaving the interior unpunched so the live scene shows through. Element
-     *  boxes are measured in LAYOUT coords (offsetLeft/Top chain) — transform-
-     *  independent — relative to the hosted panel element. */
+     *  leaving the interior unpunched so the live scene shows through.
+     *
+     *  Element boxes come from getBoundingClientRect RATIOS against the hosted
+     *  panel's own rect. The panel plane is billboarded (screen-parallel), so
+     *  every element shares one uniform 2D transform — dividing by the panel
+     *  rect cancels it exactly. This is robust where layout-based measurement
+     *  (offsetParent chains) proved fragile inside the CSS3D subtree. */
     private _bakeInkMask(ctx: CanvasRenderingContext2D, w: number, h: number): void {
         const pad = this.maskPad;
         const panelEl = this.content.firstElementChild as HTMLElement | null;
+        this._inkBakedBoxes = 0;
 
         // Border ring — a stroke over the panel's rounded outline reveals the DOM
         // border + a little glow margin on each side.
@@ -515,57 +551,58 @@ export class CSS3DPanel {
             ctx.stroke();
         }
 
-        // Ink boxes — each content element's layout rect, rounded + padded.
-        if (panelEl) {
-            for (const sel of this._inkSelectors) {
-                const els = panelEl.querySelectorAll<HTMLElement>(sel);
-                for (let i = 0; i < els.length; i++) {
-                    const el = els[i];
-                    if (el.offsetWidth <= 0 || el.offsetHeight <= 0) continue;
-                    const box = layoutRectWithin(el, panelEl);
-                    const ip = this._inkPad;
-                    const bw = box.width + 2 * ip;
-                    const bh = box.height + 2 * ip;
-                    roundRectPath(ctx, pad + box.left - ip, pad + box.top - ip, bw, bh, this._inkRadius);
-                    ctx.fill();
-                }
+        if (!panelEl) return;
+        const pRect = panelEl.getBoundingClientRect();
+        if (pRect.width < 1 || pRect.height < 1) return;  // detached/hidden — retried next frame
+        const sx = w / pRect.width;
+        const sy = h / pRect.height;
+
+        for (const sel of this._inkSelectors) {
+            const els = panelEl.querySelectorAll<HTMLElement>(sel);
+            for (let i = 0; i < els.length; i++) {
+                const r = els[i].getBoundingClientRect();
+                if (r.width < 0.5 || r.height < 0.5) continue;
+                const left = (r.left - pRect.left) * sx;
+                const top = (r.top - pRect.top) * sy;
+                const bw = r.width * sx;
+                const bh = r.height * sy;
+                const ip = this._inkPad;
+                roundRectPath(
+                    ctx,
+                    pad + left - ip, pad + top - ip,
+                    bw + 2 * ip, bh + 2 * ip,
+                    Math.min(this._inkRadius, (bh + 2 * ip) / 2),
+                );
+                ctx.fill();
+                this._inkBakedBoxes++;
             }
         }
         this._lastInkSig = this._inkSignature();
     }
 
-    /** Cheap hash of the ink elements' layout boxes — changes when the interior
-     *  reflows, triggering a re-bake (transparent mode only). */
+    /** Cheap hash of the ink elements' boxes (bounding-rect ratios, quantised) —
+     *  changes when the interior reflows, triggering a re-bake. */
     private _inkSignature(): number {
         const panelEl = this.content.firstElementChild as HTMLElement | null;
         if (!panelEl) return 0;
+        const pRect = panelEl.getBoundingClientRect();
+        if (pRect.width < 1 || pRect.height < 1) return 0;
         let sig = 0;
         for (const sel of this._inkSelectors) {
             const els = panelEl.querySelectorAll<HTMLElement>(sel);
             for (let i = 0; i < els.length; i++) {
-                const el = els[i];
-                sig = (sig * 31 + el.offsetLeft + el.offsetTop * 7 + el.offsetWidth * 13 + el.offsetHeight * 17) | 0;
+                const r = els[i].getBoundingClientRect();
+                const l = Math.round(((r.left - pRect.left) / pRect.width) * 512);
+                const t = Math.round(((r.top - pRect.top) / pRect.height) * 512);
+                const ww = Math.round((r.width / pRect.width) * 512);
+                const hh = Math.round((r.height / pRect.height) * 512);
+                sig = (sig * 31 + l + t * 7 + ww * 13 + hh * 17) | 0;
             }
         }
         return sig;
     }
 }
 
-/** Sum offsetLeft/offsetTop up the offsetParent chain to get an element's box in
- *  `ancestor`'s layout space (transform-independent). `ancestor` must be
- *  positioned so it's in the offsetParent chain. Punched elements are not inside
- *  scrolled regions, so scroll offsets are ignored for simplicity. */
-function layoutRectWithin(el: HTMLElement, ancestor: HTMLElement): { left: number; top: number; width: number; height: number } {
-    let left = 0, top = 0;
-    let node: HTMLElement | null = el;
-    let guard = 0;
-    while (node && node !== ancestor && guard++ < 32) {
-        left += node.offsetLeft;
-        top += node.offsetTop;
-        node = node.offsetParent as HTMLElement | null;
-    }
-    return { left, top, width: el.offsetWidth, height: el.offsetHeight };
-}
 
 function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
     const rr = Math.max(0, Math.min(r, w / 2, h / 2));
