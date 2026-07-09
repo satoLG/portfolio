@@ -1,5 +1,5 @@
 import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap, Object3D, Quaternion, MeshLambertMaterial } from "three";
-import { getIsUnderwater, isPugZoomActive } from "./Control";
+import { getIsUnderwater, isPugZoomActive, isRadioZoomActive } from "./Control";
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
 import * as SeaFloor from "../scene/SeaFloor";
@@ -985,6 +985,11 @@ export function Update(): void
     UI.Update();
     MediaPlayer.Update();
     PostProcess.updateCameraProjectionUniforms(camera);
+    // Disable the screen-space underwater effect while a prop zoom reframes the
+    // camera (radio/pug). The over/under line assumes a level scroll camera, so a
+    // zoom would smear the tint/distortion across dry land — and you can never see
+    // below the ocean line during a zoom anyway.
+    PostProcess.setUnderwaterEffectEnabled(!(isRadioZoomActive() || isPugZoomActive()));
 
     // ── Visibility gating ─────────────────────────────────────────────────────
     // Only update systems relevant to the current view (surface vs underwater).

@@ -93,6 +93,7 @@ const fragmentShader = /* glsl */`
     uniform vec2 uResolution;
     uniform vec3 uTintColor;
     uniform float uTintStrength;
+    uniform float uUnderwaterEnable;  // 1.0 = effect on, 0.0 = fully off (e.g. during radio/pug zoom)
 
     // Distortion "quiet rects" — screen-space rectangles (UV min/max) where the
     // underwater wave displacement is damped to uQuietMul. Every CSS3D punch
@@ -220,6 +221,12 @@ const fragmentShader = /* glsl */`
         float lineNdcY = oceanLineNdcY(uv.x * 2.0 - 1.0);
         float pixelNdcY = uv.y * 2.0 - 1.0;
         float underwaterMix = 1.0 - smoothstep(lineNdcY - uLineEdge, lineNdcY + uLineEdge, pixelNdcY);
+        // Kill the effect outright while a prop zoom drives the camera (radio/pug).
+        // The ocean line is projected assuming a level scroll camera; a zoom reframes
+        // the camera so the line lands somewhere arbitrary on screen, painting the
+        // tint/distortion over dry land. You can never see below the ocean line during
+        // a zoom anyway, so there is nothing to lose by disabling it entirely.
+        underwaterMix *= uUnderwaterEnable;
 
         // ── Underwater distortion ────────────────────────────────────────
         // Multi-frequency waves per axis at irrational frequency/phase ratios
@@ -304,6 +311,7 @@ export function Start(renderer: WebGLRenderer): void {
             uResolution: sceneResolutionUniform,           // shared
             uTintColor: { value: new Vector3(underwaterTintColor.r, underwaterTintColor.g, underwaterTintColor.b) },
             uTintStrength: { value: underwaterTintStrength },
+            uUnderwaterEnable: { value: 1.0 },
             uWaterlineY: waterlineYUniform,                // shared
             uTanHalfFov: { value: 1 },
             uAspect: { value: 1 },
@@ -436,6 +444,13 @@ export function setDistortionQuietRect(slot: number, minU: number, minV: number,
 
 export function setUnderwaterTintStrength(v: number): void {
     if (material) material.uniforms.uTintStrength.value = v;
+}
+
+/** Fully enable / disable the underwater over/under effect (tint + distortion).
+ *  Disabled while a prop zoom reframes the camera (radio/pug) — the screen-space
+ *  ocean line assumes a level scroll camera and misfires otherwise. */
+export function setUnderwaterEffectEnabled(enabled: boolean): void {
+    if (material) material.uniforms.uUnderwaterEnable.value = enabled ? 1.0 : 0.0;
 }
 
 export function setUnderwaterTintColor(r: number, g: number, b: number): void {
