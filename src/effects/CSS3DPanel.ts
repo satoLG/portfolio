@@ -520,8 +520,19 @@ export class CSS3DPanel {
         const pad = this.maskPad;
         const cw = Math.ceil(w + 2 * pad);
         const ch = Math.ceil(h + 2 * pad);
-        this.maskCanvas.width = cw;
-        this.maskCanvas.height = ch;
+
+        // CRITICAL: only resize the canvas when the dimensions actually change,
+        // and when they do, DISPOSE the texture so three re-allocates the GPU
+        // texture at the new size on next upload. Re-uploading a grown canvas
+        // into a smaller already-allocated texture is what throws
+        // "glCopySubTextureCHROMIUM: Offset overflows texture dimensions" and
+        // leaves the punch broken (content stays covered). The carousel never
+        // hits this because its mask canvas is a fixed size, allocated once.
+        if (this.maskCanvas.width !== cw || this.maskCanvas.height !== ch) {
+            this.maskCanvas.width = cw;
+            this.maskCanvas.height = ch;
+            this.maskTexture.dispose();
+        }
         const ctx = this.maskCanvas.getContext('2d');
         if (!ctx) return;
         ctx.clearRect(0, 0, cw, ch);
@@ -537,8 +548,10 @@ export class CSS3DPanel {
             roundRectPath(ctx, pad, pad, w, h, r);
             ctx.fill();
         }
+        // Let the render loop upload it (full texImage2D at the current canvas
+        // size). Do NOT call renderer.initTexture here — that eagerly re-uploads
+        // and, right after a canvas grow, is the exact call that overflows.
         this.maskTexture.needsUpdate = true;
-        try { renderer.initTexture(this.maskTexture); } catch { /* pre-GL */ }
     }
 
     /** Transparent mode: punch ONLY the panel outline + the ink-selector boxes,
