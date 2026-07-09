@@ -1,10 +1,18 @@
 /**
- * CoinTooltip — hover / tap tooltip for the three chest coins.
+ * CoinTooltip — hover / tap tooltip for the three chest coins, rendered as a
+ * CSS3D panel floating in the scene ABOVE the coin (see effects/CSS3DPanel).
  *
- * Desktop : hovers show the tooltip; clicking the coin opens the link directly.
- * Mobile  : tapping the coin shows the tooltip; tapping the tooltip opens the
- *           link; tapping anywhere else closes it.
+ * It exists at the coin's world position, billboards to face the camera and is
+ * composited into the scene (fish/geometry pass in front of and behind it).
+ *
+ * Desktop : hovering a coin shows the tooltip; clicking the coin opens the link
+ *           (the panel is a non-interactive label — the canvas stays live so
+ *           coin hovers keep tracking).
+ * Mobile  : tapping the coin shows the tooltip; the panel is modal (grabs the
+ *           pointer) so tapping IT opens the link; tapping elsewhere closes it.
  */
+
+import { CSS3DPanel } from '../effects/CSS3DPanel';
 
 /** True on primary-touch devices (checked once at module load). */
 export const IS_TOUCH_DEVICE: boolean =
@@ -42,39 +50,70 @@ const COINS = [
     },
 ] as const;
 
-// ─── DOM ─────────────────────────────────────────────────────────────────────
+// World-space vertical offset so the pill floats above the coin. The chest zoom
+// is telephoto (~fov 27), so a small world offset reads as a big screen gap —
+// nudge this if the pill sits too close to / too far from the coin.
+const TOOLTIP_Y_OFFSET = 0.18;
+// Bigger = smaller pill in-scene. High value on purpose: the DOM is authored
+// large (see the .css3d-panel-content #coin-tooltip rules — a "supersample" so
+// the raster stays crisp) and scaled DOWN into the scene, which is what makes it
+// sharp instead of upscaled/blurry. Tweak this to resize the pill.
+const TOOLTIP_PX_PER_UNIT = 2200;
 
-let _el:         HTMLDivElement | null = null;
+// ─── DOM / panel ───────────────────────────────────────────────────────────────
+
+let _panel:      CSS3DPanel | null = null;
 let _iconEl:     HTMLDivElement | null = null;
 let _nameEl:     HTMLSpanElement | null = null;
 let _visibleIdx: number = -1;
-let _hideTimer:  ReturnType<typeof setTimeout> | null = null;
 
-function _ensureDOM(): HTMLDivElement {
-    if (_el) return _el;
+function _ensurePanel(): CSS3DPanel {
+    if (_panel) return _panel;
 
-    _el = document.createElement('div');
-    _el.id = 'coin-tooltip';
-    _el.innerHTML = `
+    _panel = new CSS3DPanel({
+        pxPerUnit: TOOLTIP_PX_PER_UNIT,
+        radiusPx: 34,   // matches the supersized .ct-body border-radius (CSS)
+        // Touch: modal so tapping the pill opens the link. Desktop: the coin
+        // click already opens the link, so keep the scene interactive.
+        modal: IS_TOUCH_DEVICE,
+        maskPad: 16,
+        // Matches the fixed #coin-tooltip width in CSS (explicit width is what
+        // makes the pill measurable inside the CSS3D preserve-3d subtree — an
+        // intrinsically-sized element collapses there).
+        initialSize: { w: 380, h: 116 },
+        transparent: true,
+        // Punch ONE region = the whole pill (.ct-body). Its solid fill + rounded
+        // corners + content show; the scene shows around it.
+        inkBounds: true,
+        inkSelectors: ['.ct-body'],
+        inkPad: 4,
+        inkRadius: 34,
+        inkBorderBand: 0,
+        connector: true,   // thin 3D line down to the coin
+    });
+
+    const body = document.createElement('div');
+    body.id = 'coin-tooltip';
+    body.innerHTML = `
         <div class="ct-body">
             <div class="ct-icon"></div>
             <span class="ct-name"></span>
             ${EXTERNAL_ICON}
         </div>
     `;
-    document.body.appendChild(_el);
+    _panel.content.appendChild(body);
 
-    _iconEl = _el.querySelector('.ct-icon');
-    _nameEl = _el.querySelector('.ct-name');
+    _iconEl = body.querySelector('.ct-icon');
+    _nameEl = body.querySelector('.ct-name');
 
-    // Clicking / tapping the tooltip opens the link
-    _el.addEventListener('pointerdown', (e) => {
+    // Clicking / tapping the tooltip opens the link (touch path; harmless on desktop).
+    body.addEventListener('pointerdown', (e) => {
         e.stopPropagation();
         if (_visibleIdx < 0) return;
         window.open(COINS[_visibleIdx].href, '_blank', 'noopener,noreferrer');
     });
 
-    return _el;
+    return _panel;
 }
 
 function _setContent(idx: number): void {
@@ -87,69 +126,35 @@ function _setContent(idx: number): void {
     if (_nameEl) _nameEl.textContent = c.name;
 }
 
-function _place(coinX: number, coinY: number): void {
-    if (!_el) return;
-    // Vertical gap between tail tip and coin centre
-    const GAP      = 40;
-    const TAIL_H   = 12;   // visual tail height in px  (keep in sync with CSS)
-    const PAD      = 8;    // minimum viewport edge margin
-
-    const w = _el.offsetWidth;
-    const h = _el.offsetHeight;   // body height only (tail is outside flow)
-
-    // Default: centre tooltip horizontally on the coin
-    let left = coinX - w / 2;
-    const top  = coinY - h - TAIL_H - GAP;
-
-    // Clamp to viewport
-    const clampedLeft = Math.max(PAD, Math.min(window.innerWidth - w - PAD, left));
-
-    // Keep the tail pin aligned with the actual coin X
-    const tailX = Math.max(12, Math.min(w - 12, coinX - clampedLeft));
-
-    _el.style.left = `${clampedLeft}px`;
-    _el.style.top  = `${top}px`;
-    _el.style.setProperty('--tail-x', `${tailX}px`);
-}
-
 // ─── public API ──────────────────────────────────────────────────────────────
 
-export function showCoinTooltip(idx: number, coinX: number, coinY: number): void {
-    const el = _ensureDOM();
-
-    if (_hideTimer !== null) { clearTimeout(_hideTimer); _hideTimer = null; }
-
+/** Show the tooltip anchored at the coin's WORLD position (wx,wy,wz). */
+export function showCoinTooltip(idx: number, wx: number, wy: number, wz: number): void {
+    const panel = _ensurePanel();
     _visibleIdx = idx;
     _setContent(idx);
-
-    // Show + measure before placing
-    el.classList.remove('ct-out', 'ct-visible');
-    el.style.display = 'block';
-
-    requestAnimationFrame(() => {
-        _place(coinX, coinY);
-        el.classList.add('ct-visible');
-    });
+    _anchor(panel, wx, wy, wz);
+    panel.open();
 }
 
-/** Call every frame to keep the tail anchored as the scene animates. */
-export function repositionCoinTooltip(coinX: number, coinY: number): void {
-    if (_visibleIdx < 0) return;
-    _place(coinX, coinY);
+/** Call every frame to keep the panel anchored as the coin bobs. */
+export function repositionCoinTooltip(wx: number, wy: number, wz: number): void {
+    if (_visibleIdx < 0 || !_panel) return;
+    _anchor(_panel, wx, wy, wz);
+}
+
+/** Position above the coin + drive the connector line (down to the coin) and
+ *  its colour (matches the ink fill: black in day mode, white at night). */
+function _anchor(panel: CSS3DPanel, wx: number, wy: number, wz: number): void {
+    panel.setWorldPosition(wx, wy + TOOLTIP_Y_OFFSET, wz);
+    panel.setConnectorTarget(wx, wy, wz);
+    panel.setConnectorColor(document.body.classList.contains('day-mode') ? 0x000000 : 0xffffff);
 }
 
 export function hideCoinTooltip(): void {
-    if (!_el || _visibleIdx < 0) return;
+    if (_visibleIdx < 0 || !_panel) return;
     _visibleIdx = -1;
-    _el.classList.remove('ct-visible');
-    _el.classList.add('ct-out');
-    _hideTimer = setTimeout(() => {
-        if (_el && _visibleIdx < 0) {
-            _el.style.display = 'none';
-            _el.classList.remove('ct-out');
-        }
-        _hideTimer = null;
-    }, 200);
+    _panel.close();
 }
 
 export function isCoinTooltipVisible(): boolean { return _visibleIdx >= 0; }

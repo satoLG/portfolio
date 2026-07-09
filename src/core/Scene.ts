@@ -16,6 +16,8 @@ import * as UnderwaterParticles from "../effects/UnderwaterParticles.ts";
 import * as WindLines from "../effects/WindLines.ts";
 import * as CloudSprites from "../effects/CloudSprites.ts";
 import * as SceneDepth from "../effects/SceneDepth.ts";
+import * as CardCarousel from "../effects/CardCarousel.ts";
+import * as CSS3DPanel from "../effects/CSS3DPanel.ts";
 import { sceneDepthUniform, updateSceneDepthCamera, edgeFoamIntensityUniform } from "../materials/OceanMaterial";
 import { axes } from "./Debug.ts";
 import { deltaTime } from "./Time.ts";
@@ -74,6 +76,7 @@ export const staticCamera = new PerspectiveCamera();
 // shows what's being uploaded/compiled at runtime (= stutter source).
 (window as any).__r = renderer;
 (window as any).__scene = scene;
+(window as any).__cam = camera;
 (window as any).__diag = () => ({
     programs: renderer.info.programs?.length ?? 0,
     geometries: renderer.info.memory.geometries,
@@ -146,6 +149,7 @@ export function SetPixelSize(value: number): void
     localStorage.setItem('portfolio-pixel-size', value.toString());
     applyPixelBodyClass(value);
     PhoneScreen.applyPhonePixelSize(value);
+    CardCarousel.applyPixelSize(value);
 }
 
 function applyPixelBodyClass(value: number): void {
@@ -177,6 +181,7 @@ function applyColorFilter(value: ColorFilter): void {
     }
     canvas.style.filter = filterStr;
     PhoneScreen.applyPhoneColorFilter(filterStr);
+    CardCarousel.applyColorFilter(filterStr);
 }
 
 function getUnderwaterTransparentTargets(): Object3D[] {
@@ -244,6 +249,12 @@ function getDepthPrePassExcluded(): Object3D[] {
     if (WindLines.windLinesGroup)   _depthExcludedTargets.push(WindLines.windLinesGroup);
     if (Island.getChestRayGroup())  _depthExcludedTargets.push(Island.getChestRayGroup()!);
     if (Fire.fire)                  _depthExcludedTargets.push(Fire.fire);
+    // Card carousel punch planes: the override MeshDepthMaterial ignores their
+    // per-pixel alpha discard, so left in they'd write the FULL card rects into
+    // the foam depth target. They live deep underwater (y≈-6) but excluding
+    // them is one push and removes the risk entirely.
+    _depthExcludedTargets.push(CardCarousel.getOccluderGroup());
+    _depthExcludedTargets.push(CSS3DPanel.getOccluderGroup());
     // Fish/jellyfish/bubbles/underwater particles must be kept out of the depth
     // pre-pass: the override MeshDepthMaterial forces depthWrite=true over their
     // own depthWrite=false, so they'd write into the foam depth target and paint
@@ -590,6 +601,19 @@ export function Start(): void
 
     // Initialize underwater floating particles
     UnderwaterParticles.Start();
+
+    // CSS3D card carousel in the fish band. MUST be added to the scene BEFORE
+    // genericFishContainer: sortObjects is false, so add-order decides the
+    // transparent-pass draw order, and the depthWrite:false jellyfish need to
+    // draw AFTER the carousel's punch planes to blend over the holes instead of
+    // being erased by them.
+    CardCarousel.Start(scene, cssScene);
+    CardCarousel.applyPixelSize(pixelSizeValue);
+
+    // In-scene CSS3D panels (media player + coin tooltips). Same add-before-fish
+    // ordering rule as the carousel — the punch planes must precede the
+    // depthWrite:false jellyfish in the transparent pass.
+    CSS3DPanel.Start(scene, cssScene);
 
     // Initialize fish
     Fish.Start();
@@ -1069,6 +1093,12 @@ export function Update(): void
 
     // Sync occluder transforms BEFORE the render (so NoBlending holes are correct)
     PhoneScreen.preRender(Island.phone, camera);
+    // Card carousel: advance the track, sync DOM + punch-mesh transforms and
+    // update the post-process distortion quiet rect — also pre-render work.
+    CardCarousel.Update();
+    // In-scene panels: billboard, advance open animation, sync punch holes —
+    // must run BEFORE the WebGL render so the holes are correct this frame.
+    CSS3DPanel.preRender(camera);
 
     // Update projection matrix every frame (matches Henry's Renderer.update())
     camera.updateProjectionMatrix();
@@ -1112,6 +1142,9 @@ export function Update(): void
 
     // Pointer-events + CSS3D update
     PhoneScreen.render(camera);
+    // In-scene panels claim the canvas pointer-events last (after PhoneScreen,
+    // the other writer) so a visible modal panel receives clicks.
+    CSS3DPanel.syncCanvasPointer();
 
     // Single CSS3D render using the scaled CSS camera
     cssRenderer.render(cssScene, cssCamera);

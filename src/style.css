@@ -2790,3 +2790,215 @@ body.day-mode .ct-body::after {
 @media (max-width: 767px) {
     .cabana-exit-btn { bottom: 24px; width: 52px; height: 52px; }
 }
+
+/* ── CSS3D in-scene panels (effects/CSS3DPanel.ts) ───────────────────────────
+   Wraps interactive DOM (media player, coin tooltip) into a plane that floats
+   in the 3D scene, billboarded, composited via a punched hole. The panels sit
+   BEHIND the canvas, so backdrop-filter would blur the page background (black)
+   rather than the scene — drop it and use solid-ish fills instead. */
+
+.css3d-panel,
+.css3d-panel-inner {
+    position: relative;
+    display: block;
+    box-sizing: border-box;
+}
+
+.css3d-panel-inner {
+    width: 100%;
+    height: 100%;
+    /* transform (open-scale) + opacity are driven per-frame from JS */
+    will-change: transform, opacity;
+}
+
+.css3d-panel-content {
+    position: relative;
+    display: block;
+    width: max-content;   /* shrink-wrap the hosted panel */
+}
+
+/* Force any hosted panel into normal flow (their base styles are position:fixed
+   screen overlays) so the wrapper sizes to them and stays aligned with the
+   punch hole. */
+.css3d-panel-content > * {
+    position: relative !important;
+    inset: auto !important;
+    margin: 0 !important;
+}
+
+/* Media player, hosted in a panel — neutralise the screen-space rules */
+.css3d-panel-content .media-player {
+    position: relative;
+    inset: auto;
+    left: auto;
+    top: auto;
+    z-index: auto;
+    margin: 0;
+}
+
+/* Solid ink fill wrapped by ONE punched bbox (no border, no neon). Day
+   (body.day-mode) = black fill + white ink; night (default) = white fill +
+   black ink. The scene shows AROUND the fill (outside the punched bbox). */
+.css3d-panel-content .media-player.expanded {
+    background: #ffffff;   /* night */
+    color: #111111;
+    border: none;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    min-height: 0;
+    max-height: none;
+}
+body.day-mode .css3d-panel-content .media-player.expanded {
+    background: #000000;   /* day */
+    color: #ffffff;
+}
+
+/* Text follows the ink tone (no more neon shadow) */
+.css3d-panel-content .player-title  { color: inherit; text-shadow: none; }
+.css3d-panel-content .player-artist { color: inherit; opacity: 0.65; text-shadow: none; }
+.css3d-panel-content .time-current,
+.css3d-panel-content .time-total    { color: inherit; opacity: 0.65; text-shadow: none; }
+
+/* Waveform blends into the fill: no border, no own background */
+.css3d-panel-content .player-waveform-container,
+.css3d-panel-content #waveform {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+/* Control buttons: icon = ink tone, subtle chip bg. Play keeps its red accent. */
+.css3d-panel-content .player-btn { touch-action: manipulation; }
+.css3d-panel-content .player-btn:not(.player-play) {
+    background: rgba(0, 0, 0, 0.06);   /* night (white fill) */
+    color: inherit;
+    border: none;
+    box-shadow: none;
+}
+body.day-mode .css3d-panel-content .player-btn:not(.player-play) {
+    background: rgba(255, 255, 255, 0.14);   /* day (black fill) */
+}
+.css3d-panel-content .player-btn svg { fill: currentColor; }
+
+/* Coin tooltip, hosted in a panel. Authored at ~2.4x its screen-overlay size (a
+   "supersample") so the CSS3D plane scales it DOWN — crisp, not blurry. */
+/* Explicit width centres the pill AND makes it measurable: an intrinsically
+   sized element collapses inside the CSS3D preserve-3d subtree (unlike the
+   media player, which has a fixed 320px width). The pill (.ct-body) shrinks to
+   its content and is centred, so the connector lines up under it. */
+.css3d-panel-content #coin-tooltip {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    width: 380px;
+    z-index: auto;
+}
+
+.css3d-panel-content .ct-body {
+    background: #ffffff;   /* night */
+    color: #111111;
+    border: none;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-radius: 34px;
+    padding: 22px 32px;
+    gap: 22px;
+}
+body.day-mode .css3d-panel-content .ct-body {
+    background: #000000;   /* day */
+    color: #ffffff;
+}
+
+.css3d-panel-content .ct-icon {
+    width: 66px;
+    height: 66px;
+    border-radius: 14px;
+}
+
+.css3d-panel-content .ct-name {
+    font-size: 33px;
+    letter-spacing: 0.01em;
+    color: inherit;
+    text-shadow: none;
+}
+
+.css3d-panel-content .ct-external {
+    width: 28px;
+    height: 28px;
+    color: inherit;
+}
+
+/* Tail dropped for the in-scene tooltip. */
+.css3d-panel-content .ct-body::after {
+    display: none;
+}
+
+/* ── CSS3D Ocean Card Carousel (effects/CardCarousel.ts) ─────────────────────
+   The cards live BEHIND the WebGL canvas and only show through per-pixel
+   alpha holes punched by the carousel's mask planes. Whatever paints outside
+   a punched region is simply never seen — so glows here are free to overflow.
+   NOTE: the ::before pill insets are driven by --oc-pill-x / --oc-pill-y,
+   set from PILL_PAD_X / PILL_PAD_Y in CardCarousel.ts (single source). */
+
+.ocean-carousel {
+    position: relative;
+    pointer-events: none;
+}
+
+/* NOTE: px values below are in DOM-supersampled space (×DOM_SS = 4 in
+   CardCarousel.ts — iOS WebKit precision fix). Design px × 4. */
+.ocean-card {
+    position: absolute;
+    left: 0;
+    top: 0;
+    box-sizing: border-box;
+    border-style: solid;
+    border-color: rgba(255, 255, 255, 0.92);
+    background: transparent;   /* interior stays unpunched → live 3D scene */
+    color: #fff;
+    font-family: 'Wotfard', ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    will-change: transform;
+    pointer-events: none;
+    /* Base glow — overwritten per-frame by the jellyfish-light response */
+    box-shadow:
+        0 0 36px rgba(153, 217, 255, 0.4),
+        inset 0 0 32px rgba(153, 217, 255, 0.3);
+}
+
+.ocean-card .oc-blk {
+    position: absolute;
+    white-space: nowrap;
+    color: #fff;
+    text-shadow:
+        0 0 24px rgba(255, 255, 255, 0.9),
+        0 0 64px rgba(150, 215, 255, 0.65);
+}
+
+/* Soft light pool behind each text line — fills the punched pill so its
+   corners read as glow instead of dead black. Must track the mask pill:
+   pill rect = text block rect expanded by the pads below. */
+.ocean-card .oc-blk::before {
+    content: '';
+    position: absolute;
+    left: calc(-1 * var(--oc-pill-x, 18px));
+    right: calc(-1 * var(--oc-pill-x, 18px));
+    top: calc(-1 * var(--oc-pill-y, 12px));
+    bottom: calc(-1 * var(--oc-pill-y, 12px));
+    border-radius: 999px;
+    background: radial-gradient(ellipse closest-side,
+        rgba(150, 210, 255, 0.16),
+        rgba(150, 210, 255, 0) 78%);
+    z-index: -1;
+    pointer-events: none;
+}
+
+.ocean-card .oc-line {
+    position: absolute;
+    height: 8px;        /* overridden inline (2 × DOM_SS) — kept as fallback */
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.55);
+    box-shadow: 0 0 32px rgba(170, 225, 255, 0.8);
+}

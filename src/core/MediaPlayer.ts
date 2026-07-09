@@ -5,6 +5,8 @@
 import { camera, pixelSizeValue } from "./Scene";
 import { radio } from "../scene/Island";
 import { Vector3 } from "three";
+import { CSS3DPanel } from "../effects/CSS3DPanel";
+import { islandPosition, radioOffset } from "../scene/config/IslandConfig";
 import { playUIButton, playUIBubbleExpand, playUIBubbleCollapse, getAudioContext, getMasterDestination, getMusicVolume, isMusicMuted } from "./Audio";
 import { zoomToRadio, zoomOutFromRadio } from "./Control";
 import WaveSurfer from 'wavesurfer.js';
@@ -172,6 +174,24 @@ let _watchdogStallCount = 0;  // consecutive intervals where currentTime hasn't 
 
 // DOM Elements
 let playerContainer: HTMLDivElement | null = null;
+
+// CSS3D panel — the player floats in the scene, anchored to the radio and
+// billboarded to face the camera (see effects/CSS3DPanel).
+let playerPanel: CSS3DPanel | null = null;
+// Bigger = smaller panel in-scene. High enough that the 320px DOM is scaled
+// DOWN (crisp) rather than up (blurry) at the radio-zoom framing. Tweak to resize.
+const PLAYER_PX_PER_UNIT = 545;
+// With anchor:'top' this is where the panel's TOP edge sits; the body extends
+// downward from here (and further growth — playlist — also goes down, kept
+// off the island by the max-height cap in CSS). 1.15 puts the top just under
+// the radio-zoom frustum ceiling (~1.46wu at fov 50.5, 1.5wu away).
+const PLAYER_ANCHOR_UP   = 0.90;  // world units above the radio (tweak height)
+// Anchor to the radio's REST position (config), NOT radio.getWorldPosition():
+// the radio bounces to the music beat, and following the live transform made
+// the whole panel jitter, which made the buttons hard to hit.
+const RADIO_REST_X = islandPosition.x + radioOffset.x;
+const RADIO_REST_Y = islandPosition.y + radioOffset.y;
+const RADIO_REST_Z = islandPosition.z + radioOffset.z;
 
 // Wavesurfer instance
 let wavesurfer: WaveSurfer | null = null;
@@ -419,36 +439,11 @@ export function Start(): void {
 
 function createPlayerUI(): void {
     playerContainer = document.createElement('div');
-    playerContainer.className = 'media-player';
-    // Hidden until expandPlayer() is called
-    playerContainer.style.display = 'none';
+    // Always carry the `expanded` class — the CSS3D panel now owns show/hide via
+    // its open/close animation, so there is no collapsed/screen-space state.
+    playerContainer.className = 'media-player expanded';
     playerContainer.innerHTML = `
         <div class="player-expanded-content">
-            <div class="player-header-bar">
-                <button class="player-playlist-toggle" title="${t('player.showPlaylist')}" data-i18n-title="player.showPlaylist">
-                    <svg class="icon-normal" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15V6"/>
-                        <path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/>
-                        <path d="M12 12H3"/>
-                        <path d="M16 6H3"/>
-                        <path d="M12 18H3"/>
-                    </svg>
-                    <svg class="icon-pixel" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M10 13h6V5h6v4h-4v10h-8v-6zm2 2v2h4v-2h-4zM2 17h6v2H2v-2zm6-4H2v2h6v-2zM2 9h12v2H2V9zm12-4H2v2h12V5z"/>
-                    </svg>
-                </button>
-                <button class="player-close" title="${t('player.minimize')}" data-i18n-title="player.minimize">
-                    <svg class="icon-normal" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="4 14 10 14 10 20"/>
-                        <polyline points="20 10 14 10 14 4"/>
-                        <line x1="14" y1="10" x2="21" y2="3"/>
-                        <line x1="3" y1="21" x2="10" y2="14"/>
-                    </svg>
-                    <svg class="icon-pixel" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M17 3h-2v2h-2v2h-2V5H9V3H7v2h2v2h2v2h2V7h2V5h2V3zM4 13h16v-2H4v2zm9 4h-2v-2h2v2zm2 2h-2v-2h2v2zm0 0h2v2h-2v-2zm-6 0h2v-2H9v2zm0 0H7v2h2v-2z"/>
-                    </svg>
-                </button>
-            </div>
             <div class="player-body">
                 <div class="player-content">
                     <div class="player-cover">
@@ -506,67 +501,65 @@ function createPlayerUI(): void {
                     </svg>
                 </button>
             </div>
-            <div class="player-playlist">
-                <div class="playlist-header">
-                    <span class="playlist-title" data-i18n="player.playlist">${t('player.playlist')}</span>
-                    <span class="playlist-count"></span>
-                </div>
-                <div class="playlist-items"></div>
-            </div>
             </div>
         </div>
     `;
     
-    document.body.appendChild(playerContainer);
-    
-    // Get elements
-    const closeBtn = playerContainer.querySelector('.player-close') as HTMLButtonElement;
+    // Mount the player inside a CSS3D panel that lives in the scene (anchored to
+    // the radio, billboarded). Modal → it grabs the canvas pointer while open so
+    // every button/waveform/link stays fully interactive; clicking outside the
+    // panel collapses it (mirrors the old "click canvas to close").
+    playerPanel = new CSS3DPanel({
+        pxPerUnit: PLAYER_PX_PER_UNIT,
+        radiusPx: 14,
+        modal: true,
+        maskPad: 12,
+        // Known compact size (cover+info, waveform, controls — no header/playlist).
+        initialSize: { w: 320, h: 250 },
+        // Transparent, single ink region: punch ONE rounded rect that wraps ALL
+        // the content together (no per-element boxes, no border ring). The panel
+        // fill (black day / white night) shows inside that rect; the scene shows
+        // around it.
+        transparent: true,
+        inkBounds: true,
+        inkSelectors: [
+            '.player-content', '.player-waveform-container', '.player-controls',
+        ],
+        inkPad: 14,
+        inkRadius: 16,
+        inkBorderBand: 0,
+        // Top edge stays fixed; any growth extends DOWNWARD only.
+        anchor: 'top',
+        // Thin 3D line from the panel bottom down to the radio.
+        connector: true,
+    });
+    playerPanel.content.appendChild(playerContainer);
+    playerPanel.setOnOutsideClick(() => { if (isExpanded) collapsePlayer(); });
+
+    // Get elements (header/playlist/close removed — collapse via outside click)
     const prevBtn = playerContainer.querySelector('.player-prev') as HTMLButtonElement;
     const playBtn = playerContainer.querySelector('.player-play') as HTMLButtonElement;
     const nextBtn = playerContainer.querySelector('.player-next') as HTMLButtonElement;
-    // dragHandle removed - drag functionality disabled
-    
-    // Close button
-    closeBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        collapsePlayer();
-    });
-    
-    // Control buttons
-    prevBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        // Use `isPlaying` (authoritative state) rather than audioElement.paused
-        // which may be unreliable mid-transition.
-        previousSong(isPlaying);
-    });
-    
-    playBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        togglePlay();
-    });
-    
-    nextBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        nextSong(isPlaying);
-    });
-    
-    // Loop button
+
+    // Control buttons. Bind on POINTERUP, not click: the panel DOM lives behind
+    // the WebGL canvas (pointer-events:none while modal), and on iOS WebKit the
+    // synthesized `click` doesn't fire reliably for elements in the transformed
+    // CSS3D subtree — but pointer events do (the waveform seek proves it). Using
+    // pointerup makes every button behave like the waveform.
+    const onTap = (btn: HTMLButtonElement, fn: () => void) => {
+        btn.addEventListener('pointerup', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            fn();
+        });
+    };
+    // previousSong/nextSong read `isPlaying` (authoritative state) rather than
+    // audioElement.paused which may be unreliable mid-transition.
+    onTap(prevBtn, () => previousSong(isPlaying));
+    onTap(playBtn, () => togglePlay());
+    onTap(nextBtn, () => nextSong(isPlaying));
     const loopBtn = playerContainer.querySelector('.player-loop') as HTMLButtonElement;
-    loopBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        toggleLoop();
-    });
-    
-    // Playlist toggle button
-    const playlistToggleBtn = playerContainer.querySelector('.player-playlist-toggle') as HTMLButtonElement;
-    playlistToggleBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        togglePlaylistView();
-    });
-    
-    // Build playlist items
-    buildPlaylistItems();
+    onTap(loopBtn, () => toggleLoop());
 
     // Prevent wheel/touch scroll on the entire media player from scrolling the 3D scene
     playerContainer.addEventListener('wheel', (e) => {
@@ -1083,6 +1076,14 @@ function startAnalyserAnimation(): void {
     drawAnalyser();
 }
 
+/** Bar tone that contrasts with the panel ink fill (black in day mode → white
+ *  bars; white in night mode → black bars). Day = body.day-mode. */
+function _waveBaseColor(alpha = 1): string {
+    const day = document.body.classList.contains('day-mode');
+    const c = day ? '255,255,255' : '0,0,0';
+    return alpha >= 1 ? `rgb(${c})` : `rgba(${c},${alpha})`;
+}
+
 function drawAnalyser(): void {
     if (!analyserCtx || !analyserCanvas) { analyserAnimId = 0; return; }
 
@@ -1181,7 +1182,9 @@ function drawAnalyser(): void {
             analyserCtx.quadraticCurveTo(x, y, x + radius, y);
             analyserCtx.fill();
         }
-        analyserCtx.fillStyle = '#ffffff';
+        // Unplayed bars use the panel's text tone so they stay visible on both
+        // the black (day) and white (night) ink fill. Played bars stay red.
+        analyserCtx.fillStyle = _waveBaseColor();
         for (let i = 0; i < bufferLength; i++) {
             const value = analyserDataArray[i] / 255;
             const x = i * (barWidth + gap);
@@ -1221,7 +1224,7 @@ function drawAnalyser(): void {
         }
         analyserCtx.fill();
 
-        analyserCtx.fillStyle = 'rgba(255,255,255,0.12)';
+        analyserCtx.fillStyle = _waveBaseColor(0.14);
         analyserCtx.beginPath();
         for (let i = 0; i < bufferLength; i++) {
             const value = analyserDataArray[i] / 255;
@@ -1281,28 +1284,23 @@ function updateWaveformColors(): void {
     });
 }
 
-// Expanded player dimensions (must match CSS)
-const EXPANDED_WIDTH = 320;
-const EDGE_OFFSET = 16;  // Padding from viewport edges
 let isAnimating = false;  // Block resize during expand/collapse animation
-const ANIM_DURATION = 400;  // ms — must match CSS transition duration
+const ANIM_DURATION = 700;  // ms — full line+panel sequence (waveform right-sizes after)
 
-// Reusable Vector3 for radio screen projection
-const _radioPos = new Vector3();
-
-/** Project the radio's 3D position to screen coordinates */
-function getRadioScreenPos(): { x: number; y: number } {
-    radio.getWorldPosition(_radioPos);
-    _radioPos.y += 0.15;  // Slight offset above radio center
-    const screenPos = _radioPos.project(camera);
-    return {
-        x: (screenPos.x * 0.5 + 0.5) * window.innerWidth,
-        y: (-screenPos.y * 0.5 + 0.5) * window.innerHeight,
-    };
+/** Anchor the CSS3D panel above the radio's REST position (static — see the
+ *  RADIO_REST_* note). Fixed pose so the panel never jitters with the beat.
+ *  Also drives the connector line (down to the radio) + its colour (matches the
+ *  ink fill: black in day mode, white at night). */
+function syncPanelAnchor(): void {
+    if (!playerPanel) return;
+    playerPanel.setWorldPosition(RADIO_REST_X, RADIO_REST_Y + PLAYER_ANCHOR_UP, RADIO_REST_Z);
+    // Reach down into the radio body (was stopping above the antenna).
+    playerPanel.setConnectorTarget(RADIO_REST_X, RADIO_REST_Y - 0.10, RADIO_REST_Z);
+    playerPanel.setConnectorColor(document.body.classList.contains('day-mode') ? 0x000000 : 0xffffff);
 }
 
 export function expandPlayer(): void {
-    if (isExpanded || !playerContainer) return;
+    if (isExpanded || !playerContainer || !playerPanel) return;
     isExpanded = true;
     isAnimating = true;
 
@@ -1317,49 +1315,14 @@ export function expandPlayer(): void {
         zoomToRadio();
     }
 
-    // --- Position player at its final expanded location ---
-    const centerX = (window.innerWidth - EXPANDED_WIDTH) / 2;
-    const topY = Math.max(EDGE_OFFSET + 20, window.innerHeight * 0.15);
-    const maxX = window.innerWidth - EXPANDED_WIDTH - EDGE_OFFSET;
-    const maxY = window.innerHeight - 240 - EDGE_OFFSET;
-    const finalX = Math.max(EDGE_OFFSET, Math.min(maxX, centerX));
-    const finalY = Math.max(EDGE_OFFSET, Math.min(maxY, topY));
+    // Anchor + open the in-scene panel (the CSS3D panel owns the pop animation,
+    // billboarding and the punch hole — no screen-space positioning here).
+    syncPanelAnchor();
+    playerPanel.open();
 
-    playerContainer.style.transition = 'none';
-    playerContainer.style.display = '';
-    playerContainer.classList.add('expanded');
-    playerContainer.style.left = `${finalX}px`;
-    playerContainer.style.top = `${finalY}px`;
-
-    // Force layout so we can measure the final bounding rect
-    playerContainer.offsetHeight;
-
-    // --- Set transform-origin to the radio's screen position relative to the player ---
-    const rect = playerContainer.getBoundingClientRect();
-    const radioScreen = getRadioScreenPos();
-    const originX = radioScreen.x - rect.left;
-    const originY = radioScreen.y - rect.top;
-
-    // Start state: scale(0) at the radio's exact screen position
-    playerContainer.style.transformOrigin = `${originX}px ${originY}px`;
-    playerContainer.style.transform = 'scale(0)';
-    playerContainer.style.opacity = '0';
-
-    // Force flush so browser registers the start state
-    playerContainer.offsetHeight;
-
-    // --- Animate: grow outward from the radio point ---
-    playerContainer.style.transition = `transform ${ANIM_DURATION}ms cubic-bezier(0.16, 1, 0.3, 1), opacity ${Math.round(ANIM_DURATION * 0.4)}ms ease`;
-    playerContainer.style.transform = 'scale(1)';
-    playerContainer.style.opacity = '1';
-
-    // After animation finishes, clean up inline overrides
+    // After the pop settles, right-size the waveform (matches old timing).
     setTimeout(() => {
-        if (playerContainer && isExpanded) {
-            playerContainer.style.transition = '';
-            playerContainer.style.transform = '';
-            playerContainer.style.transformOrigin = '';
-            playerContainer.style.opacity = '';
+        if (isExpanded) {
             isAnimating = false;
             if (wavesurfer) wavesurfer.setOptions({ height: 40 });
         }
@@ -1367,53 +1330,19 @@ export function expandPlayer(): void {
 }
 
 export function collapsePlayer(): void {
-    if (!isExpanded || !playerContainer) return;
+    if (!isExpanded || !playerContainer || !playerPanel) return;
     isExpanded = false;
     isAnimating = true;
-    
-    // Exit playlist view if active
-    if (isPlaylistView) {
-        isPlaylistView = false;
-        playerContainer.classList.remove('playlist-view');
-        const toggleBtn = playerContainer.querySelector('.player-playlist-toggle') as HTMLButtonElement;
-        if (toggleBtn) toggleBtn.classList.remove('active');
-        const playlistEl = playerContainer.querySelector('.player-playlist') as HTMLDivElement;
-        if (playlistEl) playlistEl.style.maxHeight = '';
-    }
-    
+
     // Play expand sound (inverted)
     playUIBubbleExpand();
-    
+
     // Zoom out from radio when above water
     if (!isUnderwater) {
         zoomOutFromRadio();
     }
-    
-    // --- Set transform-origin to the radio's screen position relative to the player ---
-    const rect = playerContainer.getBoundingClientRect();
-    const radioScreen = getRadioScreenPos();
-    const originX = radioScreen.x - rect.left;
-    const originY = radioScreen.y - rect.top;
 
-    playerContainer.style.transformOrigin = `${originX}px ${originY}px`;
-    playerContainer.style.transition = `transform ${ANIM_DURATION}ms cubic-bezier(0.5, 0, 0.84, 0), opacity ${Math.round(ANIM_DURATION * 0.5)}ms ease ${Math.round(ANIM_DURATION * 0.4)}ms`;
-    playerContainer.style.transform = 'scale(0)';
-    playerContainer.style.opacity = '0';
-
-    // After animation finishes, hide and clean up
-    setTimeout(() => {
-        if (playerContainer && !isExpanded) {
-            playerContainer.classList.remove('expanded');
-            playerContainer.style.display = 'none';
-            playerContainer.style.transition = '';
-            playerContainer.style.transform = '';
-            playerContainer.style.transformOrigin = '';
-            playerContainer.style.opacity = '';
-            playerContainer.style.left = '';
-            playerContainer.style.top = '';
-        }
-        isAnimating = false;
-    }, ANIM_DURATION + 50);
+    playerPanel.close(() => { isAnimating = false; });
 }
 
 function togglePlay(): void {
@@ -1842,7 +1771,10 @@ let wasDayMode = false;
 // Update audio effects (underwater muffle, retro, etc.)
 export function Update(): void {
     if (!playerContainer || !radio || radio.children.length === 0) return;
-    
+
+    // Keep the in-scene panel glued to the radio while it's open.
+    if (isExpanded) syncPanelAnchor();
+
     // Check for day/night mode changes to update waveform colors
     const isDayMode = document.body.classList.contains('day-mode');
     if (isDayMode !== wasDayMode) {
