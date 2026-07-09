@@ -77,15 +77,17 @@ function _ensurePanel(): CSS3DPanel {
         // click already opens the link, so keep the scene interactive.
         modal: IS_TOUCH_DEVICE,
         maskPad: 16,
-        // Rough supersized-pill size — refined by live measurement per coin name.
-        initialSize: { w: 300, h: 110 },
-        // Transparent like the carousel: only the outline + icon + label are
-        // punched, so the scene shows through the pill body.
+        // Matches the fixed #coin-tooltip width in CSS (explicit width is what
+        // makes the pill measurable inside the CSS3D preserve-3d subtree — an
+        // intrinsically-sized element collapses there).
+        initialSize: { w: 380, h: 116 },
         transparent: true,
-        inkBounds: true,   // one region wrapping icon + label together
-        inkSelectors: ['.ct-icon', '.ct-name', '.ct-external'],
-        inkPad: 14,
-        inkRadius: 16,
+        // Punch ONE region = the whole pill (.ct-body). Its solid fill + rounded
+        // corners + content show; the scene shows around it.
+        inkBounds: true,
+        inkSelectors: ['.ct-body'],
+        inkPad: 4,
+        inkRadius: 34,
         inkBorderBand: 0,
         connector: true,   // thin 3D line down to the coin
     });

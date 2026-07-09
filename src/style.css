@@ -2869,6 +2869,7 @@ body.day-mode .css3d-panel-content .media-player.expanded {
 }
 
 /* Control buttons: icon = ink tone, subtle chip bg. Play keeps its red accent. */
+.css3d-panel-content .player-btn { touch-action: manipulation; }
 .css3d-panel-content .player-btn:not(.player-play) {
     background: rgba(0, 0, 0, 0.06);   /* night (white fill) */
     color: inherit;
@@ -2882,8 +2883,15 @@ body.day-mode .css3d-panel-content .player-btn:not(.player-play) {
 
 /* Coin tooltip, hosted in a panel. Authored at ~2.4x its screen-overlay size (a
    "supersample") so the CSS3D plane scales it DOWN — crisp, not blurry. */
+/* Explicit width centres the pill AND makes it measurable: an intrinsically
+   sized element collapses inside the CSS3D preserve-3d subtree (unlike the
+   media player, which has a fixed 320px width). The pill (.ct-body) shrinks to
+   its content and is centred, so the connector lines up under it. */
 .css3d-panel-content #coin-tooltip {
-    display: block;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    width: 380px;
     z-index: auto;
 }
 

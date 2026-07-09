@@ -541,30 +541,25 @@ function createPlayerUI(): void {
     const playBtn = playerContainer.querySelector('.player-play') as HTMLButtonElement;
     const nextBtn = playerContainer.querySelector('.player-next') as HTMLButtonElement;
 
-    // Control buttons
-    prevBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        // Use `isPlaying` (authoritative state) rather than audioElement.paused
-        // which may be unreliable mid-transition.
-        previousSong(isPlaying);
-    });
-
-    playBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        togglePlay();
-    });
-
-    nextBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        nextSong(isPlaying);
-    });
-
-    // Loop button
+    // Control buttons. Bind on POINTERUP, not click: the panel DOM lives behind
+    // the WebGL canvas (pointer-events:none while modal), and on iOS WebKit the
+    // synthesized `click` doesn't fire reliably for elements in the transformed
+    // CSS3D subtree — but pointer events do (the waveform seek proves it). Using
+    // pointerup makes every button behave like the waveform.
+    const onTap = (btn: HTMLButtonElement, fn: () => void) => {
+        btn.addEventListener('pointerup', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            fn();
+        });
+    };
+    // previousSong/nextSong read `isPlaying` (authoritative state) rather than
+    // audioElement.paused which may be unreliable mid-transition.
+    onTap(prevBtn, () => previousSong(isPlaying));
+    onTap(playBtn, () => togglePlay());
+    onTap(nextBtn, () => nextSong(isPlaying));
     const loopBtn = playerContainer.querySelector('.player-loop') as HTMLButtonElement;
-    loopBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        toggleLoop();
-    });
+    onTap(loopBtn, () => toggleLoop());
 
     // Prevent wheel/touch scroll on the entire media player from scrolling the 3D scene
     playerContainer.addEventListener('wheel', (e) => {
@@ -1299,7 +1294,8 @@ const ANIM_DURATION = 400;  // ms — panel pop duration (waveform right-sizes a
 function syncPanelAnchor(): void {
     if (!playerPanel) return;
     playerPanel.setWorldPosition(RADIO_REST_X, RADIO_REST_Y + PLAYER_ANCHOR_UP, RADIO_REST_Z);
-    playerPanel.setConnectorTarget(RADIO_REST_X, RADIO_REST_Y + 0.12, RADIO_REST_Z);
+    // Reach down into the radio body (was stopping above the antenna).
+    playerPanel.setConnectorTarget(RADIO_REST_X, RADIO_REST_Y - 0.10, RADIO_REST_Z);
     playerPanel.setConnectorColor(document.body.classList.contains('day-mode') ? 0x000000 : 0xffffff);
 }
 
