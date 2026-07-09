@@ -444,31 +444,6 @@ function createPlayerUI(): void {
     playerContainer.className = 'media-player expanded';
     playerContainer.innerHTML = `
         <div class="player-expanded-content">
-            <div class="player-header-bar">
-                <button class="player-playlist-toggle" title="${t('player.showPlaylist')}" data-i18n-title="player.showPlaylist">
-                    <svg class="icon-normal" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15V6"/>
-                        <path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/>
-                        <path d="M12 12H3"/>
-                        <path d="M16 6H3"/>
-                        <path d="M12 18H3"/>
-                    </svg>
-                    <svg class="icon-pixel" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M10 13h6V5h6v4h-4v10h-8v-6zm2 2v2h4v-2h-4zM2 17h6v2H2v-2zm6-4H2v2h6v-2zM2 9h12v2H2V9zm12-4H2v2h12V5z"/>
-                    </svg>
-                </button>
-                <button class="player-close" title="${t('player.minimize')}" data-i18n-title="player.minimize">
-                    <svg class="icon-normal" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="4 14 10 14 10 20"/>
-                        <polyline points="20 10 14 10 14 4"/>
-                        <line x1="14" y1="10" x2="21" y2="3"/>
-                        <line x1="3" y1="21" x2="10" y2="14"/>
-                    </svg>
-                    <svg class="icon-pixel" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M17 3h-2v2h-2v2h-2V5H9V3H7v2h2v2h2v2h2V7h2V5h2V3zM4 13h16v-2H4v2zm9 4h-2v-2h2v2zm2 2h-2v-2h2v2zm0 0h2v2h-2v-2zm-6 0h2v-2H9v2zm0 0H7v2h2v-2z"/>
-                    </svg>
-                </button>
-            </div>
             <div class="player-body">
                 <div class="player-content">
                     <div class="player-cover">
@@ -526,13 +501,6 @@ function createPlayerUI(): void {
                     </svg>
                 </button>
             </div>
-            <div class="player-playlist">
-                <div class="playlist-header">
-                    <span class="playlist-title" data-i18n="player.playlist">${t('player.playlist')}</span>
-                    <span class="playlist-count"></span>
-                </div>
-                <div class="playlist-items"></div>
-            </div>
             </div>
         </div>
     `;
@@ -543,48 +511,36 @@ function createPlayerUI(): void {
     // panel collapses it (mirrors the old "click canvas to close").
     playerPanel = new CSS3DPanel({
         pxPerUnit: PLAYER_PX_PER_UNIT,
-        radiusPx: 12,
+        radiusPx: 14,
         modal: true,
-        maskPad: 10,
-        // Known .media-player.expanded size (width fixed in CSS; height ≈ header
-        // + body at rest). Seeds the punch so the panel shows even before/without
-        // a DOM measurement; live measurement refines it (playlist expand etc.).
-        initialSize: { w: 320, h: 400 },
-        // Transparent like the carousel: punch only the outline + the content
-        // boxes, so the live scene shows through the gaps. Buttons/links stay
-        // interactive (modal) — the punch is purely visual.
+        maskPad: 12,
+        // Known compact size (cover+info, waveform, controls — no header/playlist).
+        initialSize: { w: 320, h: 250 },
+        // Transparent, single ink region: punch ONE rounded rect that wraps ALL
+        // the content together (no per-element boxes, no border ring). The panel
+        // fill (black day / white night) shows inside that rect; the scene shows
+        // around it.
         transparent: true,
+        inkBounds: true,
         inkSelectors: [
-            '.player-close', '.player-playlist-toggle',
-            '.player-cover', '.player-title', '.player-artist',
-            '#waveform', '.time-current', '.time-total',
-            '.player-btn', '.playlist-items',
+            '.player-content', '.player-waveform-container', '.player-controls',
         ],
-        // Generous pad: covers iOS WebKit layout-px snapping (object scale ~8 →
-        // content can sit up to ~8px off the punched box on iPhones).
-        inkPad: 10,
-        inkRadius: 12,
-        inkBorderBand: 5,
-        // Top edge stays fixed; playlist expansion grows DOWNWARD only.
+        inkPad: 14,
+        inkRadius: 16,
+        inkBorderBand: 0,
+        // Top edge stays fixed; any growth extends DOWNWARD only.
         anchor: 'top',
+        // Thin 3D line from the panel bottom down to the radio.
+        connector: true,
     });
     playerPanel.content.appendChild(playerContainer);
     playerPanel.setOnOutsideClick(() => { if (isExpanded) collapsePlayer(); });
 
-    // Get elements
-    const closeBtn = playerContainer.querySelector('.player-close') as HTMLButtonElement;
+    // Get elements (header/playlist/close removed — collapse via outside click)
     const prevBtn = playerContainer.querySelector('.player-prev') as HTMLButtonElement;
     const playBtn = playerContainer.querySelector('.player-play') as HTMLButtonElement;
     const nextBtn = playerContainer.querySelector('.player-next') as HTMLButtonElement;
-    // dragHandle removed - drag functionality disabled
-    
-    // Close button
-    closeBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        collapsePlayer();
-    });
-    
+
     // Control buttons
     prevBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -592,33 +548,23 @@ function createPlayerUI(): void {
         // which may be unreliable mid-transition.
         previousSong(isPlaying);
     });
-    
+
     playBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         togglePlay();
     });
-    
+
     nextBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         nextSong(isPlaying);
     });
-    
+
     // Loop button
     const loopBtn = playerContainer.querySelector('.player-loop') as HTMLButtonElement;
     loopBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         toggleLoop();
     });
-    
-    // Playlist toggle button
-    const playlistToggleBtn = playerContainer.querySelector('.player-playlist-toggle') as HTMLButtonElement;
-    playlistToggleBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        togglePlaylistView();
-    });
-    
-    // Build playlist items
-    buildPlaylistItems();
 
     // Prevent wheel/touch scroll on the entire media player from scrolling the 3D scene
     playerContainer.addEventListener('wheel', (e) => {
@@ -1135,6 +1081,14 @@ function startAnalyserAnimation(): void {
     drawAnalyser();
 }
 
+/** Bar tone that contrasts with the panel ink fill (black in day mode → white
+ *  bars; white in night mode → black bars). Day = body.day-mode. */
+function _waveBaseColor(alpha = 1): string {
+    const day = document.body.classList.contains('day-mode');
+    const c = day ? '255,255,255' : '0,0,0';
+    return alpha >= 1 ? `rgb(${c})` : `rgba(${c},${alpha})`;
+}
+
 function drawAnalyser(): void {
     if (!analyserCtx || !analyserCanvas) { analyserAnimId = 0; return; }
 
@@ -1233,7 +1187,9 @@ function drawAnalyser(): void {
             analyserCtx.quadraticCurveTo(x, y, x + radius, y);
             analyserCtx.fill();
         }
-        analyserCtx.fillStyle = '#ffffff';
+        // Unplayed bars use the panel's text tone so they stay visible on both
+        // the black (day) and white (night) ink fill. Played bars stay red.
+        analyserCtx.fillStyle = _waveBaseColor();
         for (let i = 0; i < bufferLength; i++) {
             const value = analyserDataArray[i] / 255;
             const x = i * (barWidth + gap);
@@ -1273,7 +1229,7 @@ function drawAnalyser(): void {
         }
         analyserCtx.fill();
 
-        analyserCtx.fillStyle = 'rgba(255,255,255,0.12)';
+        analyserCtx.fillStyle = _waveBaseColor(0.14);
         analyserCtx.beginPath();
         for (let i = 0; i < bufferLength; i++) {
             const value = analyserDataArray[i] / 255;
@@ -1337,10 +1293,14 @@ let isAnimating = false;  // Block resize during expand/collapse animation
 const ANIM_DURATION = 400;  // ms — panel pop duration (waveform right-sizes after)
 
 /** Anchor the CSS3D panel above the radio's REST position (static — see the
- *  RADIO_REST_* note). Fixed pose so the panel never jitters with the beat. */
+ *  RADIO_REST_* note). Fixed pose so the panel never jitters with the beat.
+ *  Also drives the connector line (down to the radio) + its colour (matches the
+ *  ink fill: black in day mode, white at night). */
 function syncPanelAnchor(): void {
     if (!playerPanel) return;
     playerPanel.setWorldPosition(RADIO_REST_X, RADIO_REST_Y + PLAYER_ANCHOR_UP, RADIO_REST_Z);
+    playerPanel.setConnectorTarget(RADIO_REST_X, RADIO_REST_Y + 0.12, RADIO_REST_Z);
+    playerPanel.setConnectorColor(document.body.classList.contains('day-mode') ? 0x000000 : 0xffffff);
 }
 
 export function expandPlayer(): void {
@@ -1377,16 +1337,6 @@ export function collapsePlayer(): void {
     if (!isExpanded || !playerContainer || !playerPanel) return;
     isExpanded = false;
     isAnimating = true;
-
-    // Exit playlist view if active
-    if (isPlaylistView) {
-        isPlaylistView = false;
-        playerContainer.classList.remove('playlist-view');
-        const toggleBtn = playerContainer.querySelector('.player-playlist-toggle') as HTMLButtonElement;
-        if (toggleBtn) toggleBtn.classList.remove('active');
-        const playlistEl = playerContainer.querySelector('.player-playlist') as HTMLDivElement;
-        if (playlistEl) playlistEl.style.maxHeight = '';
-    }
 
     // Play expand sound (inverted)
     playUIBubbleExpand();

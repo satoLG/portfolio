@@ -33,9 +33,14 @@
 
 import { CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer';
 import {
+    BufferGeometry,
     CanvasTexture,
+    Color,
     DoubleSide,
+    Float32BufferAttribute,
     Group,
+    Line,
+    LineBasicMaterial,
     LinearFilter,
     MathUtils,
     Mesh,
@@ -156,10 +161,18 @@ export interface PanelOptions {
     /** In transparent mode: also punch the panel's rounded-rect outline as a
      *  stroke (reveals the DOM border). Width is the stroke band in px. */
     inkBorderBand?: number;
+    /** In transparent mode: punch ONE rounded rect that is the union bounding
+     *  box of all ink elements (a single region wrapping everything) instead of
+     *  a separate box per element. The DOM fill shows inside it; the scene shows
+     *  around it. */
+    inkBounds?: boolean;
     /** Vertical anchoring of setWorldPosition's point: 'center' (default) or
      *  'top' — the anchor is the panel's TOP edge and any height growth
      *  (playlist expanding, etc.) extends DOWNWARD, keeping the top fixed. */
     anchor?: 'center' | 'top';
+    /** Draw a thin 3D line in the WebGL scene from the panel's bottom-centre to
+     *  a target (its linked model), same colour as the ink. */
+    connector?: boolean;
 }
 
 // easeOutBack — the subtle overshoot that gives the open/close a "pop".
@@ -188,9 +201,16 @@ export class CSS3DPanel {
     private _inkPad: number;
     private _inkRadius: number;
     private _inkBorderBand: number;
+    private _inkBounds: boolean;
     private _anchor: 'center' | 'top';
     private _inkBakedBoxes = 0;       // ink boxes punched on the last bake
     private _zeroInkWarnCountdown = 60;
+    // Connector line (bottom-centre of the panel → linked model)
+    private _connectorLine: Line | null = null;
+    private _connectorGeom: BufferGeometry | null = null;
+    private _connectorMat: LineBasicMaterial | null = null;
+    private _hasConnectorTarget = false;
+    private _ctx = 0; private _cty = 0; private _ctz = 0;   // target world pos
     readonly dismissOnOutsideClick: boolean;
     private _modal: boolean;
 
@@ -215,6 +235,7 @@ export class CSS3DPanel {
         this._inkPad = opts.inkPad ?? 6;
         this._inkRadius = opts.inkRadius ?? 10;
         this._inkBorderBand = opts.inkBorderBand ?? 3;
+        this._inkBounds = opts.inkBounds ?? false;
         this._anchor = opts.anchor ?? 'center';
         this._modal = opts.modal ?? false;
         this.dismissOnOutsideClick = this._modal;
@@ -290,10 +311,37 @@ export class CSS3DPanel {
         this.occluder.visible = false;
         _occluderGroup.add(this.occluder);
 
+        // Connector line — 2 points, updated per frame; lives in the WebGL scene
+        // so it's part of the 3D world (occluded by geometry between it and the
+        // camera, like any line).
+        if (opts.connector) {
+            this._connectorGeom = new BufferGeometry();
+            this._connectorGeom.setAttribute('position', new Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3));
+            this._connectorMat = new LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0 });
+            this._connectorLine = new Line(this._connectorGeom, this._connectorMat);
+            this._connectorLine.frustumCulled = false;
+            this._connectorLine.visible = false;
+            this._connectorLine.renderOrder = 3;
+            // Into the occluder group: it's excluded from the foam depth pre-pass,
+            // so the line never paints a stray foam streak underwater.
+            _occluderGroup.add(this._connectorLine);
+        }
+
         _panels.push(this);
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
+
+    /** World point the connector line runs down to (its linked model). */
+    setConnectorTarget(x: number, y: number, z: number): void {
+        this._ctx = x; this._cty = y; this._ctz = z;
+        this._hasConnectorTarget = true;
+    }
+
+    /** Connector line colour (match the ink fill). Accepts a THREE color hex. */
+    setConnectorColor(hex: number): void {
+        if (this._connectorMat) (this._connectorMat.color as Color).setHex(hex);
+    }
 
     setWorldPosition(x: number, y: number, z: number): void {
         this._wx = x; this._wy = y; this._wz = z;
@@ -342,6 +390,11 @@ export class CSS3DPanel {
         (this.occluder.material as ShaderMaterial).dispose();
         this.occluder.geometry.dispose();
         this.maskTexture.dispose();
+        if (this._connectorLine) {
+            _occluderGroup.remove(this._connectorLine);
+            this._connectorGeom?.dispose();
+            this._connectorMat?.dispose();
+        }
         this.wrapper.remove();
     }
 
@@ -458,6 +511,18 @@ export class CSS3DPanel {
         this.occluder.scale.set(worldW, worldH, 1);
         this.occluder.visible = true;
         this.cssObject.visible = true;
+
+        // Connector line: panel bottom-centre → linked model target. Fades with
+        // the open animation.
+        if (this._connectorLine && this._connectorGeom && this._connectorMat && this._hasConnectorTarget) {
+            const bottomY = cy - worldH / 2;
+            const pos = this._connectorGeom.getAttribute('position') as Float32BufferAttribute;
+            pos.setXYZ(0, this._wx, bottomY, this._wz);
+            pos.setXYZ(1, this._ctx, this._cty, this._ctz);
+            pos.needsUpdate = true;
+            this._connectorMat.opacity = MathUtils.clamp(this._openT * 1.4, 0, 1) * 0.9;
+            this._connectorLine.visible = true;
+        }
     }
 
     private _applyHidden(): void {
@@ -465,6 +530,7 @@ export class CSS3DPanel {
         this.cssObject.visible = false;
         this.occluder.visible = false;
         this.wrapper.style.display = 'none';
+        if (this._connectorLine) this._connectorLine.visible = false;
     }
 
     /** Commit a content size: wrapper box + punch mask. */
@@ -580,23 +646,51 @@ export class CSS3DPanel {
         }
 
         if (!panelEl) return;
-        for (const sel of this._inkSelectors) {
-            const els = panelEl.querySelectorAll<HTMLElement>(sel);
-            for (let i = 0; i < els.length; i++) {
-                const el = els[i];
-                if (el.offsetWidth < 0.5 || el.offsetHeight < 0.5) continue;
-                const box = layoutRectWithin(el, panelEl);
-                const ip = this._inkPad;
-                const bw = box.width + 2 * ip;
-                const bh = box.height + 2 * ip;
+        const ip = this._inkPad;
+
+        if (this._inkBounds) {
+            // ONE rounded rect = union bounding box of every ink element.
+            let minL = Infinity, minT = Infinity, maxR = -Infinity, maxB = -Infinity;
+            for (const sel of this._inkSelectors) {
+                const els = panelEl.querySelectorAll<HTMLElement>(sel);
+                for (let i = 0; i < els.length; i++) {
+                    const el = els[i];
+                    if (el.offsetWidth < 0.5 || el.offsetHeight < 0.5) continue;
+                    const box = layoutRectWithin(el, panelEl);
+                    minL = Math.min(minL, box.left);
+                    minT = Math.min(minT, box.top);
+                    maxR = Math.max(maxR, box.left + box.width);
+                    maxB = Math.max(maxB, box.top + box.height);
+                }
+            }
+            if (maxR > minL && maxB > minT) {
+                const bw = (maxR - minL) + 2 * ip;
+                const bh = (maxB - minT) + 2 * ip;
                 roundRectPath(
                     ctx,
-                    pad + box.left - ip, pad + box.top - ip,
-                    bw, bh,
-                    Math.min(this._inkRadius, bh / 2),
+                    pad + minL - ip, pad + minT - ip, bw, bh,
+                    Math.min(this._inkRadius, bw / 2, bh / 2),
                 );
                 ctx.fill();
                 this._inkBakedBoxes++;
+            }
+        } else {
+            for (const sel of this._inkSelectors) {
+                const els = panelEl.querySelectorAll<HTMLElement>(sel);
+                for (let i = 0; i < els.length; i++) {
+                    const el = els[i];
+                    if (el.offsetWidth < 0.5 || el.offsetHeight < 0.5) continue;
+                    const box = layoutRectWithin(el, panelEl);
+                    const bw = box.width + 2 * ip;
+                    const bh = box.height + 2 * ip;
+                    roundRectPath(
+                        ctx,
+                        pad + box.left - ip, pad + box.top - ip, bw, bh,
+                        Math.min(this._inkRadius, bh / 2),
+                    );
+                    ctx.fill();
+                    this._inkBakedBoxes++;
+                }
             }
         }
         this._lastInkSig = this._inkSignature();

@@ -82,10 +82,12 @@ function _ensurePanel(): CSS3DPanel {
         // Transparent like the carousel: only the outline + icon + label are
         // punched, so the scene shows through the pill body.
         transparent: true,
+        inkBounds: true,   // one region wrapping icon + label together
         inkSelectors: ['.ct-icon', '.ct-name', '.ct-external'],
-        inkPad: 10,
-        inkRadius: 14,
-        inkBorderBand: 5,
+        inkPad: 14,
+        inkRadius: 16,
+        inkBorderBand: 0,
+        connector: true,   // thin 3D line down to the coin
     });
 
     const body = document.createElement('div');
@@ -129,14 +131,22 @@ export function showCoinTooltip(idx: number, wx: number, wy: number, wz: number)
     const panel = _ensurePanel();
     _visibleIdx = idx;
     _setContent(idx);
-    panel.setWorldPosition(wx, wy + TOOLTIP_Y_OFFSET, wz);
+    _anchor(panel, wx, wy, wz);
     panel.open();
 }
 
 /** Call every frame to keep the panel anchored as the coin bobs. */
 export function repositionCoinTooltip(wx: number, wy: number, wz: number): void {
     if (_visibleIdx < 0 || !_panel) return;
-    _panel.setWorldPosition(wx, wy + TOOLTIP_Y_OFFSET, wz);
+    _anchor(_panel, wx, wy, wz);
+}
+
+/** Position above the coin + drive the connector line (down to the coin) and
+ *  its colour (matches the ink fill: black in day mode, white at night). */
+function _anchor(panel: CSS3DPanel, wx: number, wy: number, wz: number): void {
+    panel.setWorldPosition(wx, wy + TOOLTIP_Y_OFFSET, wz);
+    panel.setConnectorTarget(wx, wy, wz);
+    panel.setConnectorColor(document.body.classList.contains('day-mode') ? 0x000000 : 0xffffff);
 }
 
 export function hideCoinTooltip(): void {

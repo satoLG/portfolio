@@ -2836,71 +2836,71 @@ body.day-mode .ct-body::after {
     margin: 0;
 }
 
+/* Solid ink fill wrapped by ONE punched bbox (no border, no neon). Day
+   (body.day-mode) = black fill + white ink; night (default) = white fill +
+   black ink. The scene shows AROUND the fill (outside the punched bbox). */
 .css3d-panel-content .media-player.expanded {
-    /* Transparent like the carousel — only the outline + content boxes are
-       punched, so the live scene shows through the gaps. The interior fill and
-       header gradient are dropped; a bright rim + text shadows keep it legible. */
-    background: transparent;
+    background: #ffffff;   /* night */
+    color: #111111;
+    border: none;
+    box-shadow: none;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    border: 1.5px solid rgba(200, 225, 255, 0.9);
-    box-shadow:
-        0 0 10px rgba(150, 210, 255, 0.5),
-        inset 0 0 10px rgba(150, 210, 255, 0.25);
-    /* Fixed px cap (viewport-relative units are meaningless in the scene) so the
-       playlist scrolls inside the panel instead of stretching it arbitrarily. */
-    max-height: 560px;
+    min-height: 0;
+    max-height: none;
 }
-
-/* Drop the header gradient — only its buttons are punched now */
-.css3d-panel-content .player-header-bar {
-    background: transparent;
-    border-bottom: none;
-}
-
-/* Legibility over the live scene (no panel fill behind the text now) */
-.css3d-panel-content .player-title,
-.css3d-panel-content .player-artist,
-.css3d-panel-content .time-current,
-.css3d-panel-content .time-total {
-    text-shadow: 0 0 6px rgba(0, 0, 0, 0.85), 0 1px 3px rgba(0, 0, 0, 0.9);
-}
-
 body.day-mode .css3d-panel-content .media-player.expanded {
-    background: transparent;
-    border-color: rgba(40, 70, 110, 0.7);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
+    background: #000000;   /* day */
+    color: #ffffff;
 }
 
-body.day-mode .css3d-panel-content .player-title,
-body.day-mode .css3d-panel-content .player-artist,
-body.day-mode .css3d-panel-content .time-current,
-body.day-mode .css3d-panel-content .time-total {
-    text-shadow: 0 0 6px rgba(255, 255, 255, 0.9), 0 1px 2px rgba(255, 255, 255, 0.95);
+/* Text follows the ink tone (no more neon shadow) */
+.css3d-panel-content .player-title  { color: inherit; text-shadow: none; }
+.css3d-panel-content .player-artist { color: inherit; opacity: 0.65; text-shadow: none; }
+.css3d-panel-content .time-current,
+.css3d-panel-content .time-total    { color: inherit; opacity: 0.65; text-shadow: none; }
+
+/* Waveform blends into the fill: no border, no own background */
+.css3d-panel-content .player-waveform-container,
+.css3d-panel-content #waveform {
+    background: transparent;
+    border: none;
+    box-shadow: none;
 }
+
+/* Control buttons: icon = ink tone, subtle chip bg. Play keeps its red accent. */
+.css3d-panel-content .player-btn:not(.player-play) {
+    background: rgba(0, 0, 0, 0.06);   /* night (white fill) */
+    color: inherit;
+    border: none;
+    box-shadow: none;
+}
+body.day-mode .css3d-panel-content .player-btn:not(.player-play) {
+    background: rgba(255, 255, 255, 0.14);   /* day (black fill) */
+}
+.css3d-panel-content .player-btn svg { fill: currentColor; }
 
 /* Coin tooltip, hosted in a panel. Authored at ~2.4x its screen-overlay size (a
-   "supersample") so the CSS3D plane scales it DOWN — crisp, not upscaled/blurry.
-   Keep these in sync with radiusPx in CoinTooltip.ts. */
+   "supersample") so the CSS3D plane scales it DOWN — crisp, not blurry. */
 .css3d-panel-content #coin-tooltip {
     display: block;
     z-index: auto;
 }
 
 .css3d-panel-content .ct-body {
-    /* Transparent — only the outline + icon + label are punched (scene shows
-       through the pill body). Bright rim + text shadow keep it readable. */
-    background: transparent;
+    background: #ffffff;   /* night */
+    color: #111111;
+    border: none;
+    box-shadow: none;
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
-    border: 1.5px solid rgba(200, 225, 255, 0.9);
     border-radius: 34px;
     padding: 22px 32px;
     gap: 22px;
-    box-shadow:
-        0 0 12px rgba(150, 210, 255, 0.5),
-        inset 0 0 10px rgba(150, 210, 255, 0.22);
+}
+body.day-mode .css3d-panel-content .ct-body {
+    background: #000000;   /* day */
+    color: #ffffff;
 }
 
 .css3d-panel-content .ct-icon {
@@ -2912,27 +2912,17 @@ body.day-mode .css3d-panel-content .time-total {
 .css3d-panel-content .ct-name {
     font-size: 33px;
     letter-spacing: 0.01em;
-    text-shadow: 0 0 7px rgba(0, 0, 0, 0.9), 0 1px 3px rgba(0, 0, 0, 0.95);
+    color: inherit;
+    text-shadow: none;
 }
 
 .css3d-panel-content .ct-external {
     width: 28px;
     height: 28px;
+    color: inherit;
 }
 
-body.day-mode .css3d-panel-content .ct-body {
-    background: transparent;
-    border-color: rgba(40, 70, 110, 0.7);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-}
-
-body.day-mode .css3d-panel-content .ct-name {
-    text-shadow: 0 0 7px rgba(255, 255, 255, 0.9), 0 1px 2px rgba(255, 255, 255, 0.95);
-}
-
-/* Tail dropped for the in-scene tooltip — the pill floats above the coin and
-   the down-pointing triangle would poke outside the punched rounded hole. */
+/* Tail dropped for the in-scene tooltip. */
 .css3d-panel-content .ct-body::after {
     display: none;
 }
