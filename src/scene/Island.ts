@@ -2065,31 +2065,59 @@ const oceanLightingFragment = /*glsl*/`
     vec3 viewVec = worldPos - cameraPosition;
     float viewLen = length(viewVec);
     vec3 viewDir = viewVec / viewLen;
+    // Both branches below divide by viewDir.y to find how far along the view ray
+    // the water surface (y = 0) is. Now that both run unconditionally (for the
+    // smooth blend), that runs for every fragment — including ones far above the
+    // waterline (tree trunk, tent, radio) seen with a near-horizontal camera
+    // (viewDir.y ~ 0), where the quotient blows up. The real guard is NOT
+    // clamping viewDir.y (that just turns NaN into a huge Inf that survives the
+    // blend, since mix(Inf, b, 1.0) == Inf*0 + b == NaN under IEEE754). The
+    // guard is clamping the DISTANCES those quotients feed into: they represent
+    // physical path lengths that can never be negative. Below, uwLen is clamped
+    // to >= 0 so belowWaterLight stays finite and the mix cleanly returns
+    // aboveWaterLight for anything above water.
 
-    if (worldPos.y > 0.0) {
-        float fogStartLen = viewLen;
-        if (cameraPosition.y < 0.0) {
-            fogStartLen -= cameraPosition.y / -viewDir.y;
-        }
-        float fog = clamp(fogStartLen / FOG_DISTANCE, 0.0, 1.0);
-        fog = fog * fog;
-        vec3 horizonColor = mix(vec3(0.07, 0.13, 0.18), vec3(0.7, 0.85, 0.95), uSunVisibility);
-        outgoingLight = mix(outgoingLight, horizonColor, fog);
+    // Above-water result: aerial fog toward the horizon. The subtraction only
+    // runs when the camera is underwater; clamp so a grazing ray can't push
+    // fogStartLen negative.
+    float fogStartLen = viewLen;
+    if (cameraPosition.y < 0.0) {
+        fogStartLen -= cameraPosition.y / min(-viewDir.y, -1e-4);
     }
-    else {
-        float uwLen = viewLen;
-        float originY = cameraPosition.y;
-        if (cameraPosition.y > 0.0) {
-            uwLen -= cameraPosition.y / -viewDir.y;
-            originY = 0.0;
-        }
-        uwLen = min(uwLen, uFogDist);
-        float sampleY = originY + viewDir.y * uwLen;
-        vec3 underwaterLight = exp((sampleY - uwLen * DENSITY) * uAbsorption) * uLight;
-        outgoingLight *= underwaterLight;
-        float uwFog = min(uwLen / uFogDist, 1.0);
-        outgoingLight = mix(outgoingLight, underwaterLight * 0.3, uwFog);
+    fogStartLen = max(fogStartLen, 0.0);
+    float aboveFog = clamp(fogStartLen / FOG_DISTANCE, 0.0, 1.0);
+    aboveFog = aboveFog * aboveFog;
+    vec3 horizonColor = mix(vec3(0.07, 0.13, 0.18), vec3(0.7, 0.85, 0.95), uSunVisibility);
+    vec3 aboveWaterLight = mix(outgoingLight, horizonColor, aboveFog);
+
+    // Below-water result: depth absorption (this is what keeps light sources
+    // like the campfire from reaching down here — it replaces outgoingLight
+    // with an extinction of uLight, not the raw shaded color).
+    float uwLen = viewLen;
+    float originY = cameraPosition.y;
+    if (cameraPosition.y > 0.0) {
+        // Distance from the camera to where the ray crosses the surface. When
+        // the ray is near-horizontal this diverges, but uwLen is clamped to
+        // >= 0 immediately below, so an above-water fragment collapses to
+        // uwLen = 0 (no underwater travel) instead of a huge negative that
+        // would make exp() overflow to Inf.
+        uwLen -= cameraPosition.y / max(-viewDir.y, 1e-4);
+        originY = 0.0;
     }
+    uwLen = clamp(uwLen, 0.0, uFogDist);
+    float sampleY = originY + viewDir.y * uwLen;
+    vec3 underwaterLight = exp((sampleY - uwLen * DENSITY) * uAbsorption) * uLight;
+    vec3 belowWaterLight = outgoingLight * underwaterLight;
+    float uwFog = min(uwLen / uFogDist, 1.0);
+    belowWaterLight = mix(belowWaterLight, underwaterLight * 0.3, uwFog);
+
+    // Blend the two across a thin band around the waterline instead of a hard
+    // cut at y = 0 — the previous binary if/else swapped shading modes with
+    // zero transition, which reads as a visible seam on any geometry crossing
+    // the waterline (worst at night, when the underwater branch collapses
+    // toward black since uLight — the sun — is near-zero).
+    float aboveWaterMask = smoothstep(-0.06, 0.06, worldPos.y);
+    outgoingLight = mix(belowWaterLight, aboveWaterLight, aboveWaterMask);
 `;
 
 // Cabana interior shade — darkens fragments inside a world-space ellipsoid toward
