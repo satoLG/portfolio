@@ -6,6 +6,7 @@ import * as SeaFloor from "../scene/SeaFloor";
 import * as SeaFloorDecor from "../scene/SeaFloorDecor";
 import * as Island from "../scene/Island";
 import * as Fire from "../scene/Fire.ts";
+import { mount as mountFireFpsTestOverlay } from "../scene/FireFpsTestOverlay.ts"; // TEMP — remove with FireFpsTestOverlay.ts
 import * as Fish from "../scene/Fish.ts";
 import * as Audio from "./Audio.ts";
 import * as UI from "./UI.ts";
@@ -585,6 +586,7 @@ export function Start(): void
 
     // Add fire effect to firecamp
     Fire.Start();
+    mountFireFpsTestOverlay(); // TEMP — remove call + import + file once FPS is picked
     Island.firecamp.add(Fire.fire);
     // Shadow spotlight lives in the scene (not inside fire group which is scaled 0.25x)
     scene.add(Fire.fireShadowLight);
