@@ -1041,9 +1041,10 @@ export function Update(): void
         Bubbles.Update();
         UnderwaterParticles.Update(camera.position.y);
         // Always tick Island.Update underwater — chest open/close animations,
-        // glow fade-out, coin springs, and pug all depend on it.  Wind, radio,
-        // pug, and music-note work is skipped when isUnderwater=true.
-        Island.Update(true);
+        // glow fade-out, coin springs, and pug all depend on it. Wind, radio,
+        // pug-mixer, and music-note work is skipped once the camera has sunk
+        // well past the surface (see SURFACE_ANIM_FREEZE_Y in Island.ts).
+        Island.Update();
         Fire.Update();
     } else {
         // Show surface, hide underwater.
@@ -1083,7 +1084,7 @@ export function Update(): void
         if (Island.proceduralGrassMesh) Island.proceduralGrassMesh.visible = showOutside;
         if (Island.grassShadowMesh)     Island.grassShadowMesh.visible     = showOutside;
 
-        Island.Update(false);
+        Island.Update();
         Fire.Update();
         Fish.Update();
         Bubbles.Update();
