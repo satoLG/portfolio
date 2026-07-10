@@ -64,17 +64,10 @@ const FADE_SPEED = 1.0;
 const SPRITE_COLS          = 9;
 const SPRITE_ROWS          = 6;
 const SPRITE_TOTAL_FRAMES  = 48;
-// TEMP: mutable + exported so the FireFpsTestOverlay can switch it live. Once
-// a value is picked, inline it back to a const and delete the overlay.
-export let SPRITE_FPS      = 24; // lower = slower animation — tweak this
+const SPRITE_FPS           = 32; // lower = slower animation — tweak this
 // Local-space size — world size = value * FIRE_SCALE(0.25) * firecampScale(~1.4)
 const SPRITE_WIDTH         = 1.5;
 const SPRITE_HEIGHT        = 2.2;
-
-/** TEMP — used by FireFpsTestOverlay only; remove together with it. */
-export function setSpriteFps(fps: number): void {
-    SPRITE_FPS = fps;
-}
 
 let _fireSpriteTex: Texture;
 let _fireSpriteMat: SpriteMaterial;
