@@ -4741,7 +4741,16 @@ function setupRadioInteraction(): void {
     });
 }
 
-export function Update(isUnderwater = false): void {
+// Surface animations (wind sway, apples, radio vibration/notes, pug mixer) keep
+// running until the camera has sunk well below the surface line, not just the
+// moment it crosses UNDERWATER_Y_THRESHOLD (y<0) — that crossing happens while
+// the island/props are still on screen (you can stop scrolling and see them),
+// so freezing them there reads as a visible hitch. Push the freeze deeper, to
+// roughly where they've actually scrolled out of view.
+const SURFACE_ANIM_FREEZE_Y = -3.0;
+
+export function Update(): void {
+  const isUnderwater = camera.position.y < SURFACE_ANIM_FREEZE_Y;
   _updateAppleImpacts();
   islandCampfireGroundCenterUniform.value.set(firecamp.position.x, firecamp.position.z);
   _updateGroundApples();
