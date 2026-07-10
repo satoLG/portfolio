@@ -618,6 +618,20 @@ export function playPugAnimationThenReturn(index: number): void {
     pugMixer.addEventListener('loop', _pugReturnListener as any);
 }
 
+// Dedicated top-level scene group for above-water effect sprites (radio music
+// notes + pug sleep Zs). These float above the waterline and read as foreground,
+// so the semi-transparent ocean surface must NOT blur/tint them. Keeping them in
+// their own group lets Scene.ts re-draw them AFTER the ocean surface pass (the
+// same treatment bubbles get) instead of leaving them in the main render where
+// the surface paints a blurred copy over them. Added to the scene in Scene.ts.
+export const aboveWaterParticles = new Group();
+
+/** Targets that must be re-rendered on top of the ocean surface. Empty while no
+ *  notes/Zs are alive so Scene.ts can skip the extra pass entirely. */
+export function getAboveWaterParticleTargets(): Object3D[] {
+    return aboveWaterParticles.children.length > 0 ? [aboveWaterParticles] : [];
+}
+
 // Music note particles for radio
 interface MusicNote {
     sprite: Sprite;
@@ -5085,7 +5099,7 @@ function spawnMusicNote(intensity: number): void {
     // Base opacity scales with intensity: 0.4 at silence, 0.9 at max
     const baseOpacity = 0.4 + intensity * 0.5;
     
-    radio.parent?.add(sprite);
+    aboveWaterParticles.add(sprite);
     musicNotes.push({ sprite, age: 0, lifetime, vx, vy, vz, baseOpacity });
 }
 
@@ -5203,7 +5217,7 @@ function _spawnOneZ(job: ZSpawnJob): void {
     const riseSpeed   = PUG_Z_RISE_SPEED * (0.85 + Math.random() * 0.30);
     const baseOpacity = 0.60 + Math.random() * 0.30;
 
-    pug.parent?.add(sprite);
+    aboveWaterParticles.add(sprite);
     _pugZParticles.push({
         sprite, age: 0, lifetime,
         spawnX, spawnY, spawnZ,
