@@ -114,6 +114,13 @@ let radioZoomActive = false;
 let pugZoomActive = false;
 let phoneZoomActive = false;
 let chestZoomActive = false;
+// True from the instant zoomOutFromRadio/zoomOutFromPug is called until the camera has
+// fully eased back to its default pose (X/Z, yaw, pitch, FOV). radioZoomActive/pugZoomActive
+// flip false immediately when zoom-out starts, but the camera position/orientation are
+// still mid-transition for several frames after — the underwater over/under effect and
+// bubbles key off this too (see isRadioPugZoomSettling) so they don't reappear over dry
+// land while the camera is still swinging back into its level scroll pose.
+let radioPugZoomSettling = false;
 // Cabana (tent interior) zoom — the OUTER level. The phone zoom is nested inside
 // it: phoneZoomActive can only be true while the cabana is 'inside'.
 // Phased so the entrance is cinematic: the camera first dives into the dark
@@ -276,6 +283,14 @@ export function isChestZoomActive(): boolean {
     return chestZoomActive;
 }
 
+/** True while the camera is still easing back from a radio/pug zoom-out — see
+ *  radioPugZoomSettling above. Consumers that gate on isRadioZoomActive()/
+ *  isPugZoomActive() to suppress screen-space effects during the zoom should
+ *  also gate on this to stay suppressed through the return trip. */
+export function isRadioPugZoomSettling(): boolean {
+    return radioPugZoomSettling;
+}
+
 export function isCabanaZoomActive(): boolean {
     return cabanaPhase !== 'outside';
 }
@@ -292,6 +307,7 @@ function saveAndStartZoom(): void {
     currentZoomX = savedCameraX;
     currentZoomY = savedCameraY;
     currentZoomZ = savedCameraZ;
+    radioPugZoomSettling = false;
 }
 
 // Zoom camera to focus on radio (called when expanding media player above water)
@@ -327,6 +343,7 @@ export function zoomOutFromCabana(): void {
 export function zoomOutFromRadio(): void {
     if (!radioZoomActive) return;
     radioZoomActive = false;
+    radioPugZoomSettling = true;
     targetY = savedTargetY;
 }
 
@@ -341,6 +358,7 @@ export function zoomToPug(): void {
 export function zoomOutFromPug(): void {
     if (!pugZoomActive) return;
     pugZoomActive = false;
+    radioPugZoomSettling = true;
     targetY = savedTargetY;
 }
 
@@ -378,8 +396,8 @@ export function zoomOutFromChest(): void {
 // Force-clear all zoom flags (safety valve for stuck zooms on mobile)
 function forceExitZoom(): void {
     _zoomScrollAttempts = 0;
-    if (radioZoomActive) { radioZoomActive = false; targetY = savedTargetY; }
-    if (pugZoomActive)   { pugZoomActive = false;   targetY = savedTargetY; }
+    if (radioZoomActive) { radioZoomActive = false; radioPugZoomSettling = true; targetY = savedTargetY; }
+    if (pugZoomActive)   { pugZoomActive = false;   radioPugZoomSettling = true; targetY = savedTargetY; }
     // Phone is the inner level — the cabana below owns the restore + iframe teardown.
     if (phoneZoomActive) { phoneZoomActive = false; }
     if (cabanaPhase !== 'outside'){ cabanaPhase = 'outside'; targetY = savedTargetY; unmountPhoneIframe(); }
@@ -821,6 +839,15 @@ export function Update(): void
             // Smoothly restore FOV after phone zoom
             currentFov = MathUtils.damp(currentFov, mainCameraConfig.fov, ZOOM_SMOOTH, deltaTime);
             if (Math.abs(currentFov - mainCameraConfig.fov) < 0.05) currentFov = mainCameraConfig.fov;
+
+            // Radio/pug zoom-out is fully settled once X/Z, yaw, pitch and FOV have all
+            // snapped back to their default values above — only then is it safe to let
+            // the underwater effect/bubbles resume driving off the projected ocean line.
+            if (radioPugZoomSettling &&
+                currentZoomX === mainCameraConfig.x && currentZoomZ === mainCameraConfig.z &&
+                zoomPhi === Math.PI * 2 && zoomTetha === 0 && currentFov === mainCameraConfig.fov) {
+                radioPugZoomSettling = false;
+            }
 
             if (introLoadingActive) {
                 // Pre-click: track the loading blur. Camera eases from introPreStartY

@@ -12,6 +12,7 @@ import { camera, scene, isMobile } from "../core/Scene";
 import { deltaTime, time } from "../core/Time";
 import { UNDERWATER_Y_THRESHOLD, getLineNdcY } from "./PostProcess";
 import { playDiveSound } from "../core/Audio";
+import { isRadioZoomActive, isPugZoomActive, isRadioPugZoomSettling } from "../core/Control";
 
 // ============================================
 // BUBBLE SETTINGS (tweak these!)
@@ -320,6 +321,23 @@ export function Update(): void {
     // screen (i.e. the effect is showing), not off the bottom, regardless of the
     // camera's own depth.
     isUnderwater = getLineNdcY(camera.position.y) > -1.0;
+
+    // A radio/pug zoom reframes the camera, so the projected ocean line misfires
+    // (it assumes a level scroll camera) — the same reason the tint/distortion is
+    // disabled in PostProcess. Suppress bubbles too: stop new spawns and clear any
+    // that are already alive so they don't linger against the misplaced line. Stay
+    // suppressed through the zoom-out transition (isRadioPugZoomSettling) until the
+    // camera has fully eased back — the flags below flip false the instant zoom-out
+    // starts, well before the camera actually gets there.
+    if (isRadioZoomActive() || isPugZoomActive() || isRadioPugZoomSettling()) {
+        isUnderwater = false;
+        for (let i = 0; i < bubbles.length; i++) {
+            if (bubbles[i].life > 0) {
+                bubbles[i].life = 0;
+                _opacities[i] = 0;
+            }
+        }
+    }
 
     // Update existing bubbles (physics + opacity)
     for (let i = 0; i < bubbles.length; i++) {
