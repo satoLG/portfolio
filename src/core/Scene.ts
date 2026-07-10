@@ -313,9 +313,19 @@ function renderSceneFrame(deepUnderwater: boolean, effectOnScreen: boolean): voi
     //    Moving them after the surface here is what made their blur vanish
     //    mid-scroll. (All transparents are excluded from the depth pre-pass
     //    separately, via getDepthPrePassExcluded, so foam is unaffected either way.)
-    const underwaterTransparentVis = deepUnderwater
-        ? hideTargets(getUnderwaterTransparentTargets())
-        : (effectOnScreen ? hideTargets(getBubbleTargets()) : null);
+    //  - above-water effect sprites (radio music notes / pug sleep Zs) are ALWAYS
+    //    moved after the surface: they float above the waterline near the radio/pug
+    //    and read as foreground. Left in the main render, the surface shader blurs
+    //    and tints them wherever the water sits behind them in screen space — the
+    //    reported bug. getAboveWaterParticleTargets() returns [] while none are
+    //    alive, so the extra pass is skipped when nothing is playing/sleeping.
+    const afterOceanTargets = deepUnderwater
+        ? getUnderwaterTransparentTargets()
+        : (effectOnScreen ? getBubbleTargets() : []);
+    const combinedAfterOcean = [...afterOceanTargets, ...Island.getAboveWaterParticleTargets()];
+    const underwaterTransparentVis = combinedAfterOcean.length > 0
+        ? hideTargets(combinedAfterOcean)
+        : null;
 
     // Pre-pass: capture opaque scene depth into SceneDepth's depth target so
     // the ocean shader can do depth-intersection foam in this frame. Must run
@@ -566,6 +576,10 @@ export function Start(): void
     scene.add(Island.pug);
     scene.add(Island.tent);
     scene.add(Island.chest);
+    // Above-water effect sprites (radio music notes / pug sleep Zs) — a top-level
+    // group so renderSceneFrame can re-draw it after the ocean surface pass and
+    // keep the semi-transparent water from blurring/tinting it.
+    scene.add(Island.aboveWaterParticles);
     // Procedural grass/clover meshes are added directly to the scene by Island.ts
     // via threeScene.add() inside waitForIslandMeshes(). No polling needed.
 
