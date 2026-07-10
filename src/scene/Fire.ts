@@ -5,7 +5,8 @@ import {
     SpriteMaterial,
     TextureLoader,
     Texture,
-    RepeatWrapping,
+    ClampToEdgeWrapping,
+    LinearFilter,
     SRGBColorSpace,
     PlaneGeometry,
     ShaderMaterial,
@@ -81,8 +82,20 @@ function createFireSprite(): Sprite {
         isMobile ? 'images/fire_spritesheet_mobile.png' : 'images/fire_spritesheet.png'
     );
     _fireSpriteTex.colorSpace  = SRGBColorSpace;
-    _fireSpriteTex.wrapS       = RepeatWrapping;
-    _fireSpriteTex.wrapT       = RepeatWrapping;
+    // Spritesheet sampling: each visible frame is one cell of a 9x6 grid, selected
+    // by scrolling repeat/offset. Two defaults would bleed neighbouring frames in
+    // and read as the fire flickering the "wrong" frames:
+    //   - mipmaps average adjacent cells together at minified sizes, haloing every
+    //     flame edge with a ghost of the next frame — so disable them + use a plain
+    //     linear filter (each frame samples cleanly, no cross-cell pyramid blend).
+    //   - RepeatWrapping makes the bilinear tap at a frame's outer edge wrap to the
+    //     opposite edge of the whole sheet (col 0 pulls in col 8, etc). Clamp-to-edge
+    //     keeps that tap inside the current frame instead.
+    _fireSpriteTex.generateMipmaps = false;
+    _fireSpriteTex.minFilter   = LinearFilter;
+    _fireSpriteTex.magFilter   = LinearFilter;
+    _fireSpriteTex.wrapS       = ClampToEdgeWrapping;
+    _fireSpriteTex.wrapT       = ClampToEdgeWrapping;
     _fireSpriteTex.repeat.set(1 / SPRITE_COLS, 1 / SPRITE_ROWS);
     // Start at frame 0 — top-left cell; Three.js UV origin is bottom-left so flip Y
     _fireSpriteTex.offset.set(0, (SPRITE_ROWS - 1) / SPRITE_ROWS);
