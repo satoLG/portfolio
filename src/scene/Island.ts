@@ -2065,11 +2065,22 @@ const oceanLightingFragment = /*glsl*/`
     vec3 viewVec = worldPos - cameraPosition;
     float viewLen = length(viewVec);
     vec3 viewDir = viewVec / viewLen;
+    // Both branches below divide by viewDir.y to find where the view ray
+    // crosses y = 0. Now that both run unconditionally (for the smooth blend),
+    // that division executes for every fragment, including ones where the
+    // camera looks near-horizontal (viewDir.y ~ 0) — e.g. the tree trunk, tent,
+    // radio, all sitting well above the waterline. Left unguarded that's a
+    // divide-by-near-zero producing NaN/Inf, and mix(NaN, b, 1.0) still yields
+    // NaN (0 * NaN = NaN per IEEE754) even when the blend factor should fully
+    // discard it — rendering as a black line at the camera's eye-level, cutting
+    // through the whole scene regardless of depth. Clamp the denominator away
+    // from zero to keep the division finite.
+    float safeViewDirY = viewDir.y >= 0.0 ? max(viewDir.y, 1e-4) : min(viewDir.y, -1e-4);
 
     // Above-water result: aerial fog toward the horizon.
     float fogStartLen = viewLen;
     if (cameraPosition.y < 0.0) {
-        fogStartLen -= cameraPosition.y / -viewDir.y;
+        fogStartLen -= cameraPosition.y / -safeViewDirY;
     }
     float aboveFog = clamp(fogStartLen / FOG_DISTANCE, 0.0, 1.0);
     aboveFog = aboveFog * aboveFog;
@@ -2082,7 +2093,7 @@ const oceanLightingFragment = /*glsl*/`
     float uwLen = viewLen;
     float originY = cameraPosition.y;
     if (cameraPosition.y > 0.0) {
-        uwLen -= cameraPosition.y / -viewDir.y;
+        uwLen -= cameraPosition.y / -safeViewDirY;
         originY = 0.0;
     }
     uwLen = min(uwLen, uFogDist);
