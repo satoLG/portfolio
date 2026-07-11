@@ -148,6 +148,17 @@ export function registerCabanaInterior(load: () => void, isReady: () => boolean)
     _cabanaInteriorReady = isReady;
 }
 
+// Chest-close bridge — Island owns the chest's lid animation/mixer, but Control
+// can clear chestZoomActive through more than one path (click-outside AND the
+// forceExitZoom stuck-zoom safety valve after repeated scroll attempts). Without
+// this, forceExitZoom silently dropped the flag while the lid stayed visually
+// open — the zoom-out fired but the close animation never played. Registering the
+// callback here guarantees every path that ends a chest zoom also closes the lid.
+let _chestClose: (() => void) | null = null;
+export function registerChestClose(close: () => void): void {
+    _chestClose = close;
+}
+
 // Reveal trigger distance — mutable so the debug GUI can dial it in live.
 export const cabanaRevealConfig = { arriveDist: cabanaArriveDist };
 
@@ -408,12 +419,13 @@ export function zoomToChest(): void {
     chestZoomActive = true;
 }
 
-// Zoom out from chest
+// Zoom out from chest. Always closes the lid too — see registerChestClose above.
 export function zoomOutFromChest(): void {
     if (!chestZoomActive) return;
     chestZoomActive = false;
     zoomReturnSettling = true;
     targetY = savedTargetY;
+    _chestClose?.();
 }
 
 // Force-clear all zoom flags (safety valve for stuck zooms on mobile)
@@ -424,7 +436,7 @@ function forceExitZoom(): void {
     // Phone is the inner level — the cabana below owns the restore + iframe teardown.
     if (phoneZoomActive) { phoneZoomActive = false; }
     if (cabanaPhase !== 'outside'){ cabanaPhase = 'outside'; targetY = savedTargetY; unmountPhoneIframe(); }
-    if (chestZoomActive) { chestZoomActive = false;  zoomReturnSettling = true; targetY = savedTargetY; }
+    if (chestZoomActive) { chestZoomActive = false;  zoomReturnSettling = true; targetY = savedTargetY; _chestClose?.(); }
 }
 
 // Get saved camera position (for calculating where radio will be after zoomout)
