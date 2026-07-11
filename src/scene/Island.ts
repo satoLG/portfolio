@@ -11,7 +11,7 @@ import {
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../core/Time";
 import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../core/MediaPlayer";
-import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive, zoomToCabana, isCabanaZoomActive, getCabanaPhase, registerCabanaInterior, touchControls } from "../core/Control";
+import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive, zoomToCabana, isCabanaZoomActive, getCabanaPhase, registerCabanaInterior, registerChestClose, touchControls } from "../core/Control";
 import { cabanaShadeX, cabanaShadeY, cabanaShadeZ, cabanaShadeRadiusX, cabanaShadeRadiusY, cabanaShadeRadiusZ, cabanaShadeEdge, cabanaShadeColor, cabanaShadeStrength, cabanaShadeRevealSpeed, cabanaShadeCoverSpeed, cabanaDomeX, cabanaDomeY, cabanaDomeZ, cabanaDomeRadius, cabanaDomeColor, cabanaDomeOpacity } from "./config/CabanaConfig";
 import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../core/Dialog";
 import * as CoinTooltip from '../core/CoinTooltip';
@@ -3537,6 +3537,9 @@ export function Start(): void {
 
     // Setup chest click/hover interaction (underwater)
     setupChestInteraction();
+    // Let Control close the lid whenever it ends a chest zoom, even via paths
+    // that don't go through onChestClick (e.g. the stuck-zoom safety valve).
+    registerChestClose(closeChest);
 
     // Setup coin hover/tap tooltips
     setupCoinInteraction();
@@ -4382,11 +4385,11 @@ function setupChestInteraction(): void {
         // Ignore if another zoom is active (radio, pug, phone)
         if (isRadioZoomActive() || isPugZoomActive() || isPhoneZoomActive()) return;
 
-        // If already zoomed into chest, click outside a coin → close + zoom out
+        // If already zoomed into chest, click outside a coin → zoom out (which
+        // closes the lid too, via the registerChestClose bridge in Control).
         if (isChestZoomActive()) {
             // Check if a coin was tapped — if so, let the coin handler deal with it
             if (_hitAnyCoin(clientX, clientY)) return;
-            closeChest();
             zoomOutFromChest();
             return;
         }
