@@ -121,6 +121,16 @@ let chestZoomActive = false;
 // bubbles key off this too (see isRadioPugZoomSettling) so they don't reappear over dry
 // land while the camera is still swinging back into its level scroll pose.
 let radioPugZoomSettling = false;
+// True from the instant zoomOutFromRadio/zoomOutFromPug/zoomOutFromChest is called
+// until the camera has fully eased back to its default pose (X/Z, yaw, pitch, FOV).
+// Unlike radioPugZoomSettling (which only gates the underwater visual effect for
+// radio/pug), this gates SCROLL specifically for every zoom type that flips its
+// active flag off immediately but still animates the camera back for several
+// frames — without it, clicking away from the radio/chest to start the zoom-out
+// let native/camera scroll resume mid-flight, since only the *Active flags were
+// checked. Cabana doesn't need this: cabanaPhase stays 'exiting' (non-'outside')
+// for the whole return trip, so it's already covered by the zoom-flag check below.
+let zoomReturnSettling = false;
 // Cabana (tent interior) zoom — the OUTER level. The phone zoom is nested inside
 // it: phoneZoomActive can only be true while the cabana is 'inside'.
 // Phased so the entrance is cinematic: the camera first dives into the dark
@@ -291,6 +301,12 @@ export function isRadioPugZoomSettling(): boolean {
     return radioPugZoomSettling;
 }
 
+/** True while the camera is still easing back from any radio/pug/chest zoom-out —
+ *  see zoomReturnSettling above. Used to keep scroll blocked through the return trip. */
+export function isZoomReturnSettling(): boolean {
+    return zoomReturnSettling;
+}
+
 export function isCabanaZoomActive(): boolean {
     return cabanaPhase !== 'outside';
 }
@@ -308,6 +324,7 @@ function saveAndStartZoom(): void {
     currentZoomY = savedCameraY;
     currentZoomZ = savedCameraZ;
     radioPugZoomSettling = false;
+    zoomReturnSettling = false;
 }
 
 // Zoom camera to focus on radio (called when expanding media player above water)
@@ -344,6 +361,7 @@ export function zoomOutFromRadio(): void {
     if (!radioZoomActive) return;
     radioZoomActive = false;
     radioPugZoomSettling = true;
+    zoomReturnSettling = true;
     targetY = savedTargetY;
 }
 
@@ -359,6 +377,7 @@ export function zoomOutFromPug(): void {
     if (!pugZoomActive) return;
     pugZoomActive = false;
     radioPugZoomSettling = true;
+    zoomReturnSettling = true;
     targetY = savedTargetY;
 }
 
@@ -390,18 +409,19 @@ export function zoomToChest(): void {
 export function zoomOutFromChest(): void {
     if (!chestZoomActive) return;
     chestZoomActive = false;
+    zoomReturnSettling = true;
     targetY = savedTargetY;
 }
 
 // Force-clear all zoom flags (safety valve for stuck zooms on mobile)
 function forceExitZoom(): void {
     _zoomScrollAttempts = 0;
-    if (radioZoomActive) { radioZoomActive = false; radioPugZoomSettling = true; targetY = savedTargetY; }
-    if (pugZoomActive)   { pugZoomActive = false;   radioPugZoomSettling = true; targetY = savedTargetY; }
+    if (radioZoomActive) { radioZoomActive = false; radioPugZoomSettling = true; zoomReturnSettling = true; targetY = savedTargetY; }
+    if (pugZoomActive)   { pugZoomActive = false;   radioPugZoomSettling = true; zoomReturnSettling = true; targetY = savedTargetY; }
     // Phone is the inner level — the cabana below owns the restore + iframe teardown.
     if (phoneZoomActive) { phoneZoomActive = false; }
     if (cabanaPhase !== 'outside'){ cabanaPhase = 'outside'; targetY = savedTargetY; unmountPhoneIframe(); }
-    if (chestZoomActive) { chestZoomActive = false;  targetY = savedTargetY; }
+    if (chestZoomActive) { chestZoomActive = false;  zoomReturnSettling = true; targetY = savedTargetY; }
 }
 
 // Get saved camera position (for calculating where radio will be after zoomout)
@@ -451,14 +471,14 @@ export function handleScroll(deltaY: number): void {
     // Dragging the underwater card carousel — the horizontal swipe's vertical
     // component must not also scroll the camera (covers wheel + touch paths).
     if (isCarouselDragging()) return;
-    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside') {
+    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside' || zoomReturnSettling) {
         // Safety: user is trying to scroll while a zoom flag is active.
         // Increment a counter — if they keep scrolling, force-clear the stuck zoom.
         _zoomScrollAttempts++;
         if (_zoomScrollAttempts > 3) {
             forceExitZoom();
         }
-        return;  // Block scroll during zoom
+        return;  // Block scroll during zoom (and during the zoom-out return animation)
     }
     _zoomScrollAttempts = 0;
     if (webPageMode) {
@@ -468,13 +488,15 @@ export function handleScroll(deltaY: number): void {
 }
 
 export function isSceneScrollEnabled(): boolean {
-    // Also reports "disabled" during a dialog or any zoom so Input.ts preventDefaults
-    // wheel / touchmove events — no native page scroll or rubber-banding while
-    // talking or zoomed into the pug/radio/phone/chest. Mirrors the flag check in
-    // handleScroll() above, which previously only stopped the internal camera and
-    // let native scroll leak through for zooms that don't open a dialog (radio, chest).
+    // Also reports "disabled" during a dialog, any active zoom, or the zoom-out
+    // return animation (zoomReturnSettling) so Input.ts preventDefaults wheel /
+    // touchmove events — no native page scroll or rubber-banding while talking,
+    // zoomed into the pug/radio/phone/chest, or still easing back out of one.
+    // Mirrors the flag check in handleScroll() above, which previously only
+    // stopped the internal camera and let native scroll leak through for zooms
+    // that don't open a dialog (radio, chest) or during the return trip.
     return scrollEnabled && !isDialogActive() &&
-        !(radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside');
+        !(radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside' || zoomReturnSettling);
 }
 
 declare global {
@@ -851,6 +873,11 @@ export function Update(): void
                 currentZoomX === mainCameraConfig.x && currentZoomZ === mainCameraConfig.z &&
                 zoomPhi === Math.PI * 2 && zoomTetha === 0 && currentFov === mainCameraConfig.fov) {
                 radioPugZoomSettling = false;
+            }
+            if (zoomReturnSettling &&
+                currentZoomX === mainCameraConfig.x && currentZoomZ === mainCameraConfig.z &&
+                zoomPhi === Math.PI * 2 && zoomTetha === 0 && currentFov === mainCameraConfig.fov) {
+                zoomReturnSettling = false;
             }
 
             if (introLoadingActive) {
