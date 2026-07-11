@@ -22,11 +22,7 @@
  *      must be added to the scene BEFORE genericFishContainer — sortObjects is
  *      false, so add-order decides draw order and the depthWrite:false jellies
  *      must blend over the holes, not be erased by a later punch.
- *   5. Jellyfish lighting: every frame each card samples the active jellyfish
- *      PointLights (position/color/intensity from Fish.ts) and tints its border
- *      color + inner/outer glow toward the nearest jelly's color — the CSS3D
- *      plane visibly reacts to the bioluminescence at night.
- *   6. The underwater post-process distortion would displace the punched holes
+ *   5. The underwater post-process distortion would displace the punched holes
  *      while the DOM behind stays still, shearing the ink. PostProcess exposes a
  *      "quiet rect" (setDistortionQuietRect) that damps distortion over the
  *      carousel strip; the residual wobble stays inside the mask dilation.
@@ -43,7 +39,6 @@
 import { CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer';
 import {
     CanvasTexture,
-    Color,
     DoubleSide,
     Group,
     LinearFilter,
@@ -59,7 +54,6 @@ import {
 // import cycle this project already uses (see the alias note in Fish.ts).
 import { CSS_SCALE, camera, renderer } from '../core/Scene';
 import { getIsUnderwater, isChestZoomActive } from '../core/Control';
-import { getActiveJellyLights } from '../scene/Fish';
 import { deltaTime, time } from '../core/Time';
 import { setDistortionQuietRect } from './PostProcess';
 
@@ -119,10 +113,6 @@ const VEL_TILT_DEG_PER_PXS = 0.004; // cards lean into a swipe
 const VEL_TILT_MAX_DEG = 5;
 const HOVER_SCALE = 1.045;
 const SCALE_SMOOTH = 10;           // damp speed for hover scale
-
-// Jellyfish light response
-const JELLY_GLOW_REACH = 2.4;      // world units — visual reach (> light.distance for a soft falloff)
-const JELLY_TINT_MAX = 0.6;        // max border tint toward the jelly colour
 
 // Grab band: vertical world-strip (in card px) around the row where a drag may start
 const GRAB_BAND_PX = CARD_H / 2 + 36;
@@ -194,8 +184,6 @@ interface CardState {
     rotPhase: number;
     scale: number;          // current smoothed scale
     clickPulse: number;     // 1 → 0 flash on click
-    lastGlowKey: string;    // avoids per-frame box-shadow string churn
-    glowColor: Color;       // scratch
 }
 
 let _initialized = false;
@@ -362,8 +350,6 @@ export function Start(glScene: ThreeScene, cssScene: ThreeScene): void {
             rotPhase: Math.random() * Math.PI * 2,
             scale: 1,
             clickPulse: 0,
-            lastGlowKey: '',
-            glowColor: new Color(),
         });
     }
 
@@ -449,62 +435,9 @@ export function Update(): void {
         const sw = (CARD_W + 2 * MASK_MARGIN) / PX_PER_UNIT;
         const sh = (CARD_H + 2 * MASK_MARGIN) / PX_PER_UNIT;
         card.mesh.scale.set(sw * card.scale, sh * card.scale, 1);
-
-        updateJellyGlow(card, xPx);
     }
 
     updateQuietRect();
-}
-
-// ─── Jellyfish lighting → CSS glow ───────────────────────────────────────────
-
-function updateJellyGlow(card: CardState, xPx: number): void {
-    const cardWorldX = PLANE_X + xPx / PX_PER_UNIT;
-    let influence = 0;
-    let r = 0, g = 0, b = 0;
-
-    const lights = getActiveJellyLights();
-    for (let i = 0; i < lights.length; i++) {
-        const jl = lights[i];
-        const dx = jl.x - cardWorldX;
-        const dy = jl.y - PLANE_Y;
-        const dz = jl.z - PLANE_Z;
-        const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        const fall = Math.max(0, 1 - d / JELLY_GLOW_REACH);
-        const w = (jl.intensity / 3) * fall * fall;
-        if (w <= 0) continue;
-        influence += w;
-        r += jl.color.r * w;
-        g += jl.color.g * w;
-        b += jl.color.b * w;
-    }
-
-    if (influence > 0.001) {
-        card.glowColor.setRGB(r / influence, g / influence, b / influence);
-    } else {
-        card.glowColor.setRGB(0.6, 0.85, 1.0); // neutral cool glow when no jelly is near
-    }
-    influence = Math.min(influence, 1);
-
-    // Quantise so the style strings only rebuild on a visible change.
-    const key = `${Math.round(influence * 40)}|${Math.round(card.glowColor.r * 20)},${Math.round(card.glowColor.g * 20)},${Math.round(card.glowColor.b * 20)}`;
-    if (key === card.lastGlowKey) return;
-    card.lastGlowKey = key;
-
-    const tintK = JELLY_TINT_MAX * influence;
-    const cr = Math.round(MathUtils.lerp(255, card.glowColor.r * 255, tintK));
-    const cg = Math.round(MathUtils.lerp(255, card.glowColor.g * 255, tintK));
-    const cb = Math.round(MathUtils.lerp(255, card.glowColor.b * 255, tintK));
-    const gr = Math.round(card.glowColor.r * 255);
-    const gg = Math.round(card.glowColor.g * 255);
-    const gb = Math.round(card.glowColor.b * 255);
-
-    card.el.style.borderColor = `rgba(${cr}, ${cg}, ${cb}, 0.92)`;
-    const outer = (0.4 + 0.5 * influence).toFixed(3);
-    const inner = (0.3 + 0.4 * influence).toFixed(3);
-    card.el.style.boxShadow =
-        `0 0 ${Math.round((9 + 10 * influence) * DOM_SS)}px rgba(${gr}, ${gg}, ${gb}, ${outer}), ` +
-        `inset 0 0 ${Math.round((8 + 8 * influence) * DOM_SS)}px rgba(${gr}, ${gg}, ${gb}, ${inner})`;
 }
 
 // ─── Distortion quiet rect ────────────────────────────────────────────────────

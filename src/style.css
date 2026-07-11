@@ -2962,7 +2962,6 @@ body.day-mode .css3d-panel-content .ct-body {
     -webkit-font-smoothing: antialiased;
     will-change: transform;
     pointer-events: none;
-    /* Base glow — overwritten per-frame by the jellyfish-light response */
     box-shadow:
         0 0 36px rgba(153, 217, 255, 0.4),
         inset 0 0 32px rgba(153, 217, 255, 0.3);
