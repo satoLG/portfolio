@@ -468,9 +468,13 @@ export function handleScroll(deltaY: number): void {
 }
 
 export function isSceneScrollEnabled(): boolean {
-    // Also reports "disabled" during a dialog so Input.ts preventDefaults wheel /
-    // touchmove events — no native page scroll or rubber-banding while talking.
-    return scrollEnabled && !isDialogActive();
+    // Also reports "disabled" during a dialog or any zoom so Input.ts preventDefaults
+    // wheel / touchmove events — no native page scroll or rubber-banding while
+    // talking or zoomed into the pug/radio/phone/chest. Mirrors the flag check in
+    // handleScroll() above, which previously only stopped the internal camera and
+    // let native scroll leak through for zooms that don't open a dialog (radio, chest).
+    return scrollEnabled && !isDialogActive() &&
+        !(radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside');
 }
 
 declare global {
