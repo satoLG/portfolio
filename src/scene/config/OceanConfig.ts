@@ -66,7 +66,7 @@ export const surfaceWaveSteepness   = 0.2000; // blend of the cross wave layer �
 
 // ── Ocean Surface ─────────────────────────────────────────────────────────────
 export const surfaceColor   = { r: 0.0000, g: 1.1800, b: 1.1700 }; // RGB tint (1,1,1 = no tint)
-export const surfaceOpacity = 0.7930;
+export const surfaceOpacity = 0.8500;
 export const waterBlurStrength = 0.0240;
 export const waterBlurRadius   = 3.0000;
 export const waterBlurOpacity  = 0.3500;

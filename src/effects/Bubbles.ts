@@ -28,10 +28,8 @@ export const BUBBLE_SPAWN_RATE = 0.02;    // Seconds between cursor-trail spawns
 export const BUBBLE_SPAWN_DISTANCE = 0.8; // Distance from camera to spawn
 export const BUBBLE_HORIZONTAL_SPREAD = 1.9; // NDC width the ambient bubbles seed across (screen-wide)
 export const BUBBLE_DEPTH_SPREAD = 0.5;   // World-unit forward/back jitter so bubbles aren't coplanar
-export const BUBBLE_LINE_FADE_BAND = 0.08; // NDC band below the ocean line over which a rising bubble fades out before popping at it
+export const BUBBLE_LINE_FADE_BAND = 0.10; // NDC band below the ocean line over which a rising bubble fades out before popping at it
 export const BUBBLE_LINE_CLIP_MARGIN = 0.03; // Extra NDC below the line's ripple crest where bubbles pop — guarantees they vanish *before* touching the line
-export const BUBBLE_SPAWN_LINE_MARGIN = 0.15; // Bubbles may be seeded up to this far below the line (short-path bubbles keep the band under the line populated)
-export const BUBBLE_FADE_IN_TIME = 0.12;  // Seconds a fresh bubble takes to ramp from 0 → full opacity (so it materialises instead of popping in)
 
 // Ambient underwater bubbles are kept at a target *live count* rather than
 // spawned on a fixed timer. Because every bubble pops when it reaches the ocean
@@ -274,24 +272,22 @@ function getSpawnPositionAtNDC(ndcX: number, ndcY: number): Vector3 {
     return _spawnPos;
 }
 
-// Spawn a single ambient bubble at a random height across the *whole* visible
-// underwater column — from just below the bottom edge up to a hair under the
-// ocean line — at a random horizontal position. Seeding the upper part of the
-// column (not just the bottom) is what keeps the band right below the line
-// populated: those bubbles just have a short path before they fade out at the
-// line, which is fine. A brief fade-in (see Update) stops them from popping in.
+// Spawn a single ambient bubble just below the screen's bottom edge, at a random
+// horizontal position, so it always rises up INTO frame from below the camera's
+// view and keeps going as far as it can before fading out at the ocean line —
+// never popping into existence mid-screen.
+//
+// NOTE: this is a screen-space effect. There is deliberately no world-space
+// `pos.y < 0` gate here: at the moment you first see underwater the camera is
+// still ABOVE the water plane, so the bottom-of-screen world point is above y=0.
+// Gating on it (as before) suppressed every bubble exactly when the tint first
+// appears — the bug where "no bubbles show until you descend further". Spawning
+// is already gated on `isUnderwater` (the tint line being on screen), which is
+// the correct screen-space condition; the rise is then clipped at the line.
 function spawnAmbientBubble(): void {
     const ndcX = (Math.random() - 0.5) * BUBBLE_HORIZONTAL_SPREAD;
-
-    const lineNdc = getLineNdcY(camera.position.y);
-    const bottom = -1.1;                               // just below the screen's bottom edge
-    const top = Math.max(bottom, lineNdc - BUBBLE_SPAWN_LINE_MARGIN); // a hair below the line (never above `bottom`)
-    const ndcY = bottom + Math.random() * (top - bottom);
-    const pos = getSpawnPositionAtNDC(ndcX, ndcY);
-
-    if (pos.y < UNDERWATER_Y_THRESHOLD) {
-        spawnBubble(pos);
-    }
+    const ndcY = -1.05 - Math.random() * 0.25;   // strictly below the bottom edge
+    spawnBubble(getSpawnPositionAtNDC(ndcX, ndcY));
 }
 
 function getSpawnPosition(): Vector3 | null {
@@ -365,12 +361,9 @@ export function Update(): void {
         // Age
         b.life -= deltaTime;
 
-        // Age-based fade, plus a quick fade-IN at the start of life so a bubble
-        // seeded high in the column materialises gently instead of popping into
-        // existence.
+        // Age-based fade
         const lifeRatio = b.life / b.maxLife;
-        const fadeIn = Math.min(1.0, (b.maxLife - b.life) / BUBBLE_FADE_IN_TIME);
-        let opacity = Math.max(0.0, Math.min(0.6, lifeRatio * 1.5)) * fadeIn;
+        let opacity = Math.max(0.0, Math.min(0.6, lifeRatio * 1.5));
 
         // Screen-space clip to the ocean line (the top of the effect): fade the
         // bubble out as it approaches the line and pop it the instant it reaches
@@ -440,9 +433,12 @@ export function Update(): void {
             const dy = mousePosition.y - lastMousePosition.y;
             const mouseDelta = Math.sqrt(dx * dx + dy * dy);
 
-            if (mouseDelta > 3 && time - lastSpawnTime > BUBBLE_SPAWN_RATE) {
+            // Only trail bubbles when the cursor is below the ocean line on screen
+            // (inside the tinted region) — screen-space, same basis as the clip.
+            const cursorNdcY = -((mousePosition.y / window.innerHeight) * 2 - 1);
+            if (mouseDelta > 3 && time - lastSpawnTime > BUBBLE_SPAWN_RATE && cursorNdcY < clipLineNdcY) {
                 const pos = getSpawnPosition();
-                if (pos && pos.y < UNDERWATER_Y_THRESHOLD) {
+                if (pos) {
                     spawnBubble(pos);
                     lastSpawnTime = time;
                 }
