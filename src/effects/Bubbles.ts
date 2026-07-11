@@ -11,26 +11,27 @@ import {
 import { camera, scene, isMobile } from "../core/Scene";
 import { deltaTime, time } from "../core/Time";
 import { UNDERWATER_Y_THRESHOLD, getLineNdcY } from "./PostProcess";
+import { underwaterLineEdge } from "../scene/config/OceanConfig";
 import { playDiveSound } from "../core/Audio";
 import { isRadioZoomActive, isPugZoomActive, isRadioPugZoomSettling } from "../core/Control";
 
 // ============================================
 // BUBBLE SETTINGS (tweak these!)
 // ============================================
-export const BUBBLE_COUNT = 200;           // Max bubbles at once
-export const BUBBLE_SIZE_MIN = 0.005;     // Minimum bubble radius
-export const BUBBLE_SIZE_MAX = 0.015;     // Maximum bubble radius
+export const BUBBLE_COUNT = 320;          // Max bubbles at once (InstancedMesh — 1 draw call regardless of count)
+export const BUBBLE_SIZE_MIN = 0.0025;    // Minimum bubble radius
+export const BUBBLE_SIZE_MAX = 0.008;     // Maximum bubble radius
 export const BUBBLE_RISE_SPEED = 0.3;     // How fast bubbles rise
 export const BUBBLE_WOBBLE = 0.08;        // Horizontal wobble amount
 export const BUBBLE_LIFETIME = 2.5;       // Seconds before fade
 export const BUBBLE_SPAWN_RATE = 0.02;    // Seconds between spawns
 export const BUBBLE_SPAWN_DISTANCE = 0.8; // Distance from camera to spawn
-export const BUBBLE_SPREAD = 0.25;        // Random spread at spawn
+export const BUBBLE_SPREAD = 0.4;         // Random spread at spawn
 export const BUBBLE_LINE_FADE_BAND = 0.18; // NDC band below the ocean line over which a rising bubble fades out before popping at it
 
 // Ambient underwater bubble settings
-export const AMBIENT_BUBBLE_INTERVAL = 1.4;   // Seconds between ambient bubble groups
-export const AMBIENT_BUBBLE_GROUP_SIZE = 6;    // Bubbles per ambient group
+export const AMBIENT_BUBBLE_INTERVAL = 1.0;   // Seconds between ambient bubble groups
+export const AMBIENT_BUBBLE_GROUP_SIZE = 7;    // Bubbles per ambient group
 export const AMBIENT_SOUND_INTERVAL = 10.0;   // Seconds between bubble sounds
 export const ENTRY_BUBBLE_COUNT = 24;          // Total bubbles to spawn when entering water
 const ENTRY_BUBBLE_PER_FRAME = 6;                 // Bubbles to spawn per frame (stagger the burst)
@@ -263,13 +264,13 @@ function getSpawnPositionAtNDC(ndcX: number, ndcY: number): Vector3 {
 // Spawn a small group of ambient bubbles just below the visible bottom edge
 // so they drift up into frame instead of popping into existence mid-screen.
 function spawnAmbientBubbleGroup(): void {
-    const ndcX = (Math.random() - 0.5) * 1.4;
+    const ndcX = (Math.random() - 0.5) * 1.8;
     const ndcY = -1.0 - Math.random() * 0.15;
 
-    // Spawn bubbles close together using the constant
+    // Spawn bubbles spread apart (rather than clumped) using the constant
     for (let i = 0; i < AMBIENT_BUBBLE_GROUP_SIZE; i++) {
-        const offsetX = ndcX + (Math.random() - 0.5) * 0.2;
-        const offsetY = ndcY + (Math.random() - 0.5) * 0.2;
+        const offsetX = ndcX + (Math.random() - 0.5) * 0.5;
+        const offsetY = ndcY + (Math.random() - 0.5) * 0.3;
         const pos = getSpawnPositionAtNDC(offsetX, offsetY);
 
         if (pos.y < UNDERWATER_Y_THRESHOLD) {
@@ -317,10 +318,12 @@ export function Update(): void {
     if (!initialized || !_instMesh) return;
 
     // Same source of truth as the screen-space over/under effect (PostProcess.ts):
-    // the ocean line's projected screen row. Bubbles run whenever that line is on
-    // screen (i.e. the effect is showing), not off the bottom, regardless of the
-    // camera's own depth.
-    isUnderwater = getLineNdcY(camera.position.y) > -1.0;
+    // the ocean line's projected screen row. The tint itself is a soft smoothstep
+    // band `underwaterLineEdge` wide, so the bottom of the screen already reads as
+    // underwater once the line is within that band of the bottom edge (NDC -1) —
+    // not only once it fully crosses it. Match that so bubbles start as soon as the
+    // tint is visible, instead of lagging behind it.
+    isUnderwater = getLineNdcY(camera.position.y) > -1.0 - underwaterLineEdge;
 
     // A radio/pug zoom reframes the camera, so the projected ocean line misfires
     // (it assumes a level scroll camera) — the same reason the tint/distortion is
