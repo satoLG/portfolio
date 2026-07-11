@@ -28,15 +28,18 @@ export const BUBBLE_SPAWN_RATE = 0.02;    // Seconds between cursor-trail spawns
 export const BUBBLE_SPAWN_DISTANCE = 0.8; // Distance from camera to spawn
 export const BUBBLE_HORIZONTAL_SPREAD = 1.9; // NDC width the ambient bubbles seed across (screen-wide)
 export const BUBBLE_DEPTH_SPREAD = 0.5;   // World-unit forward/back jitter so bubbles aren't coplanar
-export const BUBBLE_LINE_FADE_BAND = 0.16; // NDC band below the ocean line over which a rising bubble fades out before popping at it
+export const BUBBLE_LINE_FADE_BAND = 0.08; // NDC band below the ocean line over which a rising bubble fades out before popping at it
+export const BUBBLE_LINE_CLIP_MARGIN = 0.03; // Extra NDC below the line's ripple crest where bubbles pop — guarantees they vanish *before* touching the line
+export const BUBBLE_SPAWN_LINE_MARGIN = 0.15; // Bubbles may be seeded up to this far below the line (short-path bubbles keep the band under the line populated)
+export const BUBBLE_FADE_IN_TIME = 0.12;  // Seconds a fresh bubble takes to ramp from 0 → full opacity (so it materialises instead of popping in)
 
 // Ambient underwater bubbles are kept at a target *live count* rather than
 // spawned on a fixed timer. Because every bubble pops when it reaches the ocean
 // line, a fixed spawn rate looks sparse when the line sits low on screen (short
 // travel → fast turnover) and dense when it sits high. Targeting a live count
 // instead keeps the density constant at any camera depth.
-export const BUBBLE_TARGET_DENSITY = 50;  // Live ambient bubbles when the screen is fully underwater
-export const BUBBLE_TARGET_MIN = 13;      // Floor as soon as any water shows (keeps shallow views populated)
+export const BUBBLE_TARGET_DENSITY = 25;  // Live ambient bubbles when the screen is fully underwater
+export const BUBBLE_TARGET_MIN = 7;       // Floor as soon as any water shows (keeps shallow views populated)
 const BUBBLE_SPAWN_PER_FRAME = 5;         // Cap on new ambient bubbles per frame (staggers the fill)
 export const AMBIENT_SOUND_INTERVAL = 10.0;   // Seconds between bubble sounds
 // ============================================
@@ -271,11 +274,19 @@ function getSpawnPositionAtNDC(ndcX: number, ndcY: number): Vector3 {
     return _spawnPos;
 }
 
-// Spawn a single ambient bubble below the visible bottom edge, at a random
-// horizontal position, so it drifts up into frame instead of appearing mid-screen.
+// Spawn a single ambient bubble at a random height across the *whole* visible
+// underwater column — from just below the bottom edge up to a hair under the
+// ocean line — at a random horizontal position. Seeding the upper part of the
+// column (not just the bottom) is what keeps the band right below the line
+// populated: those bubbles just have a short path before they fade out at the
+// line, which is fine. A brief fade-in (see Update) stops them from popping in.
 function spawnAmbientBubble(): void {
     const ndcX = (Math.random() - 0.5) * BUBBLE_HORIZONTAL_SPREAD;
-    const ndcY = -1.05 - Math.random() * 0.25;   // strictly below the bottom edge
+
+    const lineNdc = getLineNdcY(camera.position.y);
+    const bottom = -1.1;                               // just below the screen's bottom edge
+    const top = Math.max(bottom, lineNdc - BUBBLE_SPAWN_LINE_MARGIN); // a hair below the line (never above `bottom`)
+    const ndcY = bottom + Math.random() * (top - bottom);
     const pos = getSpawnPositionAtNDC(ndcX, ndcY);
 
     if (pos.y < UNDERWATER_Y_THRESHOLD) {
@@ -326,9 +337,9 @@ export function Update(): void {
 
     // The clip line: the rendered ocean line ripples up to `underwaterLineWobbleGain`
     // above the base line (getLineNdcY returns the un-rippled base). Clip at the
-    // *crest* of that ripple so a rising bubble pops before it can ever peek above
-    // the visible line at any column, at any camera height.
-    const clipLineNdcY = getLineNdcY(camera.position.y) - underwaterLineWobbleGain;
+    // *crest* of that ripple, plus an extra margin, so a rising bubble pops a bit
+    // BEFORE it can ever reach the visible line at any column or camera height.
+    const clipLineNdcY = getLineNdcY(camera.position.y) - underwaterLineWobbleGain - BUBBLE_LINE_CLIP_MARGIN;
 
     // Update existing bubbles (physics + opacity), tallying the live count so the
     // spawner below can top the population back up to its target.
@@ -354,9 +365,12 @@ export function Update(): void {
         // Age
         b.life -= deltaTime;
 
-        // Age-based fade
+        // Age-based fade, plus a quick fade-IN at the start of life so a bubble
+        // seeded high in the column materialises gently instead of popping into
+        // existence.
         const lifeRatio = b.life / b.maxLife;
-        let opacity = Math.max(0.0, Math.min(0.6, lifeRatio * 1.5));
+        const fadeIn = Math.min(1.0, (b.maxLife - b.life) / BUBBLE_FADE_IN_TIME);
+        let opacity = Math.max(0.0, Math.min(0.6, lifeRatio * 1.5)) * fadeIn;
 
         // Screen-space clip to the ocean line (the top of the effect): fade the
         // bubble out as it approaches the line and pop it the instant it reaches
