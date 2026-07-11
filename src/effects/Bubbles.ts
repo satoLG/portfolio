@@ -21,8 +21,8 @@ import { isRadioZoomActive, isPugZoomActive, isRadioPugZoomSettling } from "../c
 export const BUBBLE_COUNT = 360;          // Instance pool size (InstancedMesh — 1 draw call regardless of count)
 export const BUBBLE_SIZE_MIN = 0.0025;    // Minimum bubble radius
 export const BUBBLE_SIZE_MAX = 0.008;     // Maximum bubble radius
-export const BUBBLE_RISE_SPEED = 0.28;    // How fast bubbles rise (world units/sec)
-export const BUBBLE_WOBBLE = 0.045;       // Horizontal sway velocity amplitude (world units/sec)
+export const BUBBLE_RISE_SPEED = 0.14;    // How fast bubbles rise (world units/sec)
+export const BUBBLE_WOBBLE = 0.0225;      // Horizontal sway velocity amplitude (world units/sec)
 export const BUBBLE_LIFETIME = 3.4;       // Seconds before fade (longer so they can reach a high line)
 export const BUBBLE_SPAWN_RATE = 0.02;    // Seconds between cursor-trail spawns
 export const BUBBLE_SPAWN_DISTANCE = 0.8; // Distance from camera to spawn
@@ -35,8 +35,8 @@ export const BUBBLE_LINE_FADE_BAND = 0.16; // NDC band below the ocean line over
 // line, a fixed spawn rate looks sparse when the line sits low on screen (short
 // travel → fast turnover) and dense when it sits high. Targeting a live count
 // instead keeps the density constant at any camera depth.
-export const BUBBLE_TARGET_DENSITY = 150; // Live ambient bubbles when the screen is fully underwater
-export const BUBBLE_TARGET_MIN = 40;      // Floor as soon as any water shows (keeps shallow views populated)
+export const BUBBLE_TARGET_DENSITY = 50;  // Live ambient bubbles when the screen is fully underwater
+export const BUBBLE_TARGET_MIN = 13;      // Floor as soon as any water shows (keeps shallow views populated)
 const BUBBLE_SPAWN_PER_FRAME = 5;         // Cap on new ambient bubbles per frame (staggers the fill)
 export const AMBIENT_SOUND_INTERVAL = 10.0;   // Seconds between bubble sounds
 // ============================================
