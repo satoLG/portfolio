@@ -356,13 +356,16 @@ export function zoomOutFromCabana(): void {
     unmountPhoneIframe();
 }
 
-// Return camera to previous position (called when collapsing media player)
+// Return camera to previous position (called when collapsing media player).
+// Always snaps targetY to the scene's top (not savedTargetY) — radio zoom can only
+// start above water, but forcing the top here guarantees the return trip can never
+// dip toward the underwater dead zone and glitch the underwater effect mid-transition.
 export function zoomOutFromRadio(): void {
     if (!radioZoomActive) return;
     radioZoomActive = false;
     radioPugZoomSettling = true;
     zoomReturnSettling = true;
-    targetY = savedTargetY;
+    targetY = aboveWaterTopY;
 }
 
 // Zoom camera to focus on pug
@@ -372,13 +375,13 @@ export function zoomToPug(): void {
     pugZoomActive = true;
 }
 
-// Zoom out from pug
+// Zoom out from pug. Always snaps targetY to the scene's top — see zoomOutFromRadio.
 export function zoomOutFromPug(): void {
     if (!pugZoomActive) return;
     pugZoomActive = false;
     radioPugZoomSettling = true;
     zoomReturnSettling = true;
-    targetY = savedTargetY;
+    targetY = aboveWaterTopY;
 }
 
 // Zoom camera to focus on phone (top-down view). INNER level — only reachable
@@ -416,8 +419,8 @@ export function zoomOutFromChest(): void {
 // Force-clear all zoom flags (safety valve for stuck zooms on mobile)
 function forceExitZoom(): void {
     _zoomScrollAttempts = 0;
-    if (radioZoomActive) { radioZoomActive = false; radioPugZoomSettling = true; zoomReturnSettling = true; targetY = savedTargetY; }
-    if (pugZoomActive)   { pugZoomActive = false;   radioPugZoomSettling = true; zoomReturnSettling = true; targetY = savedTargetY; }
+    if (radioZoomActive) { radioZoomActive = false; radioPugZoomSettling = true; zoomReturnSettling = true; targetY = aboveWaterTopY; }
+    if (pugZoomActive)   { pugZoomActive = false;   radioPugZoomSettling = true; zoomReturnSettling = true; targetY = aboveWaterTopY; }
     // Phone is the inner level — the cabana below owns the restore + iframe teardown.
     if (phoneZoomActive) { phoneZoomActive = false; }
     if (cabanaPhase !== 'outside'){ cabanaPhase = 'outside'; targetY = savedTargetY; unmountPhoneIframe(); }
