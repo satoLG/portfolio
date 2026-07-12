@@ -90,6 +90,10 @@ function _ensurePanel(): CSS3DPanel {
         inkRadius: 34,
         inkBorderBand: 0,
         connector: true,   // thin 3D line down to the coin
+        // The pill is already authored ~2.4× large, but the telephoto chest zoom
+        // can still upscale it on a wide, low-DPR desktop. A modest extra raster
+        // bump keeps the icon + label sharp there (mobile gets it from its DPR).
+        supersample: 1.5,
     });
 
     const body = document.createElement('div');

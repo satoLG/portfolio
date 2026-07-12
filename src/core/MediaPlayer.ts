@@ -575,6 +575,11 @@ function createPlayerUI(): void {
         anchor: 'top',
         // Thin 3D line from the panel bottom down to the radio.
         connector: true,
+        // The player DOM is authored at 1× (screen-overlay sizing), so on a
+        // low-DPR desktop — where a wide viewport also upscales the panel — it
+        // rasterises soft. Render it at 2× and let pxPerUnit compensate so it
+        // stays the same size but crisp. (Mobile already gets this from its DPR.)
+        supersample: 2,
     });
     playerPanel.content.appendChild(playerContainer);
     playerPanel.setOnOutsideClick(() => { if (isExpanded) collapsePlayer(); });

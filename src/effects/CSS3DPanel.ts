@@ -173,6 +173,16 @@ export interface PanelOptions {
     /** Draw a thin 3D line in the WebGL scene from the panel's bottom-centre to
      *  a target (its linked model), same colour as the ink. */
     connector?: boolean;
+    /** Supersample factor (default 1). The hosted DOM is authored at design px
+     *  but rendered `zoom:N` larger, and `pxPerUnit` is raised by N so the panel
+     *  keeps the SAME on-screen footprint while the browser rasterises N× more
+     *  pixels. This is what keeps CSS3D content crisp on low-DPR desktops (mobile
+     *  already gets 2-3× for free from its devicePixelRatio; desktop gets ~1× and
+     *  looks soft, worse still when a wide viewport upscales the panel). All the
+     *  panel's geometry (radii, pads, seeded size) is scaled by N internally, so
+     *  callers pass everything in design px and this stays a single knob. Ignored
+     *  where CSS `zoom` isn't supported (very old Firefox) — falls back to 1. */
+    supersample?: number;
 }
 
 // easeOutBack — the subtle overshoot that gives the open/close a "pop".
@@ -208,6 +218,7 @@ export class CSS3DPanel {
     private pxPerUnit: number;
     private radiusPx: number;
     private maskPad: number;
+    private _supersample: number;
     private _transparent: boolean;
     private _inkSelectors: string[];
     private _inkPad: number;
@@ -241,21 +252,27 @@ export class CSS3DPanel {
 
     constructor(opts: PanelOptions = {}) {
         if (!_cssScene) throw new Error('[CSS3DPanel] Start() must be called before creating a panel');
-        this.pxPerUnit = opts.pxPerUnit ?? 340;
-        this.radiusPx = opts.radiusPx ?? 14;
-        this.maskPad = opts.maskPad ?? 6;
+        // Supersample: `zoom:ss` on the content raster + ss× every geometry value
+        // below keeps the footprint identical while adding raster resolution. Skip
+        // it where CSS zoom isn't supported so the panel never renders half-size.
+        const zoomOK = typeof CSS !== 'undefined' && !!CSS.supports && CSS.supports('zoom', '2');
+        const ss = zoomOK ? Math.max(1, opts.supersample ?? 1) : 1;
+        this._supersample = ss;
+        this.pxPerUnit = (opts.pxPerUnit ?? 340) * ss;
+        this.radiusPx = (opts.radiusPx ?? 14) * ss;
+        this.maskPad = (opts.maskPad ?? 6) * ss;
         this._transparent = opts.transparent ?? false;
         this._inkSelectors = opts.inkSelectors ?? [];
-        this._inkPad = opts.inkPad ?? 6;
-        this._inkRadius = opts.inkRadius ?? 10;
-        this._inkBorderBand = opts.inkBorderBand ?? 3;
+        this._inkPad = (opts.inkPad ?? 6) * ss;
+        this._inkRadius = (opts.inkRadius ?? 10) * ss;
+        this._inkBorderBand = (opts.inkBorderBand ?? 3) * ss;
         this._inkBounds = opts.inkBounds ?? false;
         this._anchor = opts.anchor ?? 'center';
         this._modal = opts.modal ?? false;
         this.dismissOnOutsideClick = this._modal;
         if (opts.initialSize) {
-            this._lastW = opts.initialSize.w;
-            this._lastH = opts.initialSize.h;
+            this._lastW = opts.initialSize.w * ss;
+            this._lastH = opts.initialSize.h * ss;
         }
 
         // wrapper (transform owned by CSS3DRenderer) → inner (open-scale) → content
@@ -271,6 +288,12 @@ export class CSS3DPanel {
         this.content = document.createElement('div');
         this.content.className = 'css3d-panel-content';
         this.content.style.pointerEvents = 'auto';
+        // Author the hosted DOM at ss× so the browser rasterises it at higher
+        // resolution; pxPerUnit (above) is raised by the same factor so the
+        // on-screen size is unchanged. `zoom` (not `transform: scale`) so the
+        // layout metrics the punch mask reads — offsetWidth/offsetLeft — grow
+        // with it and stay consistent with the ss-scaled geometry.
+        if (ss !== 1) this.content.style.zoom = String(ss);
 
         this.inner.appendChild(this.content);
         this.wrapper.appendChild(this.inner);
