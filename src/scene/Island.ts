@@ -4489,16 +4489,18 @@ function setupCoinInteraction(): void {
         }
     });
 
-    // ── Mobile: touchend on coin → show tooltip ────────────────────────────
-    canvas.addEventListener('touchend', (e: TouchEvent) => {
-        if (!CoinTooltip.IS_TOUCH_DEVICE) return;
-        if (_touchWasMulti || _touchDragged) return;
-        if (_chestCoins.length === 0) return;
-        if (e.changedTouches.length === 0) return;
+    // Raycasts a touch point against the coins and, on a hit, switches the
+    // bounce-selection + tooltip to it. Shared by the canvas handler below AND
+    // the document-level outside-tap handler: while the coin tooltip is open
+    // it's `modal`, which drives the canvas to pointer-events:none for the
+    // whole close animation (see CSS3DPanel.syncCanvasPointer) — so a tap on a
+    // *different* coin never reaches the canvas's own touchend listener and
+    // must be caught here instead. Returns true if a coin was hit.
+    const _trySelectCoinAtTouch = (clientX: number, clientY: number): boolean => {
+        if (_chestCoins.length === 0) return false;
 
-        const touch = e.changedTouches[0];
-        _coinMouse.x =  (touch.clientX / window.innerWidth)  * 2 - 1;
-        _coinMouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
+        _coinMouse.x =  (clientX / window.innerWidth)  * 2 - 1;
+        _coinMouse.y = -(clientY / window.innerHeight) * 2 + 1;
         _coinRaycaster.setFromCamera(_coinMouse, camera);
 
         let hit = -1;
@@ -4510,30 +4512,50 @@ function setupCoinInteraction(): void {
             }
         }
 
-        if (hit >= 0) {
-            e.preventDefault();
-            // Trigger bounce on newly selected coin, deselect previous
-            if (_selectedCoinIdx !== hit) {
-                if (_selectedCoinIdx >= 0) {
-                    _coinBounceVels[_selectedCoinIdx] = 0; // stop old bounce
-                }
-                _selectedCoinIdx = hit;
-                _coinBounceVels[hit] = 6; // kick the spring upward
+        if (hit < 0) return false;
+
+        // Trigger bounce on newly selected coin, deselect previous
+        if (_selectedCoinIdx !== hit) {
+            if (_selectedCoinIdx >= 0) {
+                _coinBounceVels[_selectedCoinIdx] = 0; // stop old bounce
             }
-            const pos = _getCoinWorldPos(hit);
-            if (pos) {
-                _mobileJustOpened = true;
-                CoinTooltip.showCoinTooltip(hit, pos.x, pos.y, pos.z);
-                setTimeout(() => { _mobileJustOpened = false; }, 60);
-            }
+            _selectedCoinIdx = hit;
+            _coinBounceVels[hit] = 6; // kick the spring upward
         }
+        const pos = _getCoinWorldPos(hit);
+        if (pos) {
+            _mobileJustOpened = true;
+            CoinTooltip.showCoinTooltip(hit, pos.x, pos.y, pos.z);
+            setTimeout(() => { _mobileJustOpened = false; }, 60);
+        }
+        return true;
+    };
+
+    // ── Mobile: touchend on coin → show tooltip ────────────────────────────
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (!CoinTooltip.IS_TOUCH_DEVICE) return;
+        if (_touchWasMulti || _touchDragged) return;
+        if (e.changedTouches.length === 0) return;
+
+        const touch = e.changedTouches[0];
+        if (_trySelectCoinAtTouch(touch.clientX, touch.clientY)) e.preventDefault();
     }, { passive: false });
 
-    // ── Mobile: tap outside tooltip → close ───────────────────────────────
-    document.addEventListener('touchend', () => {
+    // ── Mobile: tap outside tooltip → close (or switch to the tapped coin) ──
+    document.addEventListener('touchend', (e: TouchEvent) => {
         if (!CoinTooltip.IS_TOUCH_DEVICE) return;
         if (_mobileJustOpened) return;
-        if (CoinTooltip.isCoinTooltipVisible()) CoinTooltip.hideCoinTooltip();
+        if (!CoinTooltip.isCoinTooltipVisible()) return;
+
+        // The canvas is pointer-events:none right now (modal tooltip open), so
+        // tapping a different coin lands here instead of the canvas handler
+        // above — try to switch selection to it before falling back to close.
+        if (e.changedTouches.length > 0) {
+            const touch = e.changedTouches[0];
+            if (_trySelectCoinAtTouch(touch.clientX, touch.clientY)) return;
+        }
+
+        CoinTooltip.hideCoinTooltip();
     }, { capture: true });
 }
 
