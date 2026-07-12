@@ -135,6 +135,10 @@ export function showCoinTooltip(idx: number, wx: number, wy: number, wz: number)
     _setContent(idx);
     _anchor(panel, wx, wy, wz);
     panel.open();
+    // The icon + name were just swapped via innerHTML. If the pill was already
+    // open (moving straight from one coin to another) the CSS3D layer is static,
+    // so force it to re-rasterise the new content instead of showing the old.
+    panel.requestRepaint();
 }
 
 /** Call every frame to keep the panel anchored as the coin bobs. */

@@ -325,6 +325,49 @@ export function preloadAllTracks(): void {
     }
 }
 
+// Keep decoded cover images referenced so the browser can't GC them before use.
+const _coverImageCache = new Set<HTMLImageElement>();
+let _coversPreloaded = false;
+
+/** Preload AND decode every cover image up front. The player lives in a CSS3D
+ *  layer composited behind the canvas; assigning `img.src` to an image that is
+ *  still decoding often fails to repaint that layer while the camera is static,
+ *  so the cover shows up blank until "the second time". Decoding here primes the
+ *  browser's decoded-image cache so a later `img.src = url` paints immediately. */
+export function preloadAllCovers(): void {
+    if (_coversPreloaded) return;
+    _coversPreloaded = true;
+    const urls = new Set<string>([DEFAULT_COVER]);
+    for (const song of playlist) if (song.cover) urls.add(song.cover);
+    for (const url of urls) {
+        const img = new Image();
+        img.src = url;
+        // decode() may reject for SVGs / in some browsers — harmless, the fetch
+        // above (image request) still warms the byte cache.
+        if (img.decode) img.decode().catch(() => {});
+        _coverImageCache.add(img);
+    }
+}
+
+/** Swap the visible cover to `url`, decoding first so the CSS3D layer paints the
+ *  new art in one go (no async-decode gap), then nudging the panel to re-raster. */
+function setCoverSrc(img: HTMLImageElement, url: string): void {
+    const commit = () => {
+        // Skip if a newer swap already moved on to a different cover.
+        if (img.dataset.pendingCover !== url) return;
+        img.src = url;
+        playerPanel?.requestRepaint();
+    };
+    img.dataset.pendingCover = url;
+    const probe = new Image();
+    probe.src = url;
+    if (probe.decode) {
+        probe.decode().then(commit).catch(commit);
+    } else {
+        commit();
+    }
+}
+
 export function Start(): void {
     createPlayerUI();
     createAudioElement();
@@ -535,6 +578,15 @@ function createPlayerUI(): void {
     });
     playerPanel.content.appendChild(playerContainer);
     playerPanel.setOnOutsideClick(() => { if (isExpanded) collapsePlayer(); });
+
+    // Whenever the cover art finishes loading, force the CSS3D layer to
+    // re-rasterise — otherwise a cover that decodes while the camera is static
+    // (behind the composited canvas) can stay blank until an unrelated repaint.
+    const coverImgEl = playerContainer.querySelector('.player-cover img') as HTMLImageElement | null;
+    if (coverImgEl) {
+        coverImgEl.addEventListener('load',  () => playerPanel?.requestRepaint());
+        coverImgEl.addEventListener('error', () => playerPanel?.requestRepaint());
+    }
 
     // Get elements (header/playlist/close removed — collapse via outside click)
     const prevBtn = playerContainer.querySelector('.player-prev') as HTMLButtonElement;
@@ -1502,7 +1554,7 @@ function updatePlayerDisplay(): void {
     const titleEl = playerContainer.querySelector('.player-title') as HTMLDivElement;
     const artistEl = playerContainer.querySelector('.player-artist') as HTMLDivElement;
     
-    coverImg.src = song.cover || DEFAULT_COVER;
+    setCoverSrc(coverImg, song.cover || DEFAULT_COVER);
     titleEl.textContent = song.name || DEFAULT_NAME;
     artistEl.textContent = song.artist || DEFAULT_ARTIST;
     

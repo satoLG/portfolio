@@ -815,6 +815,9 @@ async function prewarmGPU(): Promise<void> {
 
     // 6. Preload all music tracks into browser cache (non-blocking)
     MediaPlayer.preloadAllTracks();
+    // Also decode all cover art up front so cover swaps paint instantly (the
+    // CSS3D player layer won't reliably repaint a still-decoding image).
+    MediaPlayer.preloadAllCovers();
   } finally {
     // Always drive the bar to 100%, even if the prewarm above threw — a
     // first-interaction hitch is far better than a permanent freeze at 90%.

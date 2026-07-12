@@ -233,6 +233,7 @@ export class CSS3DPanel {
     private _openT = 0;        // eased 0..1
     private _lastW = 0; private _lastH = 0;
     private _lastInkSig = -1;          // transparent mode: re-bake when ink layout shifts
+    private _inkProvisional = false;   // last bake fell back to full-rect (no real ink boxes yet)
     private _zeroMeasureFrames = 0;   // diagnostic — warn if DOM never measures
     private _warnedZero = false;
     private _onOutsideClick: ((e: PointerEvent) => void) | null = null;
@@ -360,6 +361,23 @@ export class CSS3DPanel {
         this._wx = x; this._wy = y; this._wz = z;
     }
 
+    /** Force the hosted DOM to re-rasterise NOW and re-bake the punch mask on the
+     *  next frame. Content inside the CSS3D preserve-3d layer (composited behind
+     *  the canvas) can fail to repaint when it changes while the camera is static
+     *  — a late-decoding cover image or a swapped tooltip icon then stays blank
+     *  until some unrelated transform nudge. A synchronous display toggle is a
+     *  hard paint invalidation the browser can't batch away; because no frame is
+     *  rendered between the two writes, there is no visible flash. */
+    requestRepaint(): void {
+        const el = this.content;
+        const prev = el.style.display;
+        el.style.display = 'none';
+        void el.offsetHeight;   // flush layout so the toggle counts as a repaint
+        el.style.display = prev;
+        // Re-bake next frame in case the change reflowed the interior.
+        this._lastInkSig = -1;
+    }
+
     open(): void {
         this._visible = true;
         this._openTarget = 1;
@@ -479,7 +497,7 @@ export class CSS3DPanel {
         // _bakeInkMask works on the rendered element regardless).
         if (this._transparent && this._lastW > 0 && this._lastH > 0) {
             const sig = this._inkSignature();
-            if (sig !== this._lastInkSig || this._inkBakedBoxes === 0) {
+            if (sig !== this._lastInkSig || this._inkBakedBoxes === 0 || this._inkProvisional) {
                 this._bakeMask(this._lastW, this._lastH);
             }
             if (this._inkBakedBoxes === 0 && this._zeroInkWarnCountdown-- === 0) {
@@ -668,10 +686,9 @@ export class CSS3DPanel {
             ctx.stroke();
         }
 
-        if (!panelEl) return;
         const ip = this._inkPad;
 
-        if (this._inkBounds) {
+        if (panelEl && this._inkBounds) {
             // ONE rounded rect = union bounding box of every ink element.
             let minL = Infinity, minT = Infinity, maxR = -Infinity, maxB = -Infinity;
             for (const sel of this._inkSelectors) {
@@ -698,7 +715,7 @@ export class CSS3DPanel {
                 this._inkBakedBoxes++;
                 this._inkMaxB = maxB + ip;   // ink bottom (design px) for the connector
             }
-        } else {
+        } else if (panelEl) {
             let maxB = 0;
             for (const sel of this._inkSelectors) {
                 const els = panelEl.querySelectorAll<HTMLElement>(sel);
@@ -719,6 +736,22 @@ export class CSS3DPanel {
                 }
             }
             if (maxB > 0) this._inkMaxB = maxB + ip;
+        }
+
+        // Fallback: nothing measurable yet (the hosted DOM isn't laid out on the
+        // first visible frames — it only attaches on the CSS renderer's first
+        // render). Punch the full seeded rect so the content is VISIBLE from
+        // frame 1 instead of blank-until-the-second-time, then refine once the
+        // real ink boxes land. `_inkProvisional` keeps `_frame` re-baking until
+        // they do.
+        if (this._inkBakedBoxes === 0) {
+            const r = Math.min(this.radiusPx, w / 2, h / 2);
+            roundRectPath(ctx, pad, pad, w, h, r);
+            ctx.fill();
+            this._inkMaxB = h;
+            this._inkProvisional = true;
+        } else {
+            this._inkProvisional = false;
         }
         this._lastInkSig = this._inkSignature();
     }
