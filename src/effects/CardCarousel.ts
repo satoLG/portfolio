@@ -153,10 +153,10 @@ function textPadFor(size: number): number {
 }
 
 // ── Titles (design px) ───────────────────────────────────────────────────────
-const TAB_SIZE = 34;
+const TAB_SIZE = 38;
 const TAB_WEIGHT = 600;
 const TAB_LS = 1.6;
-const TAB_LINE_H = 46;
+const TAB_LINE_H = 52;
 const TAB_GAP = 84;                  // px between titles once gathered
 const TAB_RISE_PX = 248;             // gathered row's height above the strip centre
 const TAB_UNDERLINE_DY = 40;         // px below the title centre
@@ -336,8 +336,8 @@ function wrapText(text: string, size: number, weight: number, ls: number, maxW: 
 
 // ── Card layouts ─────────────────────────────────────────────────────────────
 
-const ICON_BOX = 52;                 // icon / monogram square, shared by both layouts
-const ICON_GAP = 18;
+const ICON_BOX = 50;                 // icon / monogram square, shared by both layouts
+const ICON_GAP = 14;
 const HEAD_Y = 34;
 
 /** Icon slot: the real logo when there is one, otherwise a monogram in an
@@ -359,13 +359,13 @@ function pushIconBlocks(blocks: Block[], icon: string, mono: string, cls: string
         kind: 'rect', x: CARD_PAD, y: HEAD_Y, w: ICON_BOX, h: ICON_BOX,
         radius: 14, stroke: BORDER_PX, cls: 'oc-mono',
     }));
-    const size = mono.length > 1 ? 18 : 22;
+    const size = mono.length > 1 ? 21 : 25;
     const w = textWidth(mono, size, 600, 1);
     blocks.push(block({
         kind: 'text', text: mono,
         x: CARD_PAD + (ICON_BOX - w) / 2,
-        y: HEAD_Y + (ICON_BOX - 26) / 2,
-        size, weight: 600, ls: 1, lineH: 26, alpha: 0.95, padMul: 0.8,
+        y: HEAD_Y + (ICON_BOX - 30) / 2,
+        size, weight: 600, ls: 1, lineH: 30, alpha: 0.95, padMul: 0.8,
     }));
 }
 
@@ -379,36 +379,43 @@ function buildEntryLayout(e: EntryCard): Block[] {
     pushIconBlocks(blocks, e.icon ?? '', e.mono ?? e.heading.slice(0, 1).toUpperCase(), 'oc-logo');
 
     const headX = CARD_PAD + ICON_BOX + ICON_GAP;
-    const headLines = wrapText(e.heading, 25, 600, 0.2, CARD_W - CARD_PAD - headX);
-    let hy = Math.max(HEAD_Y - 6, HEAD_Y + (ICON_BOX - headLines.length * 32) / 2);
+    const headLines = wrapText(e.heading, 29, 600, 0.2, CARD_W - CARD_PAD - headX);
+    let hy = Math.max(HEAD_Y - 8, HEAD_Y + (ICON_BOX - headLines.length * 37) / 2);
     for (const line of headLines) {
-        blocks.push(block({ kind: 'text', text: line, x: headX, y: hy, size: 25, weight: 600, ls: 0.2, lineH: 32, alpha: 0.98 }));
-        hy += 32;
+        blocks.push(block({ kind: 'text', text: line, x: headX, y: hy, size: 29, weight: 600, ls: 0.2, lineH: 37, alpha: 0.98 }));
+        hy += 37;
     }
 
     let y = Math.max(HEAD_Y + ICON_BOX, hy) + 22;
 
-    for (const line of wrapText(e.subheading, 15.5, 500, 0.3, innerW)) {
-        blocks.push(block({ kind: 'text', text: line, y, size: 15.5, weight: 500, ls: 0.3, lineH: 22, alpha: 0.88 }));
-        y += 22;
+    for (const line of wrapText(e.subheading, 18, 500, 0.3, innerW)) {
+        blocks.push(block({ kind: 'text', text: line, y, size: 18, weight: 500, ls: 0.3, lineH: 25, alpha: 0.88 }));
+        y += 25;
     }
     y += 4;
 
     if (e.period) {
-        blocks.push(block({ kind: 'text', text: e.period, y, size: 12.5, weight: 500, ls: 2.6, lineH: 17, alpha: 0.68 }));
-        y += 17;
+        blocks.push(block({ kind: 'text', text: e.period, y, size: 14.5, weight: 500, ls: 2.2, lineH: 20, alpha: 0.68 }));
+        y += 20;
     }
     y += 20;
 
     blocks.push(block({ kind: 'line', y, w: 64, h: 2 }));
 
     // Bottom-anchored description — the "no fim do card" of the original brief,
-    // and what keeps every entry card ending on the same line.
-    const bodyLines = wrapText(e.body, 14.5, 400, 0.2, innerW);
-    let by = CARD_H - 46 - bodyLines.length * 21;
+    // and what keeps every entry card ending on the same line. The header above
+    // is variable (a long institution name can run to three lines), so the run
+    // is clipped to the gap left under the divider rather than allowed to grow
+    // up into it.
+    const BODY_SIZE = 17, BODY_LINE_H = 24, BODY_BOTTOM = 46;
+    const bodyTopLimit = y + 26;
+    const maxLines = Math.max(0, Math.floor((CARD_H - BODY_BOTTOM - bodyTopLimit) / BODY_LINE_H));
+    const bodyLines = wrapText(e.body, BODY_SIZE, 400, 0.2, innerW).slice(0, maxLines);
+
+    let by = CARD_H - BODY_BOTTOM - bodyLines.length * BODY_LINE_H;
     for (const line of bodyLines) {
-        blocks.push(block({ kind: 'text', text: line, y: by, size: 14.5, weight: 400, ls: 0.2, lineH: 21, alpha: 0.82 }));
-        by += 21;
+        blocks.push(block({ kind: 'text', text: line, y: by, size: BODY_SIZE, weight: 400, ls: 0.2, lineH: BODY_LINE_H, alpha: 0.82 }));
+        by += BODY_LINE_H;
     }
 
     return blocks;
@@ -423,24 +430,26 @@ function buildProjectLayout(p: ProjectCard): Block[] {
     pushIconBlocks(blocks, p.icon, '', 'oc-icon');
 
     const nameX = CARD_PAD + ICON_BOX + ICON_GAP;
-    const nameLines = wrapText(p.name, 23, 600, 0.2, CARD_W - CARD_PAD - nameX);
-    let ny = Math.max(HEAD_Y - 4, HEAD_Y + (ICON_BOX - nameLines.length * 30) / 2);
+    const nameLines = wrapText(p.name, 27, 600, 0.2, CARD_W - CARD_PAD - nameX);
+    let ny = Math.max(HEAD_Y - 6, HEAD_Y + (ICON_BOX - nameLines.length * 35) / 2);
     for (const line of nameLines) {
-        blocks.push(block({ kind: 'text', text: line, x: nameX, y: ny, size: 23, weight: 600, ls: 0.2, lineH: 30, alpha: 0.98 }));
-        ny += 30;
+        blocks.push(block({ kind: 'text', text: line, x: nameX, y: ny, size: 27, weight: 600, ls: 0.2, lineH: 35, alpha: 0.98 }));
+        ny += 35;
     }
 
-    // Bottom-up: link label, screenshot above it, divider above that.
-    const LABEL_H = 18, SHOT_H = 168;
+    // Bottom-up: link label, screenshot above it, divider above that. The shot
+    // gives up height to the larger type — it is a crop either way, and losing
+    // a slice of it costs less than truncating the description.
+    const LABEL_H = 21, SHOT_H = 152;
     const labelY = CARD_H - 34 - LABEL_H;
-    const shotY = labelY - 26 - SHOT_H;
-    const dividerY = shotY - 22;
+    const shotY = labelY - 24 - SHOT_H;
+    const dividerY = shotY - 20;
 
     let y = Math.max(HEAD_Y + ICON_BOX, ny) + 24;
-    for (const line of wrapText(p.body, 14.5, 400, 0.2, innerW)) {
-        if (y + 21 > dividerY - 12) break;   // never collide with the image section
-        blocks.push(block({ kind: 'text', text: line, y, size: 14.5, weight: 400, ls: 0.2, lineH: 21, alpha: 0.82 }));
-        y += 21;
+    for (const line of wrapText(p.body, 17, 400, 0.2, innerW)) {
+        if (y + 24 > dividerY - 12) break;   // never collide with the image section
+        blocks.push(block({ kind: 'text', text: line, y, size: 17, weight: 400, ls: 0.2, lineH: 24, alpha: 0.82 }));
+        y += 24;
     }
 
     blocks.push(block({ kind: 'line', y: dividerY, w: innerW, h: 2 }));
@@ -451,10 +460,10 @@ function buildProjectLayout(p: ProjectCard): Block[] {
 
     // The link is TEXT ONLY — no button chrome. Its tap area comes from HIT_PAD.
     const label = `${p.cta}  →`;
-    const labelW = textWidth(label, 13, 600, 2.4);
+    const labelW = textWidth(label, 15, 600, 2.2);
     blocks.push(block({
         kind: 'text', text: label, x: (CARD_W - labelW) / 2, y: labelY,
-        size: 13, weight: 600, ls: 2.4, lineH: LABEL_H, alpha: 0.95,
+        size: 15, weight: 600, ls: 2.2, lineH: LABEL_H, alpha: 0.95,
         href: p.url,
     }));
 
@@ -462,7 +471,27 @@ function buildProjectLayout(p: ProjectCard): Block[] {
 }
 
 function buildLayout(c: CardData): Block[] {
-    return c.kind === 'project' ? buildProjectLayout(c) : buildEntryLayout(c);
+    const blocks = c.kind === 'project' ? buildProjectLayout(c) : buildEntryLayout(c);
+    warnIfOverflowing(blocks, c.kind === 'project' ? c.name : c.heading);
+    return blocks;
+}
+
+/** Every card is a fixed box, so content that outgrows it is silently clipped by
+ *  the punch mask rather than pushing anything — which is exactly the kind of
+ *  thing you only notice on a device you don't own. Say it out loud instead.
+ *  Text is measured, not estimated, so this catches wrapping surprises too. */
+function warnIfOverflowing(blocks: Block[], label: string): void {
+    for (const b of blocks) {
+        const bottom = b.y + (b.kind === 'text' ? b.lineH : b.h);
+        const right = b.x + (b.kind === 'text' ? textWidth(b.text, b.size, b.weight, b.ls) : b.w);
+        if (bottom > CARD_H - 2 || right > CARD_W - 2 || b.x < 2 || b.y < 2) {
+            console.warn(
+                `[CardCarousel] "${label}": block ${JSON.stringify(b.text || b.cls || b.kind)} ` +
+                `spills the ${CARD_W}x${CARD_H} card (x ${b.x.toFixed(0)}..${right.toFixed(0)}, ` +
+                `y ${b.y.toFixed(0)}..${bottom.toFixed(0)})`,
+            );
+        }
+    }
 }
 
 // ─── INTERNALS ────────────────────────────────────────────────────────────────
