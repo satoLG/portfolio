@@ -8,15 +8,16 @@
  * SHAPE OF THE UI
  *
  *   Collapsed (the state the scene starts in): three bare titles — Experiência,
- *   Projetos, Estudos — floating at the strip's centre line, in the same type
- *   style the card headings use. Nothing else: no frame, no backdrop.
+ *   Projetos, Estudos — scattered asymmetrically across the strip, each drifting
+ *   on its own bob and tilt, in the same type style the card headings use.
+ *   Nothing else: no frame, no backdrop.
  *
- *   Expanded: picking a title lifts the whole title row UP by TAB_RISE_PX and
- *   unfolds that tab's cards below it, scaling out from directly under the row
- *   (transform-origin: top centre) with a per-card stagger. Switching tabs
- *   collapses the current cards, swaps the content and unfolds the new ones —
- *   the title row stays up across the swap. Clicking the ACTIVE title collapses
- *   everything back to the three bare titles.
+ *   Expanded: picking a title gathers all three into an aligned row ABOVE the
+ *   strip centre and unfolds that tab's cards below it, scaling out from
+ *   directly under the row (transform-origin: top centre) with a per-card
+ *   stagger. Switching tabs collapses the current cards, swaps the content and
+ *   unfolds the new ones — the row stays gathered across the swap. Clicking the
+ *   ACTIVE title releases everything back to the scattered titles.
  *
  * HOW IT RENDERS (extends the PhoneScreen "CSS3D-behind-alpha-canvas" pattern):
  *
@@ -24,12 +25,12 @@
  *      (Scene.ts adds #css before #webgl).
  *   2. For each title and each card, a WebGL "punch" plane with a per-pixel
  *      alpha MASK writes (0,0,0,0) with NoBlending ONLY where there is ink
- *      (border strokes, text pills, image/button boxes), slightly dilated. The
- *      canvas becomes transparent at those pixels and the crisp DOM shows through.
+ *      (border strokes, glyphs, image boxes), slightly dilated. The canvas
+ *      becomes transparent at those pixels and the crisp DOM shows through.
  *   3. Card interiors are NOT punched, so the live 3D scene (water, fish behind
  *      the plane) stays visible through the cards — they read as border-only
- *      floating glass frames. Image and button boxes ARE punched solid, because
- *      their DOM is the thing you're meant to see.
+ *      floating glass frames. Image boxes ARE punched solid, because their DOM
+ *      is the thing you're meant to see.
  *   4. The punch planes write depth: WebGL objects BEHIND the plane are occluded
  *      at ink pixels (fish swim behind the borders), while objects IN FRONT are
  *      drawn over the holes (fish swim over the cards). NOTE: the punch group
@@ -49,7 +50,7 @@
  *
  * Interaction is raycast-driven (the canvas sits on top and owns pointer
  * events): tap a title to switch tabs, drag horizontally to pan a tab whose
- * cards overflow the viewport, tap a card's button to open its link.
+ * cards overflow the viewport, tap a card's link to open it.
  *
  * Content lives in CarouselContent.ts.
  */
@@ -105,83 +106,77 @@ const PX_PER_UNIT = 320;
 const DOM_SS = 4;
 
 // ── Card geometry (design px) ────────────────────────────────────────────────
+// EVERY card is exactly this size, on every tab. The project card — icon, name,
+// description, screenshot, link — is the tallest thing the carousel has to show,
+// so it sets the height and the shorter entry cards distribute into it: header
+// pinned to the top, description pinned to the bottom, water in between.
 const CARD_W = 384;
-// Every card's punch mask is baked into a canvas of this height with the card
-// box centred in it, so slots never resize their canvas/texture when the tab
-// changes (a grown canvas re-uploaded into a smaller GPU texture is the
-// "glCopySubTextureCHROMIUM: Offset overflows" failure CSS3DPanel documents).
-// Must exceed the tallest card any tab can produce.
-const CARD_H_MAX = 640;
+const CARD_H = 500;
 const CARD_RADIUS = 26;
 const BORDER_PX = 2;
 const CARD_PAD = 32;                 // card box inset for all content
 
 // Punch dilation: how far (px) the alpha hole extends past the ink. Must cover
-// (a) the DOM glow (box-shadow / text-shadow) so it isn't hard-clipped and
-// (b) the residual post-process distortion inside the quiet rect (damped to
-//     12% by the quiet rect, so a few px is plenty for that part alone).
+// (a) the DOM glow so it isn't hard-clipped and (b) the residual post-process
+// distortion inside the quiet rect (damped to 12% there, so a few px covers it).
 //
-// (a) is why the dilation is DAY/NIGHT DEPENDENT. The neon glow only burns at
-// night; by day the ink is plain white. A punched hole shows whatever is behind
-// the canvas, and that is the page background — BLACK (index.html sets it
-// inline). At night the glow paints that band, so a fat hole reads as a halo;
-// by day nothing paints it, so the same fat hole would read as a black fringe
-// around every letter and border. Day mode therefore hugs the ink instead.
-// applyNeonMode() swaps these and re-bakes.
-const BAND_NIGHT = 12, BAND_DAY = 4;         // punch band each side of a stroke
-const LINE_PAD_NIGHT = 3, LINE_PAD_DAY = 1.5;   // divider-line punch pad
-const RECT_PAD_NIGHT = 6, RECT_PAD_DAY = 2;     // filled-box (image) punch pad
-
-// Glyph dilation scales with FONT SIZE. A flat pad cannot work across a 12.5px
-// period line and a 34px title: whatever is wide enough to carry the title's
-// halo is wider than the gaps between small glyphs, so body text fuses back
-// into the solid slab this whole approach exists to avoid. Capped so the
-// dilation never outruns what the text-shadow can actually fill — blur reaches
-// roughly a third of its radius at usable opacity, so a hole wider than that is
-// just black.
-const TEXT_PAD_RATIO_NIGHT = 0.18, TEXT_PAD_MIN_NIGHT = 2.5, TEXT_PAD_MAX_NIGHT = 6.5;
-const TEXT_PAD_RATIO_DAY = 0.09, TEXT_PAD_MIN_DAY = 1.2, TEXT_PAD_MAX_DAY = 3;
-const BTN_PAD_MUL = 0.7;     // tighter dilation on the button label, so the
-                             // button reads as a ring with a lit label
+// These are DELIBERATELY MODE-INDEPENDENT. An earlier version widened them at
+// night to give the neon more room, but the hole shows the page background
+// (black — index.html sets it inline), so growing it made a visibly fatter dark
+// outline appear around every letter the moment night fell. The geometry has to
+// hold still; only the DOM glow changes between day and night.
+const BAND = 6;              // punch band each side of a stroke (card border)
+const LINE_PAD = 3;          // divider-line punch pad
+const RECT_PAD = 3;          // filled-box (image) punch pad
 
 // Text is punched as GLYPH SHAPES, never as a pill box. A rounded-rect hole
-// around a line of text shows the page background (black) in every gap between
-// the letters and the box edge, which reads as a dark chip behind the line —
+// around a line of text shows the page background in every gap between the
+// letters and the box edge, which reads as a dark chip behind the line —
 // unmissable on the bare floating titles, where there is no card frame to
-// explain it. Stroking + filling the glyphs keeps the hole letter-shaped, so
-// the only thing visible around a letter is that letter's own glow.
-// Hit targets do NOT follow this: a tap area must stay forgiving whatever the
-// punch does, so they use these fixed pads in both modes.
+// explain it. Stroking + filling the glyphs keeps the hole letter-shaped.
+//
+// The dilation scales with FONT SIZE and is capped tight: a flat pad cannot
+// serve both a 12.5px period line and a 34px title (whatever carries the
+// title's halo is wider than the gaps between small glyphs, so body text fuses
+// back into the slab this exists to avoid), and blur only holds useful opacity
+// out to about a third of its radius, so a wider hole is simply black.
+const TEXT_PAD_RATIO = 0.13, TEXT_PAD_MIN = 2, TEXT_PAD_MAX = 4.5;
+
+// Hit targets do NOT follow the punch: a tap area stays forgiving regardless.
 const HIT_PAD_X = 18;
 const HIT_PAD_Y = 12;
 
-// Mask canvases are allocated once, so their margin is sized for the widest
-// case (night) and simply left transparent by day.
-const MASK_MARGIN = BAND_NIGHT + 4;
-
-let neonOn = true;           // mirrors body.night-mode
-let band = BAND_NIGHT;
-let linePad = LINE_PAD_NIGHT;
-let rectPad = RECT_PAD_NIGHT;
+const MASK_MARGIN = BAND + 4;   // canvas margin around the card box
 
 function textPadFor(size: number): number {
-    return neonOn
-        ? MathUtils.clamp(size * TEXT_PAD_RATIO_NIGHT, TEXT_PAD_MIN_NIGHT, TEXT_PAD_MAX_NIGHT)
-        : MathUtils.clamp(size * TEXT_PAD_RATIO_DAY, TEXT_PAD_MIN_DAY, TEXT_PAD_MAX_DAY);
+    return MathUtils.clamp(size * TEXT_PAD_RATIO, TEXT_PAD_MIN, TEXT_PAD_MAX);
 }
 
-// ── Title row (design px) ────────────────────────────────────────────────────
+// ── Titles (design px) ───────────────────────────────────────────────────────
 const TAB_SIZE = 34;
 const TAB_WEIGHT = 600;
 const TAB_LS = 1.6;
 const TAB_LINE_H = 46;
-const TAB_GAP = 84;                  // px between title boxes
-const TAB_RISE_PX = 248;             // how far the row lifts when a tab opens
+const TAB_GAP = 84;                  // px between titles once gathered
+const TAB_RISE_PX = 248;             // gathered row's height above the strip centre
 const TAB_UNDERLINE_DY = 40;         // px below the title centre
 const TAB_UNDERLINE_H = 2;
 const TAB_HOVER_SCALE = 1.06;
 const TAB_ACTIVE_SCALE = 1.03;
-const TAB_ROW_FILL = 0.9;            // max share of the viewport width the row may use
+const TAB_ROW_FILL = 0.9;            // max share of the viewport width the titles may use
+
+// Where each title drifts while nothing is selected. Hand-placed rather than
+// randomised: they have to read as three things that happen to be floating near
+// each other, without ever overlapping, and a seeded random never quite lands
+// that composition. Order matches TABS.
+const TAB_SCATTER = [
+    { x: -268, y: -84, rot: -2.6 },
+    { x: 40, y: 76, rot: 1.9 },
+    { x: 292, y: -30, rot: -1.3 },
+];
+const TAB_DRIFT_AMP = 11;            // scattered bob amplitude (px)
+const TAB_DRIFT_TILT = 1.6;          // scattered extra sway (deg)
+const TAB_GATHERED_AMP = 3;          // bob amplitude once gathered
 
 // ── Card strip (design px) ───────────────────────────────────────────────────
 const CARDS_TOP_Y = -180;            // top edge of every card, relative to PLANE_Y
@@ -195,7 +190,7 @@ const SPRING_BACK = 9;               // 1/s damp speed back inside the limits
 
 // ── Animation ────────────────────────────────────────────────────────────────
 const REVEAL_SEC = 0.42;             // card unfold duration (before stagger)
-const TABS_RISE_SEC = 0.5;           // title-row lift duration
+const GATHER_SEC = 0.6;              // scatter → aligned row duration
 const CARD_STAGGER = 0.1;            // per-card delay, in reveal-units
 const UNDERLINE_SMOOTH = 12;
 
@@ -222,18 +217,13 @@ interface Block {
     // text
     text: string;
     size: number; weight: number; ls: number; lineH: number; alpha: number;
-    padMul: number;                  // multiplier on the current mode's glyph dilation
+    padMul: number;                  // multiplier on the glyph dilation
     // rect
     radius: number;
     img: string;                     // '' → no image element
     stroke: number;                  // 0 → filled punch; >0 → punch the ring only
     cls: string;                     // extra DOM class
     href: string;                    // '' → not clickable
-}
-
-interface CardLayout {
-    blocks: Block[];
-    h: number;                       // card box height (design px)
 }
 
 function block(b: Partial<Block> & { kind: BlockKind }): Block {
@@ -346,17 +336,54 @@ function wrapText(text: string, size: number, weight: number, ls: number, maxW: 
 
 // ── Card layouts ─────────────────────────────────────────────────────────────
 
-/** Chronological entry: company/institution → role/subject → period → body. */
-function buildEntryLayout(e: EntryCard): CardLayout {
+const ICON_BOX = 52;                 // icon / monogram square, shared by both layouts
+const ICON_GAP = 18;
+const HEAD_Y = 34;
+
+/** Icon slot: the real logo when the entry carries one, otherwise a monogram in
+ *  an outlined square — same ink language as the card frame, and no dependency
+ *  on assets we may not have. */
+function pushIconBlocks(blocks: Block[], icon: string, mono: string): void {
+    if (icon) {
+        blocks.push(block({
+            kind: 'rect', x: CARD_PAD, y: HEAD_Y, w: ICON_BOX, h: ICON_BOX,
+            radius: 14, img: icon, cls: 'oc-icon',
+        }));
+        return;
+    }
+    if (!mono) return;
+    blocks.push(block({
+        kind: 'rect', x: CARD_PAD, y: HEAD_Y, w: ICON_BOX, h: ICON_BOX,
+        radius: 14, stroke: BORDER_PX, cls: 'oc-mono',
+    }));
+    const size = mono.length > 1 ? 18 : 22;
+    const w = textWidth(mono, size, 600, 1);
+    blocks.push(block({
+        kind: 'text', text: mono,
+        x: CARD_PAD + (ICON_BOX - w) / 2,
+        y: HEAD_Y + (ICON_BOX - 26) / 2,
+        size, weight: 600, ls: 1, lineH: 26, alpha: 0.95, padMul: 0.8,
+    }));
+}
+
+/** Chronological entry — Experiência and Estudos. Header (icon + company, role,
+ *  period, divider) pinned to the top, description pinned to the BOTTOM so every
+ *  card ends on the same line regardless of how much text it carries. */
+function buildEntryLayout(e: EntryCard): Block[] {
     const blocks: Block[] = [];
     const innerW = CARD_W - 2 * CARD_PAD;
-    let y = 44;
 
-    for (const line of wrapText(e.heading, 26, 600, 0.2, innerW)) {
-        blocks.push(block({ kind: 'text', text: line, y, size: 26, weight: 600, ls: 0.2, lineH: 34, alpha: 0.98 }));
-        y += 34;
+    pushIconBlocks(blocks, e.icon ?? '', e.mono ?? e.heading.slice(0, 1).toUpperCase());
+
+    const headX = CARD_PAD + ICON_BOX + ICON_GAP;
+    const headLines = wrapText(e.heading, 25, 600, 0.2, CARD_W - CARD_PAD - headX);
+    let hy = Math.max(HEAD_Y - 6, HEAD_Y + (ICON_BOX - headLines.length * 32) / 2);
+    for (const line of headLines) {
+        blocks.push(block({ kind: 'text', text: line, x: headX, y: hy, size: 25, weight: 600, ls: 0.2, lineH: 32, alpha: 0.98 }));
+        hy += 32;
     }
-    y += 6;
+
+    let y = Math.max(HEAD_Y + ICON_BOX, hy) + 22;
 
     for (const line of wrapText(e.subheading, 15.5, 500, 0.3, innerW)) {
         blocks.push(block({ kind: 'text', text: line, y, size: 15.5, weight: 500, ls: 0.3, lineH: 22, alpha: 0.88 }));
@@ -368,87 +395,71 @@ function buildEntryLayout(e: EntryCard): CardLayout {
         blocks.push(block({ kind: 'text', text: e.period, y, size: 12.5, weight: 500, ls: 2.6, lineH: 17, alpha: 0.68 }));
         y += 17;
     }
-    y += 18;
+    y += 20;
 
     blocks.push(block({ kind: 'line', y, w: 64, h: 2 }));
-    y += 2;
 
-    // No body (Estudos cards are subject + period only) → the divider closes the
-    // card instead of hanging over dead space.
+    // Bottom-anchored description — the "no fim do card" of the original brief,
+    // and what keeps every entry card ending on the same line.
     const bodyLines = wrapText(e.body, 14.5, 400, 0.2, innerW);
-    if (bodyLines.length > 0) {
-        y += 24;
-        for (const line of bodyLines) {
-            blocks.push(block({ kind: 'text', text: line, y, size: 14.5, weight: 400, ls: 0.2, lineH: 21, alpha: 0.82 }));
-            y += 21;
-        }
+    let by = CARD_H - 46 - bodyLines.length * 21;
+    for (const line of bodyLines) {
+        blocks.push(block({ kind: 'text', text: line, y: by, size: 14.5, weight: 400, ls: 0.2, lineH: 21, alpha: 0.82 }));
+        by += 21;
     }
 
-    return { blocks, h: Math.max(200, y + 34) };
+    return blocks;
 }
 
-/** Project: icon + name, description, a divided image section, then the link. */
-function buildProjectLayout(p: ProjectCard): CardLayout {
+/** Project: icon + name, description, then a divided image section and the link
+ *  — the last three pinned to the bottom so they line up across every project. */
+function buildProjectLayout(p: ProjectCard): Block[] {
     const blocks: Block[] = [];
     const innerW = CARD_W - 2 * CARD_PAD;
-    const ICON = 56, ICON_GAP = 18, HEAD_Y = 34;
 
-    blocks.push(block({
-        kind: 'rect', x: CARD_PAD, y: HEAD_Y, w: ICON, h: ICON,
-        radius: 14, img: p.icon, cls: 'oc-icon',
-    }));
+    pushIconBlocks(blocks, p.icon, '');
 
-    const nameX = CARD_PAD + ICON + ICON_GAP;
+    const nameX = CARD_PAD + ICON_BOX + ICON_GAP;
     const nameLines = wrapText(p.name, 23, 600, 0.2, CARD_W - CARD_PAD - nameX);
-    let ny = Math.max(HEAD_Y - 4, HEAD_Y + (ICON - nameLines.length * 30) / 2);
+    let ny = Math.max(HEAD_Y - 4, HEAD_Y + (ICON_BOX - nameLines.length * 30) / 2);
     for (const line of nameLines) {
         blocks.push(block({ kind: 'text', text: line, x: nameX, y: ny, size: 23, weight: 600, ls: 0.2, lineH: 30, alpha: 0.98 }));
         ny += 30;
     }
 
-    let y = Math.max(HEAD_Y + ICON, ny) + 26;
+    // Bottom-up: link label, screenshot above it, divider above that.
+    const LABEL_H = 18, SHOT_H = 168;
+    const labelY = CARD_H - 34 - LABEL_H;
+    const shotY = labelY - 26 - SHOT_H;
+    const dividerY = shotY - 22;
+
+    let y = Math.max(HEAD_Y + ICON_BOX, ny) + 24;
     for (const line of wrapText(p.body, 14.5, 400, 0.2, innerW)) {
+        if (y + 21 > dividerY - 12) break;   // never collide with the image section
         blocks.push(block({ kind: 'text', text: line, y, size: 14.5, weight: 400, ls: 0.2, lineH: 21, alpha: 0.82 }));
         y += 21;
     }
-    y += 20;
 
-    // Divider: the "seção" break before the screenshot.
-    blocks.push(block({ kind: 'line', y, w: innerW, h: 2 }));
-    y += 24;
-
-    const SHOT_H = 172;
+    blocks.push(block({ kind: 'line', y: dividerY, w: innerW, h: 2 }));
     blocks.push(block({
-        kind: 'rect', x: CARD_PAD, y, w: innerW, h: SHOT_H,
+        kind: 'rect', x: CARD_PAD, y: shotY, w: innerW, h: SHOT_H,
         radius: 16, img: p.shot, cls: 'oc-shot',
     }));
-    y += SHOT_H + 28;
 
-    const BTN_W = 210, BTN_H = 46;
-    blocks.push(block({
-        kind: 'rect', x: (CARD_W - BTN_W) / 2, y, w: BTN_W, h: BTN_H,
-        radius: BTN_H / 2, stroke: BORDER_PX, cls: 'oc-btn', href: p.url,
-    }));
+    // The link is TEXT ONLY — no button chrome. Its tap area comes from HIT_PAD.
     const label = `${p.cta}  →`;
     const labelW = textWidth(label, 13, 600, 2.4);
     blocks.push(block({
-        kind: 'text', text: label,
-        x: (CARD_W - labelW) / 2, y: y + (BTN_H - 18) / 2,
-        size: 13, weight: 600, ls: 2.4, lineH: 18, alpha: 0.95,
-        padMul: BTN_PAD_MUL, href: p.url,
+        kind: 'text', text: label, x: (CARD_W - labelW) / 2, y: labelY,
+        size: 13, weight: 600, ls: 2.4, lineH: LABEL_H, alpha: 0.95,
+        href: p.url,
     }));
-    y += BTN_H + 30;
 
-    return { blocks, h: y };
+    return blocks;
 }
 
-function buildLayout(c: CardData): CardLayout {
-    const layout = c.kind === 'project' ? buildProjectLayout(c) : buildEntryLayout(c);
-    if (layout.h > CARD_H_MAX) {
-        console.warn(`[CardCarousel] card layout is ${layout.h}px tall, above CARD_H_MAX ${CARD_H_MAX} — it will be clipped`);
-        layout.h = CARD_H_MAX;
-    }
-    return layout;
+function buildLayout(c: CardData): Block[] {
+    return c.kind === 'project' ? buildProjectLayout(c) : buildEntryLayout(c);
 }
 
 // ─── INTERNALS ────────────────────────────────────────────────────────────────
@@ -458,7 +469,7 @@ interface CardSlot {
     mesh: Mesh;
     maskCanvas: HTMLCanvasElement;
     maskTexture: CanvasTexture;
-    layout: CardLayout | null;      // null → slot unused by the active tab
+    blocks: Block[] | null;         // null → slot unused by the active tab
     bobPhase: number;
     rotPhase: number;
     scale: number;                  // smoothed hover scale
@@ -476,8 +487,14 @@ interface TabSlot {
     maskCanvas: HTMLCanvasElement;
     maskTexture: CanvasTexture;
     textW: number;                  // measured label width (design px)
+    rowX: number;                   // x once gathered into the row (design px)
+    bobPhase: number;
+    rotPhase: number;
     scale: number;                  // smoothed hover/active scale
-    xPx: number;                    // live centre, design px (fit applied)
+    // live transform, mirrored by the punch mesh — also the hit-test basis
+    cx: number;
+    cy: number;
+    rotDeg: number;
 }
 
 let _initialized = false;
@@ -498,12 +515,12 @@ let _pixelHidden = false;           // hidden because pixelation is on (like Pho
 let activeTab = -1;                 // tab whose cards are currently BUILT (-1 none)
 let requestedTab = -1;              // tab the user last picked (-1 none)
 let reveal = 0;                     // 0..1 cards unfolded
-let tabsUp = 0;                     // 0..1 title-row lift
+let gather = 0;                     // 0..1 titles scattered → aligned row
 let underlineX = 0;                 // smoothed underline centre
 let underlineW = 0;                 // smoothed underline width
 let cardCount = 0;                  // slots in use by the active tab
-let _revealFlushed = false;         // raster flush already done for this unfold
 let stripHalfW = 0;                 // half-extent of the built strip (design px)
+let _revealFlushed = false;         // raster flush already done for this unfold
 
 // Track state
 let trackOffset = 0;
@@ -587,7 +604,6 @@ export function Start(glScene: ThreeScene, cssScene: ThreeScene): void {
     buildCardSlots();
     buildUnderline();
     layoutTabs();
-    applyNeonMode(document.body.classList.contains('night-mode'));
 
     // Project imagery is punched solid, so a late-decoding image shows a hole
     // full of page background. Warm the cache before any tab can open.
@@ -600,12 +616,10 @@ export function Start(glScene: ThreeScene, cssScene: ThreeScene): void {
 
     // The Wotfard webfont usually isn't ready at Start — every layout above was
     // measured with the fallback font. Re-measure once fonts settle so wrapping
-    // and the punch pills match the real glyph widths.
+    // and the punched glyphs match the real shapes.
     if (document.fonts?.ready) {
         document.fonts.ready.then(() => {
             layoutTabs();
-            bakeTabMasks();
-            bakeUnderlineMask();
             if (activeTab >= 0) buildActiveTabCards();
         }).catch(() => { /* non-fatal */ });
     }
@@ -636,22 +650,17 @@ export function Update(): void {
             setCursor('');
             setDistortionQuietRect(0, 0, 0, 0, 0, false);
             // Surfacing resets the panel: the scene always comes back to the
-            // three bare titles.
+            // three scattered titles.
             requestedTab = -1;
             activeTab = -1;
             reveal = 0;
-            tabsUp = 0;
+            gather = 0;
             hoverCard = hoverTab = -1;
             hoverLink = false;
             releaseCardSlots();
         }
     }
     if (!_active) return;
-
-    // UI.ts swaps body.night-mode at the day/night midpoint; the punch dilation
-    // has to follow it (see the BAND_* docs).
-    const night = document.body.classList.contains('night-mode');
-    if (night !== neonOn) applyNeonMode(night);
 
     advanceAnimation();
     updateTabs();
@@ -703,10 +712,10 @@ function makeMaskCanvas(w: number, h: number): { canvas: HTMLCanvasElement; text
 }
 
 function buildTabs(): void {
-    for (const def of TABS) {
+    for (let i = 0; i < TABS.length; i++) {
         const el = document.createElement('div');
         el.className = 'ocean-tab';
-        el.textContent = def.label;
+        el.textContent = TABS[i].label;
         el.style.font = blockFont(TAB_SIZE, TAB_WEIGHT, DOM_SS);
         el.style.lineHeight = `${TAB_LINE_H * DOM_SS}px`;
         el.style.height = `${TAB_LINE_H * DOM_SS}px`;
@@ -718,19 +727,25 @@ function buildTabs(): void {
         const mesh = new Mesh(new PlaneGeometry(1, 1), makePunchMaterial(texture));
         occluderGroup.add(mesh);
 
-        tabs.push({ el, mesh, maskCanvas: canvas, maskTexture: texture, textW: 0, scale: 1, xPx: 0 });
+        tabs.push({
+            el, mesh, maskCanvas: canvas, maskTexture: texture,
+            textW: 0, rowX: 0,
+            bobPhase: i * 2.1, rotPhase: i * 1.7 + 0.6,
+            scale: 1, cx: 0, cy: 0, rotDeg: 0,
+        });
     }
 }
 
 function buildCardSlots(): void {
     const maskW = CARD_W + 2 * MASK_MARGIN;
-    const maskH = CARD_H_MAX + 2 * MASK_MARGIN;
+    const maskH = CARD_H + 2 * MASK_MARGIN;
     const planeGeo = new PlaneGeometry(1, 1);
 
     for (let i = 0; i < MAX_CARDS; i++) {
         const el = document.createElement('div');
         el.className = 'ocean-card';
         el.style.width = `${CARD_W * DOM_SS}px`;
+        el.style.height = `${CARD_H * DOM_SS}px`;
         el.style.borderWidth = `${BORDER_PX * DOM_SS}px`;
         el.style.borderRadius = `${CARD_RADIUS * DOM_SS}px`;
         el.style.display = 'none';
@@ -742,7 +757,7 @@ function buildCardSlots(): void {
         occluderGroup.add(mesh);
 
         cards.push({
-            el, mesh, maskCanvas: canvas, maskTexture: texture, layout: null,
+            el, mesh, maskCanvas: canvas, maskTexture: texture, blocks: null,
             bobPhase: Math.random() * Math.PI * 2,
             rotPhase: Math.random() * Math.PI * 2,
             scale: 1, clickPulse: 0,
@@ -767,8 +782,7 @@ function buildUnderline(): void {
     occluderGroup.add(underlineMesh);
 }
 
-/** Measure the labels and place the title row, shrinking it to fit narrow
- *  viewports (mobile is barely 650 design px wide at the strip's depth). */
+/** Measure the labels, place the gathered row and bake the title masks. */
 function layoutTabs(): void {
     let rowW = 0;
     for (let i = 0; i < tabs.length; i++) {
@@ -780,23 +794,31 @@ function layoutTabs(): void {
 
     let x = -rowW / 2;
     for (const tab of tabs) {
-        tab.xPx = x + tab.textW / 2;
+        tab.rowX = x + tab.textW / 2;
         x += tab.textW + TAB_GAP;
     }
 
     // Underline is baked once at the widest label and scaled down per tab.
     underlineMaskW = Math.max(...tabs.map(t => t.textW));
     if (underlineEl) underlineEl.style.width = `${underlineMaskW * DOM_SS}px`;
+
+    bakeTabMasks();
     bakeUnderlineMask();
 }
 
-/** Horizontal squeeze so the row (and the strip) never runs off a narrow
- *  viewport. Recomputed per frame — the aspect ratio can change at any time. */
+/** Horizontal squeeze so neither layout runs off a narrow viewport — the
+ *  scattered titles are WIDER than the gathered row, so both are measured.
+ *  Recomputed per frame; the aspect ratio can change at any time. */
 function rowFit(): number {
     let rowW = TAB_GAP * (tabs.length - 1);
-    for (const tab of tabs) rowW += tab.textW;
+    let scatterHalf = 0;
+    for (let i = 0; i < tabs.length; i++) {
+        rowW += tabs[i].textW;
+        scatterHalf = Math.max(scatterHalf, Math.abs(TAB_SCATTER[i].x) + tabs[i].textW / 2);
+    }
+    const need = Math.max(rowW, scatterHalf * 2);
     const avail = getFrustumHalfWidthPx() * 2 * TAB_ROW_FILL;
-    return rowW > 0 ? Math.min(1, avail / rowW) : 1;
+    return need > 0 ? Math.min(1, avail / need) : 1;
 }
 
 // ─── Tab switching ────────────────────────────────────────────────────────────
@@ -824,7 +846,7 @@ function buildActiveTabCards(): void {
 
     for (let i = 0; i < cardCount; i++) {
         const slot = cards[i];
-        slot.layout = buildLayout(data[i]);
+        slot.blocks = buildLayout(data[i]);
         slot.scale = 1;
         slot.clickPulse = 0;
         renderCardDom(slot);
@@ -833,20 +855,12 @@ function buildActiveTabCards(): void {
     }
 
     stripHalfW = ((cardCount - 1) * CARD_SPACING + CARD_W) / 2;
-
-    // The DOM lives behind the canvas, where a content swap can be served from
-    // stale composited tiles (see CSS3DPanel.requestRepaint). Force one repaint.
-    if (screenEl) {
-        const prev = screenEl.style.display;
-        screenEl.style.display = 'none';
-        void screenEl.offsetHeight;
-        screenEl.style.display = prev;
-    }
+    flushCardRaster();
 }
 
 function releaseCardSlots(): void {
     for (const slot of cards) {
-        slot.layout = null;
+        slot.blocks = null;
         slot.el.style.display = 'none';
         slot.el.replaceChildren();
         slot.mesh.visible = false;
@@ -857,13 +871,11 @@ function releaseCardSlots(): void {
 }
 
 function renderCardDom(slot: CardSlot): void {
-    const layout = slot.layout;
-    if (!layout) return;
+    if (!slot.blocks) return;
     slot.el.replaceChildren();
-    slot.el.style.height = `${layout.h * DOM_SS}px`;
     slot.el.style.display = '';
 
-    for (const b of layout.blocks) {
+    for (const b of slot.blocks) {
         if (b.kind === 'line') {
             const bl = document.createElement('div');
             bl.className = 'oc-line';
@@ -896,7 +908,7 @@ function renderCardDom(slot: CardSlot): void {
         }
 
         const bl = document.createElement('div');
-        bl.className = 'oc-blk';
+        bl.className = `oc-blk${b.cls ? ` ${b.cls}` : ''}`;
         bl.style.left = `${b.x * DOM_SS}px`;
         bl.style.top = `${b.y * DOM_SS}px`;
         bl.textContent = b.text;
@@ -916,6 +928,11 @@ function easeOutBack(t: number): number {
     const c1 = 1.70158, c3 = c1 + 1;
     const x = t - 1;
     return 1 + c3 * x * x * x + c1 * x * x;
+}
+
+function smootherstep(t: number): number {
+    const x = MathUtils.clamp(t, 0, 1);
+    return x * x * x * (x * (x * 6 - 15) + 10);
 }
 
 function advanceAnimation(): void {
@@ -945,13 +962,13 @@ function advanceAnimation(): void {
         _revealFlushed = false;
     }
 
-    // The row stays lifted across a tab swap — it only drops when everything
-    // collapses, so switching tabs never bounces the titles.
-    const upTarget = requestedTab >= 0 ? 1 : 0;
-    const upStep = deltaTime / TABS_RISE_SEC;
-    tabsUp = upTarget > tabsUp
-        ? Math.min(upTarget, tabsUp + upStep)
-        : Math.max(upTarget, tabsUp - upStep);
+    // The titles stay gathered across a tab swap — they only scatter again when
+    // everything collapses, so switching tabs never scrambles the row.
+    const gatherTarget = requestedTab >= 0 ? 1 : 0;
+    const gatherStep = deltaTime / GATHER_SEC;
+    gather = gatherTarget > gather
+        ? Math.min(gatherTarget, gather + gatherStep)
+        : Math.max(gatherTarget, gather - gatherStep);
 }
 
 /** Hiding an element and reading a layout property back is a paint
@@ -975,57 +992,71 @@ function cardReveal(i: number): number {
 
 // ─── Per-frame transforms ─────────────────────────────────────────────────────
 
-function tabRowY(): number {
-    return -TAB_RISE_PX * smootherstep(tabsUp);
-}
-
-function smootherstep(t: number): number {
-    const x = MathUtils.clamp(t, 0, 1);
-    return x * x * x * (x * (x * 6 - 15) + 10);
-}
-
 function updateTabs(): void {
     const fit = rowFit();
-    const rowY = tabRowY();
-    const bobY = Math.sin(time * BOB_FREQ) * BOB_AMP_PX * 0.5;
+    const align = smootherstep(gather);
+    const driftAmp = MathUtils.lerp(TAB_DRIFT_AMP, TAB_GATHERED_AMP, align);
 
-    extentTopPx = rowY + bobY - (TAB_LINE_H / 2 + TEXT_PAD_MAX_NIGHT + BAND_NIGHT) * fit;
-    extentBottomPx = rowY + bobY + (TAB_UNDERLINE_DY + LINE_PAD_NIGHT + BAND_NIGHT) * fit;
+    extentTopPx = Infinity;
+    extentBottomPx = -Infinity;
 
     for (let i = 0; i < tabs.length; i++) {
         const tab = tabs[i];
+        const scatter = TAB_SCATTER[i];
         const isActive = i === requestedTab;
+
+        const bobY = Math.sin(time * BOB_FREQ + tab.bobPhase) * driftAmp;
+        // Scattered titles carry their own resting tilt plus a slow sway; both
+        // ease out to a level row as they gather.
+        const rotDeg = MathUtils.lerp(
+            scatter.rot + Math.sin(time * ROT_FREQ + tab.rotPhase) * TAB_DRIFT_TILT,
+            Math.sin(time * ROT_FREQ + tab.rotPhase) * ROT_AMP_DEG * 0.5,
+            align,
+        );
+
+        const cx = MathUtils.lerp(scatter.x, tab.rowX, align) * fit;
+        const cy = MathUtils.lerp(scatter.y, -TAB_RISE_PX, align) * fit + bobY;
+
         const target = (i === hoverTab ? TAB_HOVER_SCALE : (isActive ? TAB_ACTIVE_SCALE : 1)) * fit;
         tab.scale = MathUtils.damp(tab.scale, target, SCALE_SMOOTH, deltaTime);
 
-        const cx = tab.xPx * fit;
-        const cy = rowY + bobY;
+        tab.cx = cx; tab.cy = cy; tab.rotDeg = rotDeg;
+
         tab.el.classList.toggle('is-active', isActive);
         tab.el.classList.toggle('is-dimmed', requestedTab >= 0 && !isActive);
         tab.el.style.transform =
             `translate3d(${(cx - tab.textW / 2) * DOM_SS}px, ${(cy - TAB_LINE_H / 2) * DOM_SS}px, 0px) ` +
-            `scale(${tab.scale})`;
+            `rotate(${rotDeg}deg) scale(${tab.scale})`;
 
-        const mw = (tab.maskCanvas.width / PX_PER_UNIT) * tab.scale;
-        const mh = (tab.maskCanvas.height / PX_PER_UNIT) * tab.scale;
         tab.mesh.position.set(cx / PX_PER_UNIT, -cy / PX_PER_UNIT, 0);
-        tab.mesh.scale.set(mw, mh, 1);
+        tab.mesh.rotation.z = -rotDeg * MathUtils.DEG2RAD;
+        tab.mesh.scale.set(
+            (tab.maskCanvas.width / PX_PER_UNIT) * tab.scale,
+            (tab.maskCanvas.height / PX_PER_UNIT) * tab.scale,
+            1,
+        );
         tab.mesh.visible = true;
+
+        const halfH = (TAB_LINE_H / 2 + TEXT_PAD_MAX + BAND) * fit;
+        extentTopPx = Math.min(extentTopPx, cy - halfH);
+        extentBottomPx = Math.max(extentBottomPx, cy + halfH + TAB_UNDERLINE_DY * fit * align);
     }
 
-    updateUnderline(fit, rowY + bobY);
+    updateUnderline(fit);
 }
 
-function updateUnderline(fit: number, rowY: number): void {
+function updateUnderline(fit: number): void {
     if (!underlineEl || !underlineMesh) return;
 
-    const targetW = requestedTab >= 0 ? tabs[requestedTab].textW * 0.72 : 0;
-    const targetX = requestedTab >= 0 ? tabs[requestedTab].xPx : underlineX;
+    // The underline rides the ACTIVE title wherever it currently is, so it
+    // arrives with the row instead of waiting at the gathered position.
+    const active = requestedTab >= 0 ? tabs[requestedTab] : null;
+    const targetW = active ? active.textW * 0.72 * smootherstep(gather) : 0;
     underlineW = MathUtils.damp(underlineW, targetW, UNDERLINE_SMOOTH, deltaTime);
-    underlineX = MathUtils.damp(underlineX, targetX, UNDERLINE_SMOOTH, deltaTime);
+    if (active) underlineX = active.cx;
 
     const sx = underlineMaskW > 0 ? underlineW / underlineMaskW : 0;
-    if (sx < 0.01) {
+    if (sx < 0.01 || !active) {
         underlineEl.style.display = 'none';
         underlineMesh.visible = false;
         return;
@@ -1033,8 +1064,8 @@ function updateUnderline(fit: number, rowY: number): void {
     underlineEl.style.display = '';
     underlineMesh.visible = true;
 
-    const cx = underlineX * fit;
-    const cy = rowY + TAB_UNDERLINE_DY * fit;
+    const cx = underlineX;
+    const cy = active.cy + TAB_UNDERLINE_DY * fit;
     underlineEl.style.transform =
         `translate3d(${(cx - underlineMaskW / 2) * DOM_SS}px, ${(cy - TAB_UNDERLINE_H / 2) * DOM_SS}px, 0px) ` +
         `scale(${sx * fit}, ${fit})`;
@@ -1078,7 +1109,7 @@ function updateCards(): void {
 
     for (let i = 0; i < cards.length; i++) {
         const slot = cards[i];
-        if (!slot.layout || i >= cardCount) {
+        if (!slot.blocks || i >= cardCount) {
             slot.mesh.visible = false;
             slot.revealScale = 0;
             continue;
@@ -1125,7 +1156,7 @@ function updateCards(): void {
         // Punch mesh: the DOM pivots about its top centre, so the mesh centre is
         // the pivot plus the scaled half-height rotated by the same angle.
         const rad = rotDeg * MathUtils.DEG2RAD;
-        const half = (slot.layout.h * s) / 2;
+        const half = (CARD_H * s) / 2;
         const cx = xPx - half * Math.sin(rad);
         const cy = topY + half * Math.cos(rad);
         slot.mesh.position.set(cx / PX_PER_UNIT, -cy / PX_PER_UNIT, 0);
@@ -1136,8 +1167,8 @@ function updateCards(): void {
             1,
         );
 
-        extentBottomPx = Math.max(extentBottomPx, topY + slot.layout.h * s + BAND_NIGHT);
-        extentTopPx = Math.min(extentTopPx, topY - BAND_NIGHT);
+        extentBottomPx = Math.max(extentBottomPx, topY + CARD_H * s + BAND);
+        extentTopPx = Math.min(extentTopPx, topY - BAND);
     }
 }
 
@@ -1145,14 +1176,12 @@ function updateCards(): void {
 
 function updateQuietRect(): void {
     // Project the live extent of everything drawn into UV space for the post
-    // shader. Horizontally the strip can run past the frustum edges, so use the
-    // full built width — the UV clamp below trims it. Keep the rect tight: it
-    // damps the underwater distortion to 12%, and any water it covers beyond the
-    // ink reads as an unnaturally calm rectangle.
+    // shader. Keep the rect tight: it damps the underwater distortion to 12%,
+    // and any water it covers beyond the ink reads as an unnaturally calm box.
     const fit = rowFit();
     let tabHalfW = 0;
-    for (const tab of tabs) tabHalfW = Math.max(tabHalfW, Math.abs(tab.xPx) + tab.textW / 2);
-    const halfW = ((Math.max(stripHalfW, tabHalfW + TEXT_PAD_MAX_NIGHT) * fit) + MASK_MARGIN) / PX_PER_UNIT;
+    for (const tab of tabs) tabHalfW = Math.max(tabHalfW, Math.abs(tab.cx) + (tab.textW / 2) * fit);
+    const halfW = (Math.max(stripHalfW * fit, tabHalfW + TEXT_PAD_MAX) + MASK_MARGIN) / PX_PER_UNIT;
     const topWorld = -(extentTopPx - 6) / PX_PER_UNIT;
     const botWorld = -(extentBottomPx + 6) / PX_PER_UNIT;
 
@@ -1196,32 +1225,37 @@ function pointerToPlanePx(clientX: number, clientY: number): { x: number; y: num
     };
 }
 
+/** Undo a rotate-about-centre transform, giving the point in the box's own
+ *  space (origin at that centre). */
+function unrotate(dx: number, dy: number, rotDeg: number): { x: number; y: number } {
+    const rad = -rotDeg * MathUtils.DEG2RAD;
+    const c = Math.cos(rad), s = Math.sin(rad);
+    return { x: dx * c - dy * s, y: dx * s + dy * c };
+}
+
 function tabIndexAt(local: { x: number; y: number }): number {
     const fit = rowFit();
-    const cy = tabRowY();
-    const halfH = (TAB_LINE_H / 2 + HIT_PAD_Y) * fit;
-    if (Math.abs(local.y - cy) > halfH) return -1;
     for (let i = 0; i < tabs.length; i++) {
-        const halfW = (tabs[i].textW / 2 + HIT_PAD_X) * fit;
-        if (Math.abs(local.x - tabs[i].xPx * fit) <= halfW) return i;
+        const tab = tabs[i];
+        const p = unrotate(local.x - tab.cx, local.y - tab.cy, tab.rotDeg);
+        const halfW = (tab.textW / 2 + HIT_PAD_X) * fit;
+        const halfH = (TAB_LINE_H / 2 + HIT_PAD_Y) * fit;
+        if (Math.abs(p.x) <= halfW && Math.abs(p.y) <= halfH) return i;
     }
     return -1;
 }
 
-/** Plane px → card-box px (0..CARD_W, 0..layout.h), undoing the card's live
+/** Plane px → card-box px (0..CARD_W, 0..CARD_H), undoing the card's live
  *  top-centre rotate+scale. Returns null when the point misses the card. */
 function cardBoxLocal(slot: CardSlot, local: { x: number; y: number }): { x: number; y: number } | null {
-    if (!slot.layout || slot.revealScale <= 0.004) return null;
+    if (!slot.blocks || slot.revealScale <= 0.004) return null;
     const s = slot.revealScale * slot.scale;
     if (s <= 0.004) return null;
 
-    const dx = local.x - slot.xPx;
-    const dy = local.y - slot.topY;
-    const rad = -slot.rotDeg * MathUtils.DEG2RAD;
-    const c = Math.cos(rad), sn = Math.sin(rad);
-    const x = (dx * c - dy * sn) / s + CARD_W / 2;
-    const y = (dx * sn + dy * c) / s;
-    if (x < 0 || x > CARD_W || y < 0 || y > slot.layout.h) return null;
+    const p = unrotate(local.x - slot.xPx, local.y - slot.topY, slot.rotDeg);
+    const x = p.x / s + CARD_W / 2;
+    const y = p.y / s;
+    if (x < 0 || x > CARD_W || y < 0 || y > CARD_H) return null;
     return { x, y };
 }
 
@@ -1232,19 +1266,18 @@ function cardIndexAt(local: { x: number; y: number }): number {
     return -1;
 }
 
-/** The link under the pointer, if any (project cards' visit button). */
+/** The link under the pointer, if any (a project card's visit label). */
 function linkAt(local: { x: number; y: number }): string {
     for (let i = 0; i < cardCount; i++) {
         const slot = cards[i];
         const box = cardBoxLocal(slot, local);
-        if (!box || !slot.layout) continue;
-        for (const b of slot.layout.blocks) {
+        if (!box || !slot.blocks) continue;
+        for (const b of slot.blocks) {
             if (!b.href) continue;
-            const px = HIT_PAD_X, py = HIT_PAD_Y;
-            const w = b.kind === 'text' ? textWidth(b.text, b.size, b.weight, b.ls) + 2 * px : b.w;
-            const h = b.kind === 'text' ? b.lineH + 2 * py : b.h;
-            const bx = b.kind === 'text' ? b.x - px : b.x;
-            const by = b.kind === 'text' ? b.y - py : b.y;
+            const w = b.kind === 'text' ? textWidth(b.text, b.size, b.weight, b.ls) + 2 * HIT_PAD_X : b.w;
+            const h = b.kind === 'text' ? b.lineH + 2 * HIT_PAD_Y : b.h;
+            const bx = b.kind === 'text' ? b.x - HIT_PAD_X : b.x;
+            const by = b.kind === 'text' ? b.y - HIT_PAD_Y : b.y;
             if (box.x >= bx && box.x <= bx + w && box.y >= by && box.y <= by + h) return b.href;
         }
     }
@@ -1371,50 +1404,48 @@ function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: n
 
 function bakeCardMask(slot: CardSlot): void {
     const ctx = slot.maskCanvas.getContext('2d');
-    const layout = slot.layout;
-    if (!ctx || !layout) return;
+    if (!ctx || !slot.blocks) return;
 
     ctx.clearRect(0, 0, slot.maskCanvas.width, slot.maskCanvas.height);
     ctx.fillStyle = '#fff';
     ctx.strokeStyle = '#fff';
     ctx.lineJoin = 'round';
 
-    // Card box is centred vertically in the fixed-size canvas (see CARD_H_MAX).
-    const offX = MASK_MARGIN;
-    const offY = MASK_MARGIN + (CARD_H_MAX - layout.h) / 2;
+    const off = MASK_MARGIN;
 
     // Border band — stroke centred on the card border line, fat enough to
     // reveal the DOM box-shadow glow on both sides.
-    roundRectPath(ctx, offX + 1, offY + 1, CARD_W - 2, layout.h - 2, CARD_RADIUS - 1);
-    ctx.lineWidth = BORDER_PX + 2 * band;
+    roundRectPath(ctx, off + 1, off + 1, CARD_W - 2, CARD_H - 2, CARD_RADIUS - 1);
+    ctx.lineWidth = BORDER_PX + 2 * BAND;
     ctx.stroke();
 
-    for (const b of layout.blocks) {
+    for (const b of slot.blocks) {
         if (b.kind === 'line') {
             roundRectPath(
                 ctx,
-                offX + b.x - linePad, offY + b.y - linePad,
-                b.w + 2 * linePad, b.h + 2 * linePad,
-                linePad + 1,
+                off + b.x - LINE_PAD, off + b.y - LINE_PAD,
+                b.w + 2 * LINE_PAD, b.h + 2 * LINE_PAD,
+                LINE_PAD + 1,
             );
             ctx.fill();
         } else if (b.kind === 'rect') {
             if (b.stroke > 0) {
-                roundRectPath(ctx, offX + b.x, offY + b.y, b.w, b.h, b.radius);
-                ctx.lineWidth = b.stroke + 2 * band;
+                roundRectPath(ctx, off + b.x, off + b.y, b.w, b.h, b.radius);
+                ctx.lineWidth = b.stroke + 2 * BAND;
+                ctx.lineJoin = 'round';
                 ctx.stroke();
             } else {
                 roundRectPath(
                     ctx,
-                    offX + b.x - rectPad, offY + b.y - rectPad,
-                    b.w + 2 * rectPad, b.h + 2 * rectPad,
-                    b.radius + rectPad,
+                    off + b.x - RECT_PAD, off + b.y - RECT_PAD,
+                    b.w + 2 * RECT_PAD, b.h + 2 * RECT_PAD,
+                    b.radius + RECT_PAD,
                 );
                 ctx.fill();
             }
         } else {
             punchText(
-                ctx, b.text, offX + b.x, offY + b.y, b.lineH,
+                ctx, b.text, off + b.x, off + b.y, b.lineH,
                 b.size, b.weight, b.ls, textPadFor(b.size) * b.padMul,
             );
         }
@@ -1423,17 +1454,16 @@ function bakeCardMask(slot: CardSlot): void {
     slot.maskTexture.needsUpdate = true;
 }
 
-/** Tab / underline canvases are sized for the NIGHT pads and never resized by a
- *  mode change — the day pill is simply baked smaller, centred in the same
- *  canvas. Growing a canvas forces a GPU texture re-allocation, and re-uploading
- *  a grown canvas into a smaller texture is the "glCopySubTextureCHROMIUM:
- *  Offset overflows texture dimensions" failure CSS3DPanel documents. Only a
- *  label re-measure (webfont load) may resize, and that disposes properly. */
+/** Title / underline canvases are sized once from the label metrics; only a
+ *  re-measure (webfont load) may resize them, and that disposes properly.
+ *  Growing a canvas forces a GPU texture re-allocation, and re-uploading a
+ *  grown canvas into a smaller texture is the "glCopySubTextureCHROMIUM: Offset
+ *  overflows texture dimensions" failure CSS3DPanel documents. */
 function bakeTabMasks(): void {
     for (let i = 0; i < tabs.length; i++) {
         const tab = tabs[i];
-        const cw = Math.ceil(tab.textW + 2 * TEXT_PAD_MAX_NIGHT + 2 * MASK_MARGIN);
-        const ch = Math.ceil(TAB_LINE_H + 2 * TEXT_PAD_MAX_NIGHT + 2 * MASK_MARGIN);
+        const cw = Math.ceil(tab.textW + 2 * TEXT_PAD_MAX + 2 * MASK_MARGIN);
+        const ch = Math.ceil(TAB_LINE_H + 2 * TEXT_PAD_MAX + 2 * MASK_MARGIN);
         if (tab.maskCanvas.width !== cw || tab.maskCanvas.height !== ch) {
             tab.maskCanvas.width = cw;
             tab.maskCanvas.height = ch;
@@ -1443,6 +1473,7 @@ function bakeTabMasks(): void {
         if (!ctx) continue;
         ctx.clearRect(0, 0, cw, ch);
         ctx.fillStyle = '#fff';
+        ctx.strokeStyle = '#fff';
         punchText(
             ctx, TABS[i].label,
             (cw - tab.textW) / 2, (ch - TAB_LINE_H) / 2, TAB_LINE_H,
@@ -1456,8 +1487,8 @@ function bakeUnderlineMask(): void {
     if (!underlineMesh) return;
     const canvas = underlineMesh.userData.maskCanvas as HTMLCanvasElement;
     const texture = underlineMesh.userData.maskTexture as CanvasTexture;
-    const cw = Math.ceil(underlineMaskW + 2 * LINE_PAD_NIGHT + 2 * MASK_MARGIN);
-    const ch = Math.ceil(TAB_UNDERLINE_H + 2 * LINE_PAD_NIGHT + 2 * MASK_MARGIN);
+    const cw = Math.ceil(underlineMaskW + 2 * LINE_PAD + 2 * MASK_MARGIN);
+    const ch = Math.ceil(TAB_UNDERLINE_H + 2 * LINE_PAD + 2 * MASK_MARGIN);
     if (canvas.width !== cw || canvas.height !== ch) {
         canvas.width = cw;
         canvas.height = ch;
@@ -1467,29 +1498,9 @@ function bakeUnderlineMask(): void {
     if (!ctx) return;
     ctx.clearRect(0, 0, cw, ch);
     ctx.fillStyle = '#fff';
-    const pw = underlineMaskW + 2 * linePad;
-    const ph = TAB_UNDERLINE_H + 2 * linePad;
-    roundRectPath(ctx, (cw - pw) / 2, (ch - ph) / 2, pw, ph, linePad + 1);
+    const pw = underlineMaskW + 2 * LINE_PAD;
+    const ph = TAB_UNDERLINE_H + 2 * LINE_PAD;
+    roundRectPath(ctx, (cw - pw) / 2, (ch - ph) / 2, pw, ph, LINE_PAD + 1);
     ctx.fill();
     texture.needsUpdate = true;
-}
-
-/**
- * Follow body.night-mode. Neon lives on the DOM (CSS custom properties on
- * .ocean-carousel), but the punch dilation that makes room for it lives in the
- * masks, so a mode flip has to re-bake everything — see the BAND_* docs for why
- * day mode must hug the ink.
- */
-function applyNeonMode(night: boolean): void {
-    neonOn = night;
-    band = night ? BAND_NIGHT : BAND_DAY;
-    linePad = night ? LINE_PAD_NIGHT : LINE_PAD_DAY;
-    rectPad = night ? RECT_PAD_NIGHT : RECT_PAD_DAY;
-
-    bakeTabMasks();
-    bakeUnderlineMask();
-    for (let i = 0; i < cardCount; i++) {
-        renderCardDom(cards[i]);
-        bakeCardMask(cards[i]);
-    }
 }

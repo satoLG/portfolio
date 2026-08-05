@@ -38,6 +38,14 @@ export interface EntryCard {
     period: string;
     /** Two SHORT sentences at most — the card is deliberately terse. */
     body: string;
+    /** Optional logo (path under /public). Drop a file in and it replaces the
+     *  monogram with no code change — see `mono`. */
+    icon?: string;
+    /** Letters shown in the icon square while there is no logo file. Defaults to
+     *  the heading's first letter. Company and school logos are trademarks we
+     *  do not ship, so the monogram is the standing default, not a placeholder
+     *  waiting to be filled. */
+    mono?: string;
 }
 
 export interface ProjectCard {
@@ -63,6 +71,7 @@ export const EXPERIENCE: EntryCard[] = [
         kind: 'entry',
         heading: 'Bradesco',
         subheading: 'Desenvolvedor de software pleno',
+        mono: 'B',
         period: 'mai. 2022 — atual',
         body: 'Aplicações web em Python — Django, FastAPI e pandas — com front-end em HTML, CSS e JavaScript. SQL Server, Redis e Docker na infraestrutura.',
     },
@@ -70,6 +79,7 @@ export const EXPERIENCE: EntryCard[] = [
         kind: 'entry',
         heading: 'TEx',
         subheading: 'Desenvolvedor de software sênior',
+        mono: 'TX',
         period: 'out. 2020 — abr. 2022',
         body: 'Liderança técnica da equipe de inovações. Micro serviços em Python com Flask, Nameko e Tornado, sobre MongoDB, Redis e Docker.',
     },
@@ -77,6 +87,7 @@ export const EXPERIENCE: EntryCard[] = [
         kind: 'entry',
         heading: 'TEx',
         subheading: 'Desenvolvedor de software pleno',
+        mono: 'TX',
         period: 'mai. 2019 — set. 2020',
         body: 'Aplicação web e web services em Delphi, com JavaScript e MySQL. Também na ferramenta de OCR.',
     },
@@ -84,6 +95,7 @@ export const EXPERIENCE: EntryCard[] = [
         kind: 'entry',
         heading: 'TEx',
         subheading: 'Desenvolvedor de software júnior',
+        mono: 'TX',
         period: 'abr. 2017 — abr. 2019',
         body: 'Aplicação web em Delphi, com JavaScript e MySQL. Manutenção da ferramenta de OCR.',
     },
@@ -91,6 +103,7 @@ export const EXPERIENCE: EntryCard[] = [
         kind: 'entry',
         heading: 'IFSP',
         subheading: 'Monitor de curso — Análise e Desenvolvimento de Sistemas',
+        mono: 'IF',
         period: 'set. 2015 — dez. 2015',
         body: 'Apoio aos alunos do primeiro semestre do curso. Dúvidas de lógica de programação, arquitetura de computadores e matemática discreta.',
     },
@@ -153,6 +166,7 @@ export const STUDIES: EntryCard[] = [
     {
         kind: 'entry',
         heading: 'Faculdade Impacta Tecnologia',
+        mono: 'FI',
         subheading: 'Pós-graduação — Engenharia de Software',
         period: '2017 — 2018',
         body: '',
@@ -160,6 +174,7 @@ export const STUDIES: EntryCard[] = [
     {
         kind: 'entry',
         heading: 'IFSP',
+        mono: 'IF',
         subheading: 'Graduação — Tecnologia em Análise e Desenvolvimento de Sistemas',
         period: '2014 — 2016',
         body: '',
@@ -167,6 +182,7 @@ export const STUDIES: EntryCard[] = [
     {
         kind: 'entry',
         heading: 'Alura',
+        mono: 'A',
         subheading: 'NumPy: análise numérica eficiente com Python',
         period: 'ago. 2024',
         body: '',
@@ -174,6 +190,7 @@ export const STUDIES: EntryCard[] = [
     {
         kind: 'entry',
         heading: 'Impacta Tecnologia',
+        mono: 'IT',
         subheading: 'SQL 2019 — Módulo II',
         period: 'jan. 2024',
         body: '',
@@ -181,6 +198,7 @@ export const STUDIES: EntryCard[] = [
     {
         kind: 'entry',
         heading: 'Alura',
+        mono: 'A',
         subheading: 'Expressões regulares: capturando textos de forma mágica',
         period: 'out. 2022',
         body: '',

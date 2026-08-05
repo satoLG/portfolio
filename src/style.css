@@ -3071,6 +3071,10 @@ body.night-mode .ocean-carousel {
 
 .ocean-card .oc-rect img {
     display: block;
+    /* border-box is load-bearing: .oc-icon adds padding, and with the default
+       content-box the image would lay out at 100% PLUS that padding, overflow
+       its box and sit visibly off-centre. */
+    box-sizing: border-box;
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -3092,9 +3096,12 @@ body.night-mode .ocean-carousel {
     box-shadow: var(--oc-frame-shadow);
 }
 
-.ocean-card .oc-btn {
+/* Monogram tile — stands in for a company / school logo we don't ship. Same
+   ink language as the card frame: an outline with the initials inside. */
+.ocean-card .oc-mono {
     border-style: solid;
-    border-color: rgba(255, 255, 255, 0.88);
+    border-color: rgba(255, 255, 255, 0.72);
     background: transparent;
     box-shadow: var(--oc-frame-shadow);
 }
+
