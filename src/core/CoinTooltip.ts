@@ -135,6 +135,10 @@ export function showCoinTooltip(idx: number, wx: number, wy: number, wz: number)
     _setContent(idx);
     _anchor(panel, wx, wy, wz);
     panel.open();
+    // Moving straight from one coin to another swaps the icon + name on an
+    // already-open pill: no pop animation runs, so nothing else would nudge the
+    // CSS3D layer into re-rasterising the new content.
+    panel.requestRepaint();
 }
 
 /** Call every frame to keep the panel anchored as the coin bobs. */
