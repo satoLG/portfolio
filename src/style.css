@@ -2940,19 +2940,19 @@ body.day-mode .css3d-panel-content .ct-body {
    per-pixel alpha holes punched by the carousel's mask planes. Whatever paints
    outside a punched region is simply never seen — so glows here are free to
    overflow.
-   NOTE: the ::before pill insets are driven by --oc-pill-x / --oc-pill-y, which
-   CardCarousel.ts writes from the pill pads it baked into the mask (single
-   source) — per block for cards, on .ocean-carousel for the titles.
+   Text is punched as GLYPH OUTLINES, not as a pill box, so the only thing a
+   text-shadow has to fill is the few px of dilation hugging each letter — see
+   the TEXT_PAD docs in CardCarousel.ts. That is why the glows below are short
+   and dense rather than wide and faint: blur that reaches past the dilation is
+   simply clipped away by the mask.
 
-   NEON IS NIGHT-ONLY. Night burns the wide halo the cards have always had; day
-   drops it entirely — plain white ink, no glow.
+   NEON IS NIGHT-ONLY. Night burns a real halo; day drops it — plain white ink.
 
-   Day is NOT simply "night with the glow set to 0": a punched hole shows the
-   page background, which is black, so an unlit wide hole would read as a black
-   fringe around every letter. CardCarousel.applyNeonMode() shrinks the punch
-   dilation to hug the ink by day, and the short, water-toned --oc-*-day values
-   below just fill that few-px remainder so the edge reads as water rather than
-   a hard cutout.
+   Day is NOT just "night with the glow at zero": a punched hole shows the page
+   background, which is black, so an unlit hole would outline every letter in
+   black. applyNeonMode() shrinks the dilation to ~3.5px by day, and the
+   water-toned day values below fill only that remainder, so the edge reads as
+   water rather than a hard cutout.
 
    The glow is deliberately NOT transitioned. The punch dilation is a baked
    raster that changes in one frame, so a fading text-shadow would spend the
@@ -2964,13 +2964,11 @@ body.day-mode .css3d-panel-content .ct-body {
     position: relative;
     pointer-events: none;
 
-    /* Day: no neon — only enough tint to fill the tight punch remainder. */
-    --oc-glow-near: rgba(190, 225, 250, 0.42);
-    --oc-glow-near-blur: 7px;
+    /* Day: no neon — only enough tint to fill the ~3.5px dilation. */
+    --oc-glow-near: rgba(196, 228, 250, 0.5);
+    --oc-glow-near-blur: 5px;
     --oc-glow-far: rgba(150, 200, 235, 0);
-    --oc-glow-far-blur: 10px;
-    --oc-pool: rgba(185, 220, 248, 0.3);
-    --oc-pool-stop: 96%;
+    --oc-glow-far-blur: 8px;
     --oc-frame-glow: rgba(160, 205, 240, 0.6);
     --oc-frame-blur: 10px;
     --oc-frame-inner: rgba(160, 205, 240, 0.35);
@@ -2978,12 +2976,12 @@ body.day-mode .css3d-panel-content .ct-body {
 }
 
 body.night-mode .ocean-carousel {
-    --oc-glow-near: rgba(255, 255, 255, 0.9);
-    --oc-glow-near-blur: 24px;
-    --oc-glow-far: rgba(150, 215, 255, 0.65);
-    --oc-glow-far-blur: 64px;
-    --oc-pool: rgba(150, 210, 255, 0.16);
-    --oc-pool-stop: 78%;
+    /* Night: dense near-halo that saturates the ~10px dilation, plus a wider
+       cyan wash for the light that spills onto the card frame. */
+    --oc-glow-near: rgba(255, 255, 255, 0.95);
+    --oc-glow-near-blur: 9px;
+    --oc-glow-far: rgba(150, 215, 255, 0.85);
+    --oc-glow-far-blur: 22px;
     --oc-frame-glow: rgba(153, 217, 255, 0.4);
     --oc-frame-blur: 36px;
     --oc-frame-inner: rgba(153, 217, 255, 0.3);
@@ -3055,25 +3053,6 @@ body.night-mode .ocean-carousel {
     text-shadow:
         0 0 var(--oc-glow-near-blur) var(--oc-glow-near),
         0 0 var(--oc-glow-far-blur) var(--oc-glow-far);
-}
-
-/* Soft light pool behind each text line — fills the punched pill so its
-   corners read as glow instead of dead background. Must track the mask pill:
-   pill rect = text block rect expanded by the pads below. */
-.ocean-card .oc-blk::before,
-.ocean-tab::before {
-    content: '';
-    position: absolute;
-    left: calc(-1 * var(--oc-pill-x, 18px));
-    right: calc(-1 * var(--oc-pill-x, 18px));
-    top: calc(-1 * var(--oc-pill-y, 12px));
-    bottom: calc(-1 * var(--oc-pill-y, 12px));
-    border-radius: 999px;
-    background: radial-gradient(ellipse closest-side,
-        var(--oc-pool),
-        rgba(150, 210, 255, 0) var(--oc-pool-stop, 78%));
-    z-index: -1;
-    pointer-events: none;
 }
 
 .ocean-card .oc-line {

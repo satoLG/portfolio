@@ -129,12 +129,22 @@ const CARD_PAD = 32;                 // card box inset for all content
 // around every letter and border. Day mode therefore hugs the ink instead.
 // applyNeonMode() swaps these and re-bakes.
 const BAND_NIGHT = 12, BAND_DAY = 4;         // punch band each side of a stroke
-const PILL_X_NIGHT = 18, PILL_X_DAY = 8;     // text pill pads (also .oc-blk::before)
-const PILL_Y_NIGHT = 12, PILL_Y_DAY = 5;
-const LINE_PAD_NIGHT = 8, LINE_PAD_DAY = 3;  // divider-line punch pad
-const RECT_PAD_NIGHT = 6, RECT_PAD_DAY = 2;  // filled-box (image) punch pad
-const BTN_PILL_MUL = 0.78;   // tighter pill for the button label, so the button
-                             // reads as a ring with a lit label, not a slab
+const TEXT_PAD_NIGHT = 10, TEXT_PAD_DAY = 3.5;  // glyph-outline dilation
+const LINE_PAD_NIGHT = 5, LINE_PAD_DAY = 2.5;   // divider-line punch pad
+const RECT_PAD_NIGHT = 6, RECT_PAD_DAY = 2;     // filled-box (image) punch pad
+const BTN_PAD_MUL = 0.7;     // tighter dilation on the button label, so the
+                             // button reads as a ring with a lit label
+
+// Text is punched as GLYPH SHAPES, never as a pill box. A rounded-rect hole
+// around a line of text shows the page background (black) in every gap between
+// the letters and the box edge, which reads as a dark chip behind the line —
+// unmissable on the bare floating titles, where there is no card frame to
+// explain it. Stroking + filling the glyphs keeps the hole letter-shaped, so
+// the only thing visible around a letter is that letter's own glow.
+// Hit targets do NOT follow this: a tap area must stay forgiving whatever the
+// punch does, so they use these fixed pads in both modes.
+const HIT_PAD_X = 18;
+const HIT_PAD_Y = 12;
 
 // Mask canvases are allocated once, so their margin is sized for the widest
 // case (night) and simply left transparent by day.
@@ -142,8 +152,7 @@ const MASK_MARGIN = BAND_NIGHT + 4;
 
 let neonOn = true;           // mirrors body.night-mode
 let band = BAND_NIGHT;
-let pillX = PILL_X_NIGHT;
-let pillY = PILL_Y_NIGHT;
+let textPad = TEXT_PAD_NIGHT;
 let linePad = LINE_PAD_NIGHT;
 let rectPad = RECT_PAD_NIGHT;
 
@@ -199,7 +208,7 @@ interface Block {
     // text
     text: string;
     size: number; weight: number; ls: number; lineH: number; alpha: number;
-    pillMul: number;                 // multiplier on the current mode's pill pad
+    padMul: number;                  // multiplier on the current mode's glyph dilation
     // rect
     radius: number;
     img: string;                     // '' → no image element
@@ -207,9 +216,6 @@ interface Block {
     cls: string;                     // extra DOM class
     href: string;                    // '' → not clickable
 }
-
-function blockPillX(b: Block): number { return pillX * b.pillMul; }
-function blockPillY(b: Block): number { return pillY * b.pillMul; }
 
 interface CardLayout {
     blocks: Block[];
@@ -220,22 +226,27 @@ function block(b: Partial<Block> & { kind: BlockKind }): Block {
     return {
         x: CARD_PAD, y: 0, w: 0, h: 0,
         text: '', size: 15, weight: 400, ls: 0, lineH: 20, alpha: 0.85,
-        pillMul: 1,
+        padMul: 1,
         radius: 0, img: '', stroke: 0, cls: '', href: '',
         ...b,
     };
 }
 
 /** Font shorthand. `ss` = px multiplier: DOM_SS for DOM styles, 1 for mask
- *  measurement (font metrics scale linearly, so pills stay registered). */
+ *  measurement and baking (font metrics scale linearly, so the two stay
+ *  registered). */
 function blockFont(size: number, weight: number, ss = 1): string {
     return `${weight} ${size * ss}px ${FONT_STACK}`;
 }
 
-// ── Text measurement / wrapping ──────────────────────────────────────────────
+// ── Text measurement / wrapping / punching ───────────────────────────────────
 // Content is authored as plain sentences; the card width is fixed, so lines are
-// measured and wrapped here. The measurement model must match the DOM exactly:
-// letter-spacing adds after EVERY glyph, including the last.
+// measured and wrapped here. Measurement, DOM and mask must agree on glyph
+// advance to the pixel, so all three go through configureText(): canvas
+// letterSpacing applies exactly the CSS model (spacing after EVERY glyph,
+// kerning intact). Where the browser lacks it, we fall back to per-character
+// placement and the manual width model — that loses kerning, but the drift
+// stays inside the dilation band.
 
 let _measureCtx: CanvasRenderingContext2D | null = null;
 function measureCtx(): CanvasRenderingContext2D {
@@ -245,21 +256,70 @@ function measureCtx(): CanvasRenderingContext2D {
     return _measureCtx as CanvasRenderingContext2D;
 }
 
-function textWidth(text: string, font: string, ls: number): number {
-    const ctx = measureCtx();
-    if (!ctx) return text.length * 8;
-    ctx.font = font;
-    return ctx.measureText(text).width + ls * text.length;
+/** Set font + tracking on a context. Returns true when the browser applied the
+ *  tracking itself (so measureText already includes it). */
+function configureText(ctx: CanvasRenderingContext2D, size: number, weight: number, ls: number): boolean {
+    ctx.font = blockFont(size, weight);
+    if ('letterSpacing' in ctx) {
+        (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${ls}px`;
+        return true;
+    }
+    return false;
 }
 
-function wrapText(text: string, font: string, ls: number, maxW: number): string[] {
+function textWidth(text: string, size: number, weight: number, ls: number): number {
+    const ctx = measureCtx();
+    if (!ctx) return text.length * size * 0.5;
+    const native = configureText(ctx, size, weight, ls);
+    const w = ctx.measureText(text).width;
+    return native ? w : w + ls * text.length;
+}
+
+/** CSS half-leading: the font's content box is centred in the line box, so the
+ *  baseline sits this far below the block's top edge. Mirrors how .oc-blk is
+ *  laid out (fixed height equal to line-height). */
+function baselineOffset(ctx: CanvasRenderingContext2D, lineH: number): number {
+    const m = ctx.measureText('Hxpg');
+    const asc = m.fontBoundingBoxAscent, desc = m.fontBoundingBoxDescent;
+    if (typeof asc === 'number' && typeof desc === 'number' && asc + desc > 0) {
+        return (lineH - (asc + desc)) / 2 + asc;
+    }
+    return lineH * 0.74;   // no font metrics — close enough inside the dilation
+}
+
+/** Punch one line of text as dilated glyph outlines (see the TEXT_PAD docs for
+ *  why this is not a pill). `top` is the block's top edge in canvas px. */
+function punchText(
+    ctx: CanvasRenderingContext2D, text: string,
+    x: number, top: number, lineH: number,
+    size: number, weight: number, ls: number, pad: number,
+): void {
+    const native = configureText(ctx, size, weight, ls);
+    const baseline = top + baselineOffset(ctx, lineH);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = pad * 2;
+    if (native) {
+        ctx.strokeText(text, x, baseline);
+        ctx.fillText(text, x, baseline);
+        return;
+    }
+    let cx = x;
+    for (const ch of text) {
+        ctx.strokeText(ch, cx, baseline);
+        ctx.fillText(ch, cx, baseline);
+        cx += ctx.measureText(ch).width + ls;
+    }
+}
+
+function wrapText(text: string, size: number, weight: number, ls: number, maxW: number): string[] {
     if (!text) return [];
     const words = text.split(/\s+/).filter(Boolean);
     const lines: string[] = [];
     let line = '';
     for (const word of words) {
         const next = line ? `${line} ${word}` : word;
-        if (line && textWidth(next, font, ls) > maxW) {
+        if (line && textWidth(next, size, weight, ls) > maxW) {
             lines.push(line);
             line = word;
         } else {
@@ -278,13 +338,13 @@ function buildEntryLayout(e: EntryCard): CardLayout {
     const innerW = CARD_W - 2 * CARD_PAD;
     let y = 44;
 
-    for (const line of wrapText(e.heading, blockFont(26, 600), 0.2, innerW)) {
+    for (const line of wrapText(e.heading, 26, 600, 0.2, innerW)) {
         blocks.push(block({ kind: 'text', text: line, y, size: 26, weight: 600, ls: 0.2, lineH: 34, alpha: 0.98 }));
         y += 34;
     }
     y += 6;
 
-    for (const line of wrapText(e.subheading, blockFont(15.5, 500), 0.3, innerW)) {
+    for (const line of wrapText(e.subheading, 15.5, 500, 0.3, innerW)) {
         blocks.push(block({ kind: 'text', text: line, y, size: 15.5, weight: 500, ls: 0.3, lineH: 22, alpha: 0.88 }));
         y += 22;
     }
@@ -301,7 +361,7 @@ function buildEntryLayout(e: EntryCard): CardLayout {
 
     // No body (Estudos cards are subject + period only) → the divider closes the
     // card instead of hanging over dead space.
-    const bodyLines = wrapText(e.body, blockFont(14.5, 400), 0.2, innerW);
+    const bodyLines = wrapText(e.body, 14.5, 400, 0.2, innerW);
     if (bodyLines.length > 0) {
         y += 24;
         for (const line of bodyLines) {
@@ -325,7 +385,7 @@ function buildProjectLayout(p: ProjectCard): CardLayout {
     }));
 
     const nameX = CARD_PAD + ICON + ICON_GAP;
-    const nameLines = wrapText(p.name, blockFont(23, 600), 0.2, CARD_W - CARD_PAD - nameX);
+    const nameLines = wrapText(p.name, 23, 600, 0.2, CARD_W - CARD_PAD - nameX);
     let ny = Math.max(HEAD_Y - 4, HEAD_Y + (ICON - nameLines.length * 30) / 2);
     for (const line of nameLines) {
         blocks.push(block({ kind: 'text', text: line, x: nameX, y: ny, size: 23, weight: 600, ls: 0.2, lineH: 30, alpha: 0.98 }));
@@ -333,7 +393,7 @@ function buildProjectLayout(p: ProjectCard): CardLayout {
     }
 
     let y = Math.max(HEAD_Y + ICON, ny) + 26;
-    for (const line of wrapText(p.body, blockFont(14.5, 400), 0.2, innerW)) {
+    for (const line of wrapText(p.body, 14.5, 400, 0.2, innerW)) {
         blocks.push(block({ kind: 'text', text: line, y, size: 14.5, weight: 400, ls: 0.2, lineH: 21, alpha: 0.82 }));
         y += 21;
     }
@@ -356,12 +416,12 @@ function buildProjectLayout(p: ProjectCard): CardLayout {
         radius: BTN_H / 2, stroke: BORDER_PX, cls: 'oc-btn', href: p.url,
     }));
     const label = `${p.cta}  →`;
-    const labelW = textWidth(label, blockFont(13, 600), 2.4);
+    const labelW = textWidth(label, 13, 600, 2.4);
     blocks.push(block({
         kind: 'text', text: label,
         x: (CARD_W - labelW) / 2, y: y + (BTN_H - 18) / 2,
         size: 13, weight: 600, ls: 2.4, lineH: 18, alpha: 0.95,
-        pillMul: BTN_PILL_MUL, href: p.url,
+        padMul: BTN_PAD_MUL, href: p.url,
     }));
     y += BTN_H + 30;
 
@@ -428,6 +488,7 @@ let tabsUp = 0;                     // 0..1 title-row lift
 let underlineX = 0;                 // smoothed underline centre
 let underlineW = 0;                 // smoothed underline width
 let cardCount = 0;                  // slots in use by the active tab
+let _revealFlushed = false;         // raster flush already done for this unfold
 let stripHalfW = 0;                 // half-extent of the built strip (design px)
 
 // Track state
@@ -491,8 +552,6 @@ export function Start(glScene: ThreeScene, cssScene: ThreeScene): void {
     screenEl.className = 'ocean-carousel';
     screenEl.style.width = '0px';
     screenEl.style.height = '0px';
-    screenEl.style.setProperty('--oc-pill-x', `${pillX * DOM_SS}px`);
-    screenEl.style.setProperty('--oc-pill-y', `${pillY * DOM_SS}px`);
 
     cssObject = new CSS3DObject(screenEl);
     // The CSS3DObject constructor forces pointerEvents:'auto' on the element;
@@ -699,7 +758,7 @@ function buildUnderline(): void {
 function layoutTabs(): void {
     let rowW = 0;
     for (let i = 0; i < tabs.length; i++) {
-        tabs[i].textW = textWidth(TABS[i].label, blockFont(TAB_SIZE, TAB_WEIGHT), TAB_LS);
+        tabs[i].textW = textWidth(TABS[i].label, TAB_SIZE, TAB_WEIGHT, TAB_LS);
         tabs[i].el.style.width = `${tabs[i].textW * DOM_SS}px`;
         rowW += tabs[i].textW;
     }
@@ -832,10 +891,6 @@ function renderCardDom(slot: CardSlot): void {
         bl.style.height = `${b.lineH * DOM_SS}px`;
         bl.style.letterSpacing = `${b.ls * DOM_SS}px`;
         bl.style.opacity = `${b.alpha}`;
-        // Pill pads are day/night dependent (see the BAND_* docs), so they are
-        // always written explicitly rather than inherited from the screen.
-        bl.style.setProperty('--oc-pill-x', `${blockPillX(b) * DOM_SS}px`);
-        bl.style.setProperty('--oc-pill-y', `${blockPillY(b) * DOM_SS}px`);
         slot.el.appendChild(bl);
     }
 }
@@ -863,6 +918,19 @@ function advanceAnimation(): void {
         buildActiveTabCards();
     }
 
+    // The cards are composited BEHIND the canvas and unfold with transform +
+    // opacity alone, which Chrome happily serves from tiles it rastered while
+    // they were still scaled down — so the later, more-delayed cards settle at
+    // full size showing a blurry small-scale raster. Nothing invalidates paint
+    // once the animation stops, so force it once, the frame the unfold lands.
+    // (Same failure and same fix as CSS3DPanel.requestRepaint.)
+    if (reveal >= 1 && !_revealFlushed) {
+        _revealFlushed = true;
+        flushCardRaster();
+    } else if (reveal < 1) {
+        _revealFlushed = false;
+    }
+
     // The row stays lifted across a tab swap — it only drops when everything
     // collapses, so switching tabs never bounces the titles.
     const upTarget = requestedTab >= 0 ? 1 : 0;
@@ -870,6 +938,19 @@ function advanceAnimation(): void {
     tabsUp = upTarget > tabsUp
         ? Math.min(upTarget, tabsUp + upStep)
         : Math.max(upTarget, tabsUp - upStep);
+}
+
+/** Hiding an element and reading a layout property back is a paint
+ *  invalidation the compositor cannot batch away; no frame renders between the
+ *  two writes, so there is no flash. One-shot only — never per frame. */
+function flushCardRaster(): void {
+    for (let i = 0; i < cardCount; i++) {
+        const el = cards[i].el;
+        const prev = el.style.display;
+        el.style.display = 'none';
+        void el.offsetHeight;
+        el.style.display = prev;
+    }
 }
 
 /** Per-card unfold amount: a staggered slice of the global reveal. */
@@ -894,7 +975,7 @@ function updateTabs(): void {
     const rowY = tabRowY();
     const bobY = Math.sin(time * BOB_FREQ) * BOB_AMP_PX * 0.5;
 
-    extentTopPx = rowY + bobY - (TAB_LINE_H / 2 + PILL_Y_NIGHT + BAND_NIGHT) * fit;
+    extentTopPx = rowY + bobY - (TAB_LINE_H / 2 + TEXT_PAD_NIGHT + BAND_NIGHT) * fit;
     extentBottomPx = rowY + bobY + (TAB_UNDERLINE_DY + LINE_PAD_NIGHT + BAND_NIGHT) * fit;
 
     for (let i = 0; i < tabs.length; i++) {
@@ -1057,7 +1138,7 @@ function updateQuietRect(): void {
     const fit = rowFit();
     let tabHalfW = 0;
     for (const tab of tabs) tabHalfW = Math.max(tabHalfW, Math.abs(tab.xPx) + tab.textW / 2);
-    const halfW = ((Math.max(stripHalfW, tabHalfW + PILL_X_NIGHT) * fit) + MASK_MARGIN) / PX_PER_UNIT;
+    const halfW = ((Math.max(stripHalfW, tabHalfW + TEXT_PAD_NIGHT) * fit) + MASK_MARGIN) / PX_PER_UNIT;
     const topWorld = -(extentTopPx - 6) / PX_PER_UNIT;
     const botWorld = -(extentBottomPx + 6) / PX_PER_UNIT;
 
@@ -1104,10 +1185,10 @@ function pointerToPlanePx(clientX: number, clientY: number): { x: number; y: num
 function tabIndexAt(local: { x: number; y: number }): number {
     const fit = rowFit();
     const cy = tabRowY();
-    const halfH = (TAB_LINE_H / 2 + PILL_Y_NIGHT) * fit;
+    const halfH = (TAB_LINE_H / 2 + HIT_PAD_Y) * fit;
     if (Math.abs(local.y - cy) > halfH) return -1;
     for (let i = 0; i < tabs.length; i++) {
-        const halfW = (tabs[i].textW / 2 + PILL_X_NIGHT) * fit;
+        const halfW = (tabs[i].textW / 2 + HIT_PAD_X) * fit;
         if (Math.abs(local.x - tabs[i].xPx * fit) <= halfW) return i;
     }
     return -1;
@@ -1145,8 +1226,8 @@ function linkAt(local: { x: number; y: number }): string {
         if (!box || !slot.layout) continue;
         for (const b of slot.layout.blocks) {
             if (!b.href) continue;
-            const px = PILL_X_NIGHT * b.pillMul, py = PILL_Y_NIGHT * b.pillMul;
-            const w = b.kind === 'text' ? textWidth(b.text, blockFont(b.size, b.weight), b.ls) + 2 * px : b.w;
+            const px = HIT_PAD_X, py = HIT_PAD_Y;
+            const w = b.kind === 'text' ? textWidth(b.text, b.size, b.weight, b.ls) + 2 * px : b.w;
             const h = b.kind === 'text' ? b.lineH + 2 * py : b.h;
             const bx = b.kind === 'text' ? b.x - px : b.x;
             const by = b.kind === 'text' ? b.y - py : b.y;
@@ -1318,16 +1399,10 @@ function bakeCardMask(slot: CardSlot): void {
                 ctx.fill();
             }
         } else {
-            const px = blockPillX(b), py = blockPillY(b);
-            const w = textWidth(b.text, blockFont(b.size, b.weight), b.ls);
-            const ph = b.lineH + 2 * py;
-            roundRectPath(
-                ctx,
-                offX + b.x - px, offY + b.y - py,
-                w + 2 * px, ph,
-                ph / 2,
+            punchText(
+                ctx, b.text, offX + b.x, offY + b.y, b.lineH,
+                b.size, b.weight, b.ls, textPad * b.padMul,
             );
-            ctx.fill();
         }
     }
 
@@ -1341,9 +1416,10 @@ function bakeCardMask(slot: CardSlot): void {
  *  Offset overflows texture dimensions" failure CSS3DPanel documents. Only a
  *  label re-measure (webfont load) may resize, and that disposes properly. */
 function bakeTabMasks(): void {
-    for (const tab of tabs) {
-        const cw = Math.ceil(tab.textW + 2 * PILL_X_NIGHT + 2 * MASK_MARGIN);
-        const ch = Math.ceil(TAB_LINE_H + 2 * PILL_Y_NIGHT + 2 * MASK_MARGIN);
+    for (let i = 0; i < tabs.length; i++) {
+        const tab = tabs[i];
+        const cw = Math.ceil(tab.textW + 2 * TEXT_PAD_NIGHT + 2 * MASK_MARGIN);
+        const ch = Math.ceil(TAB_LINE_H + 2 * TEXT_PAD_NIGHT + 2 * MASK_MARGIN);
         if (tab.maskCanvas.width !== cw || tab.maskCanvas.height !== ch) {
             tab.maskCanvas.width = cw;
             tab.maskCanvas.height = ch;
@@ -1353,10 +1429,11 @@ function bakeTabMasks(): void {
         if (!ctx) continue;
         ctx.clearRect(0, 0, cw, ch);
         ctx.fillStyle = '#fff';
-        const pw = tab.textW + 2 * pillX;
-        const ph = TAB_LINE_H + 2 * pillY;
-        roundRectPath(ctx, (cw - pw) / 2, (ch - ph) / 2, pw, ph, ph / 2);
-        ctx.fill();
+        punchText(
+            ctx, TABS[i].label,
+            (cw - tab.textW) / 2, (ch - TAB_LINE_H) / 2, TAB_LINE_H,
+            TAB_SIZE, TAB_WEIGHT, TAB_LS, textPad,
+        );
         tab.maskTexture.needsUpdate = true;
     }
 }
@@ -1392,14 +1469,9 @@ function bakeUnderlineMask(): void {
 function applyNeonMode(night: boolean): void {
     neonOn = night;
     band = night ? BAND_NIGHT : BAND_DAY;
-    pillX = night ? PILL_X_NIGHT : PILL_X_DAY;
-    pillY = night ? PILL_Y_NIGHT : PILL_Y_DAY;
+    textPad = night ? TEXT_PAD_NIGHT : TEXT_PAD_DAY;
     linePad = night ? LINE_PAD_NIGHT : LINE_PAD_DAY;
     rectPad = night ? RECT_PAD_NIGHT : RECT_PAD_DAY;
-
-    // Drives .ocean-tab::before (cards write their own, per block).
-    screenEl?.style.setProperty('--oc-pill-x', `${pillX * DOM_SS}px`);
-    screenEl?.style.setProperty('--oc-pill-y', `${pillY * DOM_SS}px`);
 
     bakeTabMasks();
     bakeUnderlineMask();
