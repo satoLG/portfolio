@@ -1375,6 +1375,7 @@ function updateLoopButton(): void {
     } else {
         loopBtn.classList.remove('active');
     }
+    playerPanel?.requestRepaint();
 }
 
 // Guard against duplicate 'finish' events — wavesurfer can fire 'finish' a second
@@ -1505,7 +1506,18 @@ function updatePlayerDisplay(): void {
     coverImg.src = song.cover || DEFAULT_COVER;
     titleEl.textContent = song.name || DEFAULT_NAME;
     artistEl.textContent = song.artist || DEFAULT_ARTIST;
-    
+
+    // The panel is composited behind the canvas and the camera is static while
+    // the user skips tracks — nudge the CSS3D layer so the new art/labels are
+    // actually rasterised. The cover also decodes asynchronously, so repaint
+    // again once it lands.
+    playerPanel?.requestRepaint();
+    const decoded = coverImg.decode?.();
+    if (decoded) {
+        const repaint = () => playerPanel?.requestRepaint();
+        decoded.then(repaint, repaint);
+    }
+
     // Update playlist view if visible
     updatePlaylistHighlight();
 }
@@ -1751,6 +1763,10 @@ function updatePlayButton(): void {
     } else {
         playBtn.classList.remove('playing');
     }
+    // The play↔pause glyph swap is a display:none/block flip inside the CSS3D
+    // layer, which the compositor can serve from its existing tiles — same
+    // stale-raster trap as the control icons (see CSS3DPanel.requestRepaint).
+    playerPanel?.requestRepaint();
 }
 
 // Update bubble state when playing/paused

@@ -233,6 +233,7 @@ export class CSS3DPanel {
     private _openT = 0;        // eased 0..1
     private _lastW = 0; private _lastH = 0;
     private _lastInkSig = -1;          // transparent mode: re-bake when ink layout shifts
+    private _rasterFlushed = false;    // hard re-raster already done for this open
     private _zeroMeasureFrames = 0;   // diagnostic — warn if DOM never measures
     private _warnedZero = false;
     private _onOutsideClick: ((e: PointerEvent) => void) | null = null;
@@ -360,9 +361,29 @@ export class CSS3DPanel {
         this._wx = x; this._wy = y; this._wz = z;
     }
 
+    /** Force the hosted DOM to re-rasterise NOW. This subtree is composited
+     *  behind the canvas, so a change that Chrome decides it can serve from the
+     *  existing tiles (or a raster that went stale mid-animation) leaves the
+     *  panel showing yesterday's pixels while the camera is static. Hiding the
+     *  content and reading a layout property back is a paint invalidation the
+     *  compositor cannot batch away; no frame is rendered between the two
+     *  writes, so there is no flash. Cheap enough for content swaps (a track
+     *  change, moving between coins) — do NOT call it per frame. */
+    requestRepaint(): void {
+        if (!this._visible) return;   // hidden panel — the next open() flushes it
+        const el = this.content;
+        const prev = el.style.display;
+        el.style.display = 'none';
+        void el.offsetHeight;      // flush layout so the toggle counts as a repaint
+        el.style.display = prev;
+        // The swap may also have reflowed the interior — re-bake the mask.
+        this._lastInkSig = -1;
+    }
+
     open(): void {
         this._visible = true;
         this._openTarget = 1;
+        this._rasterFlushed = false;
         this.cssObject.visible = true;
         this.occluder.visible = true;
         // Bridge the frame gap so offsetWidth/Height measure correctly this frame
@@ -506,6 +527,21 @@ export class CSS3DPanel {
 
         this.inner.style.transform = `scale(${s})`;
         this.inner.style.opacity = `${MathUtils.clamp(panelProgress * 1.6, 0, 1)}`;
+
+        // The frame the pop lands: force the hosted DOM to re-rasterise once.
+        // The panel is composited behind the canvas and animates in with
+        // transform+opacity, which the compositor serves from already-rastered
+        // tiles; parts of the content that were not in that raster (the control
+        // buttons' inline SVG icons) then never appear, because once the
+        // animation stops nothing invalidates paint again. That is the "icons
+        // only show up after toggling day/night" bug — the class swap repaints
+        // the panel's background and drags the icons in with it. One explicit
+        // invalidation here, at the moment the panel settles, does the same
+        // thing deterministically.
+        if (!this._rasterFlushed && this._openTarget === 1 && this._openT >= 1) {
+            this._rasterFlushed = true;
+            this.requestRepaint();
+        }
 
         // 'top' anchor: the anchor point is the panel's TOP edge — the centre
         // sits half the (unscaled) height below it, so height growth extends
