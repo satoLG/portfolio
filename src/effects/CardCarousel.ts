@@ -110,8 +110,8 @@ const DOM_SS = 4;
 // description, screenshot, link — is the tallest thing the carousel has to show,
 // so it sets the height and the shorter entry cards distribute into it: header
 // pinned to the top, description pinned to the bottom, water in between.
-const CARD_W = 384;
-const CARD_H = 500;
+const CARD_W = 410;
+const CARD_H = 560;
 const CARD_RADIUS = 26;
 const BORDER_PX = 2;
 const CARD_PAD = 32;                 // card box inset for all content
@@ -125,22 +125,18 @@ const CARD_PAD = 32;                 // card box inset for all content
 // (black — index.html sets it inline), so growing it made a visibly fatter dark
 // outline appear around every letter the moment night fell. The geometry has to
 // hold still; only the DOM glow changes between day and night.
-const BAND = 6;              // punch band each side of a stroke (card border)
-const LINE_PAD = 3;          // divider-line punch pad
-const RECT_PAD = 3;          // filled-box (image) punch pad
+const BAND = 12;             // punch band each side of a stroke (card border)
+const LINE_PAD = 8;          // divider-line punch pad
+const RECT_PAD = 6;          // filled-box (image) punch pad
 
-// Text is punched as GLYPH SHAPES, never as a pill box. A rounded-rect hole
-// around a line of text shows the page background in every gap between the
-// letters and the box edge, which reads as a dark chip behind the line —
-// unmissable on the bare floating titles, where there is no card frame to
-// explain it. Stroking + filling the glyphs keeps the hole letter-shaped.
-//
-// The dilation scales with FONT SIZE and is capped tight: a flat pad cannot
-// serve both a 12.5px period line and a 34px title (whatever carries the
-// title's halo is wider than the gaps between small glyphs, so body text fuses
-// back into the slab this exists to avoid), and blur only holds useful opacity
-// out to about a third of its radius, so a wider hole is simply black.
-const TEXT_PAD_RATIO = 0.13, TEXT_PAD_MIN = 2, TEXT_PAD_MAX = 4.5;
+// Text is punched as a generous rounded PILL around each line — the roomy halo
+// the design wants, with the DOM's ::before pool filling it so the hole reads as
+// light rather than a hole. The pads below are also written to --oc-pill-x/y on
+// each element, so the pool and the mask are one measurement.
+const PILL_PAD_X = 20;
+const PILL_PAD_Y = 14;
+const BTN_PILL_MUL = 0.78;   // tighter pill for a link label, so it reads as a
+                             // lit word rather than a slab
 
 // Hit targets do NOT follow the punch: a tap area stays forgiving regardless.
 const HIT_PAD_X = 18;
@@ -148,15 +144,11 @@ const HIT_PAD_Y = 12;
 
 const MASK_MARGIN = BAND + 4;   // canvas margin around the card box
 
-function textPadFor(size: number): number {
-    return MathUtils.clamp(size * TEXT_PAD_RATIO, TEXT_PAD_MIN, TEXT_PAD_MAX);
-}
-
 // ── Titles (design px) ───────────────────────────────────────────────────────
-const TAB_SIZE = 38;
+const TAB_SIZE = 44;
 const TAB_WEIGHT = 600;
 const TAB_LS = 1.6;
-const TAB_LINE_H = 52;
+const TAB_LINE_H = 58;
 const TAB_GAP = 84;                  // px between titles once gathered
 const TAB_RISE_PX = 248;             // gathered row's height above the strip centre
 const TAB_UNDERLINE_DY = 40;         // px below the title centre
@@ -180,7 +172,7 @@ const TAB_GATHERED_AMP = 3;          // bob amplitude once gathered
 
 // ── Card strip (design px) ───────────────────────────────────────────────────
 const CARDS_TOP_Y = -180;            // top edge of every card, relative to PLANE_Y
-const CARD_SPACING = 448;            // px between card centres
+const CARD_SPACING = 490;            // px between card centres
 const EDGE_PAD = 40;                 // px of breathing room at the pan limits
 const MOMENTUM_DECAY = 2.6;          // 1/s exponential decay of fling velocity
 const MAX_FLING = 2600;              // px/s cap
@@ -279,41 +271,18 @@ function textWidth(text: string, size: number, weight: number, ls: number): numb
     return native ? w : w + ls * text.length;
 }
 
-/** CSS half-leading: the font's content box is centred in the line box, so the
- *  baseline sits this far below the block's top edge. Mirrors how .oc-blk is
- *  laid out (fixed height equal to line-height). */
-function baselineOffset(ctx: CanvasRenderingContext2D, lineH: number): number {
-    const m = ctx.measureText('Hxpg');
-    const asc = m.fontBoundingBoxAscent, desc = m.fontBoundingBoxDescent;
-    if (typeof asc === 'number' && typeof desc === 'number' && asc + desc > 0) {
-        return (lineH - (asc + desc)) / 2 + asc;
-    }
-    return lineH * 0.74;   // no font metrics — close enough inside the dilation
-}
-
-/** Punch one line of text as dilated glyph outlines (see the TEXT_PAD docs for
- *  why this is not a pill). `top` is the block's top edge in canvas px. */
-function punchText(
+/** Punch one line of text as a rounded pill around its measured box. `top` is
+ *  the block's top edge in canvas px. The DOM paints the same rect via
+ *  ::before (--oc-pill-x/y), so the hole is always filled with light. */
+function punchTextPill(
     ctx: CanvasRenderingContext2D, text: string,
     x: number, top: number, lineH: number,
-    size: number, weight: number, ls: number, pad: number,
+    size: number, weight: number, ls: number, padX: number, padY: number,
 ): void {
-    const native = configureText(ctx, size, weight, ls);
-    const baseline = top + baselineOffset(ctx, lineH);
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.lineWidth = pad * 2;
-    if (native) {
-        ctx.strokeText(text, x, baseline);
-        ctx.fillText(text, x, baseline);
-        return;
-    }
-    let cx = x;
-    for (const ch of text) {
-        ctx.strokeText(ch, cx, baseline);
-        ctx.fillText(ch, cx, baseline);
-        cx += ctx.measureText(ch).width + ls;
-    }
+    const w = textWidth(text, size, weight, ls);
+    const ph = lineH + 2 * padY;
+    roundRectPath(ctx, x - padX, top - padY, w + 2 * padX, ph, ph / 2);
+    ctx.fill();
 }
 
 function wrapText(text: string, size: number, weight: number, ls: number, maxW: number): string[] {
@@ -336,8 +305,8 @@ function wrapText(text: string, size: number, weight: number, ls: number, maxW: 
 
 // ── Card layouts ─────────────────────────────────────────────────────────────
 
-const ICON_BOX = 50;                 // icon / monogram square, shared by both layouts
-const ICON_GAP = 14;
+const ICON_BOX = 56;                 // icon / monogram square, shared by both layouts
+const ICON_GAP = 16;
 const HEAD_Y = 34;
 
 /** Icon slot: the real logo when there is one, otherwise a monogram in an
@@ -359,13 +328,13 @@ function pushIconBlocks(blocks: Block[], icon: string, mono: string, cls: string
         kind: 'rect', x: CARD_PAD, y: HEAD_Y, w: ICON_BOX, h: ICON_BOX,
         radius: 14, stroke: BORDER_PX, cls: 'oc-mono',
     }));
-    const size = mono.length > 1 ? 21 : 25;
+    const size = mono.length > 1 ? 24 : 28;
     const w = textWidth(mono, size, 600, 1);
     blocks.push(block({
         kind: 'text', text: mono,
         x: CARD_PAD + (ICON_BOX - w) / 2,
-        y: HEAD_Y + (ICON_BOX - 30) / 2,
-        size, weight: 600, ls: 1, lineH: 30, alpha: 0.95, padMul: 0.8,
+        y: HEAD_Y + (ICON_BOX - 34) / 2,
+        size, weight: 600, ls: 1, lineH: 34, alpha: 0.95, padMul: 0.7,
     }));
 }
 
@@ -379,26 +348,26 @@ function buildEntryLayout(e: EntryCard): Block[] {
     pushIconBlocks(blocks, e.icon ?? '', e.mono ?? e.heading.slice(0, 1).toUpperCase(), 'oc-logo');
 
     const headX = CARD_PAD + ICON_BOX + ICON_GAP;
-    const headLines = wrapText(e.heading, 29, 600, 0.2, CARD_W - CARD_PAD - headX);
-    let hy = Math.max(HEAD_Y - 8, HEAD_Y + (ICON_BOX - headLines.length * 37) / 2);
+    const headLines = wrapText(e.heading, 33, 600, 0.2, CARD_W - CARD_PAD - headX);
+    let hy = Math.max(HEAD_Y - 10, HEAD_Y + (ICON_BOX - headLines.length * 42) / 2);
     for (const line of headLines) {
-        blocks.push(block({ kind: 'text', text: line, x: headX, y: hy, size: 29, weight: 600, ls: 0.2, lineH: 37, alpha: 0.98 }));
-        hy += 37;
+        blocks.push(block({ kind: 'text', text: line, x: headX, y: hy, size: 33, weight: 600, ls: 0.2, lineH: 42, alpha: 0.98 }));
+        hy += 42;
     }
 
     let y = Math.max(HEAD_Y + ICON_BOX, hy) + 22;
 
-    for (const line of wrapText(e.subheading, 18, 500, 0.3, innerW)) {
-        blocks.push(block({ kind: 'text', text: line, y, size: 18, weight: 500, ls: 0.3, lineH: 25, alpha: 0.88 }));
-        y += 25;
+    for (const line of wrapText(e.subheading, 20, 500, 0.3, innerW)) {
+        blocks.push(block({ kind: 'text', text: line, y, size: 20, weight: 500, ls: 0.3, lineH: 28, alpha: 0.88 }));
+        y += 28;
     }
-    y += 4;
+    y += 6;
 
     if (e.period) {
-        blocks.push(block({ kind: 'text', text: e.period, y, size: 14.5, weight: 500, ls: 2.2, lineH: 20, alpha: 0.68 }));
-        y += 20;
+        blocks.push(block({ kind: 'text', text: e.period, y, size: 16, weight: 500, ls: 2.2, lineH: 22, alpha: 0.68 }));
+        y += 22;
     }
-    y += 20;
+    y += 22;
 
     blocks.push(block({ kind: 'line', y, w: 64, h: 2 }));
 
@@ -407,12 +376,27 @@ function buildEntryLayout(e: EntryCard): Block[] {
     // is variable (a long institution name can run to three lines), so the run
     // is clipped to the gap left under the divider rather than allowed to grow
     // up into it.
-    const BODY_SIZE = 17, BODY_LINE_H = 24, BODY_BOTTOM = 46;
-    const bodyTopLimit = y + 26;
-    const maxLines = Math.max(0, Math.floor((CARD_H - BODY_BOTTOM - bodyTopLimit) / BODY_LINE_H));
+    const BODY_SIZE = 19, BODY_LINE_H = 27;
+    // The credential link, when there is one, owns the bottom of the card and
+    // the description stacks above it — same anchor either way, so every card
+    // still ends on the same line.
+    let bodyBottom = 46;
+    if (e.url) {
+        const label = `${e.cta ?? 'VER CERTIFICADO'}  →`;
+        const labelW = textWidth(label, 17, 600, 2.2);
+        blocks.push(block({
+            kind: 'text', text: label, x: (CARD_W - labelW) / 2, y: CARD_H - 38 - 24,
+            size: 17, weight: 600, ls: 2.2, lineH: 24, alpha: 0.95,
+            padMul: BTN_PILL_MUL, href: e.url,
+        }));
+        bodyBottom = 38 + 24 + 26;
+    }
+
+    const bodyTopLimit = y + 28;
+    const maxLines = Math.max(0, Math.floor((CARD_H - bodyBottom - bodyTopLimit) / BODY_LINE_H));
     const bodyLines = wrapText(e.body, BODY_SIZE, 400, 0.2, innerW).slice(0, maxLines);
 
-    let by = CARD_H - BODY_BOTTOM - bodyLines.length * BODY_LINE_H;
+    let by = CARD_H - bodyBottom - bodyLines.length * BODY_LINE_H;
     for (const line of bodyLines) {
         blocks.push(block({ kind: 'text', text: line, y: by, size: BODY_SIZE, weight: 400, ls: 0.2, lineH: BODY_LINE_H, alpha: 0.82 }));
         by += BODY_LINE_H;
@@ -430,26 +414,26 @@ function buildProjectLayout(p: ProjectCard): Block[] {
     pushIconBlocks(blocks, p.icon, '', 'oc-icon');
 
     const nameX = CARD_PAD + ICON_BOX + ICON_GAP;
-    const nameLines = wrapText(p.name, 27, 600, 0.2, CARD_W - CARD_PAD - nameX);
-    let ny = Math.max(HEAD_Y - 6, HEAD_Y + (ICON_BOX - nameLines.length * 35) / 2);
+    const nameLines = wrapText(p.name, 30, 600, 0.2, CARD_W - CARD_PAD - nameX);
+    let ny = Math.max(HEAD_Y - 8, HEAD_Y + (ICON_BOX - nameLines.length * 39) / 2);
     for (const line of nameLines) {
-        blocks.push(block({ kind: 'text', text: line, x: nameX, y: ny, size: 27, weight: 600, ls: 0.2, lineH: 35, alpha: 0.98 }));
-        ny += 35;
+        blocks.push(block({ kind: 'text', text: line, x: nameX, y: ny, size: 30, weight: 600, ls: 0.2, lineH: 39, alpha: 0.98 }));
+        ny += 39;
     }
 
     // Bottom-up: link label, screenshot above it, divider above that. The shot
     // gives up height to the larger type — it is a crop either way, and losing
     // a slice of it costs less than truncating the description.
-    const LABEL_H = 21, SHOT_H = 152;
-    const labelY = CARD_H - 34 - LABEL_H;
-    const shotY = labelY - 24 - SHOT_H;
-    const dividerY = shotY - 20;
+    const LABEL_H = 24, SHOT_H = 176;
+    const labelY = CARD_H - 38 - LABEL_H;
+    const shotY = labelY - 26 - SHOT_H;
+    const dividerY = shotY - 22;
 
-    let y = Math.max(HEAD_Y + ICON_BOX, ny) + 24;
-    for (const line of wrapText(p.body, 17, 400, 0.2, innerW)) {
-        if (y + 24 > dividerY - 12) break;   // never collide with the image section
-        blocks.push(block({ kind: 'text', text: line, y, size: 17, weight: 400, ls: 0.2, lineH: 24, alpha: 0.82 }));
-        y += 24;
+    let y = Math.max(HEAD_Y + ICON_BOX, ny) + 26;
+    for (const line of wrapText(p.body, 19, 400, 0.2, innerW)) {
+        if (y + 27 > dividerY - 14) break;   // never collide with the image section
+        blocks.push(block({ kind: 'text', text: line, y, size: 19, weight: 400, ls: 0.2, lineH: 27, alpha: 0.82 }));
+        y += 27;
     }
 
     blocks.push(block({ kind: 'line', y: dividerY, w: innerW, h: 2 }));
@@ -460,11 +444,11 @@ function buildProjectLayout(p: ProjectCard): Block[] {
 
     // The link is TEXT ONLY — no button chrome. Its tap area comes from HIT_PAD.
     const label = `${p.cta}  →`;
-    const labelW = textWidth(label, 15, 600, 2.2);
+    const labelW = textWidth(label, 17, 600, 2.2);
     blocks.push(block({
         kind: 'text', text: label, x: (CARD_W - labelW) / 2, y: labelY,
-        size: 15, weight: 600, ls: 2.2, lineH: LABEL_H, alpha: 0.95,
-        href: p.url,
+        size: 17, weight: 600, ls: 2.2, lineH: LABEL_H, alpha: 0.95,
+        padMul: BTN_PILL_MUL, href: p.url,
     }));
 
     return blocks;
@@ -615,6 +599,8 @@ export function Start(glScene: ThreeScene, cssScene: ThreeScene): void {
     screenEl.className = 'ocean-carousel';
     screenEl.style.width = '0px';
     screenEl.style.height = '0px';
+    screenEl.style.setProperty('--oc-pill-x', `${PILL_PAD_X * DOM_SS}px`);
+    screenEl.style.setProperty('--oc-pill-y', `${PILL_PAD_Y * DOM_SS}px`);
 
     cssObject = new CSS3DObject(screenEl);
     // The CSS3DObject constructor forces pointerEvents:'auto' on the element;
@@ -949,6 +935,10 @@ function renderCardDom(slot: CardSlot): void {
         bl.style.height = `${b.lineH * DOM_SS}px`;
         bl.style.letterSpacing = `${b.ls * DOM_SS}px`;
         bl.style.opacity = `${b.alpha}`;
+        // Single measurement: the pool the DOM paints is exactly the pill the
+        // mask punched.
+        bl.style.setProperty('--oc-pill-x', `${PILL_PAD_X * b.padMul * DOM_SS}px`);
+        bl.style.setProperty('--oc-pill-y', `${PILL_PAD_Y * b.padMul * DOM_SS}px`);
         slot.el.appendChild(bl);
     }
 }
@@ -1069,7 +1059,7 @@ function updateTabs(): void {
         );
         tab.mesh.visible = true;
 
-        const halfH = (TAB_LINE_H / 2 + TEXT_PAD_MAX + BAND) * fit;
+        const halfH = (TAB_LINE_H / 2 + PILL_PAD_Y + BAND) * fit;
         extentTopPx = Math.min(extentTopPx, cy - halfH);
         extentBottomPx = Math.max(extentBottomPx, cy + halfH + TAB_UNDERLINE_DY * fit * align);
     }
@@ -1213,7 +1203,7 @@ function updateQuietRect(): void {
     const fit = rowFit();
     let tabHalfW = 0;
     for (const tab of tabs) tabHalfW = Math.max(tabHalfW, Math.abs(tab.cx) + (tab.textW / 2) * fit);
-    const halfW = (Math.max(stripHalfW * fit, tabHalfW + TEXT_PAD_MAX) + MASK_MARGIN) / PX_PER_UNIT;
+    const halfW = (Math.max(stripHalfW * fit, tabHalfW + PILL_PAD_X) + MASK_MARGIN) / PX_PER_UNIT;
     const topWorld = -(extentTopPx - 6) / PX_PER_UNIT;
     const botWorld = -(extentBottomPx + 6) / PX_PER_UNIT;
 
@@ -1476,9 +1466,10 @@ function bakeCardMask(slot: CardSlot): void {
                 ctx.fill();
             }
         } else {
-            punchText(
+            punchTextPill(
                 ctx, b.text, off + b.x, off + b.y, b.lineH,
-                b.size, b.weight, b.ls, textPadFor(b.size) * b.padMul,
+                b.size, b.weight, b.ls,
+                PILL_PAD_X * b.padMul, PILL_PAD_Y * b.padMul,
             );
         }
     }
@@ -1494,8 +1485,8 @@ function bakeCardMask(slot: CardSlot): void {
 function bakeTabMasks(): void {
     for (let i = 0; i < tabs.length; i++) {
         const tab = tabs[i];
-        const cw = Math.ceil(tab.textW + 2 * TEXT_PAD_MAX + 2 * MASK_MARGIN);
-        const ch = Math.ceil(TAB_LINE_H + 2 * TEXT_PAD_MAX + 2 * MASK_MARGIN);
+        const cw = Math.ceil(tab.textW + 2 * PILL_PAD_X + 2 * MASK_MARGIN);
+        const ch = Math.ceil(TAB_LINE_H + 2 * PILL_PAD_Y + 2 * MASK_MARGIN);
         if (tab.maskCanvas.width !== cw || tab.maskCanvas.height !== ch) {
             tab.maskCanvas.width = cw;
             tab.maskCanvas.height = ch;
@@ -1505,11 +1496,10 @@ function bakeTabMasks(): void {
         if (!ctx) continue;
         ctx.clearRect(0, 0, cw, ch);
         ctx.fillStyle = '#fff';
-        ctx.strokeStyle = '#fff';
-        punchText(
+        punchTextPill(
             ctx, TABS[i].label,
             (cw - tab.textW) / 2, (ch - TAB_LINE_H) / 2, TAB_LINE_H,
-            TAB_SIZE, TAB_WEIGHT, TAB_LS, textPadFor(TAB_SIZE),
+            TAB_SIZE, TAB_WEIGHT, TAB_LS, PILL_PAD_X, PILL_PAD_Y,
         );
         tab.maskTexture.needsUpdate = true;
     }

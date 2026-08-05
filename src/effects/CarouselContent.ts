@@ -43,6 +43,11 @@ export interface EntryCard {
     /** Fallback letters for the icon square when there is no logo file.
      *  Defaults to the heading's first letter. */
     mono?: string;
+    /** Credential / certificate page. When set, the card ends with a link to it
+     *  and the description stacks above. */
+    url?: string;
+    /** Link label. Defaults to "VER CERTIFICADO". */
+    cta?: string;
 }
 
 export interface ProjectCard {
@@ -61,7 +66,9 @@ export interface ProjectCard {
 export type CardData = EntryCard | ProjectCard;
 
 // ─── EXPERIÊNCIA ─────────────────────────────────────────────────────────────
-// Reverse-chronological (most recent first), as on the LinkedIn profile.
+// CHRONOLOGICAL — oldest first. The carousel lays cards out left to right in
+// array order, so this is what puts the start of the timeline on the left and
+// the present on the right.
 //
 // Logos live in public/images/logos/ (192px webp). They are square, full-bleed
 // brand tiles carrying their own backgrounds, so the icon slot renders them edge
@@ -71,19 +78,19 @@ export type CardData = EntryCard | ProjectCard;
 export const EXPERIENCE: EntryCard[] = [
     {
         kind: 'entry',
-        heading: 'Bradesco',
-        subheading: 'Desenvolvedor de software pleno',
-        mono: 'B', icon: '/images/logos/bradesco.webp',
-        period: 'mai. 2022 — atual',
-        body: 'Aplicações web em Python — Django, FastAPI e pandas — com front-end em HTML, CSS e JavaScript. SQL Server, Redis e Docker na infraestrutura.',
+        heading: 'IFSP',
+        subheading: 'Monitor de curso — Análise e Desenvolvimento de Sistemas',
+        mono: 'IF', icon: '/images/logos/ifsp.webp',
+        period: 'set. 2015 — dez. 2015',
+        body: 'Apoio aos alunos do primeiro semestre do curso. Dúvidas de lógica de programação, arquitetura de computadores e matemática discreta.',
     },
     {
         kind: 'entry',
         heading: 'TEx',
-        subheading: 'Desenvolvedor de software sênior',
+        subheading: 'Desenvolvedor de software júnior',
         mono: 'TX', icon: '/images/logos/tex.webp',
-        period: 'out. 2020 — abr. 2022',
-        body: 'Liderança técnica da equipe de inovações. Micro serviços em Python com Flask, Nameko e Tornado, sobre MongoDB, Redis e Docker.',
+        period: 'abr. 2017 — abr. 2019',
+        body: 'Aplicação web em Delphi, com JavaScript e MySQL. Manutenção da ferramenta de OCR.',
     },
     {
         kind: 'entry',
@@ -96,18 +103,18 @@ export const EXPERIENCE: EntryCard[] = [
     {
         kind: 'entry',
         heading: 'TEx',
-        subheading: 'Desenvolvedor de software júnior',
+        subheading: 'Desenvolvedor de software sênior',
         mono: 'TX', icon: '/images/logos/tex.webp',
-        period: 'abr. 2017 — abr. 2019',
-        body: 'Aplicação web em Delphi, com JavaScript e MySQL. Manutenção da ferramenta de OCR.',
+        period: 'out. 2020 — abr. 2022',
+        body: 'Liderança técnica da equipe de inovações. Micro serviços em Python com Flask, Nameko e Tornado, sobre MongoDB, Redis e Docker.',
     },
     {
         kind: 'entry',
-        heading: 'IFSP',
-        subheading: 'Monitor de curso — Análise e Desenvolvimento de Sistemas',
-        mono: 'IF', icon: '/images/logos/ifsp.webp',
-        period: 'set. 2015 — dez. 2015',
-        body: 'Apoio aos alunos do primeiro semestre do curso. Dúvidas de lógica de programação, arquitetura de computadores e matemática discreta.',
+        heading: 'Bradesco',
+        subheading: 'Desenvolvedor de software pleno',
+        mono: 'B', icon: '/images/logos/bradesco.webp',
+        period: 'mai. 2022 — atual',
+        body: 'Aplicações web em Python — Django, FastAPI e pandas — com front-end em HTML, CSS e JavaScript. SQL Server, Redis e Docker na infraestrutura.',
     },
 ];
 
@@ -156,54 +163,58 @@ export const PROJECTS: ProjectCard[] = [
 ];
 
 // ─── ESTUDOS ─────────────────────────────────────────────────────────────────
-// Formações acadêmicas first, then the certificates (most recent first). Same
-// rule as EXPERIENCE for what goes where: heading = who issued it, subheading =
-// what it was. `body` stays empty — these cards are subject + period only, so
-// buildEntryLayout closes the card right after the divider.
+// CHRONOLOGICAL — oldest first, same as EXPERIENCE, so degrees and courses read
+// as one timeline rather than two groups. Same rule for what goes where:
+// heading = who issued it, subheading = what it was, prefixed with its kind
+// (Graduação / Pós-graduação / Curso) so a course never reads as a degree.
 //
 // NOTE: only 3 certificates were listed on the profile at the time of writing.
-// Adding more is just another entry at the top of the certificate run.
 
 export const STUDIES: EntryCard[] = [
     {
         kind: 'entry',
-        heading: 'Faculdade Impacta Tecnologia',
-        mono: 'FI', icon: '/images/logos/impacta.webp',
-        subheading: 'Pós-graduação — Engenharia de Software',
-        period: '2017 — 2018',
-        body: '',
-    },
-    {
-        kind: 'entry',
         heading: 'IFSP',
-        mono: 'IF', icon: '/images/logos/ifsp.webp',
         subheading: 'Graduação — Tecnologia em Análise e Desenvolvimento de Sistemas',
+        mono: 'IF', icon: '/images/logos/ifsp.webp',
         period: '2014 — 2016',
         body: '',
     },
     {
         kind: 'entry',
-        heading: 'Alura',
-        mono: 'A', icon: '/images/logos/alura.webp',
-        subheading: 'NumPy: análise numérica eficiente com Python',
-        period: 'ago. 2024',
+        heading: 'Faculdade Impacta Tecnologia',
+        subheading: 'Pós-graduação — Engenharia de Software',
+        mono: 'FI', icon: '/images/logos/impacta.webp',
+        period: '2017 — 2018',
         body: '',
+    },
+    {
+        kind: 'entry',
+        heading: 'Alura',
+        subheading: 'Curso — Expressões regulares: capturando textos de forma mágica',
+        mono: 'A', icon: '/images/logos/alura.webp',
+        period: 'out. 2022',
+        body: '',
+        // TODO(link): paste the profile's "Exibir credencial" URL. Credential
+        // code bb05ea11-c30e-4902-93ff-9292d081e7e8 — the card simply drops the
+        // link block while url is unset.
     },
     {
         kind: 'entry',
         heading: 'Impacta Tecnologia',
+        subheading: 'Curso — SQL 2019, Módulo II',
         mono: 'IT', icon: '/images/logos/impacta.webp',
-        subheading: 'SQL 2019 — Módulo II',
         period: 'jan. 2024',
         body: '',
+        // TODO(link): credential code 2340789-169894.
     },
     {
         kind: 'entry',
         heading: 'Alura',
+        subheading: 'Curso — NumPy: análise numérica eficiente com Python',
         mono: 'A', icon: '/images/logos/alura.webp',
-        subheading: 'Expressões regulares: capturando textos de forma mágica',
-        period: 'out. 2022',
+        period: 'ago. 2024',
         body: '',
+        // TODO(link): credential code 3ef9832b-05e4-4fd6-96a8-174c728ba27e.
     },
 ];
 

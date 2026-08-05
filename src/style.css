@@ -2940,54 +2940,46 @@ body.day-mode .css3d-panel-content .ct-body {
    per-pixel alpha holes punched by the carousel's mask planes. Whatever paints
    outside a punched region is simply never seen — so glows here are free to
    overflow.
-   Text is punched as GLYPH OUTLINES, not as a pill box, so the only thing a
-   text-shadow has to fill is the few px of dilation hugging each letter — see
-   the TEXT_PAD docs in CardCarousel.ts. That is why the glows below are short
-   and dense rather than wide and faint: blur that reaches past the dilation is
-   simply clipped away by the mask.
+   Each line of text is punched as a roomy rounded PILL (PILL_PAD_X/Y in
+   CardCarousel.ts). A hole shows whatever is behind the canvas — the page
+   background, which is black — so every pill needs something painted into it or
+   it reads as a dark chip. That is the ::before pool below: it fills exactly the
+   punched rect, driven by the same --oc-pill-x/y the mask was baked from.
 
-   NEON IS NIGHT-ONLY. Night burns a real halo; day drops it — plain white ink.
-
-   Day is NOT just "night with the glow at zero": a punched hole shows the page
-   background, which is black, so an unlit hole would outline every letter in
-   black. applyNeonMode() shrinks the dilation to ~3.5px by day, and the
-   water-toned day values below fill only that remainder, so the edge reads as
-   water rather than a hard cutout.
-
-   The glow is deliberately NOT transitioned. The punch dilation is a baked
-   raster that changes in one frame, so a fading text-shadow would spend the
-   whole fade hard-clipped by an already-shrunk hole. DOM and mask switch
-   together instead — and UI.ts only swaps the class at the day/night midpoint,
-   where the scene is mid-transition anyway. */
+   THE PUNCH GEOMETRY IS IDENTICAL IN BOTH MODES. Only the light changes: neon
+   at night, a plain water-toned fill by day. An earlier version widened the
+   dilation at night to give the neon more room, which made the dark area around
+   every letter visibly grow the moment night fell — the geometry has to hold
+   still. */
 
 .ocean-carousel {
     position: relative;
     pointer-events: none;
 
-    /* Day: no neon — two tight layers, just enough to tint the 1–3px dilation
-       so its edge reads as water instead of a hard black cutout. */
-    --oc-ink-glow:
-        0 0 2px rgba(198, 230, 250, 0.75),
-        0 0 5px rgba(170, 212, 242, 0.45);
-    --oc-line-glow: 0 0 5px rgba(180, 218, 245, 0.6);
+    /* Day: no neon on the letters — they stay plain white. The pool still
+       carries a water tone, because it is what stands between the punched pill
+       and a black rectangle. */
+    --oc-ink-glow: none;
+    --oc-pool: rgba(150, 196, 232, 0.5);
+    --oc-pool-stop: 96%;
+    --oc-line-glow: 0 0 10px rgba(170, 210, 240, 0.55);
     --oc-frame-shadow:
-        0 0 10px rgba(160, 205, 240, 0.6),
-        inset 0 0 10px rgba(160, 205, 240, 0.35);
+        0 0 22px rgba(150, 200, 238, 0.55),
+        inset 0 0 20px rgba(150, 200, 238, 0.32);
 }
 
 body.night-mode .ocean-carousel {
-    /* Night: the neon. Stacked short radii first — a single wide blur is far
-       too thin near the glyph to fill the punched dilation, and everything it
-       spends past that dilation is clipped by the mask anyway — then the wider
-       cyan layers for the bloom that lands on the card frame. */
+    /* Night: the neon. Stacked radii — near layers saturate the pill around the
+       glyphs, wide ones give the bloom that lands on the card frame. */
     --oc-ink-glow:
-        0 0 2px rgba(255, 255, 255, 0.95),
-        0 0 4px rgba(255, 255, 255, 0.85),
-        0 0 9px rgba(160, 220, 255, 0.9),
-        0 0 20px rgba(150, 215, 255, 0.6);
+        0 0 4px rgba(255, 255, 255, 0.95),
+        0 0 12px rgba(255, 255, 255, 0.7),
+        0 0 28px rgba(150, 215, 255, 0.75);
+    --oc-pool: rgba(150, 210, 255, 0.2);
+    --oc-pool-stop: 82%;
     --oc-line-glow:
-        0 0 4px rgba(200, 235, 255, 0.9),
-        0 0 14px rgba(150, 215, 255, 0.7);
+        0 0 8px rgba(200, 235, 255, 0.9),
+        0 0 26px rgba(150, 215, 255, 0.7);
     --oc-frame-shadow:
         0 0 36px rgba(153, 217, 255, 0.4),
         inset 0 0 32px rgba(153, 217, 255, 0.3);
@@ -3052,6 +3044,25 @@ body.night-mode .ocean-carousel {
     white-space: nowrap;
     color: #fff;
     text-shadow: var(--oc-ink-glow);
+}
+
+/* Soft light pool behind each line — this IS the punched pill, filled. Its
+   insets come from --oc-pill-x/y, which CardCarousel writes from the very pads
+   it baked into the mask, so the paint and the hole are one measurement. */
+.ocean-card .oc-blk::before,
+.ocean-tab::before {
+    content: '';
+    position: absolute;
+    left: calc(-1 * var(--oc-pill-x, 20px));
+    right: calc(-1 * var(--oc-pill-x, 20px));
+    top: calc(-1 * var(--oc-pill-y, 14px));
+    bottom: calc(-1 * var(--oc-pill-y, 14px));
+    border-radius: 999px;
+    background: radial-gradient(ellipse closest-side,
+        var(--oc-pool),
+        rgba(150, 210, 255, 0) var(--oc-pool-stop, 82%));
+    z-index: -1;
+    pointer-events: none;
 }
 
 .ocean-card .oc-line {
