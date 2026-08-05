@@ -3082,6 +3082,8 @@ body.night-mode .ocean-carousel {
     -webkit-user-drag: none;
 }
 
+/* Loose mark on transparency (project icons) — letterboxed with breathing room
+   so the artwork keeps its own proportions. */
 .ocean-card .oc-icon {
     background: rgba(190, 225, 255, 0.1);
 }
@@ -3089,6 +3091,13 @@ body.night-mode .ocean-carousel {
 .ocean-card .oc-icon img {
     object-fit: contain;
     padding: 24px;      /* 6 × DOM_SS */
+}
+
+/* Full-bleed brand tile (company / school logos) — these ship with their own
+   background, so padding them would float a second square inside the slot.
+   Fills the rounded box edge to edge instead; .oc-rect img already covers. */
+.ocean-card .oc-logo {
+    background: transparent;
 }
 
 .ocean-card .oc-shot {

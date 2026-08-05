@@ -340,14 +340,17 @@ const ICON_BOX = 52;                 // icon / monogram square, shared by both l
 const ICON_GAP = 18;
 const HEAD_Y = 34;
 
-/** Icon slot: the real logo when the entry carries one, otherwise a monogram in
- *  an outlined square — same ink language as the card frame, and no dependency
- *  on assets we may not have. */
-function pushIconBlocks(blocks: Block[], icon: string, mono: string): void {
+/** Icon slot: the real logo when there is one, otherwise a monogram in an
+ *  outlined square — same ink language as the card frame, so a missing asset
+ *  degrades to something deliberate rather than a hole.
+ *  `cls` picks the fit: 'oc-logo' for full-bleed brand tiles (company and school
+ *  marks, which carry their own background), 'oc-icon' for loose marks on
+ *  transparency, which need padding and letterboxing instead. */
+function pushIconBlocks(blocks: Block[], icon: string, mono: string, cls: string): void {
     if (icon) {
         blocks.push(block({
             kind: 'rect', x: CARD_PAD, y: HEAD_Y, w: ICON_BOX, h: ICON_BOX,
-            radius: 14, img: icon, cls: 'oc-icon',
+            radius: 14, img: icon, cls,
         }));
         return;
     }
@@ -373,7 +376,7 @@ function buildEntryLayout(e: EntryCard): Block[] {
     const blocks: Block[] = [];
     const innerW = CARD_W - 2 * CARD_PAD;
 
-    pushIconBlocks(blocks, e.icon ?? '', e.mono ?? e.heading.slice(0, 1).toUpperCase());
+    pushIconBlocks(blocks, e.icon ?? '', e.mono ?? e.heading.slice(0, 1).toUpperCase(), 'oc-logo');
 
     const headX = CARD_PAD + ICON_BOX + ICON_GAP;
     const headLines = wrapText(e.heading, 25, 600, 0.2, CARD_W - CARD_PAD - headX);
@@ -417,7 +420,7 @@ function buildProjectLayout(p: ProjectCard): Block[] {
     const blocks: Block[] = [];
     const innerW = CARD_W - 2 * CARD_PAD;
 
-    pushIconBlocks(blocks, p.icon, '');
+    pushIconBlocks(blocks, p.icon, '', 'oc-icon');
 
     const nameX = CARD_PAD + ICON_BOX + ICON_GAP;
     const nameLines = wrapText(p.name, 23, 600, 0.2, CARD_W - CARD_PAD - nameX);
