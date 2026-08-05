@@ -2935,36 +2935,117 @@ body.day-mode .css3d-panel-content .ct-body {
     display: none;
 }
 
-/* ── CSS3D Ocean Card Carousel (effects/CardCarousel.ts) ─────────────────────
-   The cards live BEHIND the WebGL canvas and only show through per-pixel
-   alpha holes punched by the carousel's mask planes. Whatever paints outside
-   a punched region is simply never seen — so glows here are free to overflow.
-   NOTE: the ::before pill insets are driven by --oc-pill-x / --oc-pill-y,
-   set from PILL_PAD_X / PILL_PAD_Y in CardCarousel.ts (single source). */
+/* ── CSS3D Ocean Tab Carousel (effects/CardCarousel.ts) ──────────────────────
+   The titles and cards live BEHIND the WebGL canvas and only show through
+   per-pixel alpha holes punched by the carousel's mask planes. Whatever paints
+   outside a punched region is simply never seen — so glows here are free to
+   overflow.
+   NOTE: the ::before pill insets are driven by --oc-pill-x / --oc-pill-y, which
+   CardCarousel.ts writes from the pill pads it baked into the mask (single
+   source) — per block for cards, on .ocean-carousel for the titles.
+
+   NEON IS NIGHT-ONLY. Night burns the wide halo the cards have always had; day
+   drops it entirely — plain white ink, no glow.
+
+   Day is NOT simply "night with the glow set to 0": a punched hole shows the
+   page background, which is black, so an unlit wide hole would read as a black
+   fringe around every letter. CardCarousel.applyNeonMode() shrinks the punch
+   dilation to hug the ink by day, and the short, water-toned --oc-*-day values
+   below just fill that few-px remainder so the edge reads as water rather than
+   a hard cutout.
+
+   The glow is deliberately NOT transitioned. The punch dilation is a baked
+   raster that changes in one frame, so a fading text-shadow would spend the
+   whole fade hard-clipped by an already-shrunk hole. DOM and mask switch
+   together instead — and UI.ts only swaps the class at the day/night midpoint,
+   where the scene is mid-transition anyway. */
 
 .ocean-carousel {
     position: relative;
     pointer-events: none;
+
+    /* Day: no neon — only enough tint to fill the tight punch remainder. */
+    --oc-glow-near: rgba(190, 225, 250, 0.42);
+    --oc-glow-near-blur: 7px;
+    --oc-glow-far: rgba(150, 200, 235, 0);
+    --oc-glow-far-blur: 10px;
+    --oc-pool: rgba(185, 220, 248, 0.3);
+    --oc-pool-stop: 96%;
+    --oc-frame-glow: rgba(160, 205, 240, 0.6);
+    --oc-frame-blur: 10px;
+    --oc-frame-inner: rgba(160, 205, 240, 0.35);
+    --oc-frame-inner-blur: 10px;
+}
+
+body.night-mode .ocean-carousel {
+    --oc-glow-near: rgba(255, 255, 255, 0.9);
+    --oc-glow-near-blur: 24px;
+    --oc-glow-far: rgba(150, 215, 255, 0.65);
+    --oc-glow-far-blur: 64px;
+    --oc-pool: rgba(150, 210, 255, 0.16);
+    --oc-pool-stop: 78%;
+    --oc-frame-glow: rgba(153, 217, 255, 0.4);
+    --oc-frame-blur: 36px;
+    --oc-frame-inner: rgba(153, 217, 255, 0.3);
+    --oc-frame-inner-blur: 32px;
 }
 
 /* NOTE: px values below are in DOM-supersampled space (×DOM_SS = 4 in
    CardCarousel.ts — iOS WebKit precision fix). Design px × 4. */
+
+/* ── The three floating titles ─────────────────────────────────────────────── */
+.ocean-tab {
+    position: absolute;
+    left: 0;
+    top: 0;
+    white-space: nowrap;
+    text-align: center;
+    color: #fff;
+    font-family: 'Wotfard', ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    will-change: transform;
+    pointer-events: none;
+    opacity: 0.95;
+    text-shadow:
+        0 0 var(--oc-glow-near-blur) var(--oc-glow-near),
+        0 0 var(--oc-glow-far-blur) var(--oc-glow-far);
+    transition: opacity 0.35s ease;
+}
+
+.ocean-tab.is-dimmed { opacity: 0.52; }
+.ocean-tab.is-active { opacity: 1; }
+
+.ocean-tab-underline {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform-origin: 50% 50%;
+    background: rgba(255, 255, 255, 0.7);
+    box-shadow: 0 0 var(--oc-frame-blur) var(--oc-frame-glow);
+    will-change: transform;
+    pointer-events: none;
+}
+
+/* ── Cards ─────────────────────────────────────────────────────────────────── */
 .ocean-card {
     position: absolute;
     left: 0;
     top: 0;
     box-sizing: border-box;
+    /* Cards unfold downward from under the title row — the punch mesh mirrors
+       this pivot in CardCarousel.updateCards(). */
+    transform-origin: 50% 0%;
     border-style: solid;
     border-color: rgba(255, 255, 255, 0.92);
     background: transparent;   /* interior stays unpunched → live 3D scene */
     color: #fff;
     font-family: 'Wotfard', ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
-    will-change: transform;
+    will-change: transform, opacity;
     pointer-events: none;
     box-shadow:
-        0 0 36px rgba(153, 217, 255, 0.4),
-        inset 0 0 32px rgba(153, 217, 255, 0.3);
+        0 0 var(--oc-frame-blur) var(--oc-frame-glow),
+        inset 0 0 var(--oc-frame-inner-blur) var(--oc-frame-inner);
 }
 
 .ocean-card .oc-blk {
@@ -2972,14 +3053,15 @@ body.day-mode .css3d-panel-content .ct-body {
     white-space: nowrap;
     color: #fff;
     text-shadow:
-        0 0 24px rgba(255, 255, 255, 0.9),
-        0 0 64px rgba(150, 215, 255, 0.65);
+        0 0 var(--oc-glow-near-blur) var(--oc-glow-near),
+        0 0 var(--oc-glow-far-blur) var(--oc-glow-far);
 }
 
 /* Soft light pool behind each text line — fills the punched pill so its
-   corners read as glow instead of dead black. Must track the mask pill:
+   corners read as glow instead of dead background. Must track the mask pill:
    pill rect = text block rect expanded by the pads below. */
-.ocean-card .oc-blk::before {
+.ocean-card .oc-blk::before,
+.ocean-tab::before {
     content: '';
     position: absolute;
     left: calc(-1 * var(--oc-pill-x, 18px));
@@ -2988,8 +3070,8 @@ body.day-mode .css3d-panel-content .ct-body {
     bottom: calc(-1 * var(--oc-pill-y, 12px));
     border-radius: 999px;
     background: radial-gradient(ellipse closest-side,
-        rgba(150, 210, 255, 0.16),
-        rgba(150, 210, 255, 0) 78%);
+        var(--oc-pool),
+        rgba(150, 210, 255, 0) var(--oc-pool-stop, 78%));
     z-index: -1;
     pointer-events: none;
 }
@@ -2998,6 +3080,45 @@ body.day-mode .css3d-panel-content .ct-body {
     position: absolute;
     height: 8px;        /* overridden inline (2 × DOM_SS) — kept as fallback */
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.55);
-    box-shadow: 0 0 32px rgba(170, 225, 255, 0.8);
+    background: rgba(255, 255, 255, 0.5);
+    box-shadow: 0 0 var(--oc-frame-blur) var(--oc-frame-glow);
+}
+
+/* ── Boxed blocks: project icon, screenshot, link button ───────────────────── */
+.ocean-card .oc-rect {
+    position: absolute;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.ocean-card .oc-rect img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.ocean-card .oc-icon {
+    background: rgba(190, 225, 255, 0.1);
+}
+
+.ocean-card .oc-icon img {
+    object-fit: contain;
+    padding: 24px;      /* 6 × DOM_SS */
+}
+
+.ocean-card .oc-shot {
+    background: rgba(12, 34, 60, 0.55);
+    box-shadow: 0 0 var(--oc-frame-blur) var(--oc-frame-glow);
+}
+
+.ocean-card .oc-btn {
+    border-style: solid;
+    border-color: rgba(255, 255, 255, 0.88);
+    background: transparent;
+    box-shadow:
+        0 0 var(--oc-frame-blur) var(--oc-frame-glow),
+        inset 0 0 var(--oc-frame-inner-blur) var(--oc-frame-inner);
 }
