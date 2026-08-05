@@ -56,31 +56,43 @@ export interface ProjectCard {
 export type CardData = EntryCard | ProjectCard;
 
 // ─── EXPERIÊNCIA ─────────────────────────────────────────────────────────────
-// TODO(content): placeholder scaffolding — LinkedIn blocks automated reads
-// (HTTP 403 without a session), so these are template rows, NOT real history.
-// Replace with the real entries, most recent first.
+// Reverse-chronological (most recent first), as on the LinkedIn profile.
 
 export const EXPERIENCE: EntryCard[] = [
     {
         kind: 'entry',
-        heading: 'Empresa 3',
-        subheading: 'Cargo',
-        period: '2024 — atual',
-        body: 'Primeira frase curta sobre a experiência. Segunda frase curta.',
+        heading: 'Bradesco',
+        subheading: 'Desenvolvedor de software pleno',
+        period: 'mai. 2022 — atual',
+        body: 'Aplicações web em Python — Django, FastAPI e pandas — com front-end em HTML, CSS e JavaScript. SQL Server, Redis e Docker na infraestrutura.',
     },
     {
         kind: 'entry',
-        heading: 'Empresa 2',
-        subheading: 'Cargo',
-        period: '2022 — 2024',
-        body: 'Primeira frase curta sobre a experiência. Segunda frase curta.',
+        heading: 'TEx',
+        subheading: 'Desenvolvedor de software sênior',
+        period: 'out. 2020 — abr. 2022',
+        body: 'Liderança técnica da equipe de inovações. Micro serviços em Python com Flask, Nameko e Tornado, sobre MongoDB, Redis e Docker.',
     },
     {
         kind: 'entry',
-        heading: 'Empresa 1',
-        subheading: 'Cargo',
-        period: '2020 — 2022',
-        body: 'Primeira frase curta sobre a experiência. Segunda frase curta.',
+        heading: 'TEx',
+        subheading: 'Desenvolvedor de software pleno',
+        period: 'mai. 2019 — set. 2020',
+        body: 'Aplicação web e web services em Delphi, com JavaScript e MySQL. Também na ferramenta de OCR.',
+    },
+    {
+        kind: 'entry',
+        heading: 'TEx',
+        subheading: 'Desenvolvedor de software júnior',
+        period: 'abr. 2017 — abr. 2019',
+        body: 'Aplicação web em Delphi, com JavaScript e MySQL. Manutenção da ferramenta de OCR.',
+    },
+    {
+        kind: 'entry',
+        heading: 'IFSP',
+        subheading: 'Monitor de curso — Análise e Desenvolvimento de Sistemas',
+        period: 'set. 2015 — dez. 2015',
+        body: 'Apoio aos alunos do primeiro semestre do curso. Dúvidas de lógica de programação, arquitetura de computadores e matemática discreta.',
     },
 ];
 
@@ -129,50 +141,48 @@ export const PROJECTS: ProjectCard[] = [
 ];
 
 // ─── ESTUDOS ─────────────────────────────────────────────────────────────────
-// TODO(content): same placeholder note as EXPERIENCE — formações acadêmicas
-// first, then the 5 most recent LinkedIn certificates.
+// Formações acadêmicas first, then the certificates (most recent first). Same
+// rule as EXPERIENCE for what goes where: heading = who issued it, subheading =
+// what it was. `body` stays empty — these cards are subject + period only, so
+// buildEntryLayout closes the card right after the divider.
+//
+// NOTE: only 3 certificates were listed on the profile at the time of writing.
+// Adding more is just another entry at the top of the certificate run.
 
 export const STUDIES: EntryCard[] = [
     {
         kind: 'entry',
-        heading: 'Instituição',
-        subheading: 'Curso / formação',
-        period: '2018 — 2022',
-        body: 'Uma frase curta sobre a formação.',
-    },
-    {
-        kind: 'entry',
-        heading: 'Emissor do certificado',
-        subheading: 'Assunto do certificado',
-        period: '2025',
+        heading: 'Faculdade Impacta Tecnologia',
+        subheading: 'Pós-graduação — Engenharia de Software',
+        period: '2017 — 2018',
         body: '',
     },
     {
         kind: 'entry',
-        heading: 'Emissor do certificado',
-        subheading: 'Assunto do certificado',
-        period: '2025',
+        heading: 'IFSP',
+        subheading: 'Graduação — Tecnologia em Análise e Desenvolvimento de Sistemas',
+        period: '2014 — 2016',
         body: '',
     },
     {
         kind: 'entry',
-        heading: 'Emissor do certificado',
-        subheading: 'Assunto do certificado',
-        period: '2024',
+        heading: 'Alura',
+        subheading: 'NumPy: análise numérica eficiente com Python',
+        period: 'ago. 2024',
         body: '',
     },
     {
         kind: 'entry',
-        heading: 'Emissor do certificado',
-        subheading: 'Assunto do certificado',
-        period: '2024',
+        heading: 'Impacta Tecnologia',
+        subheading: 'SQL 2019 — Módulo II',
+        period: 'jan. 2024',
         body: '',
     },
     {
         kind: 'entry',
-        heading: 'Emissor do certificado',
-        subheading: 'Assunto do certificado',
-        period: '2023',
+        heading: 'Alura',
+        subheading: 'Expressões regulares: capturando textos de forma mágica',
+        period: 'out. 2022',
         body: '',
     },
 ];

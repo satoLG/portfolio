@@ -297,14 +297,20 @@ function buildEntryLayout(e: EntryCard): CardLayout {
     y += 18;
 
     blocks.push(block({ kind: 'line', y, w: 64, h: 2 }));
-    y += 26;
+    y += 2;
 
-    for (const line of wrapText(e.body, blockFont(14.5, 400), 0.2, innerW)) {
-        blocks.push(block({ kind: 'text', text: line, y, size: 14.5, weight: 400, ls: 0.2, lineH: 21, alpha: 0.82 }));
-        y += 21;
+    // No body (Estudos cards are subject + period only) → the divider closes the
+    // card instead of hanging over dead space.
+    const bodyLines = wrapText(e.body, blockFont(14.5, 400), 0.2, innerW);
+    if (bodyLines.length > 0) {
+        y += 24;
+        for (const line of bodyLines) {
+            blocks.push(block({ kind: 'text', text: line, y, size: 14.5, weight: 400, ls: 0.2, lineH: 21, alpha: 0.82 }));
+            y += 21;
+        }
     }
 
-    return { blocks, h: Math.max(230, y + 34) };
+    return { blocks, h: Math.max(200, y + 34) };
 }
 
 /** Project: icon + name, description, a divided image section, then the link. */
