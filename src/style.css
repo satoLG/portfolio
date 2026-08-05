@@ -2964,28 +2964,33 @@ body.day-mode .css3d-panel-content .ct-body {
     position: relative;
     pointer-events: none;
 
-    /* Day: no neon — only enough tint to fill the ~3.5px dilation. */
-    --oc-glow-near: rgba(196, 228, 250, 0.5);
-    --oc-glow-near-blur: 5px;
-    --oc-glow-far: rgba(150, 200, 235, 0);
-    --oc-glow-far-blur: 8px;
-    --oc-frame-glow: rgba(160, 205, 240, 0.6);
-    --oc-frame-blur: 10px;
-    --oc-frame-inner: rgba(160, 205, 240, 0.35);
-    --oc-frame-inner-blur: 10px;
+    /* Day: no neon — two tight layers, just enough to tint the 1–3px dilation
+       so its edge reads as water instead of a hard black cutout. */
+    --oc-ink-glow:
+        0 0 2px rgba(198, 230, 250, 0.75),
+        0 0 5px rgba(170, 212, 242, 0.45);
+    --oc-line-glow: 0 0 5px rgba(180, 218, 245, 0.6);
+    --oc-frame-shadow:
+        0 0 10px rgba(160, 205, 240, 0.6),
+        inset 0 0 10px rgba(160, 205, 240, 0.35);
 }
 
 body.night-mode .ocean-carousel {
-    /* Night: dense near-halo that saturates the ~10px dilation, plus a wider
-       cyan wash for the light that spills onto the card frame. */
-    --oc-glow-near: rgba(255, 255, 255, 0.95);
-    --oc-glow-near-blur: 9px;
-    --oc-glow-far: rgba(150, 215, 255, 0.85);
-    --oc-glow-far-blur: 22px;
-    --oc-frame-glow: rgba(153, 217, 255, 0.4);
-    --oc-frame-blur: 36px;
-    --oc-frame-inner: rgba(153, 217, 255, 0.3);
-    --oc-frame-inner-blur: 32px;
+    /* Night: the neon. Stacked short radii first — a single wide blur is far
+       too thin near the glyph to fill the punched dilation, and everything it
+       spends past that dilation is clipped by the mask anyway — then the wider
+       cyan layers for the bloom that lands on the card frame. */
+    --oc-ink-glow:
+        0 0 2px rgba(255, 255, 255, 0.95),
+        0 0 4px rgba(255, 255, 255, 0.85),
+        0 0 9px rgba(160, 220, 255, 0.9),
+        0 0 20px rgba(150, 215, 255, 0.6);
+    --oc-line-glow:
+        0 0 4px rgba(200, 235, 255, 0.9),
+        0 0 14px rgba(150, 215, 255, 0.7);
+    --oc-frame-shadow:
+        0 0 36px rgba(153, 217, 255, 0.4),
+        inset 0 0 32px rgba(153, 217, 255, 0.3);
 }
 
 /* NOTE: px values below are in DOM-supersampled space (×DOM_SS = 4 in
@@ -3004,9 +3009,7 @@ body.night-mode .ocean-carousel {
     will-change: transform;
     pointer-events: none;
     opacity: 0.95;
-    text-shadow:
-        0 0 var(--oc-glow-near-blur) var(--oc-glow-near),
-        0 0 var(--oc-glow-far-blur) var(--oc-glow-far);
+    text-shadow: var(--oc-ink-glow);
     transition: opacity 0.35s ease;
 }
 
@@ -3019,7 +3022,7 @@ body.night-mode .ocean-carousel {
     top: 0;
     transform-origin: 50% 50%;
     background: rgba(255, 255, 255, 0.7);
-    box-shadow: 0 0 var(--oc-frame-blur) var(--oc-frame-glow);
+    box-shadow: var(--oc-line-glow);
     will-change: transform;
     pointer-events: none;
 }
@@ -3041,18 +3044,14 @@ body.night-mode .ocean-carousel {
     -webkit-font-smoothing: antialiased;
     will-change: transform, opacity;
     pointer-events: none;
-    box-shadow:
-        0 0 var(--oc-frame-blur) var(--oc-frame-glow),
-        inset 0 0 var(--oc-frame-inner-blur) var(--oc-frame-inner);
+    box-shadow: var(--oc-frame-shadow);
 }
 
 .ocean-card .oc-blk {
     position: absolute;
     white-space: nowrap;
     color: #fff;
-    text-shadow:
-        0 0 var(--oc-glow-near-blur) var(--oc-glow-near),
-        0 0 var(--oc-glow-far-blur) var(--oc-glow-far);
+    text-shadow: var(--oc-ink-glow);
 }
 
 .ocean-card .oc-line {
@@ -3060,7 +3059,7 @@ body.night-mode .ocean-carousel {
     height: 8px;        /* overridden inline (2 × DOM_SS) — kept as fallback */
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.5);
-    box-shadow: 0 0 var(--oc-frame-blur) var(--oc-frame-glow);
+    box-shadow: var(--oc-line-glow);
 }
 
 /* ── Boxed blocks: project icon, screenshot, link button ───────────────────── */
@@ -3090,14 +3089,12 @@ body.night-mode .ocean-carousel {
 
 .ocean-card .oc-shot {
     background: rgba(12, 34, 60, 0.55);
-    box-shadow: 0 0 var(--oc-frame-blur) var(--oc-frame-glow);
+    box-shadow: var(--oc-frame-shadow);
 }
 
 .ocean-card .oc-btn {
     border-style: solid;
     border-color: rgba(255, 255, 255, 0.88);
     background: transparent;
-    box-shadow:
-        0 0 var(--oc-frame-blur) var(--oc-frame-glow),
-        inset 0 0 var(--oc-frame-inner-blur) var(--oc-frame-inner);
+    box-shadow: var(--oc-frame-shadow);
 }

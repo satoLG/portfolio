@@ -129,9 +129,18 @@ const CARD_PAD = 32;                 // card box inset for all content
 // around every letter and border. Day mode therefore hugs the ink instead.
 // applyNeonMode() swaps these and re-bakes.
 const BAND_NIGHT = 12, BAND_DAY = 4;         // punch band each side of a stroke
-const TEXT_PAD_NIGHT = 10, TEXT_PAD_DAY = 3.5;  // glyph-outline dilation
-const LINE_PAD_NIGHT = 5, LINE_PAD_DAY = 2.5;   // divider-line punch pad
+const LINE_PAD_NIGHT = 3, LINE_PAD_DAY = 1.5;   // divider-line punch pad
 const RECT_PAD_NIGHT = 6, RECT_PAD_DAY = 2;     // filled-box (image) punch pad
+
+// Glyph dilation scales with FONT SIZE. A flat pad cannot work across a 12.5px
+// period line and a 34px title: whatever is wide enough to carry the title's
+// halo is wider than the gaps between small glyphs, so body text fuses back
+// into the solid slab this whole approach exists to avoid. Capped so the
+// dilation never outruns what the text-shadow can actually fill — blur reaches
+// roughly a third of its radius at usable opacity, so a hole wider than that is
+// just black.
+const TEXT_PAD_RATIO_NIGHT = 0.18, TEXT_PAD_MIN_NIGHT = 2.5, TEXT_PAD_MAX_NIGHT = 6.5;
+const TEXT_PAD_RATIO_DAY = 0.09, TEXT_PAD_MIN_DAY = 1.2, TEXT_PAD_MAX_DAY = 3;
 const BTN_PAD_MUL = 0.7;     // tighter dilation on the button label, so the
                              // button reads as a ring with a lit label
 
@@ -152,9 +161,14 @@ const MASK_MARGIN = BAND_NIGHT + 4;
 
 let neonOn = true;           // mirrors body.night-mode
 let band = BAND_NIGHT;
-let textPad = TEXT_PAD_NIGHT;
 let linePad = LINE_PAD_NIGHT;
 let rectPad = RECT_PAD_NIGHT;
+
+function textPadFor(size: number): number {
+    return neonOn
+        ? MathUtils.clamp(size * TEXT_PAD_RATIO_NIGHT, TEXT_PAD_MIN_NIGHT, TEXT_PAD_MAX_NIGHT)
+        : MathUtils.clamp(size * TEXT_PAD_RATIO_DAY, TEXT_PAD_MIN_DAY, TEXT_PAD_MAX_DAY);
+}
 
 // ── Title row (design px) ────────────────────────────────────────────────────
 const TAB_SIZE = 34;
@@ -975,7 +989,7 @@ function updateTabs(): void {
     const rowY = tabRowY();
     const bobY = Math.sin(time * BOB_FREQ) * BOB_AMP_PX * 0.5;
 
-    extentTopPx = rowY + bobY - (TAB_LINE_H / 2 + TEXT_PAD_NIGHT + BAND_NIGHT) * fit;
+    extentTopPx = rowY + bobY - (TAB_LINE_H / 2 + TEXT_PAD_MAX_NIGHT + BAND_NIGHT) * fit;
     extentBottomPx = rowY + bobY + (TAB_UNDERLINE_DY + LINE_PAD_NIGHT + BAND_NIGHT) * fit;
 
     for (let i = 0; i < tabs.length; i++) {
@@ -1138,7 +1152,7 @@ function updateQuietRect(): void {
     const fit = rowFit();
     let tabHalfW = 0;
     for (const tab of tabs) tabHalfW = Math.max(tabHalfW, Math.abs(tab.xPx) + tab.textW / 2);
-    const halfW = ((Math.max(stripHalfW, tabHalfW + TEXT_PAD_NIGHT) * fit) + MASK_MARGIN) / PX_PER_UNIT;
+    const halfW = ((Math.max(stripHalfW, tabHalfW + TEXT_PAD_MAX_NIGHT) * fit) + MASK_MARGIN) / PX_PER_UNIT;
     const topWorld = -(extentTopPx - 6) / PX_PER_UNIT;
     const botWorld = -(extentBottomPx + 6) / PX_PER_UNIT;
 
@@ -1401,7 +1415,7 @@ function bakeCardMask(slot: CardSlot): void {
         } else {
             punchText(
                 ctx, b.text, offX + b.x, offY + b.y, b.lineH,
-                b.size, b.weight, b.ls, textPad * b.padMul,
+                b.size, b.weight, b.ls, textPadFor(b.size) * b.padMul,
             );
         }
     }
@@ -1418,8 +1432,8 @@ function bakeCardMask(slot: CardSlot): void {
 function bakeTabMasks(): void {
     for (let i = 0; i < tabs.length; i++) {
         const tab = tabs[i];
-        const cw = Math.ceil(tab.textW + 2 * TEXT_PAD_NIGHT + 2 * MASK_MARGIN);
-        const ch = Math.ceil(TAB_LINE_H + 2 * TEXT_PAD_NIGHT + 2 * MASK_MARGIN);
+        const cw = Math.ceil(tab.textW + 2 * TEXT_PAD_MAX_NIGHT + 2 * MASK_MARGIN);
+        const ch = Math.ceil(TAB_LINE_H + 2 * TEXT_PAD_MAX_NIGHT + 2 * MASK_MARGIN);
         if (tab.maskCanvas.width !== cw || tab.maskCanvas.height !== ch) {
             tab.maskCanvas.width = cw;
             tab.maskCanvas.height = ch;
@@ -1432,7 +1446,7 @@ function bakeTabMasks(): void {
         punchText(
             ctx, TABS[i].label,
             (cw - tab.textW) / 2, (ch - TAB_LINE_H) / 2, TAB_LINE_H,
-            TAB_SIZE, TAB_WEIGHT, TAB_LS, textPad,
+            TAB_SIZE, TAB_WEIGHT, TAB_LS, textPadFor(TAB_SIZE),
         );
         tab.maskTexture.needsUpdate = true;
     }
@@ -1469,7 +1483,6 @@ function bakeUnderlineMask(): void {
 function applyNeonMode(night: boolean): void {
     neonOn = night;
     band = night ? BAND_NIGHT : BAND_DAY;
-    textPad = night ? TEXT_PAD_NIGHT : TEXT_PAD_DAY;
     linePad = night ? LINE_PAD_NIGHT : LINE_PAD_DAY;
     rectPad = night ? RECT_PAD_NIGHT : RECT_PAD_DAY;
 
