@@ -1,21 +1,36 @@
 /**
- * CardCarousel.ts — CSS3D card carousel floating in the middle of the fish band.
+ * CardCarousel.ts — CSS3D tab carousel floating in the middle of the fish band.
  *
  * An interactive HTML "screen" placed INSIDE the 3D scene at the generic-fish /
  * jellyfish depth (y ≈ -6, z ≈ -2, fish swim y ∈ [-7,-5], z ∈ [-4,0]), so fish
- * and jellies pass both IN FRONT of and BEHIND the cards.
+ * and jellies pass both IN FRONT of and BEHIND the content.
  *
- * How it works (extends the PhoneScreen "CSS3D-behind-alpha-canvas" pattern):
+ * SHAPE OF THE UI
  *
- *   1. The card DOM lives in the shared CSS3D scene, rendered BEHIND the WebGL
- *      canvas (Scene.ts adds #css before #webgl).
- *   2. For each card, a WebGL "punch" plane with a per-pixel alpha MASK writes
- *      (0,0,0,0) with NoBlending ONLY where the card has ink (border strokes +
- *      text pills), slightly dilated. The canvas becomes transparent at those
- *      pixels and the crisp DOM ink shows through.
+ *   Collapsed (the state the scene starts in): three bare titles — Experiência,
+ *   Projetos, Estudos — scattered asymmetrically across the strip, each drifting
+ *   on its own bob and tilt, in the same type style the card headings use.
+ *   Nothing else: no frame, no backdrop.
+ *
+ *   Expanded: picking a title gathers all three into an aligned row ABOVE the
+ *   strip centre and unfolds that tab's cards below it, scaling out from
+ *   directly under the row (transform-origin: top centre) with a per-card
+ *   stagger. Switching tabs collapses the current cards, swaps the content and
+ *   unfolds the new ones — the row stays gathered across the swap. Clicking the
+ *   ACTIVE title releases everything back to the scattered titles.
+ *
+ * HOW IT RENDERS (extends the PhoneScreen "CSS3D-behind-alpha-canvas" pattern):
+ *
+ *   1. The DOM lives in the shared CSS3D scene, rendered BEHIND the WebGL canvas
+ *      (Scene.ts adds #css before #webgl).
+ *   2. For each title and each card, a WebGL "punch" plane with a per-pixel
+ *      alpha MASK writes (0,0,0,0) with NoBlending ONLY where there is ink
+ *      (border strokes, glyphs, image boxes), slightly dilated. The canvas
+ *      becomes transparent at those pixels and the crisp DOM shows through.
  *   3. Card interiors are NOT punched, so the live 3D scene (water, fish behind
  *      the plane) stays visible through the cards — they read as border-only
- *      floating glass frames.
+ *      floating glass frames. Image boxes ARE punched solid, because their DOM
+ *      is the thing you're meant to see.
  *   4. The punch planes write depth: WebGL objects BEHIND the plane are occluded
  *      at ink pixels (fish swim behind the borders), while objects IN FRONT are
  *      drawn over the holes (fish swim over the cards). NOTE: the punch group
@@ -27,13 +42,17 @@
  *      "quiet rect" (setDistortionQuietRect) that damps distortion over the
  *      carousel strip; the residual wobble stays inside the mask dilation.
  *
- * Interaction is raycast-driven (the canvas sits on top and owns pointer
- * events): drag horizontally to spin the infinite track (with momentum),
- * hover to highlight. DOM transform and punch-mesh transform are driven by the
- * SAME scalar values every frame, so registration is preserved under bob /
- * tilt / hover-scale animation.
+ * REGISTRATION RULE: every transform is a scalar computed once per frame and
+ * applied to BOTH the DOM element and its punch mesh. Cards scale/rotate about
+ * their TOP CENTRE (so they unfold from under the titles), which the mesh
+ * reproduces by placing its centre at the pivot plus the rotated, scaled
+ * half-height — see updateCards().
  *
- * Placeholder content only — swap CARD_CONTENTS when the real content lands.
+ * Interaction is raycast-driven (the canvas sits on top and owns pointer
+ * events): tap a title to switch tabs, drag horizontally to pan a tab whose
+ * cards overflow the viewport, tap a card's link to open it.
+ *
+ * Content lives in CarouselContent.ts.
  */
 
 import { CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer';
@@ -56,6 +75,15 @@ import { CSS_SCALE, camera, renderer } from '../core/Scene';
 import { getIsUnderwater, isChestZoomActive } from '../core/Control';
 import { deltaTime, time } from '../core/Time';
 import { setDistortionQuietRect } from './PostProcess';
+import {
+    CardData,
+    EntryCard,
+    MAX_CARDS,
+    PROJECTS,
+    ProjectCard,
+    TABS,
+    TAB_CARDS,
+} from './CarouselContent';
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 
@@ -69,145 +97,467 @@ const PLANE_Z = -2.0;   // fish/jelly z band is [-4, 0] → half pass in front, 
 const PX_PER_UNIT = 320;
 
 // DOM supersample factor — the DOM is authored DOM_SS× larger and the CSS3D
-// object scale drops from 16 to 16/DOM_SS. iOS WebKit (Safari AND Chrome —
-// same engine) positions/rasterises content on the layout-px grid, so a
-// CSS3DObject scale of 16 turned 1px layout snapping into ~16px on-screen
-// displacement of the card text (the skewed-content bug). At scale 4 the snap
-// error is ≤4px, hidden inside the mask dilation. Same class of iOS precision
-// fix as PhoneScreen's CSS_SCALE (which targets scale ≈ 1 at phone distance).
-// NOTE: only DOM px are multiplied — the punch masks, world sizes and all
-// interaction math stay in "design px" (PX_PER_UNIT space).
+// object scale drops accordingly. iOS WebKit (Safari AND Chrome — same engine)
+// positions/rasterises content on the layout-px grid, so a large CSS3DObject
+// scale turns 1px layout snapping into many px of on-screen displacement (the
+// skewed-content bug). At scale 4 the snap error is ≤4px, hidden inside the mask
+// dilation. NOTE: only DOM px are multiplied — the punch masks, world sizes and
+// all interaction math stay in "design px" (PX_PER_UNIT space).
 const DOM_SS = 4;
 
-// Card geometry (CSS px). Card world height 500/320 ≈ 1.56 — fits inside the
-// 2-unit fish band with room for the bob.
-const CARD_W = 384;
-const CARD_H = 500;
+// ── Card geometry (design px) ────────────────────────────────────────────────
+// EVERY card is exactly this size, on every tab. The project card — icon, name,
+// description, screenshot, link — is the tallest thing the carousel has to show,
+// so it sets the height and the shorter entry cards distribute into it: header
+// pinned to the top, description pinned to the bottom, water in between.
+const CARD_W = 410;
+const CARD_H = 560;
 const CARD_RADIUS = 26;
 const BORDER_PX = 2;
+const CARD_PAD = 32;                 // card box inset for all content
 
 // Punch dilation: how far (px) the alpha hole extends past the ink. Must cover
-// (a) the DOM glow (box-shadow / text-shadow) so it isn't hard-clipped and
-// (b) the residual post-process distortion inside the quiet rect.
-const BAND = 12;             // border punch band on each side of the stroke
-const PILL_PAD_X = 18;       // text pill horizontal padding (also .oc-blk::before)
-const PILL_PAD_Y = 12;       // text pill vertical padding   (also .oc-blk::before)
+// (a) the DOM glow so it isn't hard-clipped and (b) the residual post-process
+// distortion inside the quiet rect (damped to 12% there, so a few px covers it).
+//
+// These are DELIBERATELY MODE-INDEPENDENT. An earlier version widened them at
+// night to give the neon more room, but the hole shows the page background
+// (black — index.html sets it inline), so growing it made a visibly fatter dark
+// outline appear around every letter the moment night fell. The geometry has to
+// hold still; only the DOM glow changes between day and night.
+const BAND = 12;             // punch band each side of a stroke (card border)
 const LINE_PAD = 8;          // divider-line punch pad
-const MASK_MARGIN = BAND + 4; // canvas margin around the card box
+const RECT_PAD = 6;          // filled-box (image) punch pad
 
-// Track
-const CARD_COUNT = 7;
-const CARD_SPACING = 512;          // px between card centres
-const TRACK_LEN = CARD_COUNT * CARD_SPACING;
-const AUTO_DRIFT_PX = -14;         // idle px/s — slow drift with the fish (-X)
-const MOMENTUM_DECAY = 2.6;        // 1/s exponential decay of fling velocity
-const MAX_FLING = 2600;            // px/s cap
-const DRAG_CLICK_SLOP = 7;         // px — pointer travel below this counts as a click
+// Text is punched as a generous rounded PILL around each line — the roomy halo
+// the design wants, with the DOM's ::before pool filling it so the hole reads as
+// light rather than a hole. The pads below are also written to --oc-pill-x/y on
+// each element, so the pool and the mask are one measurement.
+const PILL_PAD_X = 20;
+const PILL_PAD_Y = 14;
+const BTN_PILL_MUL = 0.78;   // tighter pill for a link label, so it reads as a
+                             // lit word rather than a slab
+
+// Hit targets do NOT follow the punch: a tap area stays forgiving regardless.
+const HIT_PAD_X = 18;
+const HIT_PAD_Y = 12;
+
+const MASK_MARGIN = BAND + 4;   // canvas margin around the card box
+
+// ── Titles (design px) ───────────────────────────────────────────────────────
+const TAB_SIZE = 44;
+const TAB_WEIGHT = 600;
+const TAB_LS = 1.6;
+const TAB_LINE_H = 58;
+const TAB_GAP = 84;                  // px between titles once gathered
+const TAB_RISE_PX = 248;             // gathered row's height above the strip centre
+const TAB_UNDERLINE_DY = 40;         // px below the title centre
+const TAB_UNDERLINE_H = 2;
+const TAB_HOVER_SCALE = 1.06;
+const TAB_ACTIVE_SCALE = 1.03;
+const TAB_ROW_FILL = 0.9;            // max share of the viewport width the titles may use
+
+// Where each title drifts while nothing is selected. Hand-placed rather than
+// randomised: they have to read as three things that happen to be floating near
+// each other, without ever overlapping, and a seeded random never quite lands
+// that composition. Order matches TABS.
+const TAB_SCATTER = [
+    { x: -268, y: -84, rot: -2.6 },
+    { x: 40, y: 76, rot: 1.9 },
+    { x: 292, y: -30, rot: -1.3 },
+];
+const TAB_DRIFT_AMP = 11;            // scattered bob amplitude (px)
+const TAB_DRIFT_TILT = 1.6;          // scattered extra sway (deg)
+const TAB_GATHERED_AMP = 3;          // bob amplitude once gathered
+
+// ── Card strip (design px) ───────────────────────────────────────────────────
+const CARDS_TOP_Y = -180;            // top edge of every card, relative to PLANE_Y
+const CARD_SPACING = 490;            // px between card centres
+const EDGE_PAD = 40;                 // px of breathing room at the pan limits
+const MOMENTUM_DECAY = 2.6;          // 1/s exponential decay of fling velocity
+const MAX_FLING = 2600;              // px/s cap
+const DRAG_CLICK_SLOP = 7;           // px — pointer travel below this counts as a click
+const RUBBER = 0.42;                 // drag resistance past the pan limits
+const SPRING_BACK = 9;               // 1/s damp speed back inside the limits
+
+// ── Animation ────────────────────────────────────────────────────────────────
+const REVEAL_SEC = 0.42;             // card unfold duration (before stagger)
+const GATHER_SEC = 0.6;              // scatter → aligned row duration
+const CARD_STAGGER = 0.1;            // per-card delay, in reveal-units
+const UNDERLINE_SMOOTH = 12;
 
 // Idle float animation (kept subtle — this is water, not a fairground)
 const BOB_AMP_PX = 7;
-const BOB_FREQ = 0.45;             // Hz-ish (rad/s applied to `time`)
+const BOB_FREQ = 0.45;               // Hz-ish (rad/s applied to `time`)
 const ROT_AMP_DEG = 1.1;
 const ROT_FREQ = 0.32;
-const VEL_TILT_DEG_PER_PXS = 0.004; // cards lean into a swipe
+const VEL_TILT_DEG_PER_PXS = 0.004;  // cards lean into a swipe
 const VEL_TILT_MAX_DEG = 5;
-const HOVER_SCALE = 1.045;
-const SCALE_SMOOTH = 10;           // damp speed for hover scale
-
-// Grab band: vertical world-strip (in card px) around the row where a drag may start
-const GRAB_BAND_PX = CARD_H / 2 + 36;
-
-// ─── PLACEHOLDER CONTENT (random filler — replace freely) ────────────────────
-
-interface CardContent { meta: string; title: string; body: string[]; footer: string; }
-
-const CARD_CONTENTS: CardContent[] = [
-    { meta: 'PROJETO — 01',     title: 'Recife Digital',  body: ['Visualização interativa de', 'dados do oceano em tempo real.'], footer: 'EXPLORAR →' },
-    { meta: 'PROJETO — 02',     title: 'Maré Sonora',     body: ['Player de música com ondas', 'sincronizadas ao áudio.'],        footer: 'EXPLORAR →' },
-    { meta: 'PROJETO — 03',     title: 'Cartografia Azul', body: ['Mapas batimétricos gerados', 'proceduralmente na GPU.'],       footer: 'EXPLORAR →' },
-    { meta: 'EXPERIMENTO — 04', title: 'Plâncton',        body: ['Sistema de partículas com', 'comportamento emergente.'],        footer: 'EXPLORAR →' },
-    { meta: 'PROJETO — 05',     title: 'Farol',           body: ['Dashboard de monitoramento', 'com alertas em tempo real.'],      footer: 'EXPLORAR →' },
-    { meta: 'ESTUDO — 06',      title: 'Corrente',        body: ['Simulação de fluidos 2D', 'interativa em WebGL.'],              footer: 'EXPLORAR →' },
-    { meta: 'PROJETO — 07',     title: 'Abissal',         body: ['Jornada 3D pelas zonas de', 'profundidade do oceano.'],          footer: 'EXPLORAR →' },
-];
-
-// ─── SHARED LAYOUT (single source of truth for DOM *and* punch mask) ─────────
+const HOVER_SCALE = 1.03;
+const SCALE_SMOOTH = 10;             // damp speed for hover scale
 
 const FONT_STACK = "'Wotfard', ui-sans-serif, system-ui, sans-serif";
 
-interface BlockSpec {
-    kind: 'text' | 'line';
+// ─── SHARED LAYOUT (single source of truth for DOM *and* punch mask) ─────────
+
+type BlockKind = 'text' | 'line' | 'rect';
+
+interface Block {
+    kind: BlockKind;
+    x: number; y: number;            // px from card-box top-left
+    w: number; h: number;
+    // text
     text: string;
-    x: number;              // px from card-box left (block top-left)
-    y: number;              // px from card-box top
-    w: number;              // line only — text blocks measure their own width
-    size: number;
-    weight: number;
-    letterSpacing: number;  // px per glyph — applied manually (measure + DOM)
-    lineH: number;
-    alpha: number;
+    size: number; weight: number; ls: number; lineH: number; alpha: number;
+    padMul: number;                  // multiplier on the glyph dilation
+    // rect
+    radius: number;
+    img: string;                     // '' → no image element
+    stroke: number;                  // 0 → filled punch; >0 → punch the ring only
+    cls: string;                     // extra DOM class
+    href: string;                    // '' → not clickable
 }
 
-function buildBlocks(c: CardContent): BlockSpec[] {
-    const blk = (b: Partial<BlockSpec>): BlockSpec => ({
-        kind: 'text', text: '', x: 34, y: 0, w: 0,
-        size: 15, weight: 400, letterSpacing: 0, lineH: 20, alpha: 0.85,
+function block(b: Partial<Block> & { kind: BlockKind }): Block {
+    return {
+        x: CARD_PAD, y: 0, w: 0, h: 0,
+        text: '', size: 15, weight: 400, ls: 0, lineH: 20, alpha: 0.85,
+        padMul: 1,
+        radius: 0, img: '', stroke: 0, cls: '', href: '',
         ...b,
-    });
-    const blocks: BlockSpec[] = [
-        blk({ text: c.meta,  y: 42,  size: 13,   weight: 500, letterSpacing: 3,   lineH: 18, alpha: 0.72 }),
-        blk({ text: c.title, y: 70,  size: 29,   weight: 600, letterSpacing: 0.2, lineH: 38, alpha: 0.97 }),
-        blk({ kind: 'line',  y: 128, w: 72 }),
-    ];
-    c.body.forEach((line, i) => blocks.push(
-        blk({ text: line, y: 156 + i * 27, size: 15.5, weight: 400, letterSpacing: 0.2, lineH: 21, alpha: 0.82 }),
-    ));
-    blocks.push(blk({ text: c.footer, y: CARD_H - 66, size: 13.5, weight: 500, letterSpacing: 2.5, lineH: 18, alpha: 0.9 }));
-    return blocks;
+    };
 }
 
 /** Font shorthand. `ss` = px multiplier: DOM_SS for DOM styles, 1 for mask
- *  measurement (font metrics scale linearly, so pills stay registered). */
-function blockFont(b: BlockSpec, ss = 1): string {
-    return `${b.weight} ${b.size * ss}px ${FONT_STACK}`;
+ *  measurement and baking (font metrics scale linearly, so the two stay
+ *  registered). */
+function blockFont(size: number, weight: number, ss = 1): string {
+    return `${weight} ${size * ss}px ${FONT_STACK}`;
+}
+
+// ── Text measurement / wrapping / punching ───────────────────────────────────
+// Content is authored as plain sentences; the card width is fixed, so lines are
+// measured and wrapped here. Measurement, DOM and mask must agree on glyph
+// advance to the pixel, so all three go through configureText(): canvas
+// letterSpacing applies exactly the CSS model (spacing after EVERY glyph,
+// kerning intact). Where the browser lacks it, we fall back to per-character
+// placement and the manual width model — that loses kerning, but the drift
+// stays inside the dilation band.
+
+let _measureCtx: CanvasRenderingContext2D | null = null;
+function measureCtx(): CanvasRenderingContext2D {
+    if (!_measureCtx) {
+        _measureCtx = document.createElement('canvas').getContext('2d');
+    }
+    return _measureCtx as CanvasRenderingContext2D;
+}
+
+/** Set font + tracking on a context. Returns true when the browser applied the
+ *  tracking itself (so measureText already includes it). */
+function configureText(ctx: CanvasRenderingContext2D, size: number, weight: number, ls: number): boolean {
+    ctx.font = blockFont(size, weight);
+    if ('letterSpacing' in ctx) {
+        (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${ls}px`;
+        return true;
+    }
+    return false;
+}
+
+function textWidth(text: string, size: number, weight: number, ls: number): number {
+    const ctx = measureCtx();
+    if (!ctx) return text.length * size * 0.5;
+    const native = configureText(ctx, size, weight, ls);
+    const w = ctx.measureText(text).width;
+    return native ? w : w + ls * text.length;
+}
+
+/** Punch one line of text as a rounded pill around its measured box. `top` is
+ *  the block's top edge in canvas px. The DOM paints the same rect via
+ *  ::before (--oc-pill-x/y), so the hole is always filled with light. */
+function punchTextPill(
+    ctx: CanvasRenderingContext2D, text: string,
+    x: number, top: number, lineH: number,
+    size: number, weight: number, ls: number, padX: number, padY: number,
+): void {
+    const w = textWidth(text, size, weight, ls);
+    const ph = lineH + 2 * padY;
+    roundRectPath(ctx, x - padX, top - padY, w + 2 * padX, ph, ph / 2);
+    ctx.fill();
+}
+
+function wrapText(text: string, size: number, weight: number, ls: number, maxW: number): string[] {
+    if (!text) return [];
+    const words = text.split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let line = '';
+    for (const word of words) {
+        const next = line ? `${line} ${word}` : word;
+        if (line && textWidth(next, size, weight, ls) > maxW) {
+            lines.push(line);
+            line = word;
+        } else {
+            line = next;
+        }
+    }
+    if (line) lines.push(line);
+    return lines;
+}
+
+// ── Card layouts ─────────────────────────────────────────────────────────────
+
+const ICON_BOX = 56;                 // icon / monogram square, shared by both layouts
+const ICON_GAP = 16;
+const HEAD_Y = 34;
+
+/** Icon slot: the real logo when there is one, otherwise a monogram in an
+ *  outlined square — same ink language as the card frame, so a missing asset
+ *  degrades to something deliberate rather than a hole.
+ *  `cls` picks the fit: 'oc-logo' for full-bleed brand tiles (company and school
+ *  marks, which carry their own background), 'oc-icon' for loose marks on
+ *  transparency, which need padding and letterboxing instead. */
+function pushIconBlocks(blocks: Block[], icon: string, mono: string, cls: string): void {
+    if (icon) {
+        blocks.push(block({
+            kind: 'rect', x: CARD_PAD, y: HEAD_Y, w: ICON_BOX, h: ICON_BOX,
+            radius: 14, img: icon, cls,
+        }));
+        return;
+    }
+    if (!mono) return;
+    blocks.push(block({
+        kind: 'rect', x: CARD_PAD, y: HEAD_Y, w: ICON_BOX, h: ICON_BOX,
+        radius: 14, stroke: BORDER_PX, cls: 'oc-mono',
+    }));
+    const size = mono.length > 1 ? 24 : 28;
+    const w = textWidth(mono, size, 600, 1);
+    blocks.push(block({
+        kind: 'text', text: mono,
+        x: CARD_PAD + (ICON_BOX - w) / 2,
+        y: HEAD_Y + (ICON_BOX - 34) / 2,
+        size, weight: 600, ls: 1, lineH: 34, alpha: 0.95, padMul: 0.7,
+    }));
+}
+
+/** Chronological entry — Experiência and Estudos. Header (icon + company, role,
+ *  period, divider) pinned to the top, description pinned to the BOTTOM so every
+ *  card ends on the same line regardless of how much text it carries. */
+function buildEntryLayout(e: EntryCard): Block[] {
+    const blocks: Block[] = [];
+    const innerW = CARD_W - 2 * CARD_PAD;
+
+    pushIconBlocks(blocks, e.icon ?? '', e.mono ?? e.heading.slice(0, 1).toUpperCase(), 'oc-logo');
+
+    const headX = CARD_PAD + ICON_BOX + ICON_GAP;
+    const headLines = wrapText(e.heading, 33, 600, 0.2, CARD_W - CARD_PAD - headX);
+    let hy = Math.max(HEAD_Y - 10, HEAD_Y + (ICON_BOX - headLines.length * 42) / 2);
+    for (const line of headLines) {
+        blocks.push(block({ kind: 'text', text: line, x: headX, y: hy, size: 33, weight: 600, ls: 0.2, lineH: 42, alpha: 0.98 }));
+        hy += 42;
+    }
+
+    let y = Math.max(HEAD_Y + ICON_BOX, hy) + 22;
+
+    for (const line of wrapText(e.subheading, 20, 500, 0.3, innerW)) {
+        blocks.push(block({ kind: 'text', text: line, y, size: 20, weight: 500, ls: 0.3, lineH: 28, alpha: 0.88 }));
+        y += 28;
+    }
+    y += 6;
+
+    if (e.period) {
+        blocks.push(block({ kind: 'text', text: e.period, y, size: 16, weight: 500, ls: 2.2, lineH: 22, alpha: 0.68 }));
+        y += 22;
+    }
+    y += 22;
+
+    blocks.push(block({ kind: 'line', y, w: 64, h: 2 }));
+
+    // Bottom-anchored description — the "no fim do card" of the original brief,
+    // and what keeps every entry card ending on the same line. The header above
+    // is variable (a long institution name can run to three lines), so the run
+    // is clipped to the gap left under the divider rather than allowed to grow
+    // up into it.
+    const BODY_SIZE = 19, BODY_LINE_H = 27;
+    // The credential link, when there is one, owns the bottom of the card and
+    // the description stacks above it — same anchor either way, so every card
+    // still ends on the same line.
+    let bodyBottom = 46;
+    if (e.url) {
+        const label = `${e.cta ?? 'VER CERTIFICADO'}  →`;
+        const labelW = textWidth(label, 17, 600, 2.2);
+        blocks.push(block({
+            kind: 'text', text: label, x: (CARD_W - labelW) / 2, y: CARD_H - 38 - 24,
+            size: 17, weight: 600, ls: 2.2, lineH: 24, alpha: 0.95,
+            padMul: BTN_PILL_MUL, href: e.url,
+        }));
+        bodyBottom = 38 + 24 + 26;
+    }
+
+    const bodyTopLimit = y + 28;
+    const maxLines = Math.max(0, Math.floor((CARD_H - bodyBottom - bodyTopLimit) / BODY_LINE_H));
+    const bodyLines = wrapText(e.body, BODY_SIZE, 400, 0.2, innerW).slice(0, maxLines);
+
+    let by = CARD_H - bodyBottom - bodyLines.length * BODY_LINE_H;
+    for (const line of bodyLines) {
+        blocks.push(block({ kind: 'text', text: line, y: by, size: BODY_SIZE, weight: 400, ls: 0.2, lineH: BODY_LINE_H, alpha: 0.82 }));
+        by += BODY_LINE_H;
+    }
+
+    return blocks;
+}
+
+/** Project: icon + name, description, then a divided image section and the link
+ *  — the last three pinned to the bottom so they line up across every project. */
+function buildProjectLayout(p: ProjectCard): Block[] {
+    const blocks: Block[] = [];
+    const innerW = CARD_W - 2 * CARD_PAD;
+
+    pushIconBlocks(blocks, p.icon, '', 'oc-icon');
+
+    const nameX = CARD_PAD + ICON_BOX + ICON_GAP;
+    const nameLines = wrapText(p.name, 30, 600, 0.2, CARD_W - CARD_PAD - nameX);
+    let ny = Math.max(HEAD_Y - 8, HEAD_Y + (ICON_BOX - nameLines.length * 39) / 2);
+    for (const line of nameLines) {
+        blocks.push(block({ kind: 'text', text: line, x: nameX, y: ny, size: 30, weight: 600, ls: 0.2, lineH: 39, alpha: 0.98 }));
+        ny += 39;
+    }
+
+    // Bottom-up: link label, screenshot above it, divider above that. The shot
+    // gives up height to the larger type — it is a crop either way, and losing
+    // a slice of it costs less than truncating the description.
+    const LABEL_H = 24, SHOT_H = 176;
+    const labelY = CARD_H - 38 - LABEL_H;
+    const shotY = labelY - 26 - SHOT_H;
+    const dividerY = shotY - 22;
+
+    let y = Math.max(HEAD_Y + ICON_BOX, ny) + 26;
+    for (const line of wrapText(p.body, 19, 400, 0.2, innerW)) {
+        if (y + 27 > dividerY - 14) break;   // never collide with the image section
+        blocks.push(block({ kind: 'text', text: line, y, size: 19, weight: 400, ls: 0.2, lineH: 27, alpha: 0.82 }));
+        y += 27;
+    }
+
+    blocks.push(block({ kind: 'line', y: dividerY, w: innerW, h: 2 }));
+    blocks.push(block({
+        kind: 'rect', x: CARD_PAD, y: shotY, w: innerW, h: SHOT_H,
+        radius: 16, img: p.shot, cls: 'oc-shot',
+    }));
+
+    // The link is TEXT ONLY — no button chrome. Its tap area comes from HIT_PAD.
+    const label = `${p.cta}  →`;
+    const labelW = textWidth(label, 17, 600, 2.2);
+    blocks.push(block({
+        kind: 'text', text: label, x: (CARD_W - labelW) / 2, y: labelY,
+        size: 17, weight: 600, ls: 2.2, lineH: LABEL_H, alpha: 0.95,
+        padMul: BTN_PILL_MUL, href: p.url,
+    }));
+
+    return blocks;
+}
+
+function buildLayout(c: CardData): Block[] {
+    const blocks = c.kind === 'project' ? buildProjectLayout(c) : buildEntryLayout(c);
+    warnIfOverflowing(blocks, c.kind === 'project' ? c.name : c.heading);
+    return blocks;
+}
+
+/** Every card is a fixed box, so content that outgrows it is silently clipped by
+ *  the punch mask rather than pushing anything — which is exactly the kind of
+ *  thing you only notice on a device you don't own. Say it out loud instead.
+ *  Text is measured, not estimated, so this catches wrapping surprises too. */
+function warnIfOverflowing(blocks: Block[], label: string): void {
+    for (const b of blocks) {
+        const bottom = b.y + (b.kind === 'text' ? b.lineH : b.h);
+        const right = b.x + (b.kind === 'text' ? textWidth(b.text, b.size, b.weight, b.ls) : b.w);
+        if (bottom > CARD_H - 2 || right > CARD_W - 2 || b.x < 2 || b.y < 2) {
+            console.warn(
+                `[CardCarousel] "${label}": block ${JSON.stringify(b.text || b.cls || b.kind)} ` +
+                `spills the ${CARD_W}x${CARD_H} card (x ${b.x.toFixed(0)}..${right.toFixed(0)}, ` +
+                `y ${b.y.toFixed(0)}..${bottom.toFixed(0)})`,
+            );
+        }
+    }
 }
 
 // ─── INTERNALS ────────────────────────────────────────────────────────────────
 
-interface CardState {
+interface CardSlot {
     el: HTMLDivElement;
     mesh: Mesh;
     maskCanvas: HTMLCanvasElement;
     maskTexture: CanvasTexture;
-    blocks: BlockSpec[];
+    blocks: Block[] | null;         // null → slot unused by the active tab
     bobPhase: number;
     rotPhase: number;
-    scale: number;          // current smoothed scale
-    clickPulse: number;     // 1 → 0 flash on click
+    scale: number;                  // smoothed hover scale
+    clickPulse: number;             // 1 → 0 flash on click
+    // live transform, mirrored by the punch mesh — also the hit-test basis
+    xPx: number;
+    topY: number;
+    rotDeg: number;
+    revealScale: number;
+}
+
+interface TabSlot {
+    el: HTMLDivElement;
+    mesh: Mesh;
+    maskCanvas: HTMLCanvasElement;
+    maskTexture: CanvasTexture;
+    textW: number;                  // measured label width (design px)
+    rowX: number;                   // x once gathered into the row (design px)
+    bobPhase: number;
+    rotPhase: number;
+    scale: number;                  // smoothed hover/active scale
+    // live transform, mirrored by the punch mesh — also the hit-test basis
+    cx: number;
+    cy: number;
+    rotDeg: number;
 }
 
 let _initialized = false;
 let cssObject: CSS3DObject | null = null;
 let screenEl: HTMLDivElement | null = null;
 const occluderGroup = new Group();
-const cards: CardState[] = [];
+const cards: CardSlot[] = [];
+const tabs: TabSlot[] = [];
 
-let _active = false;            // current shown/hidden state (applied)
-let _pixelHidden = false;       // hidden because pixelation is on (like PhoneScreen)
+let underlineEl: HTMLDivElement | null = null;
+let underlineMesh: Mesh | null = null;
+let underlineMaskW = 0;             // baked underline width (design px)
+
+let _active = false;                // current shown/hidden state (applied)
+let _pixelHidden = false;           // hidden because pixelation is on (like PhoneScreen)
+
+// Tab state
+let activeTab = -1;                 // tab whose cards are currently BUILT (-1 none)
+let requestedTab = -1;              // tab the user last picked (-1 none)
+let reveal = 0;                     // 0..1 cards unfolded
+let gather = 0;                     // 0..1 titles scattered → aligned row
+let underlineX = 0;                 // smoothed underline centre
+let underlineW = 0;                 // smoothed underline width
+let cardCount = 0;                  // slots in use by the active tab
+let stripHalfW = 0;                 // half-extent of the built strip (design px)
+let _revealFlushed = false;         // raster flush already done for this unfold
 
 // Track state
 let trackOffset = 0;
-let momentum = 0;               // px/s after release
+let momentum = 0;                   // px/s after release
+let panLimit = 0;                   // |trackOffset| bound (0 → content fits)
 
 // Drag state
 let dragging = false;
 let dragPointerId = -1;
-let dragLastX = 0;              // plane-local px
+let dragLastX = 0;                  // plane-local px
 let dragLastTime = 0;
-let dragTravel = 0;             // accumulated |dx| for click detection
-let dragVel = 0;                // smoothed px/s during drag
-let hoverIndex = -1;
+let dragTravel = 0;                 // accumulated |dx| for click detection
+let dragVel = 0;                    // smoothed px/s during drag
+let hoverCard = -1;
+let hoverTab = -1;
+let hoverLink = false;
 let _cursor = '';
+
+// Live vertical extent of everything drawn, for the distortion quiet rect.
+let extentTopPx = 0;
+let extentBottomPx = 0;
 
 const _rayOrigin = new Vector3();
 const _rayDir = new Vector3();
@@ -244,7 +594,7 @@ export function Start(glScene: ThreeScene, cssScene: ThreeScene): void {
     if (_initialized) return;
     _initialized = true;
 
-    // ── DOM screen (0×0 anchor — cards centre themselves around it) ──────────
+    // ── DOM screen (0×0 anchor — everything centres itself around it) ────────
     screenEl = document.createElement('div');
     screenEl.className = 'ocean-carousel';
     screenEl.style.width = '0px';
@@ -268,97 +618,28 @@ export function Start(glScene: ThreeScene, cssScene: ThreeScene): void {
     occluderGroup.visible = false;
     glScene.add(occluderGroup);
 
-    const planeGeo = new PlaneGeometry(1, 1);
-    const maskW = CARD_W + 2 * MASK_MARGIN;
-    const maskH = CARD_H + 2 * MASK_MARGIN;
+    buildTabs();
+    buildCardSlots();
+    buildUnderline();
+    layoutTabs();
 
-    for (let i = 0; i < CARD_COUNT; i++) {
-        const content = CARD_CONTENTS[i % CARD_CONTENTS.length];
-        const blocks = buildBlocks(content);
-
-        // DOM card — every px is authored at DOM_SS× (see the DOM_SS docs); the
-        // smaller object scale brings it back to the same world/screen size.
-        const el = document.createElement('div');
-        el.className = 'ocean-card';
-        el.style.width = `${CARD_W * DOM_SS}px`;
-        el.style.height = `${CARD_H * DOM_SS}px`;
-        el.style.borderWidth = `${BORDER_PX * DOM_SS}px`;
-        el.style.borderRadius = `${CARD_RADIUS * DOM_SS}px`;
-        for (const b of blocks) {
-            const bl = document.createElement('div');
-            bl.className = b.kind === 'line' ? 'oc-line' : 'oc-blk';
-            bl.style.left = `${b.x * DOM_SS}px`;
-            bl.style.top = `${b.y * DOM_SS}px`;
-            if (b.kind === 'line') {
-                bl.style.width = `${b.w * DOM_SS}px`;
-                bl.style.height = `${2 * DOM_SS}px`;
-            } else {
-                bl.textContent = b.text;
-                bl.style.font = blockFont(b, DOM_SS);
-                bl.style.lineHeight = `${b.lineH * DOM_SS}px`;
-                bl.style.height = `${b.lineH * DOM_SS}px`;
-                bl.style.letterSpacing = `${b.letterSpacing * DOM_SS}px`;
-                bl.style.opacity = `${b.alpha}`;
-            }
-            el.appendChild(bl);
+    // Project imagery is punched solid, so a late-decoding image shows a hole
+    // full of page background. Warm the cache before any tab can open.
+    for (const p of PROJECTS) {
+        for (const src of [p.icon, p.shot]) {
+            const img = new Image();
+            img.src = src;
         }
-        screenEl.appendChild(el);
-
-        // Punch mask + mesh
-        const maskCanvas = document.createElement('canvas');
-        maskCanvas.width = maskW;
-        maskCanvas.height = maskH;
-        const maskTexture = new CanvasTexture(maskCanvas);
-        maskTexture.minFilter = LinearFilter;
-        maskTexture.magFilter = LinearFilter;
-        maskTexture.generateMipmaps = false;
-
-        // NoBlending + hard alpha-test discard: fragments on card ink write
-        // (0,0,0,0) + depth (the punch), everything else leaves the scene
-        // untouched (the see-through card interior).
-        const mat = new ShaderMaterial({
-            uniforms: { uMask: { value: maskTexture } },
-            vertexShader: /* glsl */`
-                varying vec2 vUv;
-                void main() {
-                    vUv = uv;
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                }
-            `,
-            fragmentShader: /* glsl */`
-                uniform sampler2D uMask;
-                varying vec2 vUv;
-                void main() {
-                    if (texture2D(uMask, vUv).a < 0.5) discard;
-                    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
-                }
-            `,
-            blending: NoBlending,
-            transparent: true,   // → transparent render list (after opaque fish)
-            depthWrite: true,
-            depthTest: true,
-            side: DoubleSide,
-        });
-
-        const mesh = new Mesh(planeGeo, mat);
-        mesh.scale.set(maskW / PX_PER_UNIT, maskH / PX_PER_UNIT, 1);
-        occluderGroup.add(mesh);
-
-        cards.push({
-            el, mesh, maskCanvas, maskTexture, blocks,
-            bobPhase: Math.random() * Math.PI * 2,
-            rotPhase: Math.random() * Math.PI * 2,
-            scale: 1,
-            clickPulse: 0,
-        });
     }
 
-    bakeAllMasks();
-    // The Wotfard webfont usually isn't ready at Start — text pills are measured
-    // with the fallback font until it lands. Rebake once fonts settle so the
-    // punch pills match the real glyph widths.
+    // The Wotfard webfont usually isn't ready at Start — every layout above was
+    // measured with the fallback font. Re-measure once fonts settle so wrapping
+    // and the punched glyphs match the real shapes.
     if (document.fonts?.ready) {
-        document.fonts.ready.then(() => bakeAllMasks()).catch(() => { /* non-fatal */ });
+        document.fonts.ready.then(() => {
+            layoutTabs();
+            if (activeTab >= 0) buildActiveTabCards();
+        }).catch(() => { /* non-fatal */ });
     }
 
     // ── Interaction ──────────────────────────────────────────────────────────
@@ -386,71 +667,549 @@ export function Update(): void {
             cancelDrag();
             setCursor('');
             setDistortionQuietRect(0, 0, 0, 0, 0, false);
+            // Surfacing resets the panel: the scene always comes back to the
+            // three scattered titles.
+            requestedTab = -1;
+            activeTab = -1;
+            reveal = 0;
+            gather = 0;
+            hoverCard = hoverTab = -1;
+            hoverLink = false;
+            releaseCardSlots();
         }
     }
     if (!_active) return;
 
-    // ── Track motion ─────────────────────────────────────────────────────────
+    advanceAnimation();
+    updateTabs();
+    updateTrack();
+    updateCards();
+    updateQuietRect();
+}
+
+// ─── Build ────────────────────────────────────────────────────────────────────
+
+function makePunchMaterial(texture: CanvasTexture): ShaderMaterial {
+    // NoBlending + hard alpha-test discard: fragments on ink write (0,0,0,0) +
+    // depth (the punch), everything else leaves the scene untouched (the
+    // see-through interior).
+    return new ShaderMaterial({
+        uniforms: { uMask: { value: texture } },
+        vertexShader: /* glsl */`
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: /* glsl */`
+            uniform sampler2D uMask;
+            varying vec2 vUv;
+            void main() {
+                if (texture2D(uMask, vUv).a < 0.5) discard;
+                gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+            }
+        `,
+        blending: NoBlending,
+        transparent: true,   // → transparent render list (after opaque fish)
+        depthWrite: true,
+        depthTest: true,
+        side: DoubleSide,
+    });
+}
+
+function makeMaskCanvas(w: number, h: number): { canvas: HTMLCanvasElement; texture: CanvasTexture } {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(4, Math.ceil(w));
+    canvas.height = Math.max(4, Math.ceil(h));
+    const texture = new CanvasTexture(canvas);
+    texture.minFilter = LinearFilter;
+    texture.magFilter = LinearFilter;
+    texture.generateMipmaps = false;
+    return { canvas, texture };
+}
+
+function buildTabs(): void {
+    for (let i = 0; i < TABS.length; i++) {
+        const el = document.createElement('div');
+        el.className = 'ocean-tab';
+        el.textContent = TABS[i].label;
+        el.style.font = blockFont(TAB_SIZE, TAB_WEIGHT, DOM_SS);
+        el.style.lineHeight = `${TAB_LINE_H * DOM_SS}px`;
+        el.style.height = `${TAB_LINE_H * DOM_SS}px`;
+        el.style.letterSpacing = `${TAB_LS * DOM_SS}px`;
+        screenEl!.appendChild(el);
+
+        // Sized for real in layoutTabs() once the label has been measured.
+        const { canvas, texture } = makeMaskCanvas(4, 4);
+        const mesh = new Mesh(new PlaneGeometry(1, 1), makePunchMaterial(texture));
+        occluderGroup.add(mesh);
+
+        tabs.push({
+            el, mesh, maskCanvas: canvas, maskTexture: texture,
+            textW: 0, rowX: 0,
+            bobPhase: i * 2.1, rotPhase: i * 1.7 + 0.6,
+            scale: 1, cx: 0, cy: 0, rotDeg: 0,
+        });
+    }
+}
+
+function buildCardSlots(): void {
+    const maskW = CARD_W + 2 * MASK_MARGIN;
+    const maskH = CARD_H + 2 * MASK_MARGIN;
+    const planeGeo = new PlaneGeometry(1, 1);
+
+    for (let i = 0; i < MAX_CARDS; i++) {
+        const el = document.createElement('div');
+        el.className = 'ocean-card';
+        el.style.width = `${CARD_W * DOM_SS}px`;
+        el.style.height = `${CARD_H * DOM_SS}px`;
+        el.style.borderWidth = `${BORDER_PX * DOM_SS}px`;
+        el.style.borderRadius = `${CARD_RADIUS * DOM_SS}px`;
+        el.style.display = 'none';
+        screenEl!.appendChild(el);
+
+        const { canvas, texture } = makeMaskCanvas(maskW, maskH);
+        const mesh = new Mesh(planeGeo, makePunchMaterial(texture));
+        mesh.visible = false;
+        occluderGroup.add(mesh);
+
+        cards.push({
+            el, mesh, maskCanvas: canvas, maskTexture: texture, blocks: null,
+            bobPhase: Math.random() * Math.PI * 2,
+            rotPhase: Math.random() * Math.PI * 2,
+            scale: 1, clickPulse: 0,
+            xPx: 0, topY: CARDS_TOP_Y, rotDeg: 0, revealScale: 0,
+        });
+    }
+}
+
+function buildUnderline(): void {
+    underlineEl = document.createElement('div');
+    underlineEl.className = 'ocean-tab-underline';
+    underlineEl.style.height = `${TAB_UNDERLINE_H * DOM_SS}px`;
+    underlineEl.style.borderRadius = `${TAB_UNDERLINE_H * DOM_SS}px`;
+    underlineEl.style.display = 'none';
+    screenEl!.appendChild(underlineEl);
+
+    const { canvas, texture } = makeMaskCanvas(4, 4);
+    underlineMesh = new Mesh(new PlaneGeometry(1, 1), makePunchMaterial(texture));
+    underlineMesh.visible = false;
+    underlineMesh.userData.maskCanvas = canvas;
+    underlineMesh.userData.maskTexture = texture;
+    occluderGroup.add(underlineMesh);
+}
+
+/** Measure the labels, place the gathered row and bake the title masks. */
+function layoutTabs(): void {
+    let rowW = 0;
+    for (let i = 0; i < tabs.length; i++) {
+        tabs[i].textW = textWidth(TABS[i].label, TAB_SIZE, TAB_WEIGHT, TAB_LS);
+        tabs[i].el.style.width = `${tabs[i].textW * DOM_SS}px`;
+        rowW += tabs[i].textW;
+    }
+    rowW += TAB_GAP * (tabs.length - 1);
+
+    let x = -rowW / 2;
+    for (const tab of tabs) {
+        tab.rowX = x + tab.textW / 2;
+        x += tab.textW + TAB_GAP;
+    }
+
+    // Underline is baked once at the widest label and scaled down per tab.
+    underlineMaskW = Math.max(...tabs.map(t => t.textW));
+    if (underlineEl) underlineEl.style.width = `${underlineMaskW * DOM_SS}px`;
+
+    bakeTabMasks();
+    bakeUnderlineMask();
+}
+
+/** Horizontal squeeze so neither layout runs off a narrow viewport — the
+ *  scattered titles are WIDER than the gathered row, so both are measured.
+ *  Recomputed per frame; the aspect ratio can change at any time. */
+function rowFit(): number {
+    let rowW = TAB_GAP * (tabs.length - 1);
+    let scatterHalf = 0;
+    for (let i = 0; i < tabs.length; i++) {
+        rowW += tabs[i].textW;
+        scatterHalf = Math.max(scatterHalf, Math.abs(TAB_SCATTER[i].x) + tabs[i].textW / 2);
+    }
+    const need = Math.max(rowW, scatterHalf * 2);
+    const avail = getFrustumHalfWidthPx() * 2 * TAB_ROW_FILL;
+    return need > 0 ? Math.min(1, avail / need) : 1;
+}
+
+// ─── Tab switching ────────────────────────────────────────────────────────────
+
+function selectTab(index: number): void {
+    const next = index === requestedTab ? -1 : index;
+    if (next === requestedTab) return;
+    requestedTab = next;
+    trackOffset = 0;
+    momentum = 0;
+    hoverCard = -1;
+}
+
+/** Swap the DOM + masks over to `activeTab`'s content. Only ever called while
+ *  the cards are fully collapsed, so nothing pops. */
+function buildActiveTabCards(): void {
+    releaseCardSlots();
+    if (activeTab < 0) return;
+
+    const data = TAB_CARDS[TABS[activeTab].id];
+    cardCount = Math.min(data.length, cards.length);
+    if (data.length > cards.length) {
+        console.warn(`[CardCarousel] tab "${TABS[activeTab].id}" has ${data.length} cards but only ${cards.length} slots exist`);
+    }
+
+    for (let i = 0; i < cardCount; i++) {
+        const slot = cards[i];
+        slot.blocks = buildLayout(data[i]);
+        slot.scale = 1;
+        slot.clickPulse = 0;
+        renderCardDom(slot);
+        bakeCardMask(slot);
+        try { renderer.initTexture(slot.maskTexture); } catch { /* pre-GL init */ }
+    }
+
+    stripHalfW = ((cardCount - 1) * CARD_SPACING + CARD_W) / 2;
+    flushCardRaster();
+}
+
+function releaseCardSlots(): void {
+    for (const slot of cards) {
+        slot.blocks = null;
+        slot.el.style.display = 'none';
+        slot.el.replaceChildren();
+        slot.mesh.visible = false;
+        slot.revealScale = 0;
+    }
+    cardCount = 0;
+    stripHalfW = 0;
+}
+
+function renderCardDom(slot: CardSlot): void {
+    if (!slot.blocks) return;
+    slot.el.replaceChildren();
+    slot.el.style.display = '';
+
+    for (const b of slot.blocks) {
+        if (b.kind === 'line') {
+            const bl = document.createElement('div');
+            bl.className = 'oc-line';
+            bl.style.left = `${b.x * DOM_SS}px`;
+            bl.style.top = `${b.y * DOM_SS}px`;
+            bl.style.width = `${b.w * DOM_SS}px`;
+            bl.style.height = `${b.h * DOM_SS}px`;
+            slot.el.appendChild(bl);
+            continue;
+        }
+
+        if (b.kind === 'rect') {
+            const bl = document.createElement('div');
+            bl.className = `oc-rect${b.cls ? ` ${b.cls}` : ''}`;
+            bl.style.left = `${b.x * DOM_SS}px`;
+            bl.style.top = `${b.y * DOM_SS}px`;
+            bl.style.width = `${b.w * DOM_SS}px`;
+            bl.style.height = `${b.h * DOM_SS}px`;
+            bl.style.borderRadius = `${b.radius * DOM_SS}px`;
+            if (b.stroke > 0) bl.style.borderWidth = `${b.stroke * DOM_SS}px`;
+            if (b.img) {
+                const img = document.createElement('img');
+                img.src = b.img;
+                img.alt = '';
+                img.draggable = false;
+                bl.appendChild(img);
+            }
+            slot.el.appendChild(bl);
+            continue;
+        }
+
+        const bl = document.createElement('div');
+        bl.className = `oc-blk${b.cls ? ` ${b.cls}` : ''}`;
+        bl.style.left = `${b.x * DOM_SS}px`;
+        bl.style.top = `${b.y * DOM_SS}px`;
+        bl.textContent = b.text;
+        bl.style.font = blockFont(b.size, b.weight, DOM_SS);
+        bl.style.lineHeight = `${b.lineH * DOM_SS}px`;
+        bl.style.height = `${b.lineH * DOM_SS}px`;
+        bl.style.letterSpacing = `${b.ls * DOM_SS}px`;
+        bl.style.opacity = `${b.alpha}`;
+        // Single measurement: the pool the DOM paints is exactly the pill the
+        // mask punched.
+        bl.style.setProperty('--oc-pill-x', `${PILL_PAD_X * b.padMul * DOM_SS}px`);
+        bl.style.setProperty('--oc-pill-y', `${PILL_PAD_Y * b.padMul * DOM_SS}px`);
+        slot.el.appendChild(bl);
+    }
+}
+
+// ─── Animation ────────────────────────────────────────────────────────────────
+
+// easeOutBack — the subtle overshoot that gives the unfold a "pop".
+function easeOutBack(t: number): number {
+    const c1 = 1.70158, c3 = c1 + 1;
+    const x = t - 1;
+    return 1 + c3 * x * x * x + c1 * x * x;
+}
+
+function smootherstep(t: number): number {
+    const x = MathUtils.clamp(t, 0, 1);
+    return x * x * x * (x * (x * 6 - 15) + 10);
+}
+
+function advanceAnimation(): void {
+    // While the user is switching tabs the cards must reach 0 before the DOM is
+    // swapped — otherwise the new content pops in at the old content's scale.
+    const revealTarget = (requestedTab === activeTab && activeTab >= 0) ? 1 : 0;
+    const step = deltaTime / REVEAL_SEC;
+    reveal = revealTarget > reveal
+        ? Math.min(revealTarget, reveal + step)
+        : Math.max(revealTarget, reveal - step);
+
+    if (reveal <= 0 && requestedTab !== activeTab) {
+        activeTab = requestedTab;
+        buildActiveTabCards();
+    }
+
+    // The cards are composited BEHIND the canvas and unfold with transform +
+    // opacity alone, which Chrome happily serves from tiles it rastered while
+    // they were still scaled down — so the later, more-delayed cards settle at
+    // full size showing a blurry small-scale raster. Nothing invalidates paint
+    // once the animation stops, so force it once, the frame the unfold lands.
+    // (Same failure and same fix as CSS3DPanel.requestRepaint.)
+    if (reveal >= 1 && !_revealFlushed) {
+        _revealFlushed = true;
+        flushCardRaster();
+    } else if (reveal < 1) {
+        _revealFlushed = false;
+    }
+
+    // The titles stay gathered across a tab swap — they only scatter again when
+    // everything collapses, so switching tabs never scrambles the row.
+    const gatherTarget = requestedTab >= 0 ? 1 : 0;
+    const gatherStep = deltaTime / GATHER_SEC;
+    gather = gatherTarget > gather
+        ? Math.min(gatherTarget, gather + gatherStep)
+        : Math.max(gatherTarget, gather - gatherStep);
+}
+
+/** Hiding an element and reading a layout property back is a paint
+ *  invalidation the compositor cannot batch away; no frame renders between the
+ *  two writes, so there is no flash. One-shot only — never per frame. */
+function flushCardRaster(): void {
+    for (let i = 0; i < cardCount; i++) {
+        const el = cards[i].el;
+        const prev = el.style.display;
+        el.style.display = 'none';
+        void el.offsetHeight;
+        el.style.display = prev;
+    }
+}
+
+/** Per-card unfold amount: a staggered slice of the global reveal. */
+function cardReveal(i: number): number {
+    const span = 1 + CARD_STAGGER * Math.max(0, cardCount - 1);
+    return MathUtils.clamp(reveal * span - CARD_STAGGER * i, 0, 1);
+}
+
+// ─── Per-frame transforms ─────────────────────────────────────────────────────
+
+function updateTabs(): void {
+    const fit = rowFit();
+    const align = smootherstep(gather);
+    const driftAmp = MathUtils.lerp(TAB_DRIFT_AMP, TAB_GATHERED_AMP, align);
+
+    extentTopPx = Infinity;
+    extentBottomPx = -Infinity;
+
+    for (let i = 0; i < tabs.length; i++) {
+        const tab = tabs[i];
+        const scatter = TAB_SCATTER[i];
+        const isActive = i === requestedTab;
+
+        const bobY = Math.sin(time * BOB_FREQ + tab.bobPhase) * driftAmp;
+        // Scattered titles carry their own resting tilt plus a slow sway; both
+        // ease out to a level row as they gather.
+        const rotDeg = MathUtils.lerp(
+            scatter.rot + Math.sin(time * ROT_FREQ + tab.rotPhase) * TAB_DRIFT_TILT,
+            Math.sin(time * ROT_FREQ + tab.rotPhase) * ROT_AMP_DEG * 0.5,
+            align,
+        );
+
+        const cx = MathUtils.lerp(scatter.x, tab.rowX, align) * fit;
+        const cy = MathUtils.lerp(scatter.y, -TAB_RISE_PX, align) * fit + bobY;
+
+        const target = (i === hoverTab ? TAB_HOVER_SCALE : (isActive ? TAB_ACTIVE_SCALE : 1)) * fit;
+        tab.scale = MathUtils.damp(tab.scale, target, SCALE_SMOOTH, deltaTime);
+
+        tab.cx = cx; tab.cy = cy; tab.rotDeg = rotDeg;
+
+        tab.el.classList.toggle('is-active', isActive);
+        tab.el.classList.toggle('is-dimmed', requestedTab >= 0 && !isActive);
+        tab.el.style.transform =
+            `translate3d(${(cx - tab.textW / 2) * DOM_SS}px, ${(cy - TAB_LINE_H / 2) * DOM_SS}px, 0px) ` +
+            `rotate(${rotDeg}deg) scale(${tab.scale})`;
+
+        tab.mesh.position.set(cx / PX_PER_UNIT, -cy / PX_PER_UNIT, 0);
+        tab.mesh.rotation.z = -rotDeg * MathUtils.DEG2RAD;
+        tab.mesh.scale.set(
+            (tab.maskCanvas.width / PX_PER_UNIT) * tab.scale,
+            (tab.maskCanvas.height / PX_PER_UNIT) * tab.scale,
+            1,
+        );
+        tab.mesh.visible = true;
+
+        const halfH = (TAB_LINE_H / 2 + PILL_PAD_Y + BAND) * fit;
+        extentTopPx = Math.min(extentTopPx, cy - halfH);
+        extentBottomPx = Math.max(extentBottomPx, cy + halfH + TAB_UNDERLINE_DY * fit * align);
+    }
+
+    updateUnderline(fit);
+}
+
+function updateUnderline(fit: number): void {
+    if (!underlineEl || !underlineMesh) return;
+
+    // The underline rides the ACTIVE title wherever it currently is, so it
+    // arrives with the row instead of waiting at the gathered position.
+    const active = requestedTab >= 0 ? tabs[requestedTab] : null;
+    const targetW = active ? active.textW * 0.72 * smootherstep(gather) : 0;
+    underlineW = MathUtils.damp(underlineW, targetW, UNDERLINE_SMOOTH, deltaTime);
+    if (active) underlineX = active.cx;
+
+    const sx = underlineMaskW > 0 ? underlineW / underlineMaskW : 0;
+    if (sx < 0.01 || !active) {
+        underlineEl.style.display = 'none';
+        underlineMesh.visible = false;
+        return;
+    }
+    underlineEl.style.display = '';
+    underlineMesh.visible = true;
+
+    const cx = underlineX;
+    const cy = active.cy + TAB_UNDERLINE_DY * fit;
+    underlineEl.style.transform =
+        `translate3d(${(cx - underlineMaskW / 2) * DOM_SS}px, ${(cy - TAB_UNDERLINE_H / 2) * DOM_SS}px, 0px) ` +
+        `scale(${sx * fit}, ${fit})`;
+
+    const canvas = underlineMesh.userData.maskCanvas as HTMLCanvasElement;
+    underlineMesh.position.set(cx / PX_PER_UNIT, -cy / PX_PER_UNIT, 0);
+    underlineMesh.scale.set(
+        (canvas.width / PX_PER_UNIT) * sx * fit,
+        (canvas.height / PX_PER_UNIT) * fit,
+        1,
+    );
+}
+
+function updateTrack(): void {
+    const fit = rowFit();
+    const halfView = getFrustumHalfWidthPx();
+    panLimit = Math.max(0, stripHalfW * fit - halfView + EDGE_PAD);
+
     if (!dragging) {
         momentum *= Math.exp(-MOMENTUM_DECAY * deltaTime);
         if (Math.abs(momentum) < 12) momentum = 0;
-        trackOffset += (AUTO_DRIFT_PX + momentum) * deltaTime;
-    }
+        trackOffset += momentum * deltaTime;
 
-    // ── Per-card transforms (same scalars drive DOM and punch mesh) ──────────
+        // Spring back inside the pan limits.
+        const clamped = MathUtils.clamp(trackOffset, -panLimit, panLimit);
+        if (clamped !== trackOffset) {
+            trackOffset = MathUtils.damp(trackOffset, clamped, SPRING_BACK, deltaTime);
+            momentum *= 0.5;
+        }
+    }
+}
+
+function updateCards(): void {
+    const fit = rowFit();
     const cullPx = getFrustumHalfWidthPx() + CARD_W;
     const velTilt = MathUtils.clamp(
         (dragging ? dragVel : momentum) * VEL_TILT_DEG_PER_PXS,
         -VEL_TILT_MAX_DEG, VEL_TILT_MAX_DEG,
     );
+    const centreOffset = (cardCount - 1) * CARD_SPACING / 2;
 
     for (let i = 0; i < cards.length; i++) {
-        const card = cards[i];
-        const xPx = wrapPx(i * CARD_SPACING + trackOffset);
-
-        const onScreen = Math.abs(xPx) < cullPx;
-        card.mesh.visible = onScreen;
-        if (!onScreen) {
-            // Park far off-screen so the browser skips compositing work too.
-            card.el.style.transform =
-                `translate3d(${(xPx - CARD_W / 2) * DOM_SS}px, ${(-CARD_H / 2) * DOM_SS}px, 0px)`;
+        const slot = cards[i];
+        if (!slot.blocks || i >= cardCount) {
+            slot.mesh.visible = false;
+            slot.revealScale = 0;
             continue;
         }
 
-        const bobY = Math.sin(time * BOB_FREQ + card.bobPhase) * BOB_AMP_PX;
-        const rotDeg = Math.sin(time * ROT_FREQ + card.rotPhase) * ROT_AMP_DEG + velTilt;
+        const t = cardReveal(i);
+        const revealScale = Math.max(0, easeOutBack(t)) * fit;
+        slot.revealScale = revealScale;
+        if (revealScale <= 0.004) {
+            slot.mesh.visible = false;
+            slot.el.style.opacity = '0';
+            continue;
+        }
 
-        card.clickPulse = Math.max(0, card.clickPulse - deltaTime * 3);
-        const targetScale = (i === hoverIndex ? HOVER_SCALE : 1) + card.clickPulse * 0.05;
-        card.scale = MathUtils.damp(card.scale, targetScale, SCALE_SMOOTH, deltaTime);
+        const xPx = (i * CARD_SPACING - centreOffset + trackOffset) * fit;
+        slot.xPx = xPx;
+        const onScreen = Math.abs(xPx) < cullPx;
+        slot.mesh.visible = onScreen;
+        if (!onScreen) {
+            slot.el.style.opacity = '0';
+            continue;
+        }
 
-        // DOM (CSS px ×DOM_SS, y-down, rotate() is clockwise on screen)
-        card.el.style.transform =
-            `translate3d(${(xPx - CARD_W / 2) * DOM_SS}px, ${(bobY - CARD_H / 2) * DOM_SS}px, 0px) ` +
-            `rotate(${rotDeg}deg) scale(${card.scale})`;
+        const bobY = Math.sin(time * BOB_FREQ + slot.bobPhase) * BOB_AMP_PX;
+        const rotDeg = Math.sin(time * ROT_FREQ + slot.rotPhase) * ROT_AMP_DEG + velTilt;
 
-        // Punch mesh (world units, y-up → flip Y and rotation direction)
-        card.mesh.position.set(xPx / PX_PER_UNIT, -bobY / PX_PER_UNIT, 0);
-        card.mesh.rotation.z = -rotDeg * MathUtils.DEG2RAD;
-        const sw = (CARD_W + 2 * MASK_MARGIN) / PX_PER_UNIT;
-        const sh = (CARD_H + 2 * MASK_MARGIN) / PX_PER_UNIT;
-        card.mesh.scale.set(sw * card.scale, sh * card.scale, 1);
+        slot.clickPulse = Math.max(0, slot.clickPulse - deltaTime * 3);
+        const targetScale = (i === hoverCard ? HOVER_SCALE : 1) + slot.clickPulse * 0.04;
+        slot.scale = MathUtils.damp(slot.scale, targetScale, SCALE_SMOOTH, deltaTime);
+
+        const s = revealScale * slot.scale;
+        const topY = CARDS_TOP_Y * fit + bobY;
+
+        slot.topY = topY;
+        slot.rotDeg = rotDeg;
+
+        // DOM: y-down, rotate() is clockwise on screen, origin at the TOP centre
+        // so the card unfolds downward from under the title row.
+        slot.el.style.opacity = `${MathUtils.clamp(t * 2.2, 0, 1)}`;
+        slot.el.style.transform =
+            `translate3d(${(xPx - CARD_W / 2) * DOM_SS}px, ${topY * DOM_SS}px, 0px) ` +
+            `rotate(${rotDeg}deg) scale(${s})`;
+
+        // Punch mesh: the DOM pivots about its top centre, so the mesh centre is
+        // the pivot plus the scaled half-height rotated by the same angle.
+        const rad = rotDeg * MathUtils.DEG2RAD;
+        const half = (CARD_H * s) / 2;
+        const cx = xPx - half * Math.sin(rad);
+        const cy = topY + half * Math.cos(rad);
+        slot.mesh.position.set(cx / PX_PER_UNIT, -cy / PX_PER_UNIT, 0);
+        slot.mesh.rotation.z = -rad;
+        slot.mesh.scale.set(
+            (slot.maskCanvas.width / PX_PER_UNIT) * s,
+            (slot.maskCanvas.height / PX_PER_UNIT) * s,
+            1,
+        );
+
+        extentBottomPx = Math.max(extentBottomPx, topY + CARD_H * s + BAND);
+        extentTopPx = Math.min(extentTopPx, topY - BAND);
     }
-
-    updateQuietRect();
 }
 
 // ─── Distortion quiet rect ────────────────────────────────────────────────────
 
 function updateQuietRect(): void {
-    // Project the strip's vertical extent (full track width — cards span past
-    // the frustum edges whenever visible) into UV space for the post shader.
-    const halfH = (CARD_H / 2 + MASK_MARGIN + BOB_AMP_PX + 6) / PX_PER_UNIT;
-    const halfW = TRACK_LEN / 2 / PX_PER_UNIT;
+    // Project the live extent of everything drawn into UV space for the post
+    // shader. Keep the rect tight: it damps the underwater distortion to 12%,
+    // and any water it covers beyond the ink reads as an unnaturally calm box.
+    const fit = rowFit();
+    let tabHalfW = 0;
+    for (const tab of tabs) tabHalfW = Math.max(tabHalfW, Math.abs(tab.cx) + (tab.textW / 2) * fit);
+    const halfW = (Math.max(stripHalfW * fit, tabHalfW + PILL_PAD_X) + MASK_MARGIN) / PX_PER_UNIT;
+    const topWorld = -(extentTopPx - 6) / PX_PER_UNIT;
+    const botWorld = -(extentBottomPx + 6) / PX_PER_UNIT;
 
-    _proj.set(PLANE_X - halfW, PLANE_Y - halfH, PLANE_Z).project(camera);
+    _proj.set(PLANE_X - halfW, PLANE_Y + botWorld, PLANE_Z).project(camera);
     const x0 = _proj.x, y0 = _proj.y, zNdc = _proj.z;
-    _proj.set(PLANE_X + halfW, PLANE_Y + halfH, PLANE_Z).project(camera);
+    _proj.set(PLANE_X + halfW, PLANE_Y + topWorld, PLANE_Z).project(camera);
     const x1 = _proj.x, y1 = _proj.y;
 
     // Behind the camera or fully off-screen → no quiet zone.
@@ -488,20 +1247,74 @@ function pointerToPlanePx(clientX: number, clientY: number): { x: number; y: num
     };
 }
 
-function cardIndexAt(local: { x: number; y: number }): number {
-    for (let i = 0; i < cards.length; i++) {
-        const xPx = wrapPx(i * CARD_SPACING + trackOffset);
-        if (Math.abs(local.x - xPx) <= CARD_W / 2 && Math.abs(local.y) <= CARD_H / 2 + BOB_AMP_PX) {
-            return i;
-        }
+/** Undo a rotate-about-centre transform, giving the point in the box's own
+ *  space (origin at that centre). */
+function unrotate(dx: number, dy: number, rotDeg: number): { x: number; y: number } {
+    const rad = -rotDeg * MathUtils.DEG2RAD;
+    const c = Math.cos(rad), s = Math.sin(rad);
+    return { x: dx * c - dy * s, y: dx * s + dy * c };
+}
+
+function tabIndexAt(local: { x: number; y: number }): number {
+    const fit = rowFit();
+    for (let i = 0; i < tabs.length; i++) {
+        const tab = tabs[i];
+        const p = unrotate(local.x - tab.cx, local.y - tab.cy, tab.rotDeg);
+        const halfW = (tab.textW / 2 + HIT_PAD_X) * fit;
+        const halfH = (TAB_LINE_H / 2 + HIT_PAD_Y) * fit;
+        if (Math.abs(p.x) <= halfW && Math.abs(p.y) <= halfH) return i;
     }
     return -1;
+}
+
+/** Plane px → card-box px (0..CARD_W, 0..CARD_H), undoing the card's live
+ *  top-centre rotate+scale. Returns null when the point misses the card. */
+function cardBoxLocal(slot: CardSlot, local: { x: number; y: number }): { x: number; y: number } | null {
+    if (!slot.blocks || slot.revealScale <= 0.004) return null;
+    const s = slot.revealScale * slot.scale;
+    if (s <= 0.004) return null;
+
+    const p = unrotate(local.x - slot.xPx, local.y - slot.topY, slot.rotDeg);
+    const x = p.x / s + CARD_W / 2;
+    const y = p.y / s;
+    if (x < 0 || x > CARD_W || y < 0 || y > CARD_H) return null;
+    return { x, y };
+}
+
+function cardIndexAt(local: { x: number; y: number }): number {
+    for (let i = 0; i < cardCount; i++) {
+        if (cardBoxLocal(cards[i], local)) return i;
+    }
+    return -1;
+}
+
+/** The link under the pointer, if any (a project card's visit label). */
+function linkAt(local: { x: number; y: number }): string {
+    for (let i = 0; i < cardCount; i++) {
+        const slot = cards[i];
+        const box = cardBoxLocal(slot, local);
+        if (!box || !slot.blocks) continue;
+        for (const b of slot.blocks) {
+            if (!b.href) continue;
+            const w = b.kind === 'text' ? textWidth(b.text, b.size, b.weight, b.ls) + 2 * HIT_PAD_X : b.w;
+            const h = b.kind === 'text' ? b.lineH + 2 * HIT_PAD_Y : b.h;
+            const bx = b.kind === 'text' ? b.x - HIT_PAD_X : b.x;
+            const by = b.kind === 'text' ? b.y - HIT_PAD_Y : b.y;
+            if (box.x >= bx && box.x <= bx + w && box.y >= by && box.y <= by + h) return b.href;
+        }
+    }
+    return '';
+}
+
+/** Vertical band in which a pointer press may start a drag / hit something. */
+function inGrabBand(local: { x: number; y: number }): boolean {
+    return local.y >= extentTopPx - 40 && local.y <= extentBottomPx + 40;
 }
 
 function onPointerDown(e: PointerEvent): void {
     if (!_active || isChestZoomActive()) return;
     const local = pointerToPlanePx(e.clientX, e.clientY);
-    if (!local || Math.abs(local.y) > GRAB_BAND_PX) return;
+    if (!local || !inGrabBand(local)) return;
 
     dragging = true;
     dragPointerId = e.pointerId;
@@ -510,7 +1323,7 @@ function onPointerDown(e: PointerEvent): void {
     dragTravel = 0;
     dragVel = 0;
     momentum = 0;
-    setCursor('grabbing');
+    setCursor(panLimit > 0 ? 'grabbing' : '');
 }
 
 function onPointerMove(e: PointerEvent): void {
@@ -523,17 +1336,31 @@ function onPointerMove(e: PointerEvent): void {
         dragLastX = local.x;
         dragLastTime = now;
         dragTravel += Math.abs(dx);
-        trackOffset += dx;
+        // Past the pan limits the strip resists instead of running away.
+        const over = Math.abs(trackOffset) > panLimit
+            && Math.sign(dx) === Math.sign(trackOffset);
+        trackOffset += over ? dx * RUBBER : dx;
         dragVel = MathUtils.lerp(dragVel, dx / dt, 0.35);
         return;
     }
 
-    // Hover feedback (desktop) — cheap analytic test, no raycaster.
+    // Hover feedback (desktop) — cheap analytic tests, no raycaster.
     if (!_active || e.pointerType === 'touch') return;
     const local = pointerToPlanePx(e.clientX, e.clientY);
-    hoverIndex = local ? cardIndexAt(local) : -1;
-    setCursor(hoverIndex >= 0 ? 'grab'
-        : (local && Math.abs(local.y) <= GRAB_BAND_PX ? 'grab' : ''));
+    if (!local) {
+        hoverTab = hoverCard = -1;
+        hoverLink = false;
+        setCursor('');
+        return;
+    }
+    hoverTab = tabIndexAt(local);
+    hoverCard = hoverTab >= 0 ? -1 : cardIndexAt(local);
+    hoverLink = hoverCard >= 0 && !!linkAt(local);
+
+    setCursor(
+        hoverTab >= 0 || hoverLink ? 'pointer'
+            : (panLimit > 0 && inGrabBand(local) ? 'grab' : ''),
+    );
 }
 
 function onPointerUp(e: PointerEvent): void {
@@ -542,15 +1369,26 @@ function onPointerUp(e: PointerEvent): void {
     dragPointerId = -1;
 
     if (dragTravel < DRAG_CLICK_SLOP) {
-        // Treated as a click — placeholder feedback until cards get real actions.
-        const local = pointerToPlanePx(e.clientX, e.clientY);
-        const idx = local ? cardIndexAt(local) : -1;
-        if (idx >= 0) cards[idx].clickPulse = 1;
         momentum = 0;
+        const local = pointerToPlanePx(e.clientX, e.clientY);
+        if (local) {
+            const tab = tabIndexAt(local);
+            if (tab >= 0) {
+                selectTab(tab);
+            } else {
+                const href = linkAt(local);
+                if (href) {
+                    window.open(href, '_blank', 'noopener,noreferrer');
+                } else {
+                    const idx = cardIndexAt(local);
+                    if (idx >= 0) cards[idx].clickPulse = 1;
+                }
+            }
+        }
     } else {
         momentum = MathUtils.clamp(dragVel, -MAX_FLING, MAX_FLING);
     }
-    setCursor(hoverIndex >= 0 ? 'grab' : '');
+    setCursor(hoverTab >= 0 || hoverLink ? 'pointer' : (panLimit > 0 ? 'grab' : ''));
 }
 
 function cancelDrag(): void {
@@ -567,10 +1405,6 @@ function setCursor(c: string): void {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function wrapPx(x: number): number {
-    return ((x % TRACK_LEN) + TRACK_LEN * 1.5) % TRACK_LEN - TRACK_LEN / 2;
-}
-
 function getFrustumHalfWidthPx(): number {
     const dist = Math.abs(camera.position.z - PLANE_Z);
     const halfH = Math.tan(MathUtils.degToRad(camera.fov) / 2) * dist;
@@ -580,7 +1414,7 @@ function getFrustumHalfWidthPx(): number {
 // ─── Punch mask baking ────────────────────────────────────────────────────────
 
 function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
-    const rr = Math.min(r, w / 2, h / 2);
+    const rr = Math.max(0, Math.min(r, w / 2, h / 2));
     ctx.beginPath();
     ctx.moveTo(x + rr, y);
     ctx.arcTo(x + w, y, x + w, y + h, rr);
@@ -590,58 +1424,105 @@ function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: n
     ctx.closePath();
 }
 
-/** Measured text width including the manual letter-spacing model shared with
- *  the DOM (letter-spacing adds after EVERY glyph, including the last). */
-function measureBlockWidth(ctx: CanvasRenderingContext2D, b: BlockSpec): number {
-    ctx.font = blockFont(b);
-    return ctx.measureText(b.text).width + b.letterSpacing * b.text.length;
-}
+function bakeCardMask(slot: CardSlot): void {
+    const ctx = slot.maskCanvas.getContext('2d');
+    if (!ctx || !slot.blocks) return;
 
-function bakeMask(card: CardState): void {
-    const ctx = card.maskCanvas.getContext('2d');
-    if (!ctx) return;
-    const M = MASK_MARGIN;
-    ctx.clearRect(0, 0, card.maskCanvas.width, card.maskCanvas.height);
+    ctx.clearRect(0, 0, slot.maskCanvas.width, slot.maskCanvas.height);
     ctx.fillStyle = '#fff';
     ctx.strokeStyle = '#fff';
+    ctx.lineJoin = 'round';
+
+    const off = MASK_MARGIN;
 
     // Border band — stroke centred on the card border line, fat enough to
     // reveal the DOM box-shadow glow on both sides.
-    roundRectPath(ctx, M + 1, M + 1, CARD_W - 2, CARD_H - 2, CARD_RADIUS - 1);
+    roundRectPath(ctx, off + 1, off + 1, CARD_W - 2, CARD_H - 2, CARD_RADIUS - 1);
     ctx.lineWidth = BORDER_PX + 2 * BAND;
-    ctx.lineJoin = 'round';
     ctx.stroke();
 
-    // Text pills / divider line
-    for (const b of card.blocks) {
+    for (const b of slot.blocks) {
         if (b.kind === 'line') {
             roundRectPath(
                 ctx,
-                M + b.x - LINE_PAD, M + b.y - LINE_PAD,
-                b.w + 2 * LINE_PAD, 2 + 2 * LINE_PAD,
+                off + b.x - LINE_PAD, off + b.y - LINE_PAD,
+                b.w + 2 * LINE_PAD, b.h + 2 * LINE_PAD,
                 LINE_PAD + 1,
             );
             ctx.fill();
-            continue;
+        } else if (b.kind === 'rect') {
+            if (b.stroke > 0) {
+                roundRectPath(ctx, off + b.x, off + b.y, b.w, b.h, b.radius);
+                ctx.lineWidth = b.stroke + 2 * BAND;
+                ctx.lineJoin = 'round';
+                ctx.stroke();
+            } else {
+                roundRectPath(
+                    ctx,
+                    off + b.x - RECT_PAD, off + b.y - RECT_PAD,
+                    b.w + 2 * RECT_PAD, b.h + 2 * RECT_PAD,
+                    b.radius + RECT_PAD,
+                );
+                ctx.fill();
+            }
+        } else {
+            punchTextPill(
+                ctx, b.text, off + b.x, off + b.y, b.lineH,
+                b.size, b.weight, b.ls,
+                PILL_PAD_X * b.padMul, PILL_PAD_Y * b.padMul,
+            );
         }
-        const w = measureBlockWidth(ctx, b);
-        const ph = b.lineH + 2 * PILL_PAD_Y;
-        roundRectPath(
-            ctx,
-            M + b.x - PILL_PAD_X, M + b.y - PILL_PAD_Y,
-            w + 2 * PILL_PAD_X, ph,
-            ph / 2,
-        );
-        ctx.fill();
     }
 
-    card.maskTexture.needsUpdate = true;
+    slot.maskTexture.needsUpdate = true;
 }
 
-function bakeAllMasks(): void {
-    for (const card of cards) {
-        bakeMask(card);
-        // Pre-upload so the first underwater frame doesn't pay the texImage cost.
-        try { renderer.initTexture(card.maskTexture); } catch { /* pre-GL init */ }
+/** Title / underline canvases are sized once from the label metrics; only a
+ *  re-measure (webfont load) may resize them, and that disposes properly.
+ *  Growing a canvas forces a GPU texture re-allocation, and re-uploading a
+ *  grown canvas into a smaller texture is the "glCopySubTextureCHROMIUM: Offset
+ *  overflows texture dimensions" failure CSS3DPanel documents. */
+function bakeTabMasks(): void {
+    for (let i = 0; i < tabs.length; i++) {
+        const tab = tabs[i];
+        const cw = Math.ceil(tab.textW + 2 * PILL_PAD_X + 2 * MASK_MARGIN);
+        const ch = Math.ceil(TAB_LINE_H + 2 * PILL_PAD_Y + 2 * MASK_MARGIN);
+        if (tab.maskCanvas.width !== cw || tab.maskCanvas.height !== ch) {
+            tab.maskCanvas.width = cw;
+            tab.maskCanvas.height = ch;
+            tab.maskTexture.dispose();
+        }
+        const ctx = tab.maskCanvas.getContext('2d');
+        if (!ctx) continue;
+        ctx.clearRect(0, 0, cw, ch);
+        ctx.fillStyle = '#fff';
+        punchTextPill(
+            ctx, TABS[i].label,
+            (cw - tab.textW) / 2, (ch - TAB_LINE_H) / 2, TAB_LINE_H,
+            TAB_SIZE, TAB_WEIGHT, TAB_LS, PILL_PAD_X, PILL_PAD_Y,
+        );
+        tab.maskTexture.needsUpdate = true;
     }
+}
+
+function bakeUnderlineMask(): void {
+    if (!underlineMesh) return;
+    const canvas = underlineMesh.userData.maskCanvas as HTMLCanvasElement;
+    const texture = underlineMesh.userData.maskTexture as CanvasTexture;
+    const cw = Math.ceil(underlineMaskW + 2 * LINE_PAD + 2 * MASK_MARGIN);
+    const ch = Math.ceil(TAB_UNDERLINE_H + 2 * LINE_PAD + 2 * MASK_MARGIN);
+    if (canvas.width !== cw || canvas.height !== ch) {
+        canvas.width = cw;
+        canvas.height = ch;
+        texture.dispose();
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, cw, ch);
+    ctx.fillStyle = '#fff';
+    const pw = underlineMaskW + 2 * LINE_PAD;
+    const ph = TAB_UNDERLINE_H + 2 * LINE_PAD;
+    roundRectPath(ctx, (cw - pw) / 2, (ch - ph) / 2, pw, ph, LINE_PAD + 1);
+    ctx.fill();
+    texture.needsUpdate = true;
 }

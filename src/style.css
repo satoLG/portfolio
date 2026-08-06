@@ -2935,61 +2935,132 @@ body.day-mode .css3d-panel-content .ct-body {
     display: none;
 }
 
-/* ── CSS3D Ocean Card Carousel (effects/CardCarousel.ts) ─────────────────────
-   The cards live BEHIND the WebGL canvas and only show through per-pixel
-   alpha holes punched by the carousel's mask planes. Whatever paints outside
-   a punched region is simply never seen — so glows here are free to overflow.
-   NOTE: the ::before pill insets are driven by --oc-pill-x / --oc-pill-y,
-   set from PILL_PAD_X / PILL_PAD_Y in CardCarousel.ts (single source). */
+/* ── CSS3D Ocean Tab Carousel (effects/CardCarousel.ts) ──────────────────────
+   The titles and cards live BEHIND the WebGL canvas and only show through
+   per-pixel alpha holes punched by the carousel's mask planes. Whatever paints
+   outside a punched region is simply never seen — so glows here are free to
+   overflow.
+   Each line of text is punched as a roomy rounded PILL (PILL_PAD_X/Y in
+   CardCarousel.ts). A hole shows whatever is behind the canvas — the page
+   background, which is black — so every pill needs something painted into it or
+   it reads as a dark chip. That is the ::before pool below: it fills exactly the
+   punched rect, driven by the same --oc-pill-x/y the mask was baked from.
+
+   THE PUNCH GEOMETRY IS IDENTICAL IN BOTH MODES. Only the light changes: neon
+   at night, a plain water-toned fill by day. An earlier version widened the
+   dilation at night to give the neon more room, which made the dark area around
+   every letter visibly grow the moment night fell — the geometry has to hold
+   still. */
 
 .ocean-carousel {
     position: relative;
     pointer-events: none;
+
+    /* Day: no neon on the letters — they stay plain white. The pool still
+       carries a water tone, because it is what stands between the punched pill
+       and a black rectangle. */
+    --oc-ink-glow: none;
+    --oc-pool: rgba(150, 196, 232, 0.5);
+    --oc-pool-stop: 96%;
+    --oc-line-glow: 0 0 10px rgba(170, 210, 240, 0.55);
+    --oc-frame-shadow:
+        0 0 22px rgba(150, 200, 238, 0.55),
+        inset 0 0 20px rgba(150, 200, 238, 0.32);
+}
+
+body.night-mode .ocean-carousel {
+    /* Night: the neon. Stacked radii — near layers saturate the pill around the
+       glyphs, wide ones give the bloom that lands on the card frame. */
+    --oc-ink-glow:
+        0 0 4px rgba(255, 255, 255, 0.95),
+        0 0 12px rgba(255, 255, 255, 0.7),
+        0 0 28px rgba(150, 215, 255, 0.75);
+    --oc-pool: rgba(150, 210, 255, 0.2);
+    --oc-pool-stop: 82%;
+    --oc-line-glow:
+        0 0 8px rgba(200, 235, 255, 0.9),
+        0 0 26px rgba(150, 215, 255, 0.7);
+    --oc-frame-shadow:
+        0 0 36px rgba(153, 217, 255, 0.4),
+        inset 0 0 32px rgba(153, 217, 255, 0.3);
 }
 
 /* NOTE: px values below are in DOM-supersampled space (×DOM_SS = 4 in
    CardCarousel.ts — iOS WebKit precision fix). Design px × 4. */
+
+/* ── The three floating titles ─────────────────────────────────────────────── */
+.ocean-tab {
+    position: absolute;
+    left: 0;
+    top: 0;
+    white-space: nowrap;
+    text-align: center;
+    color: #fff;
+    font-family: 'Wotfard', ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    will-change: transform;
+    pointer-events: none;
+    opacity: 0.95;
+    text-shadow: var(--oc-ink-glow);
+    transition: opacity 0.35s ease;
+}
+
+.ocean-tab.is-dimmed { opacity: 0.52; }
+.ocean-tab.is-active { opacity: 1; }
+
+.ocean-tab-underline {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform-origin: 50% 50%;
+    background: rgba(255, 255, 255, 0.7);
+    box-shadow: var(--oc-line-glow);
+    will-change: transform;
+    pointer-events: none;
+}
+
+/* ── Cards ─────────────────────────────────────────────────────────────────── */
 .ocean-card {
     position: absolute;
     left: 0;
     top: 0;
     box-sizing: border-box;
+    /* Cards unfold downward from under the title row — the punch mesh mirrors
+       this pivot in CardCarousel.updateCards(). */
+    transform-origin: 50% 0%;
     border-style: solid;
     border-color: rgba(255, 255, 255, 0.92);
     background: transparent;   /* interior stays unpunched → live 3D scene */
     color: #fff;
     font-family: 'Wotfard', ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
-    will-change: transform;
+    will-change: transform, opacity;
     pointer-events: none;
-    box-shadow:
-        0 0 36px rgba(153, 217, 255, 0.4),
-        inset 0 0 32px rgba(153, 217, 255, 0.3);
+    box-shadow: var(--oc-frame-shadow);
 }
 
 .ocean-card .oc-blk {
     position: absolute;
     white-space: nowrap;
     color: #fff;
-    text-shadow:
-        0 0 24px rgba(255, 255, 255, 0.9),
-        0 0 64px rgba(150, 215, 255, 0.65);
+    text-shadow: var(--oc-ink-glow);
 }
 
-/* Soft light pool behind each text line — fills the punched pill so its
-   corners read as glow instead of dead black. Must track the mask pill:
-   pill rect = text block rect expanded by the pads below. */
-.ocean-card .oc-blk::before {
+/* Soft light pool behind each line — this IS the punched pill, filled. Its
+   insets come from --oc-pill-x/y, which CardCarousel writes from the very pads
+   it baked into the mask, so the paint and the hole are one measurement. */
+.ocean-card .oc-blk::before,
+.ocean-tab::before {
     content: '';
     position: absolute;
-    left: calc(-1 * var(--oc-pill-x, 18px));
-    right: calc(-1 * var(--oc-pill-x, 18px));
-    top: calc(-1 * var(--oc-pill-y, 12px));
-    bottom: calc(-1 * var(--oc-pill-y, 12px));
+    left: calc(-1 * var(--oc-pill-x, 20px));
+    right: calc(-1 * var(--oc-pill-x, 20px));
+    top: calc(-1 * var(--oc-pill-y, 14px));
+    bottom: calc(-1 * var(--oc-pill-y, 14px));
     border-radius: 999px;
     background: radial-gradient(ellipse closest-side,
-        rgba(150, 210, 255, 0.16),
-        rgba(150, 210, 255, 0) 78%);
+        var(--oc-pool),
+        rgba(150, 210, 255, 0) var(--oc-pool-stop, 82%));
     z-index: -1;
     pointer-events: none;
 }
@@ -2998,6 +3069,59 @@ body.day-mode .css3d-panel-content .ct-body {
     position: absolute;
     height: 8px;        /* overridden inline (2 × DOM_SS) — kept as fallback */
     border-radius: 8px;
-    background: rgba(255, 255, 255, 0.55);
-    box-shadow: 0 0 32px rgba(170, 225, 255, 0.8);
+    background: rgba(255, 255, 255, 0.5);
+    box-shadow: var(--oc-line-glow);
 }
+
+/* ── Boxed blocks: project icon, screenshot, link button ───────────────────── */
+.ocean-card .oc-rect {
+    position: absolute;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.ocean-card .oc-rect img {
+    display: block;
+    /* border-box is load-bearing: .oc-icon adds padding, and with the default
+       content-box the image would lay out at 100% PLUS that padding, overflow
+       its box and sit visibly off-centre. */
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+/* Loose mark on transparency (project icons) — letterboxed with breathing room
+   so the artwork keeps its own proportions. */
+.ocean-card .oc-icon {
+    background: rgba(190, 225, 255, 0.1);
+}
+
+.ocean-card .oc-icon img {
+    object-fit: contain;
+    padding: 24px;      /* 6 × DOM_SS */
+}
+
+/* Full-bleed brand tile (company / school logos) — these ship with their own
+   background, so padding them would float a second square inside the slot.
+   Fills the rounded box edge to edge instead; .oc-rect img already covers. */
+.ocean-card .oc-logo {
+    background: transparent;
+}
+
+.ocean-card .oc-shot {
+    background: rgba(12, 34, 60, 0.55);
+    box-shadow: var(--oc-frame-shadow);
+}
+
+/* Monogram tile — stands in for a company / school logo we don't ship. Same
+   ink language as the card frame: an outline with the initials inside. */
+.ocean-card .oc-mono {
+    border-style: solid;
+    border-color: rgba(255, 255, 255, 0.72);
+    background: transparent;
+    box-shadow: var(--oc-frame-shadow);
+}
+
