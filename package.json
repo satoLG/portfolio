@@ -9,6 +9,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "generate-icons": "node scripts/generate-icons.cjs",
+    "generate-tech-icons": "node scripts/generate-tech-icons.cjs",
     "optimize-assets": "node scripts/optimize-assets.cjs",
     "optimize-assets:force": "node scripts/optimize-assets.cjs --force",
     "webkit": "node scripts/webkit-browser.cjs"
@@ -24,6 +25,7 @@
     "playwright": "^1.58.2",
     "puppeteer": "^24.40.0",
     "sharp": "^0.34.5",
+    "simple-icons": "^16.28.0",
     "typescript": "^5.2.2",
     "vite": "^5.0.8",
     "vite-plugin-glsl": "1.5.5"

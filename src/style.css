@@ -2964,12 +2964,10 @@ body.day-mode .css3d-panel-content .ct-body {
        punch mask was baked from. Fallback 4 keeps this stylesheet standalone. */
     --oc-ss: 4;
 
-    /* Day: no neon on the letters — they stay plain white. The pool still
-       carries a water tone, because it is what stands between the punched pill
-       and a black rectangle. */
+    /* Day: no neon on the letters — they stay plain white on the bare punched
+       pill, which shows the page background. Black ink, white letters, nothing
+       pooled behind them. */
     --oc-ink-glow: none;
-    --oc-pool: rgba(150, 196, 232, 0.5);
-    --oc-pool-stop: 96%;
     --oc-line-glow: 0 0 calc(2.5px * var(--oc-ss)) rgba(170, 210, 240, 0.55);
     --oc-frame-shadow:
         0 0 calc(5.5px * var(--oc-ss)) rgba(150, 200, 238, 0.55),
@@ -2983,8 +2981,6 @@ body.night-mode .ocean-carousel {
         0 0 calc(1px * var(--oc-ss)) rgba(255, 255, 255, 0.95),
         0 0 calc(3px * var(--oc-ss)) rgba(255, 255, 255, 0.7),
         0 0 calc(7px * var(--oc-ss)) rgba(150, 215, 255, 0.75);
-    --oc-pool: rgba(150, 210, 255, 0.2);
-    --oc-pool-stop: 82%;
     --oc-line-glow:
         0 0 calc(2px * var(--oc-ss)) rgba(200, 235, 255, 0.9),
         0 0 calc(6.5px * var(--oc-ss)) rgba(150, 215, 255, 0.7);
@@ -3056,24 +3052,12 @@ body.night-mode .ocean-carousel {
     text-shadow: var(--oc-ink-glow);
 }
 
-/* Soft light pool behind each line — this IS the punched pill, filled. Its
-   insets come from --oc-pill-x/y, which CardCarousel writes from the very pads
-   it baked into the mask, so the paint and the hole are one measurement. */
-.ocean-card .oc-blk::before,
-.ocean-tab::before {
-    content: '';
-    position: absolute;
-    left: calc(-1 * var(--oc-pill-x, 20px));
-    right: calc(-1 * var(--oc-pill-x, 20px));
-    top: calc(-1 * var(--oc-pill-y, 14px));
-    bottom: calc(-1 * var(--oc-pill-y, 14px));
-    border-radius: 999px;
-    background: radial-gradient(ellipse closest-side,
-        var(--oc-pool),
-        rgba(150, 210, 255, 0) var(--oc-pool-stop, 82%));
-    z-index: -1;
-    pointer-events: none;
-}
+/* NOTHING is painted behind a line of text. The punched pill shows the page
+   background — black — and that IS the look: black ink, white letters. An
+   earlier version pooled a water tone into the pill so it would read as light
+   rather than a hole; that is the pale smudge under every line, and it is gone
+   on purpose. --oc-pill-x/y still drive the mask; they just have no fill to
+   line up with any more. */
 
 .ocean-card .oc-line {
     position: absolute;
@@ -3099,6 +3083,26 @@ body.night-mode .ocean-carousel {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+/* ── Technology tags (Experiência) ─────────────────────────────────────────
+   Glyph only, in the brand's own colour (baked into the SVG by
+   scripts/generate-tech-icons.cjs, lifted where the official hex would vanish
+   into the black ink). One row = one punched pill, so the row shows as a single
+   bar with the marks sitting in it. */
+.ocean-card .oc-techs {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    /* gap + glyph size are written inline (they scale with DOM_SS) */
+}
+
+.ocean-card .oc-tech {
+    display: block;
+    flex: 0 0 auto;
+    object-fit: contain;
     user-select: none;
     -webkit-user-drag: none;
 }
