@@ -2956,37 +2956,47 @@ body.day-mode .css3d-panel-content .ct-body {
     position: relative;
     pointer-events: none;
 
+    /* --oc-ss mirrors CardCarousel's DOM_SS (written from Start()). Blur radii
+       are authored in DESIGN px and multiplied by it, so the glow keeps the same
+       size RELATIVE TO THE INK on a phone (DOM_SS 2) as on desktop (DOM_SS 4).
+       Hard-coded DOM px would double the apparent glow the moment the
+       supersample halves — and the widest radius would then outgrow the pill the
+       punch mask was baked from. Fallback 4 keeps this stylesheet standalone. */
+    --oc-ss: 4;
+
     /* Day: no neon on the letters — they stay plain white. The pool still
        carries a water tone, because it is what stands between the punched pill
        and a black rectangle. */
     --oc-ink-glow: none;
     --oc-pool: rgba(150, 196, 232, 0.5);
     --oc-pool-stop: 96%;
-    --oc-line-glow: 0 0 10px rgba(170, 210, 240, 0.55);
+    --oc-line-glow: 0 0 calc(2.5px * var(--oc-ss)) rgba(170, 210, 240, 0.55);
     --oc-frame-shadow:
-        0 0 22px rgba(150, 200, 238, 0.55),
-        inset 0 0 20px rgba(150, 200, 238, 0.32);
+        0 0 calc(5.5px * var(--oc-ss)) rgba(150, 200, 238, 0.55),
+        inset 0 0 calc(5px * var(--oc-ss)) rgba(150, 200, 238, 0.32);
 }
 
 body.night-mode .ocean-carousel {
     /* Night: the neon. Stacked radii — near layers saturate the pill around the
        glyphs, wide ones give the bloom that lands on the card frame. */
     --oc-ink-glow:
-        0 0 4px rgba(255, 255, 255, 0.95),
-        0 0 12px rgba(255, 255, 255, 0.7),
-        0 0 28px rgba(150, 215, 255, 0.75);
+        0 0 calc(1px * var(--oc-ss)) rgba(255, 255, 255, 0.95),
+        0 0 calc(3px * var(--oc-ss)) rgba(255, 255, 255, 0.7),
+        0 0 calc(7px * var(--oc-ss)) rgba(150, 215, 255, 0.75);
     --oc-pool: rgba(150, 210, 255, 0.2);
     --oc-pool-stop: 82%;
     --oc-line-glow:
-        0 0 8px rgba(200, 235, 255, 0.9),
-        0 0 26px rgba(150, 215, 255, 0.7);
+        0 0 calc(2px * var(--oc-ss)) rgba(200, 235, 255, 0.9),
+        0 0 calc(6.5px * var(--oc-ss)) rgba(150, 215, 255, 0.7);
     --oc-frame-shadow:
-        0 0 36px rgba(153, 217, 255, 0.4),
-        inset 0 0 32px rgba(153, 217, 255, 0.3);
+        0 0 calc(9px * var(--oc-ss)) rgba(153, 217, 255, 0.4),
+        inset 0 0 calc(8px * var(--oc-ss)) rgba(153, 217, 255, 0.3);
 }
 
-/* NOTE: px values below are in DOM-supersampled space (×DOM_SS = 4 in
-   CardCarousel.ts — iOS WebKit precision fix). Design px × 4. */
+/* NOTE: px values below are in DOM-supersampled space (×DOM_SS in
+   CardCarousel.ts — iOS WebKit precision fix, 4 on desktop and 2 on phones).
+   Anything that must hold a fixed DESIGN size across both is either written
+   inline from JS or expressed as calc(<design px> * var(--oc-ss)). */
 
 /* ── The three floating titles ─────────────────────────────────────────────── */
 .ocean-tab {
@@ -3067,8 +3077,8 @@ body.night-mode .ocean-carousel {
 
 .ocean-card .oc-line {
     position: absolute;
-    height: 8px;        /* overridden inline (2 × DOM_SS) — kept as fallback */
-    border-radius: 8px;
+    height: calc(2px * var(--oc-ss));   /* overridden inline — kept as fallback */
+    border-radius: calc(2px * var(--oc-ss));
     background: rgba(255, 255, 255, 0.5);
     box-shadow: var(--oc-line-glow);
 }
@@ -3101,7 +3111,7 @@ body.night-mode .ocean-carousel {
 
 .ocean-card .oc-icon img {
     object-fit: contain;
-    padding: 24px;      /* 6 × DOM_SS */
+    padding: calc(6px * var(--oc-ss));
 }
 
 /* Full-bleed brand tile (company / school logos) — these ship with their own

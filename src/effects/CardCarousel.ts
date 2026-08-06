@@ -42,6 +42,23 @@
  *      "quiet rect" (setDistortionQuietRect) that damps distortion over the
  *      carousel strip; the residual wobble stays inside the mask dilation.
  *
+ * SURFACE BUDGET — the reason cards come and go from the DOM. Everything in the
+ * CSS3D scene sits under `transform-style: preserve-3d`, and a browser gives
+ * every element in such a subtree its OWN composited render surface: the full
+ * element, backed at device resolution, with none of the tiling or viewport
+ * clipping that keeps ordinary page layers cheap. A card is CARD_W·DOM_SS ×
+ * CARD_H·DOM_SS, so its surface costs that × devicePixelRatio² — tens to
+ * hundreds of MB apiece on a phone. Two rules keep the total survivable:
+ *
+ *   • A card is in layout ONLY while it is on screen and revealed. Off-screen,
+ *     collapsed and unused slots are display:none, not merely transparent —
+ *     opacity 0 still owns the surface (see hideCardEl).
+ *   • DOM_SS is smaller on phones, which is a QUADRATIC saving (see DOM_SS).
+ *
+ * The same budget is why the DOM and the punch mask are built per card, one card
+ * per frame, as each reaches the viewport (materialiseCard) rather than for the
+ * whole tab inside the frame that handled the tap.
+ *
  * REGISTRATION RULE: every transform is a scalar computed once per frame and
  * applied to BOTH the DOM element and its punch mesh. Cards scale/rotate about
  * their TOP CENTRE (so they unfold from under the titles), which the mesh
@@ -73,6 +90,7 @@ import {
 // import cycle this project already uses (see the alias note in Fish.ts).
 import { CSS_SCALE, camera, renderer } from '../core/Scene';
 import { getIsUnderwater, isChestZoomActive } from '../core/Control';
+import { getDeviceInfo } from '../core/DeviceCapability';
 import { deltaTime, time } from '../core/Time';
 import { setDistortionQuietRect } from './PostProcess';
 import {
@@ -103,7 +121,21 @@ const PX_PER_UNIT = 320;
 // skewed-content bug). At scale 4 the snap error is ≤4px, hidden inside the mask
 // dilation. NOTE: only DOM px are multiplied — the punch masks, world sizes and
 // all interaction math stay in "design px" (PX_PER_UNIT space).
-const DOM_SS = 4;
+//
+// IT IS ALSO A QUADRATIC MEMORY TERM, which is why phones get a smaller one.
+// The carousel DOM lives in a `transform-style: preserve-3d` subtree, so the
+// browser hands EVERY card its own composited render surface — no tiling, no
+// clipping to the viewport, the whole element is backed. One card costs
+// (CARD_W·DOM_SS)×(CARD_H·DOM_SS)×devicePixelRatio² bytes: at DOM_SS 4 on a
+// DPR-3 phone that is ~130MB per card, and a five-card tab (Experiência,
+// Estudos) asks for ~650MB in one frame. iOS kills the tab — the "forced
+// reload" and the browser's own "can't open this page".
+//
+// At DOM_SS 2 a card is 820 DOM px wide while it draws ~180 CSS px ≈ 540 device
+// px on a phone, so the DOM is still supersampled and nothing softens, but the
+// surfaces drop 4×. Desktop keeps 4: memory is not the constraint there and the
+// cards are magnified far more.
+const DOM_SS = getDeviceInfo().mobile ? 2 : 4;
 
 // ── Card geometry (design px) ────────────────────────────────────────────────
 // EVERY card is exactly this size, on every tab. The project card — icon, name,
@@ -486,6 +518,8 @@ interface CardSlot {
     maskCanvas: HTMLCanvasElement;
     maskTexture: CanvasTexture;
     blocks: Block[] | null;         // null → slot unused by the active tab
+    built: boolean;                 // DOM + punch mask match `blocks` (see materialiseCard)
+    shown: boolean;                 // element is in layout, i.e. holds a render surface
     bobPhase: number;
     rotPhase: number;
     scale: number;                  // smoothed hover scale
@@ -601,6 +635,9 @@ export function Start(glScene: ThreeScene, cssScene: ThreeScene): void {
     screenEl.style.height = '0px';
     screenEl.style.setProperty('--oc-pill-x', `${PILL_PAD_X * DOM_SS}px`);
     screenEl.style.setProperty('--oc-pill-y', `${PILL_PAD_Y * DOM_SS}px`);
+    // Everything in the stylesheet that must hold a fixed DESIGN size — the glow
+    // radii, the divider, the icon letterbox — is authored as design px × this.
+    screenEl.style.setProperty('--oc-ss', `${DOM_SS}`);
 
     cssObject = new CSS3DObject(screenEl);
     // The CSS3DObject constructor forces pointerEvents:'auto' on the element;
@@ -776,6 +813,7 @@ function buildCardSlots(): void {
 
         cards.push({
             el, mesh, maskCanvas: canvas, maskTexture: texture, blocks: null,
+            built: false, shown: false,
             bobPhase: Math.random() * Math.PI * 2,
             rotPhase: Math.random() * Math.PI * 2,
             scale: 1, clickPulse: 0,
@@ -850,8 +888,16 @@ function selectTab(index: number): void {
     hoverCard = -1;
 }
 
-/** Swap the DOM + masks over to `activeTab`'s content. Only ever called while
- *  the cards are fully collapsed, so nothing pops. */
+/** Swap the carousel over to `activeTab`'s content. Only ever called while the
+ *  cards are fully collapsed, so nothing pops.
+ *
+ *  Only the LAYOUT is computed here — measuring and wrapping the text, which the
+ *  hit tests and the strip width need for every card whether it is on screen or
+ *  not. Building the DOM and baking the punch mask is deferred to
+ *  materialiseCard(), one card per frame, as each card actually reaches the
+ *  viewport. Doing all of it here is what made the tab tap block: it is a full
+ *  DOM build plus a mask bake plus a texture upload for every card in the tab,
+ *  inside one frame, at the exact moment the user is waiting for a response. */
 function buildActiveTabCards(): void {
     releaseCardSlots();
     if (activeTab < 0) return;
@@ -865,21 +911,47 @@ function buildActiveTabCards(): void {
     for (let i = 0; i < cardCount; i++) {
         const slot = cards[i];
         slot.blocks = buildLayout(data[i]);
+        slot.built = false;
         slot.scale = 1;
         slot.clickPulse = 0;
-        renderCardDom(slot);
-        bakeCardMask(slot);
-        try { renderer.initTexture(slot.maskTexture); } catch { /* pre-GL init */ }
     }
 
     stripHalfW = ((cardCount - 1) * CARD_SPACING + CARD_W) / 2;
-    flushCardRaster();
+}
+
+/** Give a slot its DOM and its punch mask. Costed at one card per frame by
+ *  updateCards, so a five-card tab spreads over five frames instead of one. */
+function materialiseCard(slot: CardSlot): void {
+    if (slot.built || !slot.blocks) return;
+    renderCardDom(slot);
+    bakeCardMask(slot);
+    try { renderer.initTexture(slot.maskTexture); } catch { /* pre-GL init */ }
+    slot.built = true;
+}
+
+/** Take a card OUT OF LAYOUT (not merely transparent). Inside a preserve-3d
+ *  subtree a laid-out card owns a full-size composited render surface even when
+ *  its opacity is 0 and it sits far off screen — display:none is what actually
+ *  hands that memory back. This is the difference between one open tab holding
+ *  every card's surface at once and holding only the two or three the viewport
+ *  can show. */
+function hideCardEl(slot: CardSlot): void {
+    if (!slot.shown) return;
+    slot.shown = false;
+    slot.el.style.display = 'none';
+}
+
+function showCardEl(slot: CardSlot): void {
+    if (slot.shown) return;
+    slot.shown = true;
+    slot.el.style.display = '';
 }
 
 function releaseCardSlots(): void {
     for (const slot of cards) {
         slot.blocks = null;
-        slot.el.style.display = 'none';
+        slot.built = false;
+        hideCardEl(slot);
         slot.el.replaceChildren();
         slot.mesh.visible = false;
         slot.revealScale = 0;
@@ -891,7 +963,6 @@ function releaseCardSlots(): void {
 function renderCardDom(slot: CardSlot): void {
     if (!slot.blocks) return;
     slot.el.replaceChildren();
-    slot.el.style.display = '';
 
     for (const b of slot.blocks) {
         if (b.kind === 'line') {
@@ -995,14 +1066,20 @@ function advanceAnimation(): void {
 
 /** Hiding an element and reading a layout property back is a paint
  *  invalidation the compositor cannot batch away; no frame renders between the
- *  two writes, so there is no flash. One-shot only — never per frame. */
+ *  two writes, so there is no flash. One-shot only — never per frame.
+ *
+ *  Only cards that are actually IN LAYOUT are touched. A hidden card has no
+ *  render surface to refresh, and toggling display on it would allocate one just
+ *  to throw it away — which is what made this cost the whole tab's worth of
+ *  surfaces instead of the visible cards'. */
 function flushCardRaster(): void {
     for (let i = 0; i < cardCount; i++) {
-        const el = cards[i].el;
-        const prev = el.style.display;
+        const slot = cards[i];
+        if (!slot.shown) continue;
+        const el = slot.el;
         el.style.display = 'none';
         void el.offsetHeight;
-        el.style.display = prev;
+        el.style.display = '';
     }
 }
 
@@ -1122,18 +1199,26 @@ function updateTrack(): void {
 
 function updateCards(): void {
     const fit = rowFit();
-    const cullPx = getFrustumHalfWidthPx() + CARD_W;
+    // Exact horizontal half-extent of a card, plus the rotation's overhang and
+    // the mask margin. The old margin was a whole CARD_W of DESIGN px against a
+    // viewport measured in the same units — on a phone that is wider than the
+    // strip itself, so nothing was ever culled and every card in the tab stayed
+    // in layout holding a render surface.
+    const cullPx = getFrustumHalfWidthPx() + (CARD_W / 2 + CARD_H * 0.12) * fit + MASK_MARGIN;
     const velTilt = MathUtils.clamp(
         (dragging ? dragVel : momentum) * VEL_TILT_DEG_PER_PXS,
         -VEL_TILT_MAX_DEG, VEL_TILT_MAX_DEG,
     );
     const centreOffset = (cardCount - 1) * CARD_SPACING / 2;
+    // At most one card is given its DOM + mask per frame (see materialiseCard).
+    let buildBudget = 1;
 
     for (let i = 0; i < cards.length; i++) {
         const slot = cards[i];
         if (!slot.blocks || i >= cardCount) {
             slot.mesh.visible = false;
             slot.revealScale = 0;
+            hideCardEl(slot);
             continue;
         }
 
@@ -1142,18 +1227,34 @@ function updateCards(): void {
         slot.revealScale = revealScale;
         if (revealScale <= 0.004) {
             slot.mesh.visible = false;
-            slot.el.style.opacity = '0';
+            hideCardEl(slot);
             continue;
         }
 
         const xPx = (i * CARD_SPACING - centreOffset + trackOffset) * fit;
         slot.xPx = xPx;
         const onScreen = Math.abs(xPx) < cullPx;
-        slot.mesh.visible = onScreen;
         if (!onScreen) {
-            slot.el.style.opacity = '0';
+            slot.mesh.visible = false;
+            hideCardEl(slot);
             continue;
         }
+
+        // On screen and wanted — build it if this frame still has the budget,
+        // otherwise stay hidden and try again next frame. The unfold stagger
+        // (CARD_STAGGER) gives each card a few frames of head start, so the
+        // queue is never behind by the time a card is due on screen.
+        if (!slot.built) {
+            if (buildBudget <= 0) {
+                slot.mesh.visible = false;
+                hideCardEl(slot);
+                continue;
+            }
+            buildBudget--;
+            materialiseCard(slot);
+        }
+        showCardEl(slot);
+        slot.mesh.visible = true;
 
         const bobY = Math.sin(time * BOB_FREQ + slot.bobPhase) * BOB_AMP_PX;
         const rotDeg = Math.sin(time * ROT_FREQ + slot.rotPhase) * ROT_AMP_DEG + velTilt;
