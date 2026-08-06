@@ -169,6 +169,9 @@ export const PROJECTS: ProjectCard[] = [
 // (Graduação / Pós-graduação / Curso) so a course never reads as a degree.
 //
 // NOTE: only 3 certificates were listed on the profile at the time of writing.
+// Each carries the issuer's public credential page in `url`, which the card
+// renders as a link at the bottom; the degrees have no such page, so their cards
+// simply omit the block.
 
 export const STUDIES: EntryCard[] = [
     {
@@ -194,9 +197,7 @@ export const STUDIES: EntryCard[] = [
         mono: 'A', icon: '/images/logos/alura.webp',
         period: 'out. 2022',
         body: '',
-        // TODO(link): paste the profile's "Exibir credencial" URL. Credential
-        // code bb05ea11-c30e-4902-93ff-9292d081e7e8 — the card simply drops the
-        // link block while url is unset.
+        url: 'https://cursos.alura.com.br/certificate/bb05ea11-c30e-4902-93ff-9292d081e7e8',
     },
     {
         kind: 'entry',
@@ -205,7 +206,7 @@ export const STUDIES: EntryCard[] = [
         mono: 'IT', icon: '/images/logos/impacta.webp',
         period: 'jan. 2024',
         body: '',
-        // TODO(link): credential code 2340789-169894.
+        url: 'https://www.impacta.com.br/certificado/a3NBRzE5bUUvOTVHTXdjaWlZaWFnZz09',
     },
     {
         kind: 'entry',
@@ -214,7 +215,7 @@ export const STUDIES: EntryCard[] = [
         mono: 'A', icon: '/images/logos/alura.webp',
         period: 'ago. 2024',
         body: '',
-        // TODO(link): credential code 3ef9832b-05e4-4fd6-96a8-174c728ba27e.
+        url: 'https://cursos.alura.com.br/certificate/3ef9832b-05e4-4fd6-96a8-174c728ba27e',
     },
 ];
 
