@@ -34,8 +34,10 @@ export function loc(pt: string, en: string): Localized {
     return { pt, en };
 }
 
-/** Resolve a Localized against the active language. */
-export function text(v: Localized): string {
+/** Resolve against the active language. A plain string passes straight through
+ *  — that is how a proper noun with no translation is written. */
+export function text(v: Localized | string): string {
+    if (typeof v === 'string') return v;
     return getCurrentLanguage() === 'pt-br' ? v.pt : v.en;
 }
 
@@ -95,8 +97,11 @@ export interface EntryCard {
 
 export interface ProjectCard {
     kind: 'project';
-    /** Product name — a proper noun, NEVER translated. */
-    name: string;
+    /** Product name. A plain string for the ones that have a single name in any
+     *  language; a Localized pair only where THE PRODUCT ITSELF ships one — the
+     *  card follows what the thing calls itself, it does not invent a
+     *  translation. */
+    name: string | Localized;
     /** Icon shown to the left of the name (path under /public). */
     icon: string;
     body: Localized;
@@ -198,12 +203,18 @@ export const EXPERIENCE: EntryCard[] = [
 export const PROJECTS: ProjectCard[] = [
     {
         kind: 'project',
-        name: 'Defend the Crystal',
+        // The game ships its own name in both languages (apps/web/src/i18n.js,
+        // brand.title), so the card uses the game's, not a translation of mine.
+        name: loc('Defenda o Cristal', 'Defend the Crystal'),
+        // The favicon the game declares (index.html → ./img/crystal-logo.png)
+        // and a capture of its start screen, both taken from the repo itself.
         icon: '/images/projects/defend-the-crystal-icon.webp',
         shot: '/images/projects/defend-the-crystal-shot.webp',
+        // English is the repo's own meta description, trimmed to the card's line
+        // budget. Portuguese follows the game's own PT vocabulary.
         body: loc(
-            'Tower defense 3D cooperativo no navegador. De 1 a 4 jogadores escolhem uma classe, montam um labirinto de torres e seguram os monstros longe do cristal.',
-            'Co-op 3D tower defense in the browser. One to four players pick a class, build a maze of towers and keep the monsters away from the crystal.',
+            'Tower defense 3D cooperativo no navegador. Escolha uma classe, monte um labirinto de torres e segure as ondas de monstros com até 4 amigos.',
+            'Free co-op 3D tower defense in your browser. Pick a class, build a maze of towers, and fend off monster waves with up to 4 friends.',
         ),
         url: 'https://defend-the-crystal.vercel.app/',
         cta: VISIT_SITE,

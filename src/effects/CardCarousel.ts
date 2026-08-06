@@ -521,7 +521,7 @@ function buildProjectLayout(p: ProjectCard): Block[] {
     pushIconBlocks(blocks, p.icon, '', 'oc-icon');
 
     const nameX = CARD_PAD + ICON_BOX + ICON_GAP;
-    const nameLines = wrapText(p.name, 30, 600, 0.2, CARD_W - CARD_PAD - nameX);
+    const nameLines = wrapText(text(p.name), 30, 600, 0.2, CARD_W - CARD_PAD - nameX);
     let ny = Math.max(HEAD_Y - 8, HEAD_Y + (ICON_BOX - nameLines.length * 39) / 2);
     for (const line of nameLines) {
         blocks.push(block({ kind: 'text', text: line, x: nameX, y: ny, size: 30, weight: 600, ls: 0.2, lineH: 39, alpha: 0.98 }));
@@ -563,7 +563,7 @@ function buildProjectLayout(p: ProjectCard): Block[] {
 
 function buildLayout(c: CardData): Block[] {
     const blocks = c.kind === 'project' ? buildProjectLayout(c) : buildEntryLayout(c);
-    warnIfOverflowing(blocks, c.kind === 'project' ? c.name : c.heading);
+    warnIfOverflowing(blocks, c.kind === 'project' ? text(c.name) : c.heading);
     return blocks;
 }
 
