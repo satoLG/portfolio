@@ -3,7 +3,7 @@
 // Paste this entire file to replace src/scene/IslandConfig.ts
 
 // ── Positions ─────────────────────────────────────────────────────────────────
-export const islandPosition = { x: 0.0000, y: -0.8000, z: -3.3000 };
+export const islandPosition = { x: 0.0000, y: -0.6500, z: -3.3000 };  // raised 0.15 so more of the rock shows above the waterline
 export const firecampOffset = { x: 0.0080, y: 1.0000, z: 0.4000 };
 export const treeOffset = { x: -0.4500, y: 1.0000, z: -0.3000 };
 export const bushOffset = { x: -0.1200, y: 0.8140, z: -0.6690 };

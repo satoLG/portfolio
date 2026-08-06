@@ -5,7 +5,9 @@
 // ── Cabana zoom ───────────────────────────────────────────────────────────────
 // Desktop (used when viewport width > mobileBreakpointWidth).
 export const cabanaCamX   = 0.2400;
-export const cabanaCamY   = 0.5700;
+// This one is an ABSOLUTE world Y (not an islandPosition offset), so it tracks
+// islandPosition.y by hand — raised 0.15 with the island to keep the framing.
+export const cabanaCamY   = 0.7200;
 export const cabanaCamZ   = -3.0700;
 export const cabanaPhi    = 6.6800;
 export const cabanaPitch  = -0.2600;
@@ -13,7 +15,7 @@ export const cabanaFov    = 49.0000;
 // Mobile (used when viewport width ≤ mobileBreakpointWidth). The narrower mobile
 // FOV/pose framing is dialled in separately so the tent reads well on phones.
 export const cabanaCamXMobile   = 0.2100;
-export const cabanaCamYMobile   = 0.6800;
+export const cabanaCamYMobile   = 0.8300;   // absolute world Y — raised 0.15 with the island
 export const cabanaCamZMobile   = -3.0000;
 export const cabanaPhiMobile    = 6.6800;
 export const cabanaPitchMobile  = -0.2600;
