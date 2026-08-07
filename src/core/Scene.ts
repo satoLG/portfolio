@@ -356,6 +356,12 @@ function renderSceneFrame(deepUnderwater: boolean, effectOnScreen: boolean): voi
         // Skip the ocean surface pass while sealed inside the cabana — the dome
         // hides it and the camera is above water, so it's pure waste.
         if (!Island.isCabanaSealed()) Ocean.RenderSurface(renderer, camera);
+        // Cloud reflections lie ON the water, so they go down after the surface
+        // pass. Still depth-tested, so the island occludes the ones behind it.
+        // Pointless from below the waterline — that's the sky's mirror image.
+        if (!Island.isCabanaSealed() && !deepUnderwater) {
+            CloudSprites.RenderHorizonReflections(renderer, camera);
+        }
         if (underwaterTransparentVis) {
             renderOnlyUnderwaterTransparents(underwaterTransparentVis);
             restoreVisibility(underwaterTransparentVis);
