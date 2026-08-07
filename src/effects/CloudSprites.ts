@@ -17,13 +17,15 @@ import {
 export const cloudSpritesGroup = new Group();
 const cloudSpritesScene = new Scene();
 
-// Horizon cloud band — lives in the MAIN scene (see the HORIZON_CLOUD_* block).
+// Horizon cloud band — cards and their reflections both live here, in their own
+// scene drawn after the ocean surface pass (see the HORIZON_CLOUD_* block).
 export const horizonCloudsGroup = new Group();
+const horizonBandScene = new Scene();
 let horizonMaterial: ShaderMaterial | null = null;
-// Their reflections need to land after the ocean surface pass, so they sit in
-// their own scene that Scene.ts renders at that point (RenderHorizonReflections).
-const horizonReflectionScene = new Scene();
 let horizonReflectionMaterial: ShaderMaterial | null = null;
+// The band is a sea-level feature, so it stays hidden until the intro hands the
+// camera down to the water — same moment the ocean surface itself is revealed.
+let horizonRevealed = false;
 
 const CLOUDS_PER_CHUNK = 2200;
 const CLOUD_CHUNK_COUNT = 3;
@@ -84,15 +86,17 @@ const BACK_LAYER_HIDE_FADE_DURATION = 0.7;
 const BACK_LAYER_HIDE_SOFTNESS = 0.14;
 
 // ── Horizon cloud band ───────────────────────────────────────────────────────
-// A second, always-on cloud layer, unrelated to the intro deck above. These are
-// distant cards standing far out at sea and clipped at the waterline, so only
-// their top half clears the ocean horizon — the way distant clouds read when
-// you're low on the water.
+// A second cloud layer, unrelated to the intro deck above. These are distant
+// cards standing far out at sea and clipped at the waterline, so only their top
+// half clears the ocean horizon — the way distant clouds read when you're low on
+// the water. Each one is mirrored below the cut as a reflection (see the
+// HORIZON_REFLECTION_* block), and both halves draw in one pass after the ocean
+// surface (RenderHorizonBand).
 //
-// Unlike the intro deck (own scene, depth cleared, painted over everything),
-// this layer lives in the MAIN scene so the ocean, island and post-processing
-// sort against it normally. Scene.ts adds `horizonCloudsGroup`, keeps it out of
-// the foam depth pre-pass, and hides it with the skybox inside the cabana.
+// Like the intro deck this is its own scene, but it does NOT clear depth first,
+// so the island still occludes it. It stays hidden until beginDescent(): during
+// the intro the camera is parked up in the sky, where a sea-level band would
+// only show as a hard horizontal line behind the deck's semi-transparent edges.
 const HORIZON_CLOUD_COUNT = 10;
 // Z band the cards scatter through. The ocean plane runs to z = -400, so these
 // stay comfortably over water — a card past the plane's far edge would have
@@ -110,11 +114,10 @@ const HORIZON_CLOUD_MAX_SIZE = 78;
 // visually half the cloud showing. Raise to sink them, lower to lift them.
 const HORIZON_CLOUD_SINK = 0.5;
 const HORIZON_CLOUD_SINK_VARIANCE = 0.1;
-// World units of dissolve just above the cut. Without it the clip reads as a
-// ruler-drawn line; this also hides the 1-2px band where the ocean surface pass
-// paints over the card's foot (water farther than the card still draws on top
-// of it — the cards are transparent and don't write depth).
-const HORIZON_CLOUD_WATERLINE_FADE = 1.6;
+// World units of dissolve just above the cut, so the clip doesn't read as a
+// ruler-drawn line. Keep it small: the reflection below meets the cut at full
+// strength, so a wide fade here shows up as a dim gap between the two.
+const HORIZON_CLOUD_WATERLINE_FADE = 0.4;
 const HORIZON_CLOUD_OPACITY = 0.34;
 // Distant clouds lose contrast against the sky — blend them toward the haze.
 const HORIZON_CLOUD_HAZE_COLOR = 0xdfeef8;
@@ -127,12 +130,6 @@ const HORIZON_CLOUD_SEED = 20260807;
 // Each card gets a mirrored twin below the waterline, so the half the horizon
 // cut takes away comes back as a reflection lying on the water — the two meet
 // edge-to-edge at the horizon and read as one shape.
-//
-// These draw AFTER the ocean surface pass (Scene.ts calls RenderHorizonReflections
-// from inside renderSceneFrame), because a reflection sits ON the water rather
-// than behind it. Depth testing stays on, so the island still occludes the ones
-// behind it — the ocean surface itself writes no depth, which is what lets the
-// reflections land on top of the water without punching through the island.
 const HORIZON_REFLECTION_OPACITY = 0.22;
 // Vertical squash. A real reflection on a flat sea is compressed at these
 // grazing angles; 1.0 would be a perfect mirror twin and read as a mistake.
@@ -412,6 +409,7 @@ function createCloudMaterial(): ShaderMaterial {
 }
 
 export function beginDescent(): void {
+    revealHorizonBand();
     started = true;
     lifting = true;
     liftY = 0;
@@ -549,7 +547,7 @@ function makeRandom(seed: number): () => number {
 
 function buildHorizonClouds(): void {
     horizonCloudsGroup.clear();
-    horizonReflectionScene.clear();
+    horizonBandScene.add(horizonCloudsGroup);
 
     horizonMaterial = new ShaderMaterial({
         uniforms: {
@@ -600,23 +598,42 @@ function buildHorizonClouds(): void {
     // Billboarding happens in the vertex shader, so the CPU-side bounding sphere
     // never matches what's drawn.
     mesh.frustumCulled = false;
+    // Cards first, reflections over them — they only meet along the waterline, so
+    // the order is about intent rather than overlap.
+    mesh.renderOrder = 0;
     horizonCloudsGroup.add(mesh);
 
     const reflection = new Mesh(geometry, horizonReflectionMaterial);
     reflection.frustumCulled = false;
-    horizonReflectionScene.add(reflection);
+    reflection.renderOrder = 1;
+    horizonCloudsGroup.add(reflection);
 }
 
-/** Draws the cloud reflections onto the water. Must run AFTER the ocean surface
- *  pass — Scene.ts calls this from inside renderSceneFrame's ocean callback. */
-export function RenderHorizonReflections(renderer: WebGLRenderer, camera: Camera): void {
-    if (!horizonCloudsGroup.visible) return;
+/** Reveals the horizon band. Called when the intro hands off to the scene, at the
+ *  same moment the ocean surface appears — before that the camera is up in the
+ *  sky and a sea-level cloud band just draws a hard line across the cloud deck. */
+export function revealHorizonBand(): void {
+    horizonRevealed = true;
+}
+
+/** Draws the horizon cards and their reflections. Must run AFTER the ocean
+ *  surface pass — Scene.ts calls this from inside renderSceneFrame's ocean
+ *  callback.
+ *
+ *  Both halves go down here, not just the reflections. The ocean surface is
+ *  transparent and writes no depth, so anything drawn before it loses to water
+ *  that is FARTHER away but sits higher on screen — which would slice a strip of
+ *  water between each card's waterline cut and its reflection, exactly where the
+ *  two are supposed to meet. Drawing after the surface restores the real
+ *  ordering: the card is nearer than that water, so it wins. */
+export function RenderHorizonBand(renderer: WebGLRenderer, camera: Camera): void {
+    if (!horizonRevealed || !horizonCloudsGroup.visible) return;
 
     const prevAutoClear = renderer.autoClear;
     renderer.autoClear = false;
-    // No clearDepth here, unlike the intro deck's pass: the reflections are meant
-    // to be occluded by anything the main pass already drew in front of them.
-    renderer.render(horizonReflectionScene, camera);
+    // No clearDepth here, unlike the intro deck's pass: the band is meant to be
+    // occluded by anything the main pass already drew in front of it (the island).
+    renderer.render(horizonBandScene, camera);
     renderer.autoClear = prevAutoClear;
 }
 

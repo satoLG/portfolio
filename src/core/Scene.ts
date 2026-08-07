@@ -246,9 +246,6 @@ function getDepthPrePassExcluded(): Object3D[] {
     if (Island.proceduralGrassMesh) _depthExcludedTargets.push(Island.proceduralGrassMesh);
     if (Island.grassShadowMesh)     _depthExcludedTargets.push(Island.grassShadowMesh);
     if (Skybox.skybox)              _depthExcludedTargets.push(Skybox.skybox);
-    // Horizon clouds are transparent cards; the override MeshDepthMaterial would
-    // force depthWrite on and stamp their full quads into the foam depth target.
-    _depthExcludedTargets.push(CloudSprites.horizonCloudsGroup);
     if (WindLines.windLinesGroup)   _depthExcludedTargets.push(WindLines.windLinesGroup);
     if (Island.getChestRayGroup())  _depthExcludedTargets.push(Island.getChestRayGroup()!);
     if (Fire.fire)                  _depthExcludedTargets.push(Fire.fire);
@@ -356,11 +353,12 @@ function renderSceneFrame(deepUnderwater: boolean, effectOnScreen: boolean): voi
         // Skip the ocean surface pass while sealed inside the cabana — the dome
         // hides it and the camera is above water, so it's pure waste.
         if (!Island.isCabanaSealed()) Ocean.RenderSurface(renderer, camera);
-        // Cloud reflections lie ON the water, so they go down after the surface
-        // pass. Still depth-tested, so the island occludes the ones behind it.
-        // Pointless from below the waterline — that's the sky's mirror image.
+        // Horizon clouds and their reflections both go down after the surface
+        // pass, so the water can't slice a strip between them (see
+        // RenderHorizonBand). Still depth-tested, so the island occludes them.
+        // Pointless from below the waterline — it's a sky feature.
         if (!Island.isCabanaSealed() && !deepUnderwater) {
-            CloudSprites.RenderHorizonReflections(renderer, camera);
+            CloudSprites.RenderHorizonBand(renderer, camera);
         }
         if (underwaterTransparentVis) {
             renderOnlyUnderwaterTransparents(underwaterTransparentVis);
@@ -655,10 +653,6 @@ export function Start(): void
     scene.add(WindLines.windLinesGroup);
 
     CloudSprites.Start();
-    // The intro cloud deck draws in its own pass (CloudSprites.Render), but the
-    // horizon band belongs in the main scene so the ocean surface, island and
-    // post-processing sort against it like any other sky geometry.
-    scene.add(CloudSprites.horizonCloudsGroup);
 
     // Register GPU prewarm to run after all models finish loading.
     // This compiles every shader program during the loading screen so the
