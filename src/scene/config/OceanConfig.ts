@@ -23,7 +23,7 @@ export const normalMapScale    = 0.1160;
 export const normalMapStrength = 0.1400;
 export const waveVelocity1     = { x: 0.0330, y: -0.0100 };
 export const waveVelocity2     = { x: -0.0270, y: -0.0180 };
-export const edgeFadeDistance  = 0.5400;
+export const edgeFadeDistance  = 0.0600;
 
 // Horizon haze, driven by the view's GRAZING ANGLE (not distance). The ocean
 // plane edge and any grazing-angle reflection speck always sit where the line of
