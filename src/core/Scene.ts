@@ -246,6 +246,9 @@ function getDepthPrePassExcluded(): Object3D[] {
     if (Island.proceduralGrassMesh) _depthExcludedTargets.push(Island.proceduralGrassMesh);
     if (Island.grassShadowMesh)     _depthExcludedTargets.push(Island.grassShadowMesh);
     if (Skybox.skybox)              _depthExcludedTargets.push(Skybox.skybox);
+    // Horizon clouds are transparent cards; the override MeshDepthMaterial would
+    // force depthWrite on and stamp their full quads into the foam depth target.
+    _depthExcludedTargets.push(CloudSprites.horizonCloudsGroup);
     if (WindLines.windLinesGroup)   _depthExcludedTargets.push(WindLines.windLinesGroup);
     if (Island.getChestRayGroup())  _depthExcludedTargets.push(Island.getChestRayGroup()!);
     if (Fire.fire)                  _depthExcludedTargets.push(Fire.fire);
@@ -646,6 +649,10 @@ export function Start(): void
     scene.add(WindLines.windLinesGroup);
 
     CloudSprites.Start();
+    // The intro cloud deck draws in its own pass (CloudSprites.Render), but the
+    // horizon band belongs in the main scene so the ocean surface, island and
+    // post-processing sort against it like any other sky geometry.
+    scene.add(CloudSprites.horizonCloudsGroup);
 
     // Register GPU prewarm to run after all models finish loading.
     // This compiles every shader program during the loading screen so the
@@ -1059,6 +1066,7 @@ export function Update(): void
         Fish.setCameraVisibility(false, Island.getLowestY());
         WindLines.windLinesGroup.visible = showOutside && !isPugZoomActive();
         Skybox.skybox.visible = showOutside;
+        CloudSprites.horizonCloudsGroup.visible = showOutside;
         Island.island.visible = showOutside;
         Island.firecamp.visible = showOutside;
         Island.tree.visible = showOutside;
