@@ -1938,6 +1938,7 @@ body.day-mode .language-option span {
     width: 48px;
     height: 30px;
     border-radius: 2px;
+    overflow: hidden;
 }
 
 .flag-column {
@@ -1945,6 +1946,8 @@ body.day-mode .language-option span {
     min-width: 0;
     height: 100%;
     transform-origin: center;
+    /* scaleX overlaps neighbors to hide subpixel rounding seams between flex columns (visible on low-DPI desktop screens) */
+    transform: scaleX(1.2);
 }
 
 /* Inactive state - make columns transparent and desaturated */
@@ -1984,10 +1987,10 @@ body.day-mode .language-option.active span {
 /* Waving flag animation - billowing effect */
 @keyframes flag-billow {
     0%, 100% {
-        transform: scaleY(1);
+        transform: scaleX(1.2) scaleY(1);
     }
     50% {
-        transform: scaleY(0.94);
+        transform: scaleX(1.2) scaleY(0.94);
     }
 }
 
