@@ -353,13 +353,6 @@ function renderSceneFrame(deepUnderwater: boolean, effectOnScreen: boolean): voi
         // Skip the ocean surface pass while sealed inside the cabana — the dome
         // hides it and the camera is above water, so it's pure waste.
         if (!Island.isCabanaSealed()) Ocean.RenderSurface(renderer, camera);
-        // Horizon clouds go down after the surface pass, so it can't paint over
-        // their bottom edge at the waterline cut (see RenderHorizonBand). Still
-        // depth-tested, so the island occludes them. Pointless from below the
-        // waterline — it's a sky feature.
-        if (!Island.isCabanaSealed() && !deepUnderwater) {
-            CloudSprites.RenderHorizonBand(renderer, camera);
-        }
         if (underwaterTransparentVis) {
             renderOnlyUnderwaterTransparents(underwaterTransparentVis);
             restoreVisibility(underwaterTransparentVis);
@@ -1066,7 +1059,6 @@ export function Update(): void
         Fish.setCameraVisibility(false, Island.getLowestY());
         WindLines.windLinesGroup.visible = showOutside && !isPugZoomActive();
         Skybox.skybox.visible = showOutside;
-        CloudSprites.horizonCloudsGroup.visible = showOutside;
         Island.island.visible = showOutside;
         Island.firecamp.visible = showOutside;
         Island.tree.visible = showOutside;

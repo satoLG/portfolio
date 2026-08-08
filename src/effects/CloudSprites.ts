@@ -3,7 +3,6 @@ import {
     BufferGeometry,
     Color,
     Camera,
-    DoubleSide,
     Group,
     LinearFilter,
     LinearMipmapLinearFilter,
@@ -16,18 +15,6 @@ import {
 
 export const cloudSpritesGroup = new Group();
 const cloudSpritesScene = new Scene();
-
-// Horizon cloud band — lives in its own scene drawn after the ocean surface pass
-// (see the HORIZON_CLOUD_* block).
-export const horizonCloudsGroup = new Group();
-const horizonBandScene = new Scene();
-let horizonMaterial: ShaderMaterial | null = null;
-// 0 while the camera is up in the intro sky, 1 once it has descended to the
-// water (see HORIZON_REVEAL_START_Y).
-let horizonReveal = 0;
-// World units the band has drifted along +X so far, wrapped into
-// [0, HORIZON_CLOUD_LOOP_WIDTH) every frame.
-let horizonDrift = 0;
 
 const CLOUDS_PER_CHUNK = 2200;
 const CLOUD_CHUNK_COUNT = 3;
@@ -86,126 +73,6 @@ const BACK_LAYER_HIDE_AMOUNT = 0.45;
 // Seconds used to fade that rear-depth mask in, so it does not pop.
 const BACK_LAYER_HIDE_FADE_DURATION = 0.7;
 const BACK_LAYER_HIDE_SOFTNESS = 0.14;
-
-// ── Horizon cloud band ───────────────────────────────────────────────────────
-// A second cloud layer, unrelated to the intro deck above: distant cards
-// floating just above the ocean horizon, with a guaranteed gap so they never
-// touch the waterline. They drift sideways and loop — see HORIZON_CLOUD_DRIFT_SPEED.
-//
-// They draw in their own pass AFTER the ocean surface (RenderHorizonBand): the
-// surface is semi-transparent right at the horizon (see horizonFadeStart/End in
-// OceanConfig) and, drawn first, would paint over the bottom of a card sitting
-// close to it. Drawing the cards after keeps them the topmost thing there.
-//
-// Like the intro deck this is its own scene, but it does NOT clear depth first,
-// so the island still occludes it. It fades in with the camera's descent rather
-// than being on from the start — see HORIZON_REVEAL_START_Y.
-const HORIZON_CLOUD_COUNT = 14;
-// Z band the cards scatter through. The ocean plane runs to z = -400, so these
-// stay comfortably over water.
-const HORIZON_CLOUD_NEAR_Z = -150;
-const HORIZON_CLOUD_FAR_Z  = -330;
-// World-X width of the drift loop — see HORIZON_CLOUD_DRIFT_SPEED for how it wraps.
-// Wider than the view frustum on purpose: cards recycle from the far edge back
-// to the near one while both edges sit off-screen, so the wrap itself is never
-// seen, only cards drifting in and out of frame.
-const HORIZON_CLOUD_LOOP_WIDTH = 520;
-const HORIZON_CLOUD_MIN_SIZE = 34;
-const HORIZON_CLOUD_MAX_SIZE = 78;
-// World units between a card's bottom edge and the waterline. Randomised per
-// card within [MIN, MIN+VARIANCE] rather than allowing it near zero, so no card
-// can land close enough to read as touching the horizon line.
-const HORIZON_CLOUD_GAP_MIN = 3.0;
-const HORIZON_CLOUD_GAP_VARIANCE = 7.0;
-const HORIZON_CLOUD_OPACITY = 0.18;
-// World units per second the band drifts along +X — which reads as rightward
-// drift for the camera's normal forward-facing orientation. Slow: a full loop
-// takes HORIZON_CLOUD_LOOP_WIDTH / this many seconds, and this is meant to read
-// as barely-there ambient motion, not an obvious conveyor belt.
-const HORIZON_CLOUD_DRIFT_SPEED = 1.6;
-// Distant clouds lose contrast against the sky — blend them toward the haze.
-const HORIZON_CLOUD_HAZE_COLOR = 0xdfeef8;
-const HORIZON_CLOUD_HAZE = 0.45;
-// The band takes only ALPHA from cloud10.png and colours it with this. The
-// texture's transparent areas carry dark RGB (~53 grey) behind their zero alpha,
-// and mip filtering averages colour and alpha independently — so any minified or
-// mip-biased sample drags that grey into the cloud's colour and lays a dirty
-// smear on the water. Sampling colour from a constant sidesteps the whole class
-// of bug. What's lost is the texture's internal shading, which at this distance
-// and opacity the haze blend was flattening anyway.
-const HORIZON_CLOUD_BODY_COLOR = 0xeef1f3;
-// Fixed seed: the scatter is random-looking but identical on every reload, so a
-// visual tweak is the only thing that changes between two screenshots.
-const HORIZON_CLOUD_SEED = 20260807;
-
-// ── Horizon band reveal ──────────────────────────────────────────────────────
-// Fades the band in on camera height rather than switching it on at an event, so
-// it arrives gradually as the descent brings the sea up to meet you instead of
-// popping in. During the intro the camera sits pitched up at the sky (see
-// Control.ts's INTRO_TETHA_START) where the band wouldn't be in frame anyway,
-// but the fade means there's no reveal pop even at the edge of that frustum.
-const HORIZON_REVEAL_START_Y = 7.0;   // camera Y where the band starts appearing
-const HORIZON_REVEAL_END_Y   = 2.4;   // camera Y where it's fully faded in
-
-const horizonVertex = /* glsl */`
-    attribute vec2 cornerOffset;
-
-    uniform float driftOffset;
-    uniform float loopWidth;
-
-    varying vec2 vUv;
-
-    void main() {
-        vUv = uv;
-
-        // Wrap the card's authored X into a loopWidth-wide window that slides by
-        // driftOffset. mod() keeps this a single float op with no per-card state
-        // to update on the JS side — CloudSprites.Update just advances the one
-        // uniform. See HORIZON_CLOUD_LOOP_WIDTH for why the window is wider than
-        // the frustum: the wrap point this creates always falls off-screen.
-        float halfLoop = loopWidth * 0.5;
-        float wrappedX = mod(position.x + driftOffset + halfLoop, loopWidth) - halfLoop;
-        vec3 basePos = vec3(wrappedX, position.y, position.z);
-        vec3 centre = (modelMatrix * vec4(basePos, 1.0)).xyz;
-
-        // Yaw-only billboard: expand along the camera's world-space right vector
-        // so the cards keep facing the camera as it turns, but never tip with its
-        // pitch — a card that tilted out of horizontal would read as debris, not
-        // a cloud sitting on the horizon.
-        vec2 rightXZ = vec2(viewMatrix[0][0], viewMatrix[2][0]);
-        vec3 camRight = vec3(rightXZ.x, 0.0, rightXZ.y) / max(length(rightXZ), 1e-4);
-
-        vec3 worldPos = centre + camRight * cornerOffset.x + vec3(0.0, cornerOffset.y, 0.0);
-
-        gl_Position = projectionMatrix * viewMatrix * vec4(worldPos, 1.0);
-    }
-`;
-
-const horizonFragment = /* glsl */`
-    uniform sampler2D map;
-    uniform vec3 bodyColor;
-    uniform vec3 hazeColor;
-    uniform float haze;
-    uniform float opacity;
-    uniform float reveal;
-    uniform float nightBlend;
-
-    varying vec2 vUv;
-
-    void main() {
-        // Alpha from the texture, colour from a constant — see BODY_COLOR.
-        float alpha = texture2D(map, vUv).a;
-
-        vec3 rgb = mix(bodyColor, hazeColor, haze);
-        float grey = dot(rgb, vec3(0.299, 0.587, 0.114));
-        rgb = mix(rgb, vec3(grey) * 0.48, nightBlend);
-
-        alpha *= opacity * reveal;
-        if (alpha <= 0.001) discard;
-
-        gl_FragColor = vec4(rgb, alpha);
-    }
-`;
 
 const vertex = /* glsl */`
     uniform float chunkZ;
@@ -304,8 +171,6 @@ export function Start(): void {
     texture.minFilter = LinearMipmapLinearFilter;
     textureMap = texture;
 
-    buildHorizonClouds();
-
     chunks.length = 0;
     cloudSpritesGroup.clear();
     for (let i = 0; i < CLOUD_CHUNK_COUNT; i++) {
@@ -372,11 +237,6 @@ export function beginDescent(): void {
 }
 
 export function Update(cameraY: number, deltaTime: number, dayNightBlend = 0): void {
-    // Ahead of the guard below — the horizon band is independent of the intro
-    // deck's chunks and has to keep tracking the camera and day/night even once
-    // those are gone.
-    updateHorizonBand(cameraY, deltaTime, dayNightBlend);
-
     if (chunks.length === 0) return;
 
     if (!started) {
@@ -480,147 +340,6 @@ function hideFarthestChunk(): void {
     }
 
     if (farthest) farthest.visible = false;
-}
-
-// Small deterministic LCG so the scatter is stable across reloads (see
-// HORIZON_CLOUD_SEED). Math.random() would reshuffle the band on every refresh,
-// which makes eyeballing a tweak impossible.
-function makeRandom(seed: number): () => number {
-    let state = seed >>> 0;
-    return () => {
-        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-        return state / 4294967296;
-    };
-}
-
-function buildHorizonClouds(): void {
-    horizonCloudsGroup.clear();
-    horizonBandScene.add(horizonCloudsGroup);
-
-    horizonMaterial = new ShaderMaterial({
-        uniforms: {
-            map: { value: textureMap },
-            bodyColor: { value: new Color(HORIZON_CLOUD_BODY_COLOR) },
-            hazeColor: { value: new Color(HORIZON_CLOUD_HAZE_COLOR) },
-            haze: { value: HORIZON_CLOUD_HAZE },
-            opacity: { value: HORIZON_CLOUD_OPACITY },
-            driftOffset: { value: 0.0 },
-            loopWidth: { value: HORIZON_CLOUD_LOOP_WIDTH },
-            reveal: { value: 0.0 },
-            nightBlend: { value: 0.0 },
-        },
-        vertexShader: horizonVertex,
-        fragmentShader: horizonFragment,
-        // Transparent cards: no depth write, or they'd punch each other out.
-        depthWrite: false,
-        depthTest: true,
-        transparent: true,
-        // The yaw billboard can swing either face toward the camera.
-        side: DoubleSide,
-    });
-
-    const mesh = new Mesh(createHorizonGeometry(HORIZON_CLOUD_COUNT), horizonMaterial);
-    // Billboarding happens in the vertex shader, so the CPU-side bounding sphere
-    // never matches what's drawn.
-    mesh.frustumCulled = false;
-    horizonCloudsGroup.add(mesh);
-}
-
-/** Advances the drift loop, fades the band in as the camera descends toward the
- *  water (see HORIZON_REVEAL_START_Y), and keeps it in step with day/night. */
-function updateHorizonBand(cameraY: number, deltaTime: number, dayNightBlend: number): void {
-    if (!horizonMaterial) return;
-
-    // Wrapped in JS rather than left to accumulate: mod() in the shader handles
-    // the visual wrap regardless, but an ever-growing uniform would eventually
-    // lose float precision on a long-running tab.
-    horizonDrift = (horizonDrift + HORIZON_CLOUD_DRIFT_SPEED * deltaTime) % HORIZON_CLOUD_LOOP_WIDTH;
-
-    const span = HORIZON_REVEAL_START_Y - HORIZON_REVEAL_END_Y;
-    const t = (HORIZON_REVEAL_START_Y - cameraY) / span;
-    horizonReveal = Math.max(0, Math.min(1, t));
-
-    horizonMaterial.uniforms.driftOffset.value = horizonDrift;
-    horizonMaterial.uniforms.reveal.value = horizonReveal;
-    horizonMaterial.uniforms.nightBlend.value = dayNightBlend;
-}
-
-/** Draws the horizon cards. Must run AFTER the ocean surface pass — Scene.ts
- *  calls this from inside renderSceneFrame's ocean callback. See the
- *  HORIZON_CLOUD_* block for why: the surface is semi-transparent right at the
- *  horizon and, drawn first, would paint over the bottom of a card sitting
- *  close to it. */
-export function RenderHorizonBand(renderer: WebGLRenderer, camera: Camera): void {
-    if (horizonReveal <= 0 || !horizonCloudsGroup.visible) return;
-
-    const prevAutoClear = renderer.autoClear;
-    renderer.autoClear = false;
-    // No clearDepth here, unlike the intro deck's pass: the band is meant to be
-    // occluded by anything the main pass already drew in front of it (the island).
-    renderer.render(horizonBandScene, camera);
-    renderer.autoClear = prevAutoClear;
-}
-
-function createHorizonGeometry(count: number): BufferGeometry {
-    const positions = new Float32Array(count * 4 * 3);   // sprite centre, repeated per corner
-    const offsets = new Float32Array(count * 4 * 2);     // corner offset, expanded in the shader
-    const uvs = new Float32Array(count * 4 * 2);
-    const indices = new Uint32Array(count * 6);
-
-    const random = makeRandom(HORIZON_CLOUD_SEED);
-
-    for (let i = 0; i < count; i++) {
-        const x = (random() - 0.5) * HORIZON_CLOUD_LOOP_WIDTH;
-        const z = HORIZON_CLOUD_NEAR_Z + random() * (HORIZON_CLOUD_FAR_Z - HORIZON_CLOUD_NEAR_Z);
-        const size = HORIZON_CLOUD_MIN_SIZE + random() * (HORIZON_CLOUD_MAX_SIZE - HORIZON_CLOUD_MIN_SIZE);
-        const half = size * 0.5;
-        const gap = HORIZON_CLOUD_GAP_MIN + random() * HORIZON_CLOUD_GAP_VARIANCE;
-        // Centre height that puts the card's bottom edge exactly `gap` above the
-        // waterline — bigger cards float higher so they keep the same gap instead
-        // of dipping closer to the water as they grow.
-        const y = half + gap;
-        // Mirror half of them so the same puff doesn't read as a repeat.
-        const flip = random() < 0.5;
-        const vertexBase = i * 4;
-        const posBase = vertexBase * 3;
-        const offBase = vertexBase * 2;
-        const uvBase = vertexBase * 2;
-        const indexBase = i * 6;
-
-        for (let corner = 0; corner < 4; corner++) {
-            const o = posBase + corner * 3;
-            positions[o] = x;
-            positions[o + 1] = y;
-            positions[o + 2] = z;
-        }
-
-        offsets[offBase]     = -half; offsets[offBase + 1] = -half;
-        offsets[offBase + 2] =  half; offsets[offBase + 3] = -half;
-        offsets[offBase + 4] = -half; offsets[offBase + 5] =  half;
-        offsets[offBase + 6] =  half; offsets[offBase + 7] =  half;
-
-        const uLeft = flip ? 1 : 0;
-        const uRight = flip ? 0 : 1;
-        uvs[uvBase]     = uLeft;  uvs[uvBase + 1] = 0;
-        uvs[uvBase + 2] = uRight; uvs[uvBase + 3] = 0;
-        uvs[uvBase + 4] = uLeft;  uvs[uvBase + 5] = 1;
-        uvs[uvBase + 6] = uRight; uvs[uvBase + 7] = 1;
-
-        indices[indexBase]     = vertexBase;
-        indices[indexBase + 1] = vertexBase + 1;
-        indices[indexBase + 2] = vertexBase + 2;
-        indices[indexBase + 3] = vertexBase + 1;
-        indices[indexBase + 4] = vertexBase + 3;
-        indices[indexBase + 5] = vertexBase + 2;
-    }
-
-    const geometry = new BufferGeometry();
-    geometry.setAttribute("position", new BufferAttribute(positions, 3));
-    geometry.setAttribute("cornerOffset", new BufferAttribute(offsets, 2));
-    geometry.setAttribute("uv", new BufferAttribute(uvs, 2));
-    geometry.setIndex(new BufferAttribute(indices, 1));
-
-    return geometry;
 }
 
 function createCloudGeometry(count: number): BufferGeometry {
