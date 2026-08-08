@@ -17,12 +17,11 @@ import {
 export const cloudSpritesGroup = new Group();
 const cloudSpritesScene = new Scene();
 
-// Horizon cloud band — cards and their reflections both live here, in their own
-// scene drawn after the ocean surface pass (see the HORIZON_CLOUD_* block).
+// Horizon cloud band — lives in its own scene drawn after the ocean surface pass
+// (see the HORIZON_CLOUD_* block).
 export const horizonCloudsGroup = new Group();
 const horizonBandScene = new Scene();
 let horizonMaterial: ShaderMaterial | null = null;
-let horizonReflectionMaterial: ShaderMaterial | null = null;
 // 0 while the camera is up in the intro sky, 1 once it has descended to the
 // water (see HORIZON_REVEAL_START_Y).
 let horizonReveal = 0;
@@ -89,9 +88,12 @@ const BACK_LAYER_HIDE_SOFTNESS = 0.14;
 // A second cloud layer, unrelated to the intro deck above. These are distant
 // cards standing far out at sea and clipped at the waterline, so only their top
 // half clears the ocean horizon — the way distant clouds read when you're low on
-// the water. Each one is mirrored below the cut as a reflection (see the
-// HORIZON_REFLECTION_* block), and both halves draw in one pass after the ocean
-// surface (RenderHorizonBand).
+// the water.
+//
+// They draw in their own pass AFTER the ocean surface (RenderHorizonBand): the
+// surface is semi-transparent right at the horizon (see horizonFadeStart/End in
+// OceanConfig) and, drawn first, would paint over the card's bottom edge right at
+// the cut. Drawing the cards after restores the card as the topmost thing there.
 //
 // Like the intro deck this is its own scene, but it does NOT clear depth first,
 // so the island still occludes it. It fades in with the camera's descent rather
@@ -113,12 +115,11 @@ const HORIZON_CLOUD_MAX_SIZE = 78;
 // visually half the cloud showing. Raise to sink them, lower to lift them.
 const HORIZON_CLOUD_SINK = 0.5;
 const HORIZON_CLOUD_SINK_VARIANCE = 0.1;
-// World units of dissolve just above the cut. Effectively zero — the reflection
-// picks the image straight back up below the waterline, so it is what softens the
-// cut, and any fade here just carves a dim notch across the seam instead. The cut
-// itself is always exactly horizontal on screen, so it needs no anti-aliasing.
-const HORIZON_CLOUD_WATERLINE_FADE = 0.02;
-const HORIZON_CLOUD_OPACITY = 0.34;
+// World units of dissolve just above the cut. Small on purpose — the cut is
+// meant to read as a clean horizon line, not a gradient — just enough to soften
+// the pixel-hard edge of a billboard sampled at a grazing angle.
+const HORIZON_CLOUD_WATERLINE_FADE = 0.3;
+const HORIZON_CLOUD_OPACITY = 0.18;
 // Distant clouds lose contrast against the sky — blend them toward the haze.
 const HORIZON_CLOUD_HAZE_COLOR = 0xdfeef8;
 const HORIZON_CLOUD_HAZE = 0.45;
@@ -134,43 +135,6 @@ const HORIZON_CLOUD_BODY_COLOR = 0xeef1f3;
 // visual tweak is the only thing that changes between two screenshots.
 const HORIZON_CLOUD_SEED = 20260807;
 
-// ── Horizon cloud reflections ────────────────────────────────────────────────
-// Each card gets a mirrored twin below the waterline, so the half the horizon
-// cut takes away comes back as a reflection lying on the water — the two meet
-// edge-to-edge at the horizon and read as one shape.
-// Matched to HORIZON_CLOUD_OPACITY on purpose. The reflection is at full
-// strength exactly where it meets the card, so the pair crosses the waterline
-// with no step in brightness — a weaker reflection leaves the card's cut showing
-// as a bright edge against the water, which is the seam this is meant to avoid.
-// The depth falloff below takes it down from there.
-const HORIZON_REFLECTION_OPACITY = HORIZON_CLOUD_OPACITY;
-// Vertical squash. A real reflection on a flat sea is compressed at these
-// grazing angles; 1.0 would be a perfect mirror twin and read as a mistake.
-const HORIZON_REFLECTION_SQUASH = 0.62;
-// Mip bias for the reflection sample — this is the "low resolution" part.
-// Positive values force a coarser mip, so the reflection is a soft smear of the
-// cloud rather than a second sharp copy of it. Don't push this much higher: past
-// ~2 the mip is coarse enough that cloud alpha bleeds into every corner of the
-// quad and the reflection stops being cloud-shaped, reading as a translucent
-// rectangle lying on the water.
-const HORIZON_REFLECTION_BLUR = 1.6;
-// How far the reflection reaches below the waterline, as a fraction of the
-// card's mirrored half-height. Card-relative rather than in world units, so the
-// falloff always completes before the geometry ends (a reflection still carrying
-// alpha at its bottom edge shows up as a rectangle lying in the water) and
-// bigger clouds get longer reflections for free.
-const HORIZON_REFLECTION_REACH = 0.85;
-// Feather on the card's borders. The mip bias above samples a coarse mip whose
-// texels bleed cloud alpha into the quad's edges, which would otherwise outline
-// the rectangle on the water; this fades the last stretch of UV to nothing.
-const HORIZON_REFLECTION_EDGE_FEATHER = 0.15;
-// Reflections take the water's colour, not the sky's. Both the tint and the blur
-// ramp in with depth rather than applying flat, so right at the waterline the
-// reflection still matches the card's colour and sharpness and the two read as
-// one continuous shape; it turns into water further down.
-const HORIZON_REFLECTION_TINT_COLOR = 0x9dc4d6;
-const HORIZON_REFLECTION_TINT = 0.55;
-
 // ── Horizon band reveal ──────────────────────────────────────────────────────
 // The waterline cut is a dead-straight line spanning the frame, so the band must
 // not be on screen while the camera is up in the sky during the intro — there it
@@ -180,24 +144,11 @@ const HORIZON_REFLECTION_TINT = 0.55;
 const HORIZON_REVEAL_START_Y = 7.0;   // camera Y where the band starts appearing
 const HORIZON_REVEAL_END_Y   = 2.4;   // camera Y where it's fully faded in
 
-// Shared by the cards and their reflections — `yScale` is the only difference:
-// 1.0 draws the cloud, a negative value mirrors it under the waterline (and its
-// magnitude squashes the reflection).
-//
-// Note that yScale scales the whole world height, not just the corner offset, so
-// the mirror axis is the WATERLINE and not the card's centre. Per-card sink
-// variance puts those in different places, and mirroring about the centre
-// reflects the half of the card that is underwater — for a card sitting low that
-// is its dense middle, so the water below the horizon lights up with a bright
-// slab that has no cloud above it to have come from.
 const horizonVertex = /* glsl */`
     attribute vec2 cornerOffset;
 
-    uniform float yScale;
-
     varying vec2 vUv;
     varying float vWorldY;
-    varying float vDepthRange;
 
     void main() {
         vUv = uv;
@@ -210,14 +161,8 @@ const horizonVertex = /* glsl */`
         vec2 rightXZ = vec2(viewMatrix[0][0], viewMatrix[2][0]);
         vec3 camRight = vec3(rightXZ.x, 0.0, rightXZ.y) / max(length(rightXZ), 1e-4);
 
-        float worldY = (centre.y + cornerOffset.y) * yScale;
-        vec3 worldPos = vec3(centre.x, worldY, centre.z) + camRight * cornerOffset.x;
-        vWorldY = worldY;
-
-        // How far this card's mirror image can reach below the waterline: the top
-        // of the card, reflected. Constant across the quad, so the fragment stage
-        // gets it as a per-card value to normalise depth against.
-        vDepthRange = abs((centre.y + abs(cornerOffset.y)) * yScale);
+        vec3 worldPos = centre + camRight * cornerOffset.x + vec3(0.0, cornerOffset.y, 0.0);
+        vWorldY = worldPos.y;
 
         gl_Position = projectionMatrix * viewMatrix * vec4(worldPos, 1.0);
     }
@@ -248,72 +193,6 @@ const horizonFragment = /* glsl */`
         rgb = mix(rgb, vec3(grey) * 0.48, nightBlend);
 
         alpha *= smoothstep(0.0, waterlineFade, vWorldY) * opacity * reveal;
-        if (alpha <= 0.001) discard;
-
-        gl_FragColor = vec4(rgb, alpha);
-    }
-`;
-
-const horizonReflectionFragment = /* glsl */`
-    uniform sampler2D map;
-    uniform vec3 bodyColor;
-    uniform vec3 hazeColor;
-    uniform float haze;
-    uniform vec3 tintColor;
-    uniform float tint;
-    uniform float blur;
-    uniform float reach;
-    uniform float edgeFeather;
-    uniform float opacity;
-    uniform float reveal;
-    uniform float nightBlend;
-
-    varying vec2 vUv;
-    varying float vWorldY;
-    varying float vDepthRange;
-
-    void main() {
-        // Mirror image only — above the waterline is the cloud's own business.
-        if (vWorldY >= 0.0) discard;
-
-        // How far under the waterline this fragment is: 0 at the cut, 1 where the
-        // reflection has fully died out. Everything below keys off it, because the
-        // reflection has to start as a copy of the cloud and only become water
-        // further down.
-        //
-        // Measured against how far this card's mirror image reaches (vDepthRange)
-        // rather than a fixed point in its UVs, since per-card sink variance moves
-        // where the card crosses the waterline.
-        float depth = clamp(-vWorldY / max(vDepthRange * reach, 1e-4), 0.0, 1.0);
-
-        // Third argument is a mip bias: the reflection reads a coarser mip than the
-        // cloud, which is what makes it a soft low-res smear instead of a second
-        // sharp copy. Ramped with depth so the fragments touching the cut are as
-        // sharp as the card they continue. ALPHA ONLY — see BODY_COLOR for why a
-        // biased sample's colour can't be trusted.
-        float alpha = texture2D(map, vUv, blur * depth).a;
-        // A coarse mip bleeds alpha outward, all the way into the quad's corners
-        // where the cloud isn't. Gating on the unbiased alpha keeps the reflection
-        // inside the silhouette it's reflecting, so no amount of blur can turn it
-        // into a translucent rectangle on the water.
-        alpha *= texture2D(map, vUv).a;
-
-        // Colour ramps from the card's own to the water's, so the two match where
-        // they meet and it only reads as reflection once it's deep enough.
-        vec3 rgb = mix(mix(bodyColor, hazeColor, haze), tintColor, tint * depth);
-        float grey = dot(rgb, vec3(0.299, 0.587, 0.114));
-        rgb = mix(rgb, vec3(grey) * 0.48, nightBlend);
-
-        // Feather the card's side borders so a partly-blurred silhouette can't end
-        // on a straight vertical edge. Horizontal only — vertically the waterline
-        // discard bounds the top and the depth falloff bounds the bottom, and
-        // feathering on top of those would eat most of the reflection's length.
-        float edge = smoothstep(0.0, edgeFeather, vUv.x)
-                   * (1.0 - smoothstep(1.0 - edgeFeather, 1.0, vUv.x));
-
-        // Full strength against the waterline, dying out with depth the way a
-        // reflection loses its shape on open water.
-        alpha *= (1.0 - depth) * edge * opacity * reveal;
         if (alpha <= 0.001) discard;
 
         gl_FragColor = vec4(rgb, alpha);
@@ -618,7 +497,6 @@ function buildHorizonClouds(): void {
             haze: { value: HORIZON_CLOUD_HAZE },
             waterlineFade: { value: HORIZON_CLOUD_WATERLINE_FADE },
             opacity: { value: HORIZON_CLOUD_OPACITY },
-            yScale: { value: 1.0 },
             reveal: { value: 0.0 },
             nightBlend: { value: 0.0 },
         },
@@ -632,76 +510,31 @@ function buildHorizonClouds(): void {
         side: DoubleSide,
     });
 
-    horizonReflectionMaterial = new ShaderMaterial({
-        uniforms: {
-            map: { value: textureMap },
-            bodyColor: { value: new Color(HORIZON_CLOUD_BODY_COLOR) },
-            hazeColor: { value: new Color(HORIZON_CLOUD_HAZE_COLOR) },
-            haze: { value: HORIZON_CLOUD_HAZE },
-            tintColor: { value: new Color(HORIZON_REFLECTION_TINT_COLOR) },
-            tint: { value: HORIZON_REFLECTION_TINT },
-            blur: { value: HORIZON_REFLECTION_BLUR },
-            reach: { value: HORIZON_REFLECTION_REACH },
-            edgeFeather: { value: HORIZON_REFLECTION_EDGE_FEATHER },
-            opacity: { value: HORIZON_REFLECTION_OPACITY },
-            // Negative mirrors the card under the waterline; the magnitude squashes it.
-            yScale: { value: -HORIZON_REFLECTION_SQUASH },
-            reveal: { value: 0.0 },
-            nightBlend: { value: 0.0 },
-        },
-        vertexShader: horizonVertex,
-        fragmentShader: horizonReflectionFragment,
-        depthWrite: false,
-        depthTest: true,
-        transparent: true,
-        side: DoubleSide,
-    });
-
-    // One geometry, drawn twice — the reflection is the same cards read upside
-    // down, so they can never drift out of alignment with what they mirror.
-    const geometry = createHorizonGeometry(HORIZON_CLOUD_COUNT);
-
-    const mesh = new Mesh(geometry, horizonMaterial);
+    const mesh = new Mesh(createHorizonGeometry(HORIZON_CLOUD_COUNT), horizonMaterial);
     // Billboarding happens in the vertex shader, so the CPU-side bounding sphere
     // never matches what's drawn.
     mesh.frustumCulled = false;
-    // Cards first, reflections over them — they only meet along the waterline, so
-    // the order is about intent rather than overlap.
-    mesh.renderOrder = 0;
     horizonCloudsGroup.add(mesh);
-
-    const reflection = new Mesh(geometry, horizonReflectionMaterial);
-    reflection.frustumCulled = false;
-    reflection.renderOrder = 1;
-    horizonCloudsGroup.add(reflection);
 }
 
 /** Fades the band in as the camera descends toward the water, and keeps it in
  *  step with day/night. See HORIZON_REVEAL_START_Y — up in the intro sky the band
  *  is fully faded out, so its waterline cut can't show through the cloud deck. */
 function updateHorizonBand(cameraY: number, dayNightBlend: number): void {
-    if (!horizonMaterial || !horizonReflectionMaterial) return;
+    if (!horizonMaterial) return;
 
     const span = HORIZON_REVEAL_START_Y - HORIZON_REVEAL_END_Y;
     const t = (HORIZON_REVEAL_START_Y - cameraY) / span;
     horizonReveal = Math.max(0, Math.min(1, t));
 
     horizonMaterial.uniforms.reveal.value = horizonReveal;
-    horizonReflectionMaterial.uniforms.reveal.value = horizonReveal;
     horizonMaterial.uniforms.nightBlend.value = dayNightBlend;
-    horizonReflectionMaterial.uniforms.nightBlend.value = dayNightBlend;
 }
 
-/** Draws the horizon cards and their reflections. Must run AFTER the ocean
- *  surface pass — Scene.ts calls this from inside renderSceneFrame's ocean
- *  callback.
- *
- *  Both halves go down here, not just the reflections. The ocean surface is
- *  transparent and writes no depth, so anything drawn before it loses to water
- *  that is FARTHER away but sits higher on screen — which would slice a strip of
- *  water between each card's waterline cut and its reflection, exactly where the
- *  two are supposed to meet. Drawing after the surface restores the real
- *  ordering: the card is nearer than that water, so it wins. */
+/** Draws the horizon cards. Must run AFTER the ocean surface pass — Scene.ts
+ *  calls this from inside renderSceneFrame's ocean callback. See the
+ *  HORIZON_CLOUD_* block for why: the surface is semi-transparent right at the
+ *  horizon and, drawn first, would paint over the card's bottom edge at the cut. */
 export function RenderHorizonBand(renderer: WebGLRenderer, camera: Camera): void {
     if (horizonReveal <= 0 || !horizonCloudsGroup.visible) return;
 
