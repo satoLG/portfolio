@@ -89,7 +89,7 @@ import {
 // Runtime-only access (function bodies) — Scene/Control/Fish all sit on the same
 // import cycle this project already uses (see the alias note in Fish.ts).
 import { CSS_SCALE, camera, renderer } from '../core/Scene';
-import { getIsUnderwater, isChestZoomActive } from '../core/Control';
+import { getIsUnderwater, isChestZoomActive, scrollCameraToY } from '../core/Control';
 import { getDeviceInfo } from '../core/DeviceCapability';
 import { deltaTime, time } from '../core/Time';
 import { setDistortionQuietRect } from './PostProcess';
@@ -976,9 +976,46 @@ function selectTab(index: number): void {
     const next = index === requestedTab ? -1 : index;
     if (next === requestedTab) return;
     requestedTab = next;
-    trackOffset = 0;
-    momentum = 0;
     hoverCard = -1;
+    // The strip is deliberately LEFT WHERE THE USER PUT IT — trackOffset and the
+    // fling momentum are NOT reset here. Resetting them made the cards slide
+    // back to the centred position before folding away, on every tab switch and
+    // every collapse, which read as the carousel changing itself. The pan only
+    // ever resets when a tab is (re)opened, and it does that in
+    // buildActiveTabCards → snapTrackLeft: at reveal 0, with nothing on screen.
+
+    // Opening a tab brings the row up under the page header, so the cards unfold
+    // into the viewport instead of below it.
+    if (next >= 0) scrollCameraToY(tabFocusCameraY());
+}
+
+// The gathered title row should come to rest just under the page header, so the
+// cards below it get the rest of the viewport. Anything more than this and the
+// row is off the top; anything less and the cards run off the bottom.
+const TAB_FOCUS_GAP_PX = 16;      // CSS px of air between header and title row
+const TAB_FOCUS_FALLBACK_HEADER = 64;
+
+/** Camera Y that puts the TOP of the gathered title row `TAB_FOCUS_GAP_PX`
+ *  below the site header. The camera is level in normal (web-page) mode, so a
+ *  world point at the strip's depth maps to the viewport linearly: the row's top
+ *  should land at the screen fraction the header occupies. */
+function tabFocusCameraY(): number {
+    const fit = rowFit();
+    // Titles gather at -TAB_RISE_PX (y-down design px from the strip centre);
+    // their punched pill reaches half a line plus the pill pad above that.
+    const topPx = (TAB_RISE_PX + TAB_LINE_H / 2 + PILL_PAD_Y) * fit;
+    const worldTop = PLANE_Y + topPx / PX_PER_UNIT;
+
+    const viewH = renderer.domElement.getBoundingClientRect().height || window.innerHeight;
+    const header = document.querySelector('.site-header') as HTMLElement | null;
+    const headerH = header?.getBoundingClientRect().height || TAB_FOCUS_FALLBACK_HEADER;
+    // Screen fraction from the top of the viewport, capped so a tall header (or a
+    // short window) can never push the row past the middle of the screen.
+    const f = MathUtils.clamp((headerH + TAB_FOCUS_GAP_PX) / viewH, 0, 0.4);
+
+    const dist = Math.abs(camera.position.z - PLANE_Z);
+    const halfH = Math.tan(MathUtils.degToRad(camera.fov) / 2) * dist;
+    return worldTop - (1 - 2 * f) * halfH;
 }
 
 /** Swap the carousel over to `activeTab`'s content. Only ever called while the

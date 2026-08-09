@@ -502,6 +502,25 @@ export function handleScroll(deltaY: number): void {
     }
 }
 
+/**
+ * Programmatic scroll: park the camera at a world-space Y, easing there through
+ * the same damp the wheel/touch scroll uses (so it reads as a smooth scroll, not
+ * a cut). Used by the underwater card carousel to bring the tab row up under the
+ * page header when a tab is opened.
+ *
+ * Refuses — and reports false — in every state handleScroll refuses in, so a
+ * scripted scroll can never fight a zoom, a dialog or the intro descent. The
+ * user's own scrolling still overrides it the moment they touch the wheel.
+ */
+export function scrollCameraToY(y: number): boolean {
+    if (!scrollEnabled || !webPageMode) return false;
+    if (isDialogActive()) return false;
+    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive
+        || cabanaPhase !== 'outside' || zoomReturnSettling) return false;
+    targetY = MathUtils.clamp(y, underwaterBottomY, aboveWaterTopY);
+    return true;
+}
+
 export function isSceneScrollEnabled(): boolean {
     // Also reports "disabled" during a dialog, any active zoom, or the zoom-out
     // return animation (zoomReturnSettling) so Input.ts preventDefaults wheel /
