@@ -1946,12 +1946,19 @@ body.day-mode .language-option span {
     min-width: 0;
     height: 100%;
     transform-origin: center;
-    /* scaleX overlaps neighbors to hide subpixel rounding seams between flex columns (visible on low-DPI desktop screens) */
-    transform: scaleX(1.2);
+    /* 1px integer-pixel overlap (not a fractional transform) closes the subpixel
+       rounding seam between flex columns without being undone by compositor
+       layer pixel-snapping at certain zoom levels */
+    margin-left: -1px;
 }
 
-/* Inactive state - make columns transparent and desaturated */
-.language-option .flag-column {
+.flag-column:first-child {
+    margin-left: 0;
+}
+
+/* Inactive state - dim the whole wrapper (not each column) so overlapping
+   columns don't alpha-blend into visible seams */
+.language-option .flag-wrapper {
     opacity: 0.4;
     filter: grayscale(0.6) brightness(0.8);
     transition: opacity 0.3s ease, filter 0.3s ease;
@@ -1977,9 +1984,12 @@ body.day-mode .language-option.active span {
 }
 
 /* Flag animation when active */
-.language-option.active .flag-column {
+.language-option.active .flag-wrapper {
     opacity: 1;
     filter: grayscale(0) brightness(1);
+}
+
+.language-option.active .flag-column {
     animation: flag-billow 600ms ease-in-out infinite;
     animation-delay: calc(-1 * var(--delay));
 }
@@ -1987,10 +1997,10 @@ body.day-mode .language-option.active span {
 /* Waving flag animation - billowing effect */
 @keyframes flag-billow {
     0%, 100% {
-        transform: scaleX(1.2) scaleY(1);
+        transform: scaleY(1);
     }
     50% {
-        transform: scaleX(1.2) scaleY(0.94);
+        transform: scaleY(0.94);
     }
 }
 
