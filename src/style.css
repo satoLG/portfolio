@@ -1938,6 +1938,7 @@ body.day-mode .language-option span {
     width: 48px;
     height: 30px;
     border-radius: 2px;
+    overflow: hidden;
 }
 
 .flag-column {
@@ -1945,10 +1946,19 @@ body.day-mode .language-option span {
     min-width: 0;
     height: 100%;
     transform-origin: center;
+    /* 1px integer-pixel overlap (not a fractional transform) closes the subpixel
+       rounding seam between flex columns without being undone by compositor
+       layer pixel-snapping at certain zoom levels */
+    margin-left: -1px;
 }
 
-/* Inactive state - make columns transparent and desaturated */
-.language-option .flag-column {
+.flag-column:first-child {
+    margin-left: 0;
+}
+
+/* Inactive state - dim the whole wrapper (not each column) so overlapping
+   columns don't alpha-blend into visible seams */
+.language-option .flag-wrapper {
     opacity: 0.4;
     filter: grayscale(0.6) brightness(0.8);
     transition: opacity 0.3s ease, filter 0.3s ease;
@@ -1974,9 +1984,12 @@ body.day-mode .language-option.active span {
 }
 
 /* Flag animation when active */
-.language-option.active .flag-column {
+.language-option.active .flag-wrapper {
     opacity: 1;
     filter: grayscale(0) brightness(1);
+}
+
+.language-option.active .flag-column {
     animation: flag-billow 600ms ease-in-out infinite;
     animation-delay: calc(-1 * var(--delay));
 }
