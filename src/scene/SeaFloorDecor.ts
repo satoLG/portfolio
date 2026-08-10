@@ -208,8 +208,12 @@ const oceanLightingFragment = /*glsl*/`
  * Apply the underwater lighting shader to every mesh in `model`.
  * `cacheKeySuffix` lets corals with different tints share the base lighting
  * program (only the uniforms differ, so one suffix per-colour is enough).
+ *
+ * Exported because the background whale in Fish.ts needs exactly this: distance
+ * fog + per-channel absorption is what makes far-away geometry read as far
+ * away, and the whale sits deeper into the scene than anything else.
  */
-function applyOceanLighting(model: Group, cacheKeySuffix = ''): void {
+export function applyOceanLighting(model: Group, cacheKeySuffix = ''): void {
     model.traverse((child) => {
         if (!(child as Mesh).isMesh) return;
         const mesh = child as Mesh;

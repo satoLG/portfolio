@@ -13,6 +13,9 @@ import { deltaTime } from "../core/Time";
 import { camera, renderer, scene as rootScene } from "../core/Scene";
 import { getDayNightBlend, isDayTime } from "./Skybox";
 import { jellyfishLightConfig } from "./config/OceanConfig";
+// Scene.ts imports SeaFloorDecor before Fish, so this module is fully evaluated
+// by the time we get here — and SeaFloorDecor never imports Fish back.
+import { applyOceanLighting } from "./SeaFloorDecor";
 import { defaultCameraX, defaultCameraZ, defaultFov, mobileFov } from "./config/CameraConfig";
 
 // Local mobile check — avoids circular-dependency TDZ crash when importing
@@ -110,7 +113,7 @@ const SCREEN_MARGIN = 0.5;               // extra world units past screen edge
 // band, same Z band, same respawn/avoidance logic) — they're just bigger,
 // slower, and they drop to a crawl at night.
 const TURTLE_COUNT = 3;
-const TURTLE_SCALE = 0.22;               // model is ~1.43 units long at scale 1
+const TURTLE_SCALE = 0.66;               // model is ~1.43 units long at scale 1
 const TURTLE_SPEED_MIN = 0.16;
 const TURTLE_SPEED_MAX = 0.24;
 const TURTLE_NIGHT_SPEED_FACTOR = 0.45;  // speed multiplier at full night
@@ -121,20 +124,33 @@ const TURTLE_ANIM_SPEED_MAX = 1.0;
 const TURTLE_NIGHT_ANIM_FACTOR = 0.55;
 
 // ── Whale ────────────────────────────────────────────────────────────────────
-// A single whale far behind everything else, crossing LEFT to RIGHT just below
-// the generic-fish band, on a loop that restarts once it has fully cleared the
-// right edge. Nearly invisible at night (smooth fade), so it reads as a
-// daylight-only silhouette in the distance.
-const WHALE_SCALE = 0.35;                // model is ~10.2 units long at scale 1
+// A single whale FAR into the distance, crossing LEFT to RIGHT below the
+// generic-fish band, on a loop that restarts once it has fully cleared the
+// right edge.
+//
+// The "barely there" look is mostly the ocean lighting shader, not opacity: at
+// WHALE_Z the view distance runs the per-channel absorption deep enough that
+// red is almost entirely gone and the body reads as a dim blue-green shape
+// dissolving into the fog — the same treatment the distant sea floor gets. The
+// two opacity values below are the fine adjustment on top of that.
+//
+// The three knobs worth tuning together: pushing WHALE_Z further back deepens
+// the fog (and shrinks the whale, so raise WHALE_SCALE to compensate), while
+// WHALE_DAY_OPACITY trims what's left.
+const WHALE_SCALE = 1.4;                 // model is ~10.2 units long at scale 1
 // Off-screen margin at each end of the run. The group's origin sits near the
 // whale's middle, so slightly over half its length is enough for it to be fully
 // gone before the loop resets — any more is just dead time with an empty stage.
-const WHALE_MARGIN = 10.2 * WHALE_SCALE * 0.75;
+const WHALE_MARGIN = 10.2 * WHALE_SCALE * 0.7;
 const WHALE_Y = -7.8;                    // a touch below the generic fish band (-7 … -5)
-const WHALE_Z = -9.0;                    // way back — well behind the fish/jelly volume
-const WHALE_SPEED = 0.18;                // world units/s — a slow cruise
-const WHALE_BOB_AMP = 0.10;
+const WHALE_Z = -32.0;                   // deep into the fog, far behind the fish/jelly volume
+// Linear speed is scaled to the distance so the whale keeps roughly the same
+// APPARENT pace it had up close — at 3× the depth, 3× the world speed looks
+// the same on screen.
+const WHALE_SPEED = 0.55;                // world units/s
+const WHALE_BOB_AMP = 0.35;
 const WHALE_BOB_SPEED = 0.35;            // rad/s
+const WHALE_DAY_OPACITY = 0.85;          // faint even at noon — the fog does the rest
 const WHALE_NIGHT_OPACITY = 0.05;        // "almost invisible" at full night
 const WHALE_X_FRUSTUM_FRACTION = 1.0;    // full frustum width; the length margin does the rest
 
@@ -179,21 +195,22 @@ const JELLY_YZ_JITTER = 0.30;            // ± fraction of the Y/Z stratum
 const GOLDEN_RATIO_CONJUGATE = 0.618033988749895;
 
 // ── Jellyfish dodge (hover / touch) ──────────────────────────────────────────
-// Jellies sit in front of the card carousel, so the point of this is purely
-// "let me get it out of my way": once the pointer comes near, the jelly commits
-// to a FULL vertical clearance (up or down, never sideways) and stays there
-// while the pointer lingers, then drifts back. Triggering off the jelly's BASE
-// position — not its dodged position — is what makes it commit: testing the
-// live position would let it settle halfway out, right where it still blocks.
-const JELLY_DODGE_RADIUS = 0.55;         // world units at the jelly's Z plane
-const JELLY_DODGE_DISTANCE = 0.95;       // how far it clears
-const JELLY_DODGE_SPEED = 3.2;           // approach rate (fast — get out of the way)
-const JELLY_DODGE_RETURN_SPEED = 0.9;    // return rate (slow, unhurried drift back)
-const JELLY_DODGE_SETTLED = 0.02;        // below this the dodge is considered finished
-// Y band the dodge is allowed to leave the jelly in — keeps a dodging jelly
-// from wandering out of the lit fish band entirely.
-const JELLY_DODGE_Y_MIN = JELLY_Y_MIN - JELLY_DODGE_DISTANCE;
-const JELLY_DODGE_Y_MAX = JELLY_Y_MAX + JELLY_DODGE_DISTANCE;
+// Jellies sit in front of the card carousel, so this exists purely so the user
+// can clear a path. While the pointer is near one, it drifts unhurriedly out of
+// the way — vertically only, never sideways — and simply STAYS there: the drift
+// moves the jelly's resting height rather than an offset from it, so nothing
+// pulls it back afterwards and a cleared view stays cleared.
+//
+// The drift stops once the jelly is outside this radius of the pointer, so the
+// radius IS the clearance the user gets from one hover — keep it wide enough to
+// actually open a gap.
+const JELLY_DODGE_RADIUS = 0.85;         // world units at the jelly's Z plane
+const JELLY_DODGE_SPEED = 0.5;           // world units/s of drift — a slow ooze
+// How far outside its spawn band a jelly may be pushed. Generous enough to
+// fully clear the carousel, bounded so jellies can't be herded off-screen.
+const JELLY_DODGE_RANGE = 1.6;
+const JELLY_DODGE_Y_MIN = JELLY_Y_MIN - JELLY_DODGE_RANGE;
+const JELLY_DODGE_Y_MAX = JELLY_Y_MAX + JELLY_DODGE_RANGE;
 // A tap is a pointerdown/up in a few ms — without a linger the jelly would
 // barely twitch on touch devices. Keep the last touch point "live" for this
 // long so a tap produces the same full dodge a hover does.
@@ -246,8 +263,11 @@ const FISH_COLOR_TINTS: Color[] = [
     new Color(1.5, 0.15, 0.15), // vibrant red
 ];
 
-// Identity tint — used by creatures that keep their authored colours (turtles).
-const _noTint = new Color(1, 1, 1);
+// Turtle tint. The model ships a flat grey base colour, so it renders as a grey
+// turtle; this pushes it toward sea-green while leaving the vertex-colour
+// shading (which multiplies on top) to keep the shell/skin contrast intact.
+// Green above 1 so the hue shift doesn't also darken the model.
+const TURTLE_TINT = new Color(0.62, 1.20, 0.78);
 
 const loader = new GLTFLoader();
 loader.setMeshoptDecoder(MeshoptDecoder);
@@ -303,8 +323,8 @@ interface SwimmingFish {
     floatPhase: number;       // current phase of the sin bob (rad)
     floatSpeed: number;       // rad/s
     floatAmp: number;         // world units
-    // Jellyfish-only: pointer dodge (vertical clearance, see JELLY_DODGE_*)
-    dodgeOffsetY: number;     // current vertical displacement from baseY
+    // Jellyfish-only: latched pointer-dodge direction (see JELLY_DODGE_*).
+    // The dodge itself moves baseY, so there is no separate offset to track.
     dodgeDir: number;         // 0 = disengaged, ±1 = committed up/down
 }
 
@@ -566,7 +586,7 @@ function resetLoopingCreature(entry: PooledFish, slot = 0, slotCount = 1): Swimm
     const tints = jelly ? JELLY_COLOR_TINTS : FISH_COLOR_TINTS;
     const baseScale = jelly ? JELLYFISH_SCALE : (turtle ? TURTLE_SCALE : GENERIC_FISH_SCALE);
 
-    const tint = turtle ? _noTint : tints[Math.floor(Math.random() * tints.length)];
+    const tint = turtle ? TURTLE_TINT : tints[Math.floor(Math.random() * tints.length)];
     for (let i = 0; i < entry.materials.length; i++) {
         entry.materials[i].color.copy(entry.baseTintColors[i]).multiply(tint);
         entry.activeTintColors[i].copy(entry.materials[i].color);
@@ -602,7 +622,6 @@ function resetLoopingCreature(entry: PooledFish, slot = 0, slotCount = 1): Swimm
             floatPhase: Math.random() * Math.PI * 2,
             floatSpeed: JELLY_FLOAT_SPEED_MIN + Math.random() * (JELLY_FLOAT_SPEED_MAX - JELLY_FLOAT_SPEED_MIN),
             floatAmp: JELLY_FLOAT_AMPLITUDE * (0.7 + Math.random() * 0.6),
-            dodgeOffsetY: 0,
             dodgeDir: 0,
         };
     }
@@ -647,7 +666,6 @@ function resetLoopingCreature(entry: PooledFish, slot = 0, slotCount = 1): Swimm
         floatPhase: 0,
         floatSpeed: 0,
         floatAmp: 0,
-        dodgeOffsetY: 0,
         dodgeDir: 0,
     };
 }
@@ -684,7 +702,7 @@ function seedInitialFish(entry: PooledFish, index: number, total: number): Swimm
     if (entry.isJellyfish) return resetLoopingCreature(entry, index, total);
 
     const turtle = entry.isTurtle;
-    const tint = turtle ? _noTint : FISH_COLOR_TINTS[Math.floor(Math.random() * FISH_COLOR_TINTS.length)];
+    const tint = turtle ? TURTLE_TINT : FISH_COLOR_TINTS[Math.floor(Math.random() * FISH_COLOR_TINTS.length)];
     for (let i = 0; i < entry.materials.length; i++) {
         entry.materials[i].color.copy(entry.baseTintColors[i]).multiply(tint);
         entry.activeTintColors[i].copy(entry.materials[i].color);
@@ -742,7 +760,6 @@ function seedInitialFish(entry: PooledFish, index: number, total: number): Swimm
         floatPhase: 0,
         floatSpeed: 0,
         floatAmp: 0,
-        dodgeOffsetY: 0,
         dodgeDir: 0,
     };
 }
@@ -935,10 +952,11 @@ export function beginCreaturePrewarm(): () => void {
         scale: whaleGroup.scale.clone(),
         visible: whaleGroup.visible,
     };
-    whaleGroup.position.set(0, GENERIC_FISH_Y_MIN, CREATURE_PREWARM_Z);
-    // Shrunk so a 3.5-unit whale doesn't eclipse the parked creature grid it
-    // shares the plane with — the point is the upload, not the framing.
-    whaleGroup.scale.setScalar(WHALE_SCALE * 0.25);
+    // Tucked below the creature grid and shrunk hard: at its real scale a
+    // 14-unit whale parked on this plane would eclipse every clone it shares it
+    // with, and the point of the pass is uploading all of them, not framing one.
+    whaleGroup.position.set(0, GENERIC_FISH_Y_MIN - 0.5, CREATURE_PREWARM_Z);
+    whaleGroup.scale.setScalar(0.12);
     whaleGroup.visible = whaleReady;
     if (whaleMixer) whaleMixer.update(0);
 
@@ -1467,6 +1485,13 @@ function setupWhale(model: Group, animations: AnimationClip[]): void {
         for (const mat of cloned) whaleMaterials.push(mat);
     });
 
+    // Distance fog + per-channel water absorption, the same shader the sea floor
+    // and coral use. This is what actually sells "way out there" — without it a
+    // whale at WHALE_Z is just a small, fully-lit whale rather than a shape
+    // half-dissolved into the blue. Applied after the material clone so the
+    // injected program belongs to this instance alone.
+    applyOceanLighting(model, '_whale');
+
     whaleGroup.add(model);
     whaleGroup.scale.setScalar(WHALE_SCALE);
     // Nose is local +Z, so +π/2 yaw points it along +X — the direction it swims.
@@ -1501,7 +1526,7 @@ function updateWhale(dt: number, nightBlend: number): void {
 
     // Smooth day→night fade to "almost invisible". nightBlend is already the
     // eased day/night blend, so the opacity tracks the sky transition exactly.
-    const opacity = 1 + (WHALE_NIGHT_OPACITY - 1) * nightBlend;
+    const opacity = WHALE_DAY_OPACITY + (WHALE_NIGHT_OPACITY - WHALE_DAY_OPACITY) * nightBlend;
     for (let i = 0; i < whaleMaterials.length; i++) whaleMaterials[i].opacity = opacity;
 
     whaleGroup.visible = shouldShowCircleFish(whaleGroup);
@@ -1561,10 +1586,7 @@ export function Update(): void {
             // purely vertical so the user can clear a path through them.
             fish.floatPhase += fish.floatSpeed * deltaTime;
             updateJellyDodge(fish, group.position.x, group.position.z, deltaTime);
-            group.position.y = MathUtils.clamp(
-                fish.baseY + Math.sin(fish.floatPhase) * fish.floatAmp + fish.dodgeOffsetY,
-                JELLY_DODGE_Y_MIN, JELLY_DODGE_Y_MAX,
-            );
+            group.position.y = fish.baseY + Math.sin(fish.floatPhase) * fish.floatAmp;
             // Light lives at scene root — sync world position from the group.
             if (fish.pool.light) fish.pool.light.position.copy(group.position);
             continue;
@@ -1619,33 +1641,28 @@ export function Update(): void {
     }
 }
 
-/** Vertical-only "get out of my way" dodge for one jellyfish.
+/** Vertical-only "get out of my way" drift for one jellyfish.
  *
- *  Triggering off the jelly's RESTING position rather than its live one is the
- *  whole trick: with a live test the jelly would drift until it left the
- *  trigger radius and then stop — parking itself halfway, still in the way.
- *  Anchored to the base position it commits to the full clearance and holds it
- *  for as long as the pointer stays put, then drifts back at its own pace. */
+ *  This edits `baseY` — the jelly's resting height — rather than an offset from
+ *  it. That is the whole design: there is no spring and no return, so wherever
+ *  the user nudges a jelly to is simply where it now lives. It keeps drifting
+ *  only while the pointer is still within reach of its CURRENT position, so it
+ *  stops the moment it is genuinely clear. */
 function updateJellyDodge(fish: SwimmingFish, x: number, z: number, dt: number): void {
-    let target = 0;
-    if (pointerActive) {
-        const pw = getPointerWorldAtZ(z);
-        const dx = x - pw.x;
-        const dy = fish.baseY - pw.y;
-        if (Math.hypot(dx, dy) < JELLY_DODGE_RADIUS) {
-            // Direction is latched on first contact so a pointer hovering right
-            // at the jelly's height can't make it flip-flop up and down.
-            if (fish.dodgeDir === 0) fish.dodgeDir = dy >= 0 ? 1 : -1;
-            target = fish.dodgeDir * JELLY_DODGE_DISTANCE;
-        }
-    }
+    if (!pointerActive) { fish.dodgeDir = 0; return; }
 
-    const rate = target !== 0 ? JELLY_DODGE_SPEED : JELLY_DODGE_RETURN_SPEED;
-    fish.dodgeOffsetY += (target - fish.dodgeOffsetY) * Math.min(1, rate * dt);
-    if (target === 0 && Math.abs(fish.dodgeOffsetY) < JELLY_DODGE_SETTLED) {
-        fish.dodgeOffsetY = 0;
-        fish.dodgeDir = 0;
-    }
+    const pw = getPointerWorldAtZ(z);
+    const dx = x - pw.x;
+    const dy = fish.baseY - pw.y;
+    if (Math.hypot(dx, dy) >= JELLY_DODGE_RADIUS) { fish.dodgeDir = 0; return; }
+
+    // Direction is latched on first contact so a pointer sitting at exactly the
+    // jelly's height can't make it flip-flop up and down.
+    if (fish.dodgeDir === 0) fish.dodgeDir = dy >= 0 ? 1 : -1;
+    fish.baseY = MathUtils.clamp(
+        fish.baseY + fish.dodgeDir * JELLY_DODGE_SPEED * dt,
+        JELLY_DODGE_Y_MIN, JELLY_DODGE_Y_MAX,
+    );
 }
 
 /** Toggle visibility of all fish groups (GPU-side culling for surface/underwater gating). */
