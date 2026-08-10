@@ -1,4 +1,4 @@
-import { Group, AnimationMixer, AnimationClip, LoopRepeat, Vector3, Color, MeshStandardMaterial, Mesh, Vector2, MathUtils, PointLight } from "three";
+import { Group, AnimationMixer, AnimationClip, LoopRepeat, Vector3, Color, MeshStandardMaterial, Mesh, Vector2, MathUtils, PointLight, Uniform } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -12,7 +12,7 @@ import { deltaTime } from "../core/Time";
 // nested inside genericFishContainer and caused the +21 dive recompiles.
 import { camera, renderer, scene as rootScene } from "../core/Scene";
 import { getDayNightBlend, isDayTime } from "./Skybox";
-import { jellyfishLightConfig } from "./config/OceanConfig";
+import { jellyfishLightConfig, whaleConfig } from "./config/OceanConfig";
 // Scene.ts imports SeaFloorDecor before Fish, so this module is fully evaluated
 // by the time we get here — and SeaFloorDecor never imports Fish back.
 import { applyOceanLighting } from "./SeaFloorDecor";
@@ -113,7 +113,14 @@ const SCREEN_MARGIN = 0.5;               // extra world units past screen edge
 // band, same Z band, same respawn/avoidance logic) — they're just bigger,
 // slower, and they drop to a crawl at night.
 const TURTLE_COUNT = 3;
-const TURTLE_SCALE = 0.66;               // model is ~1.43 units long at scale 1
+const TURTLE_SCALE = 0.46;               // model is ~1.43 units long at scale 1
+// Turtles get a shallower Z range than the fish. At full turtle size the ones
+// that spawned near GENERIC_FISH_Z_MAX loomed right over the card carousel
+// (which sits at z = -2.0); capping the near edge here means roughly one of the
+// three passes in front of the cards at a time, and the rest read as depth
+// behind them.
+const TURTLE_Z_MIN = GENERIC_FISH_Z_MIN;
+const TURTLE_Z_MAX = -1.0;
 const TURTLE_SPEED_MIN = 0.16;
 const TURTLE_SPEED_MAX = 0.24;
 const TURTLE_NIGHT_SPEED_FACTOR = 0.45;  // speed multiplier at full night
@@ -129,29 +136,19 @@ const TURTLE_NIGHT_ANIM_FACTOR = 0.55;
 // right edge.
 //
 // The "barely there" look is mostly the ocean lighting shader, not opacity: at
-// WHALE_Z the view distance runs the per-channel absorption deep enough that
-// red is almost entirely gone and the body reads as a dim blue-green shape
-// dissolving into the fog — the same treatment the distant sea floor gets. The
-// two opacity values below are the fine adjustment on top of that.
+// that view distance the per-channel absorption has eaten nearly all the red
+// and the body reads as a dim blue shape dissolving into the fog — the same
+// treatment the distant sea floor gets, but with the whale's OWN fog distance
+// so it can be washed out further without touching the rest of the scene.
 //
-// The three knobs worth tuning together: pushing WHALE_Z further back deepens
-// the fog (and shrinks the whale, so raise WHALE_SCALE to compensate), while
-// WHALE_DAY_OPACITY trims what's left.
-const WHALE_SCALE = 1.4;                 // model is ~10.2 units long at scale 1
-// Off-screen margin at each end of the run. The group's origin sits near the
-// whale's middle, so slightly over half its length is enough for it to be fully
-// gone before the loop resets — any more is just dead time with an empty stage.
-const WHALE_MARGIN = 10.2 * WHALE_SCALE * 0.7;
-const WHALE_Y = -7.8;                    // a touch below the generic fish band (-7 … -5)
-const WHALE_Z = -32.0;                   // deep into the fog, far behind the fish/jelly volume
-// Linear speed is scaled to the distance so the whale keeps roughly the same
-// APPARENT pace it had up close — at 3× the depth, 3× the world speed looks
-// the same on screen.
-const WHALE_SPEED = 0.55;                // world units/s
-const WHALE_BOB_AMP = 0.35;
-const WHALE_BOB_SPEED = 0.35;            // rad/s
-const WHALE_DAY_OPACITY = 0.85;          // faint even at noon — the fog does the rest
-const WHALE_NIGHT_OPACITY = 0.05;        // "almost invisible" at full night
+// Every value lives in whaleConfig (OceanConfig.ts) and is read live so the
+// Debug GUI can drive all of it. Only the two below are fixed.
+const WHALE_MODEL_LENGTH = 10.2;         // model length in world units at scale 1
+// Off-screen margin at each end of the run, as a fraction of the whale's
+// length. The group's origin sits near the whale's middle, so slightly over
+// half is enough for it to be fully gone before the loop resets — any more is
+// just dead time with an empty stage.
+const WHALE_MARGIN_FRACTION = 0.7;
 const WHALE_X_FRUSTUM_FRACTION = 1.0;    // full frustum width; the length margin does the rest
 
 // Jellyfish settings — scattered static positions with gentle vertical bob.
@@ -626,8 +623,8 @@ function resetLoopingCreature(entry: PooledFish, slot = 0, slotCount = 1): Swimm
         };
     }
 
-    const zMin = GENERIC_FISH_Z_MIN;
-    const zMax = GENERIC_FISH_Z_MAX;
+    const zMin = turtle ? TURTLE_Z_MIN : GENERIC_FISH_Z_MIN;
+    const zMax = turtle ? TURTLE_Z_MAX : GENERIC_FISH_Z_MAX;
     const speedMin = turtle ? TURTLE_SPEED_MIN : GENERIC_FISH_SPEED_MIN;
     const speedMax = turtle ? TURTLE_SPEED_MAX : GENERIC_FISH_SPEED_MAX;
 
@@ -712,7 +709,9 @@ function seedInitialFish(entry: PooledFish, index: number, total: number): Swimm
     const scaleMult = turtle ? 1 : FISH_SCALE_MIN + Math.random() * (FISH_SCALE_MAX - FISH_SCALE_MIN);
     const scale = (turtle ? TURTLE_SCALE : GENERIC_FISH_SCALE) * scaleMult;
 
-    const z = GENERIC_FISH_Z_MIN + Math.random() * (GENERIC_FISH_Z_MAX - GENERIC_FISH_Z_MIN);
+    const zMin = turtle ? TURTLE_Z_MIN : GENERIC_FISH_Z_MIN;
+    const zMax = turtle ? TURTLE_Z_MAX : GENERIC_FISH_Z_MAX;
+    const z = zMin + Math.random() * (zMax - zMin);
     const _edges = getFrustumEdgesX(z);
     // Guard against a degenerate camera projection at seed time. This runs from
     // the async GLB-load callback during the loading screen, before the camera is
@@ -1247,7 +1246,7 @@ let whaleHalfWidth  = 6.0;
 
 function refitViewportExtents(): void {
     patrolHalfWidth = Math.max(PATROL_X_HALF_MIN, getViewHalfWidth(PATROL_Z, PATROL_X_FRUSTUM_FRACTION));
-    whaleHalfWidth  = getViewHalfWidth(WHALE_Z, WHALE_X_FRUSTUM_FRACTION);
+    whaleHalfWidth  = getViewHalfWidth(whaleConfig.z, WHALE_X_FRUSTUM_FRACTION);
 }
 
 /** Body orientation carried between frames for one swimmer. */
@@ -1461,9 +1460,16 @@ const whaleMaterials: MeshStandardMaterial[] = [];
 let whaleX = 0;
 let whaleClock = 0;
 let whaleReady = false;
+// The whale's private copy of the underwater fog far-distance, handed to its
+// own ocean-lighting program so the GUI can wash the whale out without
+// dragging the sea floor and coral (which share the scene-wide uniform) with it.
+const whaleFogDistUniform = new Uniform(whaleConfig.fogDistance);
 
-function whaleStartX(): number { return -(whaleHalfWidth + WHALE_MARGIN); }
-function whaleEndX(): number   { return  (whaleHalfWidth + WHALE_MARGIN); }
+function whaleMargin(): number {
+    return WHALE_MODEL_LENGTH * whaleConfig.scale * WHALE_MARGIN_FRACTION;
+}
+function whaleStartX(): number { return -(whaleHalfWidth + whaleMargin()); }
+function whaleEndX(): number   { return  (whaleHalfWidth + whaleMargin()); }
 
 function setupWhale(model: Group, animations: AnimationClip[]): void {
     model.traverse((child) => {
@@ -1487,17 +1493,18 @@ function setupWhale(model: Group, animations: AnimationClip[]): void {
 
     // Distance fog + per-channel water absorption, the same shader the sea floor
     // and coral use. This is what actually sells "way out there" — without it a
-    // whale at WHALE_Z is just a small, fully-lit whale rather than a shape
-    // half-dissolved into the blue. Applied after the material clone so the
-    // injected program belongs to this instance alone.
-    applyOceanLighting(model, '_whale');
+    // whale at whaleConfig.z is just a small, fully-lit whale rather than a
+    // shape half-dissolved into the blue. Applied after the material clone so
+    // the injected program belongs to this instance alone, and handed the
+    // whale's private fog uniform so it can be fogged harder than the scene.
+    applyOceanLighting(model, '_whale', whaleFogDistUniform);
 
     whaleGroup.add(model);
-    whaleGroup.scale.setScalar(WHALE_SCALE);
+    whaleGroup.scale.setScalar(whaleConfig.scale);
     // Nose is local +Z, so +π/2 yaw points it along +X — the direction it swims.
     whaleGroup.rotation.set(0, Math.PI / 2, 0);
     whaleX = whaleStartX();
-    whaleGroup.position.set(whaleX, WHALE_Y, WHALE_Z);
+    whaleGroup.position.set(whaleX, whaleConfig.y, whaleConfig.z);
 
     if (animations.length > 0) {
         whaleMixer = new AnimationMixer(model);
@@ -1511,22 +1518,31 @@ function setupWhale(model: Group, animations: AnimationClip[]): void {
 function updateWhale(dt: number, nightBlend: number): void {
     if (!whaleReady) return;
 
+    // Everything is re-read from whaleConfig each frame so Debug GUI edits land
+    // immediately. The run length depends on z and scale, so it is refitted here
+    // rather than only on resize.
+    whaleHalfWidth = getViewHalfWidth(whaleConfig.z, WHALE_X_FRUSTUM_FRACTION);
+    whaleFogDistUniform.value = whaleConfig.fogDistance;
+    whaleGroup.scale.setScalar(whaleConfig.scale);
+
     whaleClock += dt;
-    whaleX += WHALE_SPEED * dt;
+    whaleX += whaleConfig.speed * dt;
     // Loop only once the whale has fully cleared the right edge, so the reset
-    // never happens on screen.
-    if (whaleX > whaleEndX()) whaleX = whaleStartX();
+    // never happens on screen. Dragging z/scale in the GUI can leave whaleX
+    // outside the new run, so clamp back in rather than only checking the far end.
+    if (whaleX > whaleEndX() || whaleX < whaleStartX()) whaleX = whaleStartX();
 
     whaleGroup.position.set(
         whaleX,
-        WHALE_Y + Math.sin(whaleClock * WHALE_BOB_SPEED) * WHALE_BOB_AMP,
-        WHALE_Z,
+        whaleConfig.y + Math.sin(whaleClock * whaleConfig.bobSpeed) * whaleConfig.bobAmplitude,
+        whaleConfig.z,
     );
     if (whaleMixer) whaleMixer.update(dt);
 
     // Smooth day→night fade to "almost invisible". nightBlend is already the
     // eased day/night blend, so the opacity tracks the sky transition exactly.
-    const opacity = WHALE_DAY_OPACITY + (WHALE_NIGHT_OPACITY - WHALE_DAY_OPACITY) * nightBlend;
+    const opacity = whaleConfig.dayOpacity
+        + (whaleConfig.nightOpacity - whaleConfig.dayOpacity) * nightBlend;
     for (let i = 0; i < whaleMaterials.length; i++) whaleMaterials[i].opacity = opacity;
 
     whaleGroup.visible = shouldShowCircleFish(whaleGroup);
