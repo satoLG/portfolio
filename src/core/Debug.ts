@@ -2393,58 +2393,74 @@ function buildGUI(): void {
 
     // Anglerfish. It has TWO hiding spots — the left rock and the right rocks —
     // and tapping the lit bulb at night sends it across to the other one. Each
-    // spot is a fully-hidden DAY pose plus the night peek deltas on top, so the
-    // workflow is: set the hidden pose with night off, then flip to night and
-    // dial the deltas until only the lantern clears the rock. Then tap the bulb
-    // and do the same for the far side.
-    makePlacementFolder(sfExtrasFolder, 'Anglerfish (hidden pose)', () => sf.anglerfish, () => SeaFloorDecor.updateAnglerfishTransform());
-    const anglerPeekFolder = sfExtrasFolder.addFolder('Anglerfish Peek (night)');
-    const anglerPeekProxy = {
-        get dx()       { return sf.anglerfishPeek.dx;       }, set dx(v: number)       { sf.anglerfishPeek.dx  = v; SeaFloorDecor.updateAnglerfishTransform(); },
-        get dy()       { return sf.anglerfishPeek.dy;       }, set dy(v: number)       { sf.anglerfishPeek.dy  = v; SeaFloorDecor.updateAnglerfishTransform(); },
-        get dz()       { return sf.anglerfishPeek.dz;       }, set dz(v: number)       { sf.anglerfishPeek.dz  = v; SeaFloorDecor.updateAnglerfishTransform(); },
-        get dry()      { return sf.anglerfishPeek.dry;      }, set dry(v: number)      { sf.anglerfishPeek.dry = v; SeaFloorDecor.updateAnglerfishTransform(); },
-        get duration() { return sf.anglerfishPeekDuration;  }, set duration(v: number) { sf.anglerfishPeekDuration = v; },
-        get swim()     { return sf.anglerfishSwimSpeed;     }, set swim(v: number)     { sf.anglerfishSwimSpeed    = v; },
-    };
-    anglerPeekFolder.add(anglerPeekProxy, 'dx',       -2,   2,   0.01).name('ΔX').listen();
-    anglerPeekFolder.add(anglerPeekProxy, 'dy',       -1,   1,   0.01).name('ΔY').listen();
-    anglerPeekFolder.add(anglerPeekProxy, 'dz',       -2,   2,   0.01).name('ΔZ').listen();
-    anglerPeekFolder.add(anglerPeekProxy, 'dry',   -3.14, 3.14, 0.01).name('ΔYaw').listen();
-    anglerPeekFolder.add(anglerPeekProxy, 'duration', 0.2, 10,  0.05).name('Duration (s)').listen();
-    anglerPeekFolder.add(anglerPeekProxy, 'swim',       0,  2,   0.01).name('Idle Anim Speed').listen();
-    anglerPeekFolder.close();
+    // spot is a fully-hidden DAY pose plus the night peek deltas on top.
+    //
+    // Those two are arithmetically coupled (night pose = hidden + delta), so the
+    // setters below route through SeaFloorDecor, which enforces "only the config
+    // matching what's on screen moves the fish": in daylight the hidden sliders
+    // drive it and the deltas are inert; at night the delta sliders drive it and
+    // a hidden-pose edit counter-slides the delta so the visible fish holds
+    // still. Edits to the station the fish isn't at never move it at all.
+    //
+    // Workflow: day + left → set the hidden pose. Night → dial the deltas until
+    // only the lantern clears the rock. Tap the bulb (or ▶ Swap Sides Now) and
+    // repeat for the right-hand pair. The read-only row below always says which
+    // of the four folders is the live one.
+    const anglerStatusProxy = { get showing() { return SeaFloorDecor.getAnglerfishStateLabel(); }, set showing(_v: string) { /* read-only */ } };
+    sfExtrasFolder.add(anglerStatusProxy, 'showing').name('Anglerfish · showing').listen().disable();
 
-    // Right-hand station. No Scale here — both spots share the left station's.
-    const anglerRightFolder = sfExtrasFolder.addFolder('Anglerfish Right (hidden pose)');
-    const anglerRightProxy = {
-        get x()  { return sf.anglerfishRight.x;  }, set x(v: number)  { sf.anglerfishRight.x  = v; SeaFloorDecor.updateAnglerfishTransform(); },
-        get y()  { return sf.anglerfishRight.y;  }, set y(v: number)  { sf.anglerfishRight.y  = v; SeaFloorDecor.updateAnglerfishTransform(); },
-        get z()  { return sf.anglerfishRight.z;  }, set z(v: number)  { sf.anglerfishRight.z  = v; SeaFloorDecor.updateAnglerfishTransform(); },
-        get rx() { return sf.anglerfishRight.rx; }, set rx(v: number) { sf.anglerfishRight.rx = v; SeaFloorDecor.updateAnglerfishTransform(); },
-        get ry() { return sf.anglerfishRight.ry; }, set ry(v: number) { sf.anglerfishRight.ry = v; SeaFloorDecor.updateAnglerfishTransform(); },
-        get rz() { return sf.anglerfishRight.rz; }, set rz(v: number) { sf.anglerfishRight.rz = v; SeaFloorDecor.updateAnglerfishTransform(); },
+    const makeAnglerHiddenFolder = (label: string, side: 0 | 1, getCfg: () => { x: number; y: number; z: number; rx: number; ry: number; rz: number }): void => {
+        const folder = sfExtrasFolder.addFolder(label);
+        const p = {
+            get x()  { return getCfg().x;  }, set x(v: number)  { SeaFloorDecor.setAnglerfishHiddenAxis(side, 'x', v); },
+            get y()  { return getCfg().y;  }, set y(v: number)  { SeaFloorDecor.setAnglerfishHiddenAxis(side, 'y', v); },
+            get z()  { return getCfg().z;  }, set z(v: number)  { SeaFloorDecor.setAnglerfishHiddenAxis(side, 'z', v); },
+            get ry() { return getCfg().ry; }, set ry(v: number) { SeaFloorDecor.setAnglerfishHiddenAxis(side, 'ry', v); },
+            // rx/rz have no peek counterpart — they're shared by both poses, so
+            // they always move the model.
+            get rx() { return getCfg().rx; }, set rx(v: number) { SeaFloorDecor.setAnglerfishShared('rx', side, v); },
+            get rz() { return getCfg().rz; }, set rz(v: number) { SeaFloorDecor.setAnglerfishShared('rz', side, v); },
+        };
+        folder.add(p, 'x',  -30, 30, 0.05).name('X').listen();
+        folder.add(p, 'y',  -20,  0, 0.05).name('Y').listen();
+        folder.add(p, 'z',  -30, 30, 0.05).name('Z').listen();
+        folder.add(p, 'rx', -Math.PI, Math.PI, 0.01).name('Rot X (shared)').listen();
+        folder.add(p, 'ry', -Math.PI, Math.PI, 0.01).name('Rot Y').listen();
+        folder.add(p, 'rz', -Math.PI, Math.PI, 0.01).name('Rot Z (shared)').listen();
+        folder.close();
     };
-    anglerRightFolder.add(anglerRightProxy, 'x',  -30, 30, 0.05).name('X').listen();
-    anglerRightFolder.add(anglerRightProxy, 'y',  -20,  0, 0.05).name('Y').listen();
-    anglerRightFolder.add(anglerRightProxy, 'z',  -30, 30, 0.05).name('Z').listen();
-    anglerRightFolder.add(anglerRightProxy, 'rx', -Math.PI, Math.PI, 0.01).name('Rot X').listen();
-    anglerRightFolder.add(anglerRightProxy, 'ry', -Math.PI, Math.PI, 0.01).name('Rot Y').listen();
-    anglerRightFolder.add(anglerRightProxy, 'rz', -Math.PI, Math.PI, 0.01).name('Rot Z').listen();
-    anglerRightFolder.close();
 
-    const anglerRightPeekFolder = sfExtrasFolder.addFolder('Anglerfish Right Peek (night)');
-    const anglerRightPeekProxy = {
-        get dx()  { return sf.anglerfishRightPeek.dx;  }, set dx(v: number)  { sf.anglerfishRightPeek.dx  = v; SeaFloorDecor.updateAnglerfishTransform(); },
-        get dy()  { return sf.anglerfishRightPeek.dy;  }, set dy(v: number)  { sf.anglerfishRightPeek.dy  = v; SeaFloorDecor.updateAnglerfishTransform(); },
-        get dz()  { return sf.anglerfishRightPeek.dz;  }, set dz(v: number)  { sf.anglerfishRightPeek.dz  = v; SeaFloorDecor.updateAnglerfishTransform(); },
-        get dry() { return sf.anglerfishRightPeek.dry; }, set dry(v: number) { sf.anglerfishRightPeek.dry = v; SeaFloorDecor.updateAnglerfishTransform(); },
+    const makeAnglerPeekFolder = (label: string, side: 0 | 1, getCfg: () => { dx: number; dy: number; dz: number; dry: number }): void => {
+        const folder = sfExtrasFolder.addFolder(label);
+        const p = {
+            get dx()  { return getCfg().dx;  }, set dx(v: number)  { SeaFloorDecor.setAnglerfishPeekAxis(side, 'x', v); },
+            get dy()  { return getCfg().dy;  }, set dy(v: number)  { SeaFloorDecor.setAnglerfishPeekAxis(side, 'y', v); },
+            get dz()  { return getCfg().dz;  }, set dz(v: number)  { SeaFloorDecor.setAnglerfishPeekAxis(side, 'z', v); },
+            get dry() { return getCfg().dry; }, set dry(v: number) { SeaFloorDecor.setAnglerfishPeekAxis(side, 'ry', v); },
+        };
+        folder.add(p, 'dx',    -2,   2,   0.01).name('ΔX').listen();
+        folder.add(p, 'dy',    -1,   1,   0.01).name('ΔY').listen();
+        folder.add(p, 'dz',    -2,   2,   0.01).name('ΔZ').listen();
+        folder.add(p, 'dry', -3.14, 3.14, 0.01).name('ΔYaw').listen();
+        folder.close();
     };
-    anglerRightPeekFolder.add(anglerRightPeekProxy, 'dx',    -2,   2,   0.01).name('ΔX').listen();
-    anglerRightPeekFolder.add(anglerRightPeekProxy, 'dy',    -1,   1,   0.01).name('ΔY').listen();
-    anglerRightPeekFolder.add(anglerRightPeekProxy, 'dz',    -2,   2,   0.01).name('ΔZ').listen();
-    anglerRightPeekFolder.add(anglerRightPeekProxy, 'dry', -3.14, 3.14, 0.01).name('ΔYaw').listen();
-    anglerRightPeekFolder.close();
+
+    makeAnglerHiddenFolder('Anglerfish L · Hidden (day)', 0, () => sf.anglerfish);
+    makeAnglerPeekFolder(  'Anglerfish L · Peek (night)', 0, () => sf.anglerfishPeek);
+    makeAnglerHiddenFolder('Anglerfish R · Hidden (day)', 1, () => sf.anglerfishRight);
+    makeAnglerPeekFolder(  'Anglerfish R · Peek (night)', 1, () => sf.anglerfishRightPeek);
+
+    // Scale and the emerge/idle timings are shared by both stations.
+    const anglerCommonFolder = sfExtrasFolder.addFolder('Anglerfish Common');
+    const anglerCommonProxy = {
+        get scale()    { return sf.anglerfish.scale;       }, set scale(v: number)    { SeaFloorDecor.setAnglerfishShared('scale', 0, v); },
+        get duration() { return sf.anglerfishPeekDuration; }, set duration(v: number) { sf.anglerfishPeekDuration = v; },
+        get swim()     { return sf.anglerfishSwimSpeed;    }, set swim(v: number)     { sf.anglerfishSwimSpeed    = v; },
+    };
+    anglerCommonFolder.add(anglerCommonProxy, 'scale',    0.01, 2,  0.005).name('Scale').listen();
+    anglerCommonFolder.add(anglerCommonProxy, 'duration',  0.2, 10, 0.05 ).name('Peek Duration (s)').listen();
+    anglerCommonFolder.add(anglerCommonProxy, 'swim',        0,  2, 0.01 ).name('Idle Anim Speed').listen();
+    anglerCommonFolder.close();
 
     // The crossing itself. Arc Z pushes the path toward the camera so the fish
     // rounds the FRONT of the rocks instead of clipping through them; Arc Y

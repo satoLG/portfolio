@@ -155,8 +155,8 @@ export const whaleConfig = {
     bobAmplitude:   0.3500,
     bobSpeed:       0.3500,   // rad/s
     fogDistance:   38.0000,   // lower = more fogged; scene default is 80
-    dayOpacity:     0.6500,   // on top of the fog, at full day
-    nightOpacity:   0.0500,   // "almost invisible" at full night
+    dayOpacity:     0.5000,   // on top of the fog, at full day
+    nightOpacity:   0.0700,   // "almost invisible" at full night
 };
 
 // ── Click Ripple Effect ───────────────────────────────────────────────────────

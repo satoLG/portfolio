@@ -694,6 +694,73 @@ function _anglerPose(side: 0 | 1, t: number, out: Vector3): number {
     return base.ry + peek.dry * e;
 }
 
+// ── Debug-GUI editing ────────────────────────────────────────────────────────
+// Each station is stored as a hidden (day) pose plus the peek (night) deltas
+// laid on top, so the two are arithmetically coupled: the night pose IS
+// base + delta. Left alone, that means dragging a hidden-pose slider at night
+// drags the visible fish around too, which makes it impossible to set one
+// without wrecking the other.
+//
+// The rule these setters enforce is "only the config that matches what's on
+// screen right now moves the fish":
+//   • day   → the hidden pose is what you see, so its sliders move the model
+//             and the peek deltas are inert (they're multiplied by 0 anyway).
+//   • night → the peeked pose is what you see, so the peek sliders move the
+//             model, and a hidden-pose edit slides the delta the opposite way
+//             to hold the visible pose still. The hidden pose still changes —
+//             you just see it next time it's day.
+// Either way an edit to the station the fish ISN'T at never touches it.
+
+type AnglerAxis = 'x' | 'y' | 'z' | 'ry';
+const ANGLER_PEEK_KEY = { x: 'dx', y: 'dy', z: 'dz', ry: 'dry' } as const;
+
+/** True when `side` is the station on screen AND it has fully emerged, so its
+ *  peek delta — not its hidden pose — is what the visible position is made of.
+ *  Tested against the settled peek value rather than isDayTime() so the
+ *  compensation below is exact: it only fires when subtracting the whole delta
+ *  really does hold the fish still. */
+function _anglerShowingPeek(side: 0 | 1): boolean {
+    return side === _anglerSide && _anglerPeek > 0.999;
+}
+
+/** Debug GUI: write one axis of a station's HIDDEN (day) pose. */
+export function setAnglerfishHiddenAxis(side: 0 | 1, axis: AnglerAxis, value: number): void {
+    const { base, peek } = _anglerStation(side);
+    const b = base as unknown as Record<string, number>;
+    const delta = value - b[axis];
+    b[axis] = value;
+    // Night, and this is the station on show: counter-slide the peek delta so
+    // the fish the user is looking at doesn't move.
+    if (_anglerShowingPeek(side)) {
+        const p = peek as unknown as Record<string, number>;
+        p[ANGLER_PEEK_KEY[axis]] -= delta;
+    }
+    updateAnglerfishTransform();
+}
+
+/** Debug GUI: write one axis of a station's PEEK (night) delta. */
+export function setAnglerfishPeekAxis(side: 0 | 1, axis: AnglerAxis, value: number): void {
+    const { peek } = _anglerStation(side);
+    (peek as unknown as Record<string, number>)[ANGLER_PEEK_KEY[axis]] = value;
+    updateAnglerfishTransform();
+}
+
+/** Debug GUI: rx/rz and scale have no peek counterpart — they're shared by both
+ *  poses of both stations, so they always move the model. */
+export function setAnglerfishShared(key: 'rx' | 'rz' | 'scale', side: 0 | 1, value: number): void {
+    if (key === 'scale') config.anglerfish.scale = value;
+    else (_anglerStation(side).base as unknown as Record<string, number>)[key] = value;
+    updateAnglerfishTransform();
+}
+
+/** Which station/pose the sliders are currently driving — surfaced read-only in
+ *  the GUI so it's never ambiguous which folder is the live one. */
+export function getAnglerfishStateLabel(): string {
+    if (_anglerTravel) return 'crossing…';
+    const side = _anglerSide === 0 ? 'Left' : 'Right';
+    return `${side} · ${isDayTime() ? 'Hidden (day)' : 'Peek (night)'}`;
+}
+
 /** Position the anglerfish between its hidden (day) and peeking (night) poses.
  *  No-op mid-crossing — _updateAnglerfishTravel owns the transform then. */
 export function updateAnglerfishTransform(): void {
