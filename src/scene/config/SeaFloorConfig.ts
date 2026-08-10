@@ -79,3 +79,18 @@ export const starfish = { x: -0.4000, y: -14.0000, z: -2.7000, scale: 0.0400, rx
 
 // -- Crab behind the chest, slightly to the right ------------------------------
 export const crab = { x: 0.3000, y: -14.0000, z: -3.3000, scale: 0.6200, rx: 0.0000, ry: -0.9200, rz: 0.0000 };
+
+// -- Anglerfish hiding behind the left coral rock, facing the chest -------------
+// This is the DAY pose: fully tucked out of sight behind rock1.
+export const anglerfish = { x: -1.4500, y: -13.7500, z: -3.6500, scale: 0.1000, rx: 0.0000, ry: 1.1700, rz: 0.0000 };
+// Night pose, expressed as deltas on top of the hidden one — the motion is
+// authored as "edge out a little", so deltas are what you actually tune.
+export const anglerfishPeek = { dx: 0.4200, dy: 0.0600, dz: 0.2600, dry: -0.2200 };
+export const anglerfishPeekDuration = 2.6000;  // seconds for the full emerge / retreat
+export const anglerfishSwimSpeed    = 0.3500;  // idle clip timeScale — it barely moves
+
+// -- Anglerfish lure light (own PointLight, aimed at the chest) ----------------
+export const anglerfishLightIntensity = 2.6000;
+export const anglerfishLightDistance  = 2.8000;
+export const anglerfishLightColor     = { r: 0.5500, g: 0.8800, b: 1.0000 };
+export const anglerfishLureGlow       = 2.2000;  // emissive intensity on the lure bulb at full night

@@ -6,7 +6,7 @@
  * Call Update(dt) every frame.
  * Add decorGroup to the Three.js scene from Scene.ts.
  */
-import { Group, Mesh, Uniform, Vector2, Vector3, Box3, Sphere, AnimationMixer, LoopRepeat } from "three";
+import { Group, Mesh, Uniform, Vector2, Vector3, Box3, Sphere, AnimationMixer, LoopRepeat, PointLight, MeshStandardMaterial } from "three";
 import { GLTFLoader }           from "three/examples/jsm/loaders/GLTFLoader";
 import { MeshoptDecoder }       from "three/examples/jsm/libs/meshopt_decoder.module.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -20,7 +20,10 @@ import {
 } from "../materials/OceanMaterial";
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { timeUniform }          from "../core/Time";
-import { camera, renderer }     from "../core/Scene";
+// `scene` is aliased because the anglerfish's PointLight must be parented to
+// the renderer scene ROOT, never to decorGroup — see _spawnAnglerfish.
+import { camera, renderer, scene as rootScene } from "../core/Scene";
+import { isDayTime }            from "./Skybox";
 import { playCoralHitSound } from "../core/Audio";
 import { spawnBubble }          from "../effects/Bubbles";
 import { UNDERWATER_Y_THRESHOLD } from "../effects/PostProcess";
@@ -76,6 +79,14 @@ export const config = {
     anemoneFish2: { ...C.anemoneFish2 },
     starfish: { ...C.starfish },
     crab:     { ...C.crab     },
+    anglerfish:            { ...C.anglerfish },
+    anglerfishPeek:        { ...C.anglerfishPeek },
+    anglerfishPeekDuration: C.anglerfishPeekDuration,
+    anglerfishSwimSpeed:    C.anglerfishSwimSpeed,
+    anglerfishLightIntensity: C.anglerfishLightIntensity,
+    anglerfishLightDistance:  C.anglerfishLightDistance,
+    anglerfishLightColor:  { ...C.anglerfishLightColor },
+    anglerfishLureGlow:     C.anglerfishLureGlow,
 };
 
 // ── Scene group ────────────────────────────────────────────────────────────────
@@ -103,10 +114,12 @@ let anemoneTemplate:   Group | null = null;
 let starfishTemplate:  Group | null = null;
 let crabTemplate:      Group | null = null;
 let clownfishTemplate: Group | null = null;
+let anglerfishTemplate: Group | null = null;
 let clownfishAnimations: import("three").AnimationClip[] = [];
 let crabAnimations:      import("three").AnimationClip[] = [];
+let anglerfishAnimations: import("three").AnimationClip[] = [];
 let loadedCount = 0;
-const TOTAL_MODELS = 11; // 3 rocks + coral + kelp + coral1 + coral2 + anemone + starfish + crab + clownfish
+const TOTAL_MODELS = 12; // 3 rocks + coral + kelp + coral1 + coral2 + anemone + starfish + crab + clownfish + anglerfish
 
 // Per-frame mixers + spawned references for the new props
 let crabMixer: AnimationMixer | null = null;
@@ -118,6 +131,27 @@ let _crabGroup: Group | null = null;
 let _anemoneFish1Group: Group | null = null;
 let _anemoneFish2Group: Group | null = null;
 const _extraCorals: (Group | null)[] = [null, null, null, null];  // [c1L, c1R, c2L, c2R]
+
+// ── Anglerfish (hidden by day, lantern out at night) ─────────────────────────
+let _anglerfishGroup: Group | null = null;
+let anglerfishMixer: AnimationMixer | null = null;
+// The lure bulb's own PointLight. Lives at the SCENE ROOT, not inside
+// decorGroup — decorGroup.visible is toggled on every surface↔underwater
+// transition, and a light with an invisible ancestor drops out of Three.js's
+// pointLights uniform array, changing its length and forcing every PBR material
+// in the scene to recompile mid-dive. Same contract the jellyfish lights follow
+// in Fish.ts: `visible` stays true for the whole session, only `intensity`
+// moves. Its world position is synced from the lure mesh each frame.
+let _anglerfishLight: PointLight | null = null;
+let _anglerfishLureMesh: Mesh | null = null;
+const _anglerfishLureMats: MeshStandardMaterial[] = [];
+// 0 = fully tucked behind the rock (day), 1 = lantern out (night).
+let _anglerPeek = 0;
+const _anglerLurePos = new Vector3();
+// The lure bulb's material, by the name authored in the GLB. Only this one is
+// made emissive — 'Anglerfish_Light' next to it is the dark rod the bulb hangs
+// from, and lighting that up reads as a glowing stick rather than a lantern.
+const ANGLERFISH_LURE_MATERIAL = 'Light';
 
 // Dedicated sway uniforms for the anemone — kept separate from kelp so the
 // look can be tuned independently while reusing the same shader injector.
@@ -499,6 +533,156 @@ function _spawnExtras(): void {
         _anemoneFish2Group = f2.wrapper;
         anemoneFish2Mixer = f2.mixer;
     }
+
+    _spawnAnglerfish();
+}
+
+/** Anglerfish tucked behind the left coral rock. By day it is fully hidden; at
+ *  night it edges forward just far enough for the lure to clear the rock, and
+ *  the lure's PointLight picks out the chest. */
+function _spawnAnglerfish(): void {
+    _anglerfishGroup = null;
+    anglerfishMixer = null;
+    _anglerfishLureMesh = null;
+    _anglerfishLureMats.length = 0;
+    if (!anglerfishTemplate) return;
+
+    // SkeletonUtils.clone (not Object3D.clone) so the instance owns its
+    // skeleton and the mixer has something of its own to drive — same reason as
+    // the anemone clownfish above.
+    const g = _skeletonClone(anglerfishTemplate) as Group;
+    applyOceanLighting(g, '_angler');
+    g.traverse((child) => {
+        if (!(child as Mesh).isMesh) return;
+        const mesh = child as Mesh;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const raw of mats) {
+            const mat = raw as MeshStandardMaterial;
+            if (mat.name !== ANGLERFISH_LURE_MATERIAL) continue;
+            // Emissive colour is set ONCE here and only emissiveIntensity moves
+            // at runtime — MeshStandardMaterial always carries the emissive
+            // uniform, so ramping the intensity never triggers a recompile.
+            mat.emissive.setRGB(
+                config.anglerfishLightColor.r,
+                config.anglerfishLightColor.g,
+                config.anglerfishLightColor.b,
+            );
+            mat.emissiveIntensity = 0;
+            _anglerfishLureMats.push(mat);
+            // Anchor the PointLight to the bulb mesh so the light travels with
+            // the peek animation for free.
+            _anglerfishLureMesh = mesh;
+        }
+    });
+
+    const wrapper = new Group();
+    wrapper.rotation.order = 'YXZ';
+    wrapper.add(g);
+    decorGroup.add(wrapper);
+    _anglerfishGroup = wrapper;
+    // Start already settled in whichever mode the page opened in, so a
+    // night-first visitor doesn't watch the fish slide out of the rock.
+    _anglerPeek = isDayTime() ? 0 : 1;
+    updateAnglerfishTransform();
+
+    if (anglerfishAnimations.length > 0) {
+        anglerfishMixer = new AnimationMixer(g);
+        // Swimming_Normal — a gentle in-place undulation, played slowly so the
+        // fish reads as lurking rather than swimming anywhere.
+        const clip = anglerfishAnimations.find(a => a.name.includes('Swimming_Normal'))
+            ?? anglerfishAnimations[0];
+        const action = anglerfishMixer.clipAction(clip);
+        action.setLoop(LoopRepeat, Infinity);
+        action.play();
+    }
+
+    if (!_anglerfishLight) {
+        _anglerfishLight = new PointLight(0xffffff, 0, config.anglerfishLightDistance, 2);
+        _anglerfishLight.castShadow = false;
+        // See the declaration comment: never toggle `visible`, never reparent.
+        _anglerfishLight.visible = true;
+        rootScene.add(_anglerfishLight);
+    }
+    _anglerfishLight.color.setRGB(
+        config.anglerfishLightColor.r,
+        config.anglerfishLightColor.g,
+        config.anglerfishLightColor.b,
+    );
+    _anglerfishLight.intensity = 0;
+    _syncAnglerfishLight();
+}
+
+/** Position the anglerfish between its hidden (day) and peeking (night) poses. */
+export function updateAnglerfishTransform(): void {
+    if (!_anglerfishGroup) return;
+    const base = config.anglerfish;
+    const peek = config.anglerfishPeek;
+    // Ease so the emerge starts and settles softly instead of sliding linearly.
+    const t = _anglerPeek * _anglerPeek * (3 - 2 * _anglerPeek);
+    _anglerfishGroup.position.set(
+        base.x + peek.dx * t,
+        base.y + peek.dy * t,
+        base.z + peek.dz * t,
+    );
+    _anglerfishGroup.scale.setScalar(base.scale);
+    _anglerfishGroup.rotation.set(base.rx, base.ry + peek.dry * t, base.rz);
+}
+
+/** Park the PointLight on the lure bulb's current world position. */
+function _syncAnglerfishLight(): void {
+    if (!_anglerfishLight || !_anglerfishGroup) return;
+    if (_anglerfishLureMesh) {
+        // decorGroup never moves, so refreshing this subtree is enough to get a
+        // current world matrix one frame ahead of the renderer's own pass.
+        _anglerfishGroup.updateMatrixWorld(true);
+        _anglerfishLureMesh.getWorldPosition(_anglerLurePos);
+    } else {
+        _anglerfishGroup.getWorldPosition(_anglerLurePos);
+    }
+    _anglerfishLight.position.copy(_anglerLurePos);
+}
+
+function _updateAnglerfish(dt: number): void {
+    if (!_anglerfishGroup) return;
+
+    // Its own eased transition, independent of the sky's blend rate, so the
+    // emerge/retreat reads as a deliberate little animation in both directions.
+    const target = isDayTime() ? 0 : 1;
+    const step = dt / Math.max(0.1, config.anglerfishPeekDuration);
+    if (_anglerPeek < target)      _anglerPeek = Math.min(target, _anglerPeek + step);
+    else if (_anglerPeek > target) _anglerPeek = Math.max(target, _anglerPeek - step);
+
+    updateAnglerfishTransform();
+    if (anglerfishMixer) anglerfishMixer.update(dt * config.anglerfishSwimSpeed);
+
+    const c = config.anglerfishLightColor;
+    const glow = _anglerPeek * _anglerPeek * (3 - 2 * _anglerPeek);
+    for (let i = 0; i < _anglerfishLureMats.length; i++) {
+        _anglerfishLureMats[i].emissive.setRGB(c.r, c.g, c.b);
+        _anglerfishLureMats[i].emissiveIntensity = config.anglerfishLureGlow * glow;
+    }
+    if (_anglerfishLight) {
+        _anglerfishLight.color.setRGB(c.r, c.g, c.b);
+        _anglerfishLight.intensity = config.anglerfishLightIntensity * glow;
+        _anglerfishLight.distance  = config.anglerfishLightDistance;
+        _syncAnglerfishLight();
+    }
+}
+
+/** Force the lure light + glow on for the loading-screen GPU prewarm, so the
+ *  first switch to night doesn't compile the "PointLight contributing" fragment
+ *  path on the fly. Mirrors Fish.beginJellyfishPrewarm; returns the restore. */
+export function beginAnglerfishPrewarm(): () => void {
+    const savedIntensity = _anglerfishLight ? _anglerfishLight.intensity : 0;
+    const savedGlow = _anglerfishLureMats.map(m => m.emissiveIntensity);
+    if (_anglerfishLight) _anglerfishLight.intensity = config.anglerfishLightIntensity;
+    for (const mat of _anglerfishLureMats) mat.emissiveIntensity = config.anglerfishLureGlow;
+    return () => {
+        if (_anglerfishLight) _anglerfishLight.intensity = savedIntensity;
+        for (let i = 0; i < _anglerfishLureMats.length; i++) {
+            _anglerfishLureMats[i].emissiveIntensity = savedGlow[i];
+        }
+    };
 }
 
 /** Re-apply transform from config to a specific extra prop (called by debug GUI). */
@@ -537,6 +721,7 @@ function loadModels(): void {
         { path: 'models/underwater/starfish.glb',    onLoad: g => { starfishTemplate  = g.scene; } },
         { path: 'models/underwater/crab.glb',        onLoad: g => { crabTemplate      = g.scene; crabAnimations = g.animations; } },
         { path: 'models/underwater/clownfish.glb',   onLoad: g => { clownfishTemplate = g.scene; clownfishAnimations = g.animations; } },
+        { path: 'models/underwater/anglerfish.glb',  onLoad: g => { anglerfishTemplate = g.scene; anglerfishAnimations = g.animations; } },
     ];
 
     for (const entry of entries) {
@@ -604,6 +789,7 @@ export function Update(dt: number): void {
     if (crabMixer)         crabMixer.update(dt);
     if (anemoneFish1Mixer) anemoneFish1Mixer.update(dt);
     if (anemoneFish2Mixer) anemoneFish2Mixer.update(dt);
+    _updateAnglerfish(dt);
 
     // Circle each clownfish around the anemone using the same trajectory
     // pattern as Fish.ts's main clownFish — circleAngle advances with dt,

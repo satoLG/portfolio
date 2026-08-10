@@ -2160,6 +2160,21 @@ function buildGUI(): void {
                 ``,
                 `// -- Crab behind the chest, slightly to the right ------------------------------`,
                 `export const crab = { x: ${f(sf.crab.x)}, y: ${f(sf.crab.y)}, z: ${f(sf.crab.z)}, scale: ${f(sf.crab.scale)}, rx: ${f(sf.crab.rx)}, ry: ${f(sf.crab.ry)}, rz: ${f(sf.crab.rz)} };`,
+                ``,
+                `// -- Anglerfish hiding behind the left coral rock, facing the chest -------------`,
+                `// This is the DAY pose: fully tucked out of sight behind rock1.`,
+                `export const anglerfish = { x: ${f(sf.anglerfish.x)}, y: ${f(sf.anglerfish.y)}, z: ${f(sf.anglerfish.z)}, scale: ${f(sf.anglerfish.scale)}, rx: ${f(sf.anglerfish.rx)}, ry: ${f(sf.anglerfish.ry)}, rz: ${f(sf.anglerfish.rz)} };`,
+                `// Night pose, expressed as deltas on top of the hidden one — the motion is`,
+                `// authored as "edge out a little", so deltas are what you actually tune.`,
+                `export const anglerfishPeek = { dx: ${f(sf.anglerfishPeek.dx)}, dy: ${f(sf.anglerfishPeek.dy)}, dz: ${f(sf.anglerfishPeek.dz)}, dry: ${f(sf.anglerfishPeek.dry)} };`,
+                `export const anglerfishPeekDuration = ${f(sf.anglerfishPeekDuration)};  // seconds for the full emerge / retreat`,
+                `export const anglerfishSwimSpeed    = ${f(sf.anglerfishSwimSpeed)};  // idle clip timeScale — it barely moves`,
+                ``,
+                `// -- Anglerfish lure light (own PointLight, aimed at the chest) ----------------`,
+                `export const anglerfishLightIntensity = ${f(sf.anglerfishLightIntensity)};`,
+                `export const anglerfishLightDistance  = ${f(sf.anglerfishLightDistance)};`,
+                `export const anglerfishLightColor     = { r: ${f(sf.anglerfishLightColor.r)}, g: ${f(sf.anglerfishLightColor.g)}, b: ${f(sf.anglerfishLightColor.b)} };`,
+                `export const anglerfishLureGlow       = ${f(sf.anglerfishLureGlow)};  // emissive intensity on the lure bulb at full night`,
             ].join('\n');
             navigator.clipboard.writeText(content).then(() => {
                 console.log('[Debug] SeaFloorConfig.ts content copied to clipboard!');
@@ -2304,6 +2319,43 @@ function buildGUI(): void {
     // Starfish + crab — straight placement
     makePlacementFolder(sfExtrasFolder, 'Starfish', () => sf.starfish, () => SeaFloorDecor.updateStarfishTransform());
     makePlacementFolder(sfExtrasFolder, 'Crab',     () => sf.crab,     () => SeaFloorDecor.updateCrabTransform());
+
+    // Anglerfish — the DAY (hidden) pose, plus the night peek offsets and its
+    // lure light. Tune the hidden pose first with night mode off, then flip to
+    // night and dial the deltas until the lantern just clears the rock.
+    makePlacementFolder(sfExtrasFolder, 'Anglerfish (hidden pose)', () => sf.anglerfish, () => SeaFloorDecor.updateAnglerfishTransform());
+    const anglerPeekFolder = sfExtrasFolder.addFolder('Anglerfish Peek (night)');
+    const anglerPeekProxy = {
+        get dx()       { return sf.anglerfishPeek.dx;       }, set dx(v: number)       { sf.anglerfishPeek.dx  = v; SeaFloorDecor.updateAnglerfishTransform(); },
+        get dy()       { return sf.anglerfishPeek.dy;       }, set dy(v: number)       { sf.anglerfishPeek.dy  = v; SeaFloorDecor.updateAnglerfishTransform(); },
+        get dz()       { return sf.anglerfishPeek.dz;       }, set dz(v: number)       { sf.anglerfishPeek.dz  = v; SeaFloorDecor.updateAnglerfishTransform(); },
+        get dry()      { return sf.anglerfishPeek.dry;      }, set dry(v: number)      { sf.anglerfishPeek.dry = v; SeaFloorDecor.updateAnglerfishTransform(); },
+        get duration() { return sf.anglerfishPeekDuration;  }, set duration(v: number) { sf.anglerfishPeekDuration = v; },
+        get swim()     { return sf.anglerfishSwimSpeed;     }, set swim(v: number)     { sf.anglerfishSwimSpeed    = v; },
+    };
+    anglerPeekFolder.add(anglerPeekProxy, 'dx',       -2,   2,   0.01).name('ΔX').listen();
+    anglerPeekFolder.add(anglerPeekProxy, 'dy',       -1,   1,   0.01).name('ΔY').listen();
+    anglerPeekFolder.add(anglerPeekProxy, 'dz',       -2,   2,   0.01).name('ΔZ').listen();
+    anglerPeekFolder.add(anglerPeekProxy, 'dry',   -3.14, 3.14, 0.01).name('ΔYaw').listen();
+    anglerPeekFolder.add(anglerPeekProxy, 'duration', 0.2, 10,  0.05).name('Duration (s)').listen();
+    anglerPeekFolder.add(anglerPeekProxy, 'swim',       0,  2,   0.01).name('Idle Anim Speed').listen();
+    anglerPeekFolder.close();
+    const anglerLightFolder = sfExtrasFolder.addFolder('Anglerfish Lure Light');
+    const anglerLightProxy = {
+        get intensity() { return sf.anglerfishLightIntensity; }, set intensity(v: number) { sf.anglerfishLightIntensity = v; },
+        get distance()  { return sf.anglerfishLightDistance;  }, set distance(v: number)  { sf.anglerfishLightDistance  = v; },
+        get glow()      { return sf.anglerfishLureGlow;       }, set glow(v: number)      { sf.anglerfishLureGlow       = v; },
+        get r()         { return sf.anglerfishLightColor.r;   }, set r(v: number)         { sf.anglerfishLightColor.r   = v; },
+        get g()         { return sf.anglerfishLightColor.g;   }, set g(v: number)         { sf.anglerfishLightColor.g   = v; },
+        get b()         { return sf.anglerfishLightColor.b;   }, set b(v: number)         { sf.anglerfishLightColor.b   = v; },
+    };
+    anglerLightFolder.add(anglerLightProxy, 'intensity', 0, 15,  0.05).name('Intensity').listen();
+    anglerLightFolder.add(anglerLightProxy, 'distance',  0, 15,  0.05).name('Distance').listen();
+    anglerLightFolder.add(anglerLightProxy, 'glow',      0, 10,  0.05).name('Lure Glow').listen();
+    anglerLightFolder.add(anglerLightProxy, 'r',         0,  1,  0.01).name('Color R').listen();
+    anglerLightFolder.add(anglerLightProxy, 'g',         0,  1,  0.01).name('Color G').listen();
+    anglerLightFolder.add(anglerLightProxy, 'b',         0,  1,  0.01).name('Color B').listen();
+    anglerLightFolder.close();
     sfExtrasFolder.close();
 
     // ── Chest ────────────────────────────────────────────────────────────────────
