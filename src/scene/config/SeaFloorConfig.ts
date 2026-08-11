@@ -79,3 +79,41 @@ export const starfish = { x: -0.4000, y: -14.0000, z: -2.7000, scale: 0.0400, rx
 
 // -- Crab behind the chest, slightly to the right ------------------------------
 export const crab = { x: 0.3000, y: -14.0000, z: -3.3000, scale: 0.6200, rx: 0.0000, ry: -0.9200, rz: 0.0000 };
+
+// -- Anglerfish, LEFT station (behind rock1), facing the chest -----------------
+// This is the DAY pose: fully tucked out of sight behind the rock. `scale` here
+// is the anglerfish's scale at BOTH stations.
+export const anglerfish = { x: -1.4500, y: -13.7500, z: -3.6500, scale: 0.2500, rx: 0.0000, ry: 1.1700, rz: 0.0000 };
+// Night pose, expressed as deltas on top of the hidden one — the motion is
+// authored as "edge out a little", so deltas are what you actually tune.
+export const anglerfishPeek = { dx: 0.3400, dy: 0.5000, dz: 0.3400, dry: 0.5300 };
+
+// -- Anglerfish, RIGHT station (behind rock2/rock3) ----------------------------
+// Where it settles after being tapped on the bulb. Same shape as the left pair:
+// a fully-hidden day pose plus the night peek deltas. Roughly mirrored, so the
+// fish faces back toward the chest from the other side.
+export const anglerfishRight     = { x: 0.9500, y: -13.7500, z: -4.7500, rx: 0.0000, ry: -1.3000, rz: 0.0000 };
+export const anglerfishRightPeek = { dx: -0.5100, dy: 0.5000, dz: 0.6300, dry: 0.3600 };
+
+export const anglerfishPeekDuration = 1.1500;  // seconds for the full emerge / retreat
+export const anglerfishSwimSpeed    = 0.3500;  // idle clip timeScale — it barely moves
+
+// -- Anglerfish side-to-side swim (triggered by tapping the lit bulb) ----------
+// The fish arcs out from behind its rock, crosses in front, and tucks in on the
+// far side. The path is a quadratic curve whose control point is pushed toward
+// the camera and upward — these are the CONTROL-POINT offsets, so the curve
+// actually peaks at about half of each value.
+export const anglerfishTravelDuration = 3.4000;  // seconds for the whole crossing
+export const anglerfishTravelArcZ     = -2.3500; // + bulges toward the camera, − behind the rocks
+export const anglerfishTravelArcY     = 1.6000;  // upward — lifts it over the rock tops
+export const anglerfishTravelAnimSpeed = 1.0000; // clip timeScale while crossing (it's working now)
+
+// -- Anglerfish lure light (own PointLight, aimed at the chest) ----------------
+export const anglerfishLightIntensity = 9.9000;
+export const anglerfishLightDistance  = 2.1500;
+export const anglerfishLightColor     = { r: 0.5500, g: 0.8800, b: 1.0000 };
+export const anglerfishLureGlow       = 4.4500;  // emissive intensity on the lure bulb at full night
+// Nudge for the light relative to the bulb mesh, in the FISH's own frame
+// (x = its right, y = up, z = the way it faces) so the offset keeps pointing
+// the same way after it turns around at the other station. World units.
+export const anglerfishLightOffset    = { x: -0.2100, y: 0.3400, z: 0.7900 };

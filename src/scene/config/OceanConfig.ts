@@ -133,6 +133,32 @@ export const jellyfishLightConfig = {
     distance: 1.5000,
 };
 
+// ── Background Whale ────────────────────────────────────────────────────────
+// The whale far out in the murk. Everything here is read live each frame so the
+// Debug GUI can drive it.
+//
+// The three that interact: pushing `z` further back deepens the fog but also
+// shrinks the whale (raise `scale` to compensate), and `speed` should scale
+// with the depth to keep the same APPARENT pace on screen — at 3× the distance
+// a whale needs 3× the world speed to look like it's moving the same.
+//
+// `fogDistance` is the whale's OWN copy of the underwater fog far-distance, not
+// the scene's (which is 80 and is shared by the sea floor). Lowering it is the
+// direct control for "I want it more washed out": the shader fogs by
+// viewDistance/fogDistance, so once fogDistance drops near the whale's actual
+// distance from the camera the body is fully replaced by the water colour.
+export const whaleConfig = {
+    y:             -7.8000,
+    z:            -32.0000,
+    scale:          1.4000,
+    speed:          0.5500,   // world units/s
+    bobAmplitude:   0.3500,
+    bobSpeed:       0.3500,   // rad/s
+    fogDistance:   38.0000,   // lower = more fogged; scene default is 80
+    dayOpacity:     0.5000,   // on top of the fog, at full day
+    nightOpacity:   0.0700,   // "almost invisible" at full night
+};
+
 // ── Click Ripple Effect ───────────────────────────────────────────────────────
 export const rippleSpeed           = 0.7;    // World-units/sec the ring expands (max radius = speed × lifetime)
 export const rippleLifetime        = 1;    // Seconds before the wave fully fades out

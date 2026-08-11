@@ -2,6 +2,9 @@ import { Group, Object3D, Mesh, LoadingManager, Uniform, Vector2, Vector3, Rayca
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { config as sfDecorConfig } from './SeaFloorDecor';
+// Namespace import alongside the config one so the chest interaction can defer
+// to the anglerfish's lure — see the isAnglerfishBulbAt calls below.
+import * as sfDecor from './SeaFloorDecor';
 import {
     oceanAbsorptionUniform,
     underwaterFogDistUniform,
@@ -4394,6 +4397,13 @@ function setupChestInteraction(): void {
             return;
         }
 
+        // The anglerfish's lure sits right in front of the chest at night, and
+        // the chest is raycast against its whole mesh — so without this it wins
+        // nearly every tap aimed at the bulb. Opening the chest also yanks the
+        // camera into a zoom, which is a far worse thing to trigger by accident
+        // than the swap it stole. Give the (small, night-only) bulb first refusal.
+        if (sfDecor.isAnglerfishBulbAt(clientX, clientY)) return;
+
         // Not zoomed — check if click hit the chest
         if (_chestRayHit2(clientX, clientY)) {
             isChestHovered = false;
@@ -4421,7 +4431,10 @@ function setupChestInteraction(): void {
             if (isChestHovered) { isChestHovered = false; canvas.style.cursor = ''; }
             return;
         }
-        const hit = _chestRayHit2(e.clientX, e.clientY);
+        // Same precedence as the click path — don't claim the cursor over a
+        // point where a tap would go to the anglerfish's lure instead.
+        const hit = !sfDecor.isAnglerfishBulbAt(e.clientX, e.clientY)
+            && _chestRayHit2(e.clientX, e.clientY);
         if (hit) {
             if (!isChestHovered) { isChestHovered = true; canvas.style.cursor = 'pointer'; }
         } else {

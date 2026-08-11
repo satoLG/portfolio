@@ -760,6 +760,11 @@ async function prewarmGPU(): Promise<void> {
         // Briefly render the real pooled jellyfish clones with non-zero opacity so
         // their transparent shader variant and buffers are warm before the first dive.
         const restoreJellyfishPrewarm = Fish.beginJellyfishPrewarm();
+        // Same reason as the jellyfish: the anglerfish's lure light only exists
+        // at night, so its lit fragment path has to be exercised here or the
+        // first day→night flip compiles it mid-frame. The chest corridor below
+        // renders exactly the region it illuminates.
+        const restoreAnglerfishPrewarm = SeaFloorDecor.beginAnglerfishPrewarm();
         try {
             await prewarmChestCorridor();
 
@@ -793,6 +798,7 @@ async function prewarmGPU(): Promise<void> {
             // GPU work above ever throws, the restore must still run — otherwise
             // leaked golden lights stay attached to the apples for the session.
             restoreJellyfishPrewarm();
+            restoreAnglerfishPrewarm();
         }
     } finally {
         // Undo the variant prewarm FIRST. beginPrewarmVariants() captured each

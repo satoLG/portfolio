@@ -328,6 +328,7 @@ import {
     rippleNormalStrength as RIPPLE_NORMAL_STRENGTH,
     rippleMaxClickDistance as RIPPLE_MAX_CLICK_DISTANCE,
     jellyfishLightConfig,
+    whaleConfig,
     edgeFoamFadeStartZDesktop as CFG_EF_FADE_START_Z_DESKTOP,
     edgeFoamFadeEndZDesktop as CFG_EF_FADE_END_Z_DESKTOP,
     edgeFoamFadeStartZMobile as CFG_EF_FADE_START_Z_MOBILE,
@@ -1063,6 +1064,32 @@ function buildGUI(): void {
                 `    distance: ${f(jellyfishLightConfig.distance)},`,
                 `};`,
                 ``,
+                `// ── Background Whale ────────────────────────────────────────────────────────`,
+                `// The whale far out in the murk. Everything here is read live each frame so the`,
+                `// Debug GUI can drive it.`,
+                `//`,
+                `// The three that interact: pushing \`z\` further back deepens the fog but also`,
+                `// shrinks the whale (raise \`scale\` to compensate), and \`speed\` should scale`,
+                `// with the depth to keep the same APPARENT pace on screen — at 3× the distance`,
+                `// a whale needs 3× the world speed to look like it's moving the same.`,
+                `//`,
+                `// \`fogDistance\` is the whale's OWN copy of the underwater fog far-distance, not`,
+                `// the scene's (which is 80 and is shared by the sea floor). Lowering it is the`,
+                `// direct control for "I want it more washed out": the shader fogs by`,
+                `// viewDistance/fogDistance, so once fogDistance drops near the whale's actual`,
+                `// distance from the camera the body is fully replaced by the water colour.`,
+                `export const whaleConfig = {`,
+                `    y:            ${f(whaleConfig.y)},`,
+                `    z:            ${f(whaleConfig.z)},`,
+                `    scale:        ${f(whaleConfig.scale)},`,
+                `    speed:        ${f(whaleConfig.speed)},   // world units/s`,
+                `    bobAmplitude: ${f(whaleConfig.bobAmplitude)},`,
+                `    bobSpeed:     ${f(whaleConfig.bobSpeed)},   // rad/s`,
+                `    fogDistance:  ${f(whaleConfig.fogDistance)},   // lower = more fogged; scene default is 80`,
+                `    dayOpacity:   ${f(whaleConfig.dayOpacity)},   // on top of the fog, at full day`,
+                `    nightOpacity: ${f(whaleConfig.nightOpacity)},   // "almost invisible" at full night`,
+                `};`,
+                ``,
                 `// ── Click Ripple Effect ───────────────────────────────────────────────────────`,
                 `export const rippleSpeed           = ${RIPPLE_SPEED};    // World-units/sec the ring expands (max radius = speed × lifetime)`,
                 `export const rippleLifetime        = ${RIPPLE_LIFETIME};    // Seconds before the wave fully fades out`,
@@ -1089,6 +1116,27 @@ function buildGUI(): void {
     jellyLightFolder.add(jellyfishLightConfig, 'intensity', 0, 10, 0.05).name('Intensity').listen();
     jellyLightFolder.add(jellyfishLightConfig, 'distance', 0.05, 5, 0.05).name('Distance').listen();
     jellyLightFolder.close();
+
+    // Background whale. Read live every frame by Fish.updateWhale, so every
+    // slider here takes effect immediately — including Z and Scale, which also
+    // refit the off-screen run length.
+    //
+    // For "less visible", reach for Fog Distance first: it is the whale's own
+    // copy of the underwater fog far-distance, so pulling it down toward the
+    // whale's actual distance from the camera (≈ 1.78 + |Z|) washes the body
+    // out into the water colour without touching the sea floor. Day Opacity is
+    // the blunt trim on top of that.
+    const whaleFolder = oceanFishFolder.addFolder('Whale');
+    whaleFolder.add(whaleConfig, 'z',            -200, -5,   0.5 ).name('Z (distance)').listen();
+    whaleFolder.add(whaleConfig, 'y',             -14,  0,   0.05).name('Y').listen();
+    whaleFolder.add(whaleConfig, 'scale',        0.05, 12,   0.05).name('Scale').listen();
+    whaleFolder.add(whaleConfig, 'speed',           0,  6,   0.01).name('Speed').listen();
+    whaleFolder.add(whaleConfig, 'fogDistance',     2, 120,  0.5 ).name('Fog Distance').listen();
+    whaleFolder.add(whaleConfig, 'dayOpacity',      0,  1,   0.01).name('Day Opacity').listen();
+    whaleFolder.add(whaleConfig, 'nightOpacity',    0,  1,   0.01).name('Night Opacity').listen();
+    whaleFolder.add(whaleConfig, 'bobAmplitude',    0,  3,   0.01).name('Bob Amplitude').listen();
+    whaleFolder.add(whaleConfig, 'bobSpeed',        0,  3,   0.01).name('Bob Speed').listen();
+    whaleFolder.close();
     oceanFishFolder.close();
 
     const skyActions = {
@@ -2160,6 +2208,44 @@ function buildGUI(): void {
                 ``,
                 `// -- Crab behind the chest, slightly to the right ------------------------------`,
                 `export const crab = { x: ${f(sf.crab.x)}, y: ${f(sf.crab.y)}, z: ${f(sf.crab.z)}, scale: ${f(sf.crab.scale)}, rx: ${f(sf.crab.rx)}, ry: ${f(sf.crab.ry)}, rz: ${f(sf.crab.rz)} };`,
+                ``,
+                `// -- Anglerfish, LEFT station (behind rock1), facing the chest -----------------`,
+                `// This is the DAY pose: fully tucked out of sight behind the rock. \`scale\` here`,
+                `// is the anglerfish's scale at BOTH stations.`,
+                `export const anglerfish = { x: ${f(sf.anglerfish.x)}, y: ${f(sf.anglerfish.y)}, z: ${f(sf.anglerfish.z)}, scale: ${f(sf.anglerfish.scale)}, rx: ${f(sf.anglerfish.rx)}, ry: ${f(sf.anglerfish.ry)}, rz: ${f(sf.anglerfish.rz)} };`,
+                `// Night pose, expressed as deltas on top of the hidden one — the motion is`,
+                `// authored as "edge out a little", so deltas are what you actually tune.`,
+                `export const anglerfishPeek = { dx: ${f(sf.anglerfishPeek.dx)}, dy: ${f(sf.anglerfishPeek.dy)}, dz: ${f(sf.anglerfishPeek.dz)}, dry: ${f(sf.anglerfishPeek.dry)} };`,
+                ``,
+                `// -- Anglerfish, RIGHT station (behind rock2/rock3) ----------------------------`,
+                `// Where it settles after being tapped on the bulb. Same shape as the left pair:`,
+                `// a fully-hidden day pose plus the night peek deltas. Roughly mirrored, so the`,
+                `// fish faces back toward the chest from the other side.`,
+                `export const anglerfishRight     = { x: ${f(sf.anglerfishRight.x)}, y: ${f(sf.anglerfishRight.y)}, z: ${f(sf.anglerfishRight.z)}, rx: ${f(sf.anglerfishRight.rx)}, ry: ${f(sf.anglerfishRight.ry)}, rz: ${f(sf.anglerfishRight.rz)} };`,
+                `export const anglerfishRightPeek = { dx: ${f(sf.anglerfishRightPeek.dx)}, dy: ${f(sf.anglerfishRightPeek.dy)}, dz: ${f(sf.anglerfishRightPeek.dz)}, dry: ${f(sf.anglerfishRightPeek.dry)} };`,
+                ``,
+                `export const anglerfishPeekDuration = ${f(sf.anglerfishPeekDuration)};  // seconds for the full emerge / retreat`,
+                `export const anglerfishSwimSpeed    = ${f(sf.anglerfishSwimSpeed)};  // idle clip timeScale — it barely moves`,
+                ``,
+                `// -- Anglerfish side-to-side swim (triggered by tapping the lit bulb) ----------`,
+                `// The fish arcs out from behind its rock, crosses in front, and tucks in on the`,
+                `// far side. The path is a quadratic curve whose control point is pushed toward`,
+                `// the camera and upward — these are the CONTROL-POINT offsets, so the curve`,
+                `// actually peaks at about half of each value.`,
+                `export const anglerfishTravelDuration = ${f(sf.anglerfishTravelDuration)};  // seconds for the whole crossing`,
+                `export const anglerfishTravelArcZ     = ${f(sf.anglerfishTravelArcZ)}; // + bulges toward the camera, − behind the rocks`,
+                `export const anglerfishTravelArcY     = ${f(sf.anglerfishTravelArcY)};  // upward — lifts it over the rock tops`,
+                `export const anglerfishTravelAnimSpeed = ${f(sf.anglerfishTravelAnimSpeed)}; // clip timeScale while crossing (it's working now)`,
+                ``,
+                `// -- Anglerfish lure light (own PointLight, aimed at the chest) ----------------`,
+                `export const anglerfishLightIntensity = ${f(sf.anglerfishLightIntensity)};`,
+                `export const anglerfishLightDistance  = ${f(sf.anglerfishLightDistance)};`,
+                `export const anglerfishLightColor     = { r: ${f(sf.anglerfishLightColor.r)}, g: ${f(sf.anglerfishLightColor.g)}, b: ${f(sf.anglerfishLightColor.b)} };`,
+                `export const anglerfishLureGlow       = ${f(sf.anglerfishLureGlow)};  // emissive intensity on the lure bulb at full night`,
+                `// Nudge for the light relative to the bulb mesh, in the FISH's own frame`,
+                `// (x = its right, y = up, z = the way it faces) so the offset keeps pointing`,
+                `// the same way after it turns around at the other station. World units.`,
+                `export const anglerfishLightOffset    = { x: ${f(sf.anglerfishLightOffset.x)}, y: ${f(sf.anglerfishLightOffset.y)}, z: ${f(sf.anglerfishLightOffset.z)} };`,
             ].join('\n');
             navigator.clipboard.writeText(content).then(() => {
                 console.log('[Debug] SeaFloorConfig.ts content copied to clipboard!');
@@ -2304,6 +2390,121 @@ function buildGUI(): void {
     // Starfish + crab — straight placement
     makePlacementFolder(sfExtrasFolder, 'Starfish', () => sf.starfish, () => SeaFloorDecor.updateStarfishTransform());
     makePlacementFolder(sfExtrasFolder, 'Crab',     () => sf.crab,     () => SeaFloorDecor.updateCrabTransform());
+
+    // Anglerfish. It has TWO hiding spots — the left rock and the right rocks —
+    // and tapping the lit bulb at night sends it across to the other one. Each
+    // spot is a fully-hidden DAY pose plus the night peek deltas on top.
+    //
+    // Those two are arithmetically coupled (night pose = hidden + delta), so the
+    // setters below route through SeaFloorDecor, which enforces "only the config
+    // matching what's on screen moves the fish": in daylight the hidden sliders
+    // drive it and the deltas are inert; at night the delta sliders drive it and
+    // a hidden-pose edit counter-slides the delta so the visible fish holds
+    // still. Edits to the station the fish isn't at never move it at all.
+    //
+    // Workflow: day + left → set the hidden pose. Night → dial the deltas until
+    // only the lantern clears the rock. Tap the bulb (or ▶ Swap Sides Now) and
+    // repeat for the right-hand pair. The read-only row below always says which
+    // of the four folders is the live one.
+    const anglerStatusProxy = { get showing() { return SeaFloorDecor.getAnglerfishStateLabel(); }, set showing(_v: string) { /* read-only */ } };
+    sfExtrasFolder.add(anglerStatusProxy, 'showing').name('Anglerfish · showing').listen().disable();
+
+    const makeAnglerHiddenFolder = (label: string, side: 0 | 1, getCfg: () => { x: number; y: number; z: number; rx: number; ry: number; rz: number }): void => {
+        const folder = sfExtrasFolder.addFolder(label);
+        const p = {
+            get x()  { return getCfg().x;  }, set x(v: number)  { SeaFloorDecor.setAnglerfishHiddenAxis(side, 'x', v); },
+            get y()  { return getCfg().y;  }, set y(v: number)  { SeaFloorDecor.setAnglerfishHiddenAxis(side, 'y', v); },
+            get z()  { return getCfg().z;  }, set z(v: number)  { SeaFloorDecor.setAnglerfishHiddenAxis(side, 'z', v); },
+            get ry() { return getCfg().ry; }, set ry(v: number) { SeaFloorDecor.setAnglerfishHiddenAxis(side, 'ry', v); },
+            // rx/rz have no peek counterpart — they're shared by both poses, so
+            // they always move the model.
+            get rx() { return getCfg().rx; }, set rx(v: number) { SeaFloorDecor.setAnglerfishShared('rx', side, v); },
+            get rz() { return getCfg().rz; }, set rz(v: number) { SeaFloorDecor.setAnglerfishShared('rz', side, v); },
+        };
+        folder.add(p, 'x',  -30, 30, 0.05).name('X').listen();
+        folder.add(p, 'y',  -20,  0, 0.05).name('Y').listen();
+        folder.add(p, 'z',  -30, 30, 0.05).name('Z').listen();
+        folder.add(p, 'rx', -Math.PI, Math.PI, 0.01).name('Rot X (shared)').listen();
+        folder.add(p, 'ry', -Math.PI, Math.PI, 0.01).name('Rot Y').listen();
+        folder.add(p, 'rz', -Math.PI, Math.PI, 0.01).name('Rot Z (shared)').listen();
+        folder.close();
+    };
+
+    const makeAnglerPeekFolder = (label: string, side: 0 | 1, getCfg: () => { dx: number; dy: number; dz: number; dry: number }): void => {
+        const folder = sfExtrasFolder.addFolder(label);
+        const p = {
+            get dx()  { return getCfg().dx;  }, set dx(v: number)  { SeaFloorDecor.setAnglerfishPeekAxis(side, 'x', v); },
+            get dy()  { return getCfg().dy;  }, set dy(v: number)  { SeaFloorDecor.setAnglerfishPeekAxis(side, 'y', v); },
+            get dz()  { return getCfg().dz;  }, set dz(v: number)  { SeaFloorDecor.setAnglerfishPeekAxis(side, 'z', v); },
+            get dry() { return getCfg().dry; }, set dry(v: number) { SeaFloorDecor.setAnglerfishPeekAxis(side, 'ry', v); },
+        };
+        folder.add(p, 'dx',    -2,   2,   0.01).name('ΔX').listen();
+        folder.add(p, 'dy',    -1,   1,   0.01).name('ΔY').listen();
+        folder.add(p, 'dz',    -2,   2,   0.01).name('ΔZ').listen();
+        folder.add(p, 'dry', -3.14, 3.14, 0.01).name('ΔYaw').listen();
+        folder.close();
+    };
+
+    makeAnglerHiddenFolder('Anglerfish L · Hidden (day)', 0, () => sf.anglerfish);
+    makeAnglerPeekFolder(  'Anglerfish L · Peek (night)', 0, () => sf.anglerfishPeek);
+    makeAnglerHiddenFolder('Anglerfish R · Hidden (day)', 1, () => sf.anglerfishRight);
+    makeAnglerPeekFolder(  'Anglerfish R · Peek (night)', 1, () => sf.anglerfishRightPeek);
+
+    // Scale and the emerge/idle timings are shared by both stations.
+    const anglerCommonFolder = sfExtrasFolder.addFolder('Anglerfish Common');
+    const anglerCommonProxy = {
+        get scale()    { return sf.anglerfish.scale;       }, set scale(v: number)    { SeaFloorDecor.setAnglerfishShared('scale', 0, v); },
+        get duration() { return sf.anglerfishPeekDuration; }, set duration(v: number) { sf.anglerfishPeekDuration = v; },
+        get swim()     { return sf.anglerfishSwimSpeed;    }, set swim(v: number)     { sf.anglerfishSwimSpeed    = v; },
+    };
+    anglerCommonFolder.add(anglerCommonProxy, 'scale',    0.01, 2,  0.005).name('Scale').listen();
+    anglerCommonFolder.add(anglerCommonProxy, 'duration',  0.2, 10, 0.05 ).name('Peek Duration (s)').listen();
+    anglerCommonFolder.add(anglerCommonProxy, 'swim',        0,  2, 0.01 ).name('Idle Anim Speed').listen();
+    anglerCommonFolder.close();
+
+    // The crossing itself. Arc Z pushes the path toward the camera so the fish
+    // rounds the FRONT of the rocks instead of clipping through them; Arc Y
+    // lifts it over their tops. Both are control-point offsets, so the path
+    // actually peaks at roughly half of each value.
+    const anglerSwapFolder = sfExtrasFolder.addFolder('Anglerfish Crossing');
+    const anglerSwapProxy = {
+        get duration()  { return sf.anglerfishTravelDuration;  }, set duration(v: number)  { sf.anglerfishTravelDuration  = v; },
+        get arcZ()      { return sf.anglerfishTravelArcZ;      }, set arcZ(v: number)      { sf.anglerfishTravelArcZ      = v; },
+        get arcY()      { return sf.anglerfishTravelArcY;      }, set arcY(v: number)      { sf.anglerfishTravelArcY      = v; },
+        get animSpeed() { return sf.anglerfishTravelAnimSpeed; }, set animSpeed(v: number) { sf.anglerfishTravelAnimSpeed = v; },
+        swapNow: () => SeaFloorDecor.swapAnglerfishSide(),
+    };
+    anglerSwapFolder.add(anglerSwapProxy, 'duration',  0.5, 15, 0.05).name('Duration (s)').listen();
+    anglerSwapFolder.add(anglerSwapProxy, 'arcZ',       -8,  8, 0.05).name('Arc Z (+front/−back)').listen();
+    anglerSwapFolder.add(anglerSwapProxy, 'arcY',       -4,  6, 0.05).name('Arc Y (rise)').listen();
+    anglerSwapFolder.add(anglerSwapProxy, 'animSpeed',   0,  3, 0.01).name('Swim Anim Speed').listen();
+    anglerSwapFolder.add(anglerSwapProxy, 'swapNow').name('▶ Swap Sides Now');
+    anglerSwapFolder.close();
+
+    const anglerLightFolder = sfExtrasFolder.addFolder('Anglerfish Lure Light');
+    const anglerLightProxy = {
+        get intensity() { return sf.anglerfishLightIntensity; }, set intensity(v: number) { sf.anglerfishLightIntensity = v; },
+        get distance()  { return sf.anglerfishLightDistance;  }, set distance(v: number)  { sf.anglerfishLightDistance  = v; },
+        get glow()      { return sf.anglerfishLureGlow;       }, set glow(v: number)      { sf.anglerfishLureGlow       = v; },
+        get r()         { return sf.anglerfishLightColor.r;   }, set r(v: number)         { sf.anglerfishLightColor.r   = v; },
+        get g()         { return sf.anglerfishLightColor.g;   }, set g(v: number)         { sf.anglerfishLightColor.g   = v; },
+        get b()         { return sf.anglerfishLightColor.b;   }, set b(v: number)         { sf.anglerfishLightColor.b   = v; },
+        // Offsets are in the FISH's frame (X = its right, Y = up, Z = the way
+        // it faces), so they keep pointing the same way once it turns around.
+        get ox()        { return sf.anglerfishLightOffset.x;  }, set ox(v: number)        { sf.anglerfishLightOffset.x  = v; },
+        get oy()        { return sf.anglerfishLightOffset.y;  }, set oy(v: number)        { sf.anglerfishLightOffset.y  = v; },
+        get oz()        { return sf.anglerfishLightOffset.z;  }, set oz(v: number)        { sf.anglerfishLightOffset.z  = v; },
+    };
+    anglerLightFolder.add(anglerLightProxy, 'intensity', 0, 15,  0.05).name('Intensity').listen();
+    anglerLightFolder.add(anglerLightProxy, 'distance',  0, 15,  0.05).name('Distance').listen();
+    anglerLightFolder.add(anglerLightProxy, 'glow',      0, 10,  0.05).name('Lure Glow').listen();
+    anglerLightFolder.add(anglerLightProxy, 'r',         0,  1,  0.01).name('Color R').listen();
+    anglerLightFolder.add(anglerLightProxy, 'g',         0,  1,  0.01).name('Color G').listen();
+    anglerLightFolder.add(anglerLightProxy, 'b',         0,  1,  0.01).name('Color B').listen();
+    anglerLightFolder.add(anglerLightProxy, 'ox',       -3,  3,  0.01).name('Offset X (right)').listen();
+    anglerLightFolder.add(anglerLightProxy, 'oy',       -3,  3,  0.01).name('Offset Y (up)').listen();
+    anglerLightFolder.add(anglerLightProxy, 'oz',       -3,  3,  0.01).name('Offset Z (forward)').listen();
+    anglerLightFolder.close();
     sfExtrasFolder.close();
 
     // ── Chest ────────────────────────────────────────────────────────────────────
