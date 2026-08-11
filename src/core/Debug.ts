@@ -2233,7 +2233,7 @@ function buildGUI(): void {
                 `// the camera and upward — these are the CONTROL-POINT offsets, so the curve`,
                 `// actually peaks at about half of each value.`,
                 `export const anglerfishTravelDuration = ${f(sf.anglerfishTravelDuration)};  // seconds for the whole crossing`,
-                `export const anglerfishTravelArcZ     = ${f(sf.anglerfishTravelArcZ)};  // toward the camera — keeps it clear of the rocks`,
+                `export const anglerfishTravelArcZ     = ${f(sf.anglerfishTravelArcZ)}; // + bulges toward the camera, − behind the rocks`,
                 `export const anglerfishTravelArcY     = ${f(sf.anglerfishTravelArcY)};  // upward — lifts it over the rock tops`,
                 `export const anglerfishTravelAnimSpeed = ${f(sf.anglerfishTravelAnimSpeed)}; // clip timeScale while crossing (it's working now)`,
                 ``,
@@ -2475,7 +2475,7 @@ function buildGUI(): void {
         swapNow: () => SeaFloorDecor.swapAnglerfishSide(),
     };
     anglerSwapFolder.add(anglerSwapProxy, 'duration',  0.5, 15, 0.05).name('Duration (s)').listen();
-    anglerSwapFolder.add(anglerSwapProxy, 'arcZ',       -8,  8, 0.05).name('Arc Z (to camera)').listen();
+    anglerSwapFolder.add(anglerSwapProxy, 'arcZ',       -8,  8, 0.05).name('Arc Z (+front/−back)').listen();
     anglerSwapFolder.add(anglerSwapProxy, 'arcY',       -4,  6, 0.05).name('Arc Y (rise)').listen();
     anglerSwapFolder.add(anglerSwapProxy, 'animSpeed',   0,  3, 0.01).name('Swim Anim Speed').listen();
     anglerSwapFolder.add(anglerSwapProxy, 'swapNow').name('▶ Swap Sides Now');

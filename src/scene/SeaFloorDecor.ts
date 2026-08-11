@@ -913,7 +913,12 @@ const _anglerScreenPos = new Vector3();
 /** Debug GUI hook: run the crossing on demand, day or night. */
 export function swapAnglerfishSide(): void { _startAnglerfishTravel(true); }
 
-/** Screen-space hit test on the lit bulb. */
+/** Screen-space hit test on the lit bulb.
+ *
+ *  Deliberately the BULB only, never the body: the body spends nearly all its
+ *  time tucked behind a coral rock, so a body-sized target would be a hitbox
+ *  floating over solid rock. The lure is the part that is actually visible and
+ *  the part the interaction is about. */
 function _anglerfishBulbHit(ndcX: number, ndcY: number): boolean {
     if (!_anglerfishCanTravel()) return false;
     _anglerScreenPos.copy(_anglerBulbPos).project(camera);
@@ -921,6 +926,27 @@ function _anglerfishBulbHit(ndcX: number, ndcY: number): boolean {
     if (_anglerScreenPos.z > 1) return false;
     return Math.abs(ndcX - _anglerScreenPos.x) < ANGLER_TAP_HALF_W
         && Math.abs(ndcY - _anglerScreenPos.y) < ANGLER_TAP_HALF_H;
+}
+
+/**
+ * Does the anglerfish's lure own this screen point?
+ *
+ * Exported so the other underwater click targets can stand down near the bulb.
+ * The chest in particular sits right behind it and is raycast against its full
+ * mesh, so without this it swallows most taps aimed at the lure — and opening
+ * the chest yanks the camera into a zoom, which is a much worse thing to
+ * trigger by accident than the reverse. The bulb is a small, precise target
+ * that is only live at night while the fish is out, so giving it first refusal
+ * costs the other props almost nothing.
+ *
+ * Takes client (event) pixels, not NDC, so callers can pass event coords
+ * straight through.
+ */
+export function isAnglerfishBulbAt(clientX: number, clientY: number): boolean {
+    return _anglerfishBulbHit(
+        (clientX / window.innerWidth) * 2 - 1,
+        -(clientY / window.innerHeight) * 2 + 1,
+    );
 }
 
 function _updateAnglerfish(dt: number): void {
@@ -1222,19 +1248,22 @@ function _setupCoralInteraction(): void {
         }
         _coralMouse.x = (e.clientX / window.innerWidth) * 2 - 1;
         _coralMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        // Same precedence as the click handler, so the cursor never promises a
+        // coral where a tap would actually reach the bulb.
+        const overBulb = _anglerfishBulbHit(_coralMouse.x, _coralMouse.y);
         let hitIdx = -1;
-        for (let i = 0; i < 3; i++) {
-            const g = _corals[i];
-            if (!g) continue;
-            if (_coralHit(i, _coralMouse.x, _coralMouse.y)) { hitIdx = i; break; }
+        if (!overBulb) {
+            for (let i = 0; i < 3; i++) {
+                const g = _corals[i];
+                if (!g) continue;
+                if (_coralHit(i, _coralMouse.x, _coralMouse.y)) { hitIdx = i; break; }
+            }
         }
         if (hitIdx !== _hoveredCoralIdx) {
             _hoveredCoralIdx = hitIdx;
             _resetHoverScales();
             if (hitIdx >= 0 && _coralStates[hitIdx]) _coralStates[hitIdx].scaleTarget = 1.15;
         }
-        // The lit anglerfish bulb is clickable too — same cursor affordance.
-        const overBulb = hitIdx < 0 && _anglerfishBulbHit(_coralMouse.x, _coralMouse.y);
         canvas.style.cursor = (hitIdx >= 0 || overBulb) ? 'pointer' : '';
     });
 
@@ -1247,6 +1276,13 @@ function _setupCoralInteraction(): void {
         if (camera.position.y >= UNDERWATER_Y_THRESHOLD) return;
         _coralMouse.x = (clientX / window.innerWidth) * 2 - 1;
         _coralMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+        // Bulb first. The coral targets are deliberately tall (see
+        // CORAL_HIT_HALF_H) and one of them overlaps the lure on screen, so
+        // checking corals first would eat most taps meant for the fish.
+        if (_anglerfishBulbHit(_coralMouse.x, _coralMouse.y)) {
+            _startAnglerfishTravel();
+            return;
+        }
         for (let i = 0; i < 3; i++) {
             const g = _corals[i];
             if (!g) continue;
@@ -1255,12 +1291,38 @@ function _setupCoralInteraction(): void {
                 return;
             }
         }
-        // Tap the lit lure and the fish relocates to the rocks on the far side.
-        if (_anglerfishBulbHit(_coralMouse.x, _coralMouse.y)) _startAnglerfishTravel();
     };
 
     canvas.addEventListener('click', (e: MouseEvent) => onClick(e.clientX, e.clientY));
+
+    // Scroll-gesture guard, mirroring the one Island uses for the chest/apples.
+    // Underwater the whole page scrolls by dragging, so without this every
+    // drag that happens to lift off over a coral or the lure fires it.
+    let touchWasMulti = false;
+    let touchDragged = false;
+    let touchStartX = 0, touchStartY = 0;
+    const TOUCH_DRAG_THRESHOLD_PX = 10;
+
+    canvas.addEventListener('touchstart', (e: TouchEvent) => {
+        if (e.touches.length >= 2) touchWasMulti = true;
+        else if (e.touches.length === 1) {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+            touchDragged = false;
+        }
+    }, { passive: true });
+
+    canvas.addEventListener('touchmove', (e: TouchEvent) => {
+        if (touchWasMulti || e.touches.length !== 1) return;
+        const dx = e.touches[0].clientX - touchStartX;
+        const dy = e.touches[0].clientY - touchStartY;
+        if (Math.sqrt(dx * dx + dy * dy) > TOUCH_DRAG_THRESHOLD_PX) touchDragged = true;
+    }, { passive: true });
+
     canvas.addEventListener('touchend', (e: TouchEvent) => {
+        const wasTap = !touchWasMulti && !touchDragged;
+        if (e.touches.length === 0) { touchWasMulti = false; touchDragged = false; }
+        if (!wasTap) return;
         if (e.changedTouches.length > 0) {
             const t = e.changedTouches[0];
             onClick(t.clientX, t.clientY);
