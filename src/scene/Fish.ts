@@ -198,11 +198,34 @@ const GOLDEN_RATIO_CONJUGATE = 0.618033988749895;
 // moves the jelly's resting height rather than an offset from it, so nothing
 // pulls it back afterwards and a cleared view stays cleared.
 //
-// The drift stops once the jelly is outside this radius of the pointer, so the
-// radius IS the clearance the user gets from one hover — keep it wide enough to
-// actually open a gap.
-const JELLY_DODGE_RADIUS = 0.85;         // world units at the jelly's Z plane
-const JELLY_DODGE_SPEED = 0.5;           // world units/s of drift — a slow ooze
+// The motion is an ACCELERATION toward clear water plus drag, not a fixed
+// speed. Driving the position directly gave the jelly a dead-constant velocity
+// with hard ends — it started and stopped like a lift. Pushing the velocity
+// instead means it eases in as the pointer nears, coasts, and settles by
+// itself, which is the same impulse/damping shape the generic fish already use
+// for their scatter (see AVOIDANCE_STRENGTH / VELOCITY_DAMPING below).
+const JELLY_DODGE_ACCEL = 3.2;           // world units/s² at the centre of the radius
+const JELLY_DODGE_DAMPING = 2.2;         // drag on the drift velocity
+const JELLY_DODGE_MAX_SPEED = 0.9;       // world units/s — keeps it an unhurried drift
+const JELLY_DODGE_MIN_SPEED = 1e-4;      // below this the drift is over; snap to rest
+// Bell lean, so it looks pushed rather than translated. Same sign convention as
+// the fish tilt — these groups share the -π/2 yaw, so rotation.x is the axis
+// that tips the body along its direction of travel.
+const JELLY_DODGE_TILT = 0.55;           // radians of lean per unit/s of drift
+const JELLY_DODGE_MAX_TILT = 0.22;
+const JELLY_DODGE_TILT_SMOOTHING = 3.0;
+
+// Reach. A mouse hovers continuously and can be aimed precisely, so it gets a
+// tight radius. A fingertip gets neither: there is no hover at all, the finger
+// covers the target it is trying to hit, and the whole gesture may be one tap.
+// So touch gets a much wider catchment and a harder shove — this is purely
+// about how EASY it is to trigger, and is deliberately separate from the
+// motion tuning above, which stays identical either way so the jelly always
+// moves with the same weight.
+const JELLY_DODGE_RADIUS = 0.85;         // world units at the jelly's Z plane (mouse)
+const JELLY_DODGE_RADIUS_TOUCH = 1.55;
+const JELLY_DODGE_TOUCH_ACCEL_BOOST = 1.9;
+
 // How far outside its spawn band a jelly may be pushed. Generous enough to
 // fully clear the carousel, bounded so jellies can't be herded off-screen.
 const JELLY_DODGE_RANGE = 1.6;
@@ -210,8 +233,8 @@ const JELLY_DODGE_Y_MIN = JELLY_Y_MIN - JELLY_DODGE_RANGE;
 const JELLY_DODGE_Y_MAX = JELLY_Y_MAX + JELLY_DODGE_RANGE;
 // A tap is a pointerdown/up in a few ms — without a linger the jelly would
 // barely twitch on touch devices. Keep the last touch point "live" for this
-// long so a tap produces the same full dodge a hover does.
-const TOUCH_LINGER_SECONDS = 1.6;
+// long so a single tap produces a full, unhurried drift.
+const TOUCH_LINGER_SECONDS = 2.2;
 
 // Jellyfish bioluminescence settings — DECOUPLED from PointLight intensity.
 // The jelly's own visual glow is driven purely by JELLY_EMISSIVE_INTENSITY *
@@ -320,9 +343,11 @@ interface SwimmingFish {
     floatPhase: number;       // current phase of the sin bob (rad)
     floatSpeed: number;       // rad/s
     floatAmp: number;         // world units
-    // Jellyfish-only: latched pointer-dodge direction (see JELLY_DODGE_*).
-    // The dodge itself moves baseY, so there is no separate offset to track.
+    // Jellyfish-only: pointer dodge (see JELLY_DODGE_*). The dodge moves baseY
+    // directly, so there is no offset to track — but it does so through a
+    // velocity, which is what keeps the motion from reading as a lift.
     dodgeDir: number;         // 0 = disengaged, ±1 = committed up/down
+    dodgeVelY: number;        // world units/s of drift, damped every frame
 }
 
 const fishPool: PooledFish[] = [];       // available (inactive) day fish
@@ -358,6 +383,9 @@ let pointerActive = false;
 // tap is over in milliseconds — without this the jelly dodge would never have
 // time to play out on a phone. Counted down in Update().
 let pointerLinger = 0;
+// Whether the live pointer is a finger. Touch gets a much wider dodge radius
+// and a harder shove — see the JELLY_DODGE_*_TOUCH constants for why.
+let pointerIsTouch = false;
 
 function onPointerMove(e: PointerEvent): void {
     const rect = renderer.domElement.getBoundingClientRect();
@@ -366,6 +394,7 @@ function onPointerMove(e: PointerEvent): void {
         -((e.clientY - rect.top) / rect.height) * 2 + 1
     );
     pointerActive = true;
+    pointerIsTouch = e.pointerType !== 'mouse';
     pointerLinger = 0;
 }
 
@@ -620,6 +649,7 @@ function resetLoopingCreature(entry: PooledFish, slot = 0, slotCount = 1): Swimm
             floatSpeed: JELLY_FLOAT_SPEED_MIN + Math.random() * (JELLY_FLOAT_SPEED_MAX - JELLY_FLOAT_SPEED_MIN),
             floatAmp: JELLY_FLOAT_AMPLITUDE * (0.7 + Math.random() * 0.6),
             dodgeDir: 0,
+            dodgeVelY: 0,
         };
     }
 
@@ -664,6 +694,7 @@ function resetLoopingCreature(entry: PooledFish, slot = 0, slotCount = 1): Swimm
         floatSpeed: 0,
         floatAmp: 0,
         dodgeDir: 0,
+        dodgeVelY: 0,
     };
 }
 
@@ -760,6 +791,7 @@ function seedInitialFish(entry: PooledFish, index: number, total: number): Swimm
         floatSpeed: 0,
         floatAmp: 0,
         dodgeDir: 0,
+        dodgeVelY: 0,
     };
 }
 
@@ -1095,8 +1127,13 @@ export function getDiagState() {
 export function Start(): void {
     // Register pointer tracking
     renderer.domElement.addEventListener('pointermove', onPointerMove);
+    // pointerdown matters for touch: a clean tap can produce no pointermove at
+    // all, so without this a finger that doesn't drag never registers and the
+    // jellies ignore it entirely.
+    renderer.domElement.addEventListener('pointerdown', onPointerMove);
     renderer.domElement.addEventListener('pointerleave', onPointerLeave);
     renderer.domElement.addEventListener('pointerup', onPointerLeave);
+    renderer.domElement.addEventListener('pointercancel', onPointerLeave);
 
     // The patrol reach and the whale's run length are fitted to the viewport, so
     // they have to be refitted when it changes.
@@ -1603,6 +1640,17 @@ export function Update(): void {
             fish.floatPhase += fish.floatSpeed * deltaTime;
             updateJellyDodge(fish, group.position.x, group.position.z, deltaTime);
             group.position.y = fish.baseY + Math.sin(fish.floatPhase) * fish.floatAmp;
+            // Lean the bell along the drift so it reads as being pushed through
+            // water rather than translated. Same axis and sign as the fish
+            // tilt — both groups carry the -π/2 yaw, so rotation.x is the one
+            // that tips the body along its direction of travel.
+            const jellyTilt = MathUtils.clamp(
+                -fish.dodgeVelY * JELLY_DODGE_TILT,
+                -JELLY_DODGE_MAX_TILT, JELLY_DODGE_MAX_TILT,
+            );
+            fish.currentTilt += (jellyTilt - fish.currentTilt)
+                * Math.min(1, JELLY_DODGE_TILT_SMOOTHING * deltaTime);
+            group.rotation.x = fish.currentTilt;
             // Light lives at scene root — sync world position from the group.
             if (fish.pool.light) fish.pool.light.position.copy(group.position);
             continue;
@@ -1661,24 +1709,50 @@ export function Update(): void {
  *
  *  This edits `baseY` — the jelly's resting height — rather than an offset from
  *  it. That is the whole design: there is no spring and no return, so wherever
- *  the user nudges a jelly to is simply where it now lives. It keeps drifting
- *  only while the pointer is still within reach of its CURRENT position, so it
- *  stops the moment it is genuinely clear. */
+ *  the user nudges a jelly to is simply where it now lives.
+ *
+ *  The pointer contributes ACCELERATION, not position. Nothing here sets a
+ *  velocity outright, so the jelly always eases into motion and always coasts
+ *  to a stop under drag — there is no frame where it starts or stops abruptly. */
 function updateJellyDodge(fish: SwimmingFish, x: number, z: number, dt: number): void {
-    if (!pointerActive) { fish.dodgeDir = 0; return; }
+    if (pointerActive) {
+        const radius = pointerIsTouch ? JELLY_DODGE_RADIUS_TOUCH : JELLY_DODGE_RADIUS;
+        const pw = getPointerWorldAtZ(z);
+        const dx = x - pw.x;
+        const dy = fish.baseY - pw.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < radius) {
+            // Direction is latched on first contact so a pointer sitting at
+            // exactly the jelly's height can't make it flip-flop up and down.
+            if (fish.dodgeDir === 0) fish.dodgeDir = dy >= 0 ? 1 : -1;
+            // Full push at the centre, fading to nothing at the rim, so a
+            // pointer sweeping past nudges the jelly instead of shoving it.
+            const falloff = smooth01(1 - dist / radius);
+            const accel = JELLY_DODGE_ACCEL * (pointerIsTouch ? JELLY_DODGE_TOUCH_ACCEL_BOOST : 1);
+            fish.dodgeVelY += fish.dodgeDir * accel * falloff * dt;
+        } else {
+            fish.dodgeDir = 0;
+        }
+    } else {
+        fish.dodgeDir = 0;
+    }
 
-    const pw = getPointerWorldAtZ(z);
-    const dx = x - pw.x;
-    const dy = fish.baseY - pw.y;
-    if (Math.hypot(dx, dy) >= JELLY_DODGE_RADIUS) { fish.dodgeDir = 0; return; }
+    if (fish.dodgeVelY === 0) return;
 
-    // Direction is latched on first contact so a pointer sitting at exactly the
-    // jelly's height can't make it flip-flop up and down.
-    if (fish.dodgeDir === 0) fish.dodgeDir = dy >= 0 ? 1 : -1;
-    fish.baseY = MathUtils.clamp(
-        fish.baseY + fish.dodgeDir * JELLY_DODGE_SPEED * dt,
+    fish.dodgeVelY *= Math.max(0, 1 - JELLY_DODGE_DAMPING * dt);
+    fish.dodgeVelY = MathUtils.clamp(fish.dodgeVelY, -JELLY_DODGE_MAX_SPEED, JELLY_DODGE_MAX_SPEED);
+    // Drag decays geometrically and never quite reaches zero — settle it so the
+    // jelly (and its lean) actually comes to rest.
+    if (Math.abs(fish.dodgeVelY) < JELLY_DODGE_MIN_SPEED) { fish.dodgeVelY = 0; return; }
+
+    const next = MathUtils.clamp(
+        fish.baseY + fish.dodgeVelY * dt,
         JELLY_DODGE_Y_MIN, JELLY_DODGE_Y_MAX,
     );
+    // At the band edge, drop the velocity instead of letting it pile up against
+    // the wall and fling the jelly the moment the pointer leaves.
+    if (next === JELLY_DODGE_Y_MIN || next === JELLY_DODGE_Y_MAX) fish.dodgeVelY = 0;
+    fish.baseY = next;
 }
 
 /** Toggle visibility of all fish groups (GPU-side culling for surface/underwater gating). */
