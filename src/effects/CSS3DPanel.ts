@@ -8,8 +8,8 @@
  *   1. The panel DOM lives in the shared CSS3D scene, rendered BEHIND the WebGL
  *      canvas. It is anchored to a WORLD position and billboards to face the
  *      camera, so it reads as a flat panel floating in the scene.
- *   2. A WebGL "punch" plane with a rounded-rect alpha mask writes (0,0,0,0) +
- *      depth with NoBlending exactly over the panel, so the canvas becomes
+ *   2. A WebGL "punch" plane with a rounded-rect alpha mask dissolves the canvas
+ *      (and writes depth) exactly over the panel, so the canvas becomes
  *      transparent there and the crisp DOM shows through. Because the punch
  *      writes depth, scene geometry BEHIND the panel is occluded while anything
  *      IN FRONT (fish closer to the camera than the plane) draws over it — the
@@ -33,9 +33,11 @@
 
 import { CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer';
 import {
+    AddEquation,
     BufferGeometry,
     CanvasTexture,
     Color,
+    CustomBlending,
     DoubleSide,
     Float32BufferAttribute,
     Group,
@@ -44,7 +46,7 @@ import {
     LinearFilter,
     MathUtils,
     Mesh,
-    NoBlending,
+    OneMinusSrcAlphaFactor,
     PerspectiveCamera,
     PlaneGeometry,
     Raycaster,
@@ -52,6 +54,7 @@ import {
     ShaderMaterial,
     Vector2,
     Vector3,
+    ZeroFactor,
 } from 'three';
 // Runtime-only access inside functions — same import-cycle pattern as
 // CardCarousel/PhoneScreen (see the alias note in Fish.ts).
@@ -173,6 +176,13 @@ export interface PanelOptions {
     /** Draw a thin 3D line in the WebGL scene from the panel's bottom-centre to
      *  a target (its linked model), same colour as the ink. */
     connector?: boolean;
+    /** How hard the punch dissolves the canvas over the panel, 0..1. 1 (default)
+     *  erases it outright — the panel is fully opaque DOM. Lower values leave
+     *  that fraction of the LIVE rendered scene on top of the DOM, so the panel
+     *  reads as tinted glass with the water still moving inside it. Same knob
+     *  the ocean carousel uses on its text ink (INK_PUNCH_TEXT there); the two
+     *  punch materials are deliberately identical. */
+    punchAlpha?: number;
 }
 
 // easeOutBack — the subtle overshoot that gives the open/close a "pop".
@@ -298,8 +308,18 @@ export class CSS3DPanel {
         this.maskTexture.magFilter = LinearFilter;
         this.maskTexture.generateMipmaps = false;
 
+        // The punch DISSOLVES the canvas by mask alpha × uPunch instead of
+        // stencilling it away: blending is dst *= (1 - src.a) on colour AND
+        // alpha, which keeps the premultiplied canvas consistent. At uPunch 1
+        // the destination becomes (0,0,0,0) — bit-for-bit the old NoBlending
+        // hole — and below 1 it keeps that fraction of the rendered scene, which
+        // the browser composites OVER the DOM (see PanelOptions.punchAlpha).
+        // Depth still writes, so the panel's place in the scene is unchanged.
         const mat = new ShaderMaterial({
-            uniforms: { uMask: { value: this.maskTexture } },
+            uniforms: {
+                uMask: { value: this.maskTexture },
+                uPunch: { value: MathUtils.clamp(opts.punchAlpha ?? 1, 0, 1) },
+            },
             vertexShader: /* glsl */`
                 varying vec2 vUv;
                 void main() {
@@ -309,13 +329,23 @@ export class CSS3DPanel {
             `,
             fragmentShader: /* glsl */`
                 uniform sampler2D uMask;
+                uniform float uPunch;
                 varying vec2 vUv;
                 void main() {
-                    if (texture2D(uMask, vUv).a < 0.5) discard;
-                    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+                    float m = texture2D(uMask, vUv).a * uPunch;
+                    // Discard rather than write a no-op: a zero-alpha fragment
+                    // would still write DEPTH and occlude the scene for nothing.
+                    if (m < 0.004) discard;
+                    gl_FragColor = vec4(0.0, 0.0, 0.0, m);
                 }
             `,
-            blending: NoBlending,
+            blending: CustomBlending,
+            blendEquation: AddEquation,
+            blendSrc: ZeroFactor,
+            blendDst: OneMinusSrcAlphaFactor,
+            blendEquationAlpha: AddEquation,
+            blendSrcAlpha: ZeroFactor,
+            blendDstAlpha: OneMinusSrcAlphaFactor,
             transparent: true,
             depthWrite: true,
             depthTest: true,

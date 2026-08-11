@@ -24,9 +24,12 @@
  *   1. The DOM lives in the shared CSS3D scene, rendered BEHIND the WebGL canvas
  *      (Scene.ts adds #css before #webgl).
  *   2. For each title and each card, a WebGL "punch" plane with a per-pixel
- *      alpha MASK writes (0,0,0,0) with NoBlending ONLY where there is ink
- *      (border strokes, glyphs, image boxes), slightly dilated. The canvas
- *      becomes transparent at those pixels and the crisp DOM shows through.
+ *      alpha MASK dissolves the canvas ONLY where there is ink (border strokes,
+ *      glyphs, image boxes), slightly dilated. The canvas becomes transparent at
+ *      those pixels and the crisp DOM shows through. The mask's alpha is the
+ *      punch STRENGTH, not a binary stencil: 1 erases the canvas outright (the
+ *      original all-or-nothing hole), anything less leaves that fraction of the
+ *      rendered scene sitting on top of the DOM — see INK_PUNCH_* below.
  *   3. Card interiors are NOT punched, so the live 3D scene (water, fish behind
  *      the plane) stays visible through the cards — they read as border-only
  *      floating glass frames. Image boxes ARE punched solid, because their DOM
@@ -74,17 +77,21 @@
 
 import { CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer';
 import {
+    AddEquation,
     CanvasTexture,
+    CustomBlending,
     DoubleSide,
     Group,
     LinearFilter,
     MathUtils,
     Mesh,
-    NoBlending,
+    OneMinusSrcAlphaFactor,
     PlaneGeometry,
     Scene as ThreeScene,
     ShaderMaterial,
+    Uniform,
     Vector3,
+    ZeroFactor,
 } from 'three';
 // Runtime-only access (function bodies) — Scene/Control/Fish all sit on the same
 // import cycle this project already uses (see the alias note in Fish.ts).
@@ -160,21 +167,52 @@ const CARD_PAD = 48;                 // card box inset for all content
 // distortion inside the quiet rect (damped to 12% there, so a few px covers it).
 //
 // These are DELIBERATELY MODE-INDEPENDENT. An earlier version widened them at
-// night to give the neon more room, but the hole shows the page background
-// (black — index.html sets it inline), so growing it made a visibly fatter dark
-// outline appear around every letter the moment night fell. The geometry has to
-// hold still; only the DOM glow changes between day and night.
+// night to give the neon more room, but the hole shows whatever is behind the
+// canvas, so growing it made a visibly fatter dark outline appear around every
+// letter the moment night fell. The geometry has to hold still; only the DOM
+// glow changes between day and night.
 const BAND = 12;             // punch band each side of a stroke (card border)
 const LINE_PAD = 8;          // divider-line punch pad
 const RECT_PAD = 6;          // filled-box (image) punch pad
 
 // Text is punched as a generous rounded PILL around each line — the roomy halo
-// the design wants. Nothing is painted into it: the hole shows the page
-// background, and black ink under white letters IS the look. The pads are still
-// written to --oc-pill-x/y on each element for anything that needs to line up
-// with the punched rect.
+// the design wants. The pads are also written to --oc-pill-x/y on each element
+// for anything that needs to line up with the punched rect.
 const PILL_PAD_X = 20;
 const PILL_PAD_Y = 14;
+
+// ── Ink transparency (how hard each kind of ink dissolves the canvas) ─────────
+// The mask's alpha IS the punch strength (see makePunchMaterial): the canvas is
+// multiplied by (1 - alpha) there, so
+//
+//   1.0 → the canvas is erased outright. The pixel is 100% DOM, composited on
+//         whatever paints behind the canvas (--ink-water, see style.css).
+//   0.7 → 30% of the LIVE rendered scene stays on top of the DOM: the ink reads
+//         as tinted glass you can actually see the water move through, instead
+//         of a flat chip of page background.
+//
+// What is behind the plane is still occluded (the punch writes depth), so what
+// shows through is the water/godrays/floor in FRONT of the panel's depth, plus
+// anything nearer to the camera drawn after it. That is the honest limit of the
+// technique: the canvas can only be dissolved, never re-ordered under the DOM.
+//
+// Text pills are the only ink that goes translucent. Structural ink stays at
+// full punch: image boxes ARE the content (a photo at 70% over ink is mud), and
+// the hairline border/divider strokes need every bit of contrast they have.
+const INK_PUNCH_TEXT = 0.72;
+const INK_PUNCH_SOLID = 1.0;
+
+// Master multiplier over every mask, so the whole effect can be dialled from one
+// place (1 = use the per-ink values above, 0 = no punch at all). Shared Uniform
+// instance — every punch material references it, so a write is live everywhere.
+const punchStrengthUniform = new Uniform(1.0);
+
+/** Global ink-transparency scale (0..1) — multiplies every punch. 1 = as
+ *  authored (INK_PUNCH_*), lower = more of the live scene bleeds through all
+ *  the ink at once. Exposed for tuning; nothing calls it in normal play. */
+export function setInkPunchStrength(v: number): void {
+    punchStrengthUniform.value = MathUtils.clamp(v, 0, 1);
+}
 const BTN_PILL_MUL = 0.78;   // tighter pill for a link label, so it reads as a
                              // lit word rather than a slab
 
@@ -319,18 +357,23 @@ function textWidth(text: string, size: number, weight: number, ls: number): numb
     return native ? w : w + ls * text.length;
 }
 
-/** Punch one line of text as a rounded pill around its measured box. `top` is
- *  the block's top edge in canvas px. The DOM paints the same rect via
- *  ::before (--oc-pill-x/y), so the hole is always filled with light. */
-function punchTextPill(
+/** Append one line of text's rounded pill to the CURRENT path (no beginPath, no
+ *  fill). `top` is the block's top edge in canvas px.
+ *
+ *  Callers add every pill of a mask to one path and fill it ONCE at
+ *  INK_PUNCH_TEXT. Filling them individually at a partial alpha would compound
+ *  where two pills overlap (0.72 over 0.72 → 0.92), printing a brighter, harder
+ *  patch between two close lines; a single nonzero-winding fill covers the union
+ *  exactly once. Solid ink already in the mask is safe either way — source-over
+ *  with dst alpha 1 stays at 1. */
+function addTextPillPath(
     ctx: CanvasRenderingContext2D, text: string,
     x: number, top: number, lineH: number,
     size: number, weight: number, ls: number, padX: number, padY: number,
 ): void {
     const w = textWidth(text, size, weight, ls);
     const ph = lineH + 2 * padY;
-    roundRectPath(ctx, x - padX, top - padY, w + 2 * padX, ph, ph / 2);
-    ctx.fill();
+    roundRectSubPath(ctx, x - padX, top - padY, w + 2 * padX, ph, ph / 2);
 }
 
 function wrapText(text: string, size: number, weight: number, ls: number, maxW: number): string[] {
@@ -819,11 +862,20 @@ export function Update(): void {
 // ─── Build ────────────────────────────────────────────────────────────────────
 
 function makePunchMaterial(texture: CanvasTexture): ShaderMaterial {
-    // NoBlending + hard alpha-test discard: fragments on ink write (0,0,0,0) +
-    // depth (the punch), everything else leaves the scene untouched (the
-    // see-through interior).
+    // The punch DISSOLVES the canvas by the mask's alpha instead of stencilling
+    // it away. Blending is dst *= (1 - src.a) on colour AND alpha (Zero /
+    // OneMinusSrcAlpha), which keeps the premultiplied-alpha canvas consistent:
+    // at alpha 1 the destination becomes (0,0,0,0) — bit-for-bit the old
+    // NoBlending hole — and at 0.72 it keeps 28% of the rendered scene, which
+    // the browser then composites OVER the DOM. That residual is the whole
+    // point: the ink stops being a flat chip of page background and becomes
+    // glass with the water still moving inside it.
+    //
+    // Depth still writes, so the front/behind relationship with the fish is
+    // exactly as before. Where two punch planes overlap, the nearer one wins the
+    // depth test rather than both multiplying, so the effect never compounds.
     return new ShaderMaterial({
-        uniforms: { uMask: { value: texture } },
+        uniforms: { uMask: { value: texture }, uPunch: punchStrengthUniform },
         vertexShader: /* glsl */`
             varying vec2 vUv;
             void main() {
@@ -833,13 +885,23 @@ function makePunchMaterial(texture: CanvasTexture): ShaderMaterial {
         `,
         fragmentShader: /* glsl */`
             uniform sampler2D uMask;
+            uniform float uPunch;
             varying vec2 vUv;
             void main() {
-                if (texture2D(uMask, vUv).a < 0.5) discard;
-                gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+                float m = texture2D(uMask, vUv).a * uPunch;
+                // Discard rather than write a no-op: a zero-alpha fragment would
+                // still write DEPTH and occlude the scene for nothing.
+                if (m < 0.004) discard;
+                gl_FragColor = vec4(0.0, 0.0, 0.0, m);
             }
         `,
-        blending: NoBlending,
+        blending: CustomBlending,
+        blendEquation: AddEquation,
+        blendSrc: ZeroFactor,
+        blendDst: OneMinusSrcAlphaFactor,
+        blendEquationAlpha: AddEquation,
+        blendSrcAlpha: ZeroFactor,
+        blendDstAlpha: OneMinusSrcAlphaFactor,
         transparent: true,   // → transparent render list (after opaque fish)
         depthWrite: true,
         depthTest: true,
@@ -1691,8 +1753,14 @@ function getFrustumHalfWidthPx(): number {
 // ─── Punch mask baking ────────────────────────────────────────────────────────
 
 function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
-    const rr = Math.max(0, Math.min(r, w / 2, h / 2));
     ctx.beginPath();
+    roundRectSubPath(ctx, x, y, w, h, r);
+}
+
+/** Same rounded rect, appended to whatever path is already open — lets several
+ *  shapes share one fill (see addTextPillPath). */
+function roundRectSubPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+    const rr = Math.max(0, Math.min(r, w / 2, h / 2));
     ctx.moveTo(x + rr, y);
     ctx.arcTo(x + w, y, x + w, y + h, rr);
     ctx.arcTo(x + w, y + h, x, y + h, rr);
@@ -1709,6 +1777,7 @@ function bakeCardMask(slot: CardSlot): void {
     ctx.fillStyle = '#fff';
     ctx.strokeStyle = '#fff';
     ctx.lineJoin = 'round';
+    ctx.globalAlpha = INK_PUNCH_SOLID;
 
     const off = MASK_MARGIN;
 
@@ -1752,13 +1821,26 @@ function bakeCardMask(slot: CardSlot): void {
                 );
                 ctx.fill();
             }
-        } else {
-            punchTextPill(
-                ctx, b.text, off + b.x, off + b.y, b.lineH,
-                b.size, b.weight, b.ls,
-                PILL_PAD_X * b.padMul, PILL_PAD_Y * b.padMul,
-            );
         }
+    }
+
+    // Text pills last, as ONE path filled ONCE at the translucent ink strength
+    // (see addTextPillPath for why they can't be filled one by one).
+    ctx.beginPath();
+    let hasPill = false;
+    for (const b of slot.blocks) {
+        if (b.kind !== 'text') continue;
+        addTextPillPath(
+            ctx, b.text, off + b.x, off + b.y, b.lineH,
+            b.size, b.weight, b.ls,
+            PILL_PAD_X * b.padMul, PILL_PAD_Y * b.padMul,
+        );
+        hasPill = true;
+    }
+    if (hasPill) {
+        ctx.globalAlpha = INK_PUNCH_TEXT;
+        ctx.fill();
+        ctx.globalAlpha = 1;
     }
 
     slot.maskTexture.needsUpdate = true;
@@ -1783,11 +1865,16 @@ function bakeTabMasks(): void {
         if (!ctx) continue;
         ctx.clearRect(0, 0, cw, ch);
         ctx.fillStyle = '#fff';
-        punchTextPill(
+        // One pill, so a plain alpha fill can't compound with anything.
+        ctx.globalAlpha = INK_PUNCH_TEXT;
+        ctx.beginPath();
+        addTextPillPath(
             ctx, text(TABS[i].label),
             (cw - tab.textW) / 2, (ch - TAB_LINE_H) / 2, TAB_LINE_H,
             TAB_SIZE, TAB_WEIGHT, TAB_LS, PILL_PAD_X, PILL_PAD_Y,
         );
+        ctx.fill();
+        ctx.globalAlpha = 1;
         tab.maskTexture.needsUpdate = true;
     }
 }

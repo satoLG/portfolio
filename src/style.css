@@ -203,11 +203,30 @@ body
     font-family: 'Wotfard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
     touch-action: none;
     user-select: none;
-    background: #0a1628;  /* Dark blue background to prevent white blur edges */
+
+    /* --ink-water: THE COLOUR OF EVERY PUNCHED HOLE.
+       The CSS3D layers sit behind the WebGL canvas, so the only place the page
+       background is ever seen is through the alpha holes the punch planes cut
+       in that canvas — overwhelmingly the ocean carousel's ink (its text pills,
+       card border band, dividers). It used to be pure black (an inline style on
+       <body> in index.html, which beat the rule here and made these two values
+       dead code), which is why the ink read as a black chip stamped over the
+       water instead of ink IN the water.
+
+       The values below are the water's own colour family: the underwater view
+       is roughly exp((camY - MAX_VIEW_DEPTH*DENSITY) * oceanAbsorption) * _Light
+       (OceanShaders volumeFragment) mixed 35% toward underwaterTintColor
+       (PostProcess), which lands near rgb(9,36,53) at night and rgb(21,88,114)
+       by day around the depth the carousel lives at. Ink is deliberately a
+       touch deeper than that so white letters still carry — this is the one
+       knob to nudge if the ink reads too light or too dark against the water.
+       Keep the night value in sync with the inline fallback in index.html. */
+    --ink-water: #0a2338;
+    background: var(--ink-water);
 }
 
 body.day-mode {
-    background: #1a5a8a;  /* Lighter blue for day mode */
+    --ink-water: #155872;
 }
 
 /* ============================================
@@ -2954,10 +2973,11 @@ body.day-mode .css3d-panel-content .ct-body {
    outside a punched region is simply never seen — so glows here are free to
    overflow.
    Each line of text is punched as a roomy rounded PILL (PILL_PAD_X/Y in
-   CardCarousel.ts). A hole shows whatever is behind the canvas — the page
-   background, which is black — so every pill needs something painted into it or
-   it reads as a dark chip. That is the ::before pool below: it fills exactly the
-   punched rect, driven by the same --oc-pill-x/y the mask was baked from.
+   CardCarousel.ts). Two things fill that pill now, and neither is a painted DOM
+   fill: the punch is only PARTIAL over text (INK_PUNCH_TEXT), so a slice of the
+   live rendered scene stays on top of the DOM, and what it lands on is
+   --ink-water rather than the old black page background. Between them the pill
+   reads as ink floating in the water instead of a hole cut out of it.
 
    THE PUNCH GEOMETRY IS IDENTICAL IN BOTH MODES. Only the light changes: neon
    at night, a plain water-toned fill by day. An earlier version widened the
@@ -3065,12 +3085,13 @@ body.night-mode .ocean-carousel {
     text-shadow: var(--oc-ink-glow);
 }
 
-/* NOTHING is painted behind a line of text. The punched pill shows the page
-   background — black — and that IS the look: black ink, white letters. An
-   earlier version pooled a water tone into the pill so it would read as light
-   rather than a hole; that is the pale smudge under every line, and it is gone
-   on purpose. --oc-pill-x/y still drive the mask; they just have no fill to
-   line up with any more. */
+/* NOTHING is painted behind a line of text, and nothing should be: an earlier
+   version pooled a water tone into the pill via ::before, and that is the pale
+   smudge under every line — a second, flat rectangle of colour that had to
+   register perfectly with the punch and never quite did. The ink's colour comes
+   from the two layers that need no registration at all: --ink-water behind the
+   canvas, and the live scene the partial punch leaves in front of it.
+   --oc-pill-x/y still drive the mask; they just have no fill to line up with. */
 
 .ocean-card .oc-line {
     position: absolute;
