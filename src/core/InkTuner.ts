@@ -13,10 +13,15 @@
  *              opaque ink, lower = more of the live scene left sitting on top.
  *   • ALL    — instant master multiplier over it (no mask re-bake), for
  *              sweeping the whole effect to feel the range.
- *   • WATER  — --ink-water, the colour every fully-punched pixel lands on.
- *   • CARD DAY — --oc-panel in DAY mode: the fill of the carousel's cards and
- *              title pills. Scoped to day only (see applyDayPanel), so night is
- *              never touched no matter what is stored.
+ *   • WATER N — --ink-water-night, the colour a fully-punched pixel lands on
+ *              at night.
+ *   • CARD DAY — --oc-panel-day: the carousel cards' and title pills' fill at
+ *              midday.
+ *
+ * Both pickers write ENDPOINTS, never the live value. The live --ink-water and
+ * --oc-panel are mixed between their day and night endpoints off
+ * --day-night-blend (style.css), so pinning the mixed value would freeze the
+ * transition the blend exists to produce.
  *   • GLASS  — strength of the lit pane in front of the media player, and how
  *              rough it is.
  *   • PLAYER — how see-through the media player panel is (1 = opaque). Zoom the
@@ -38,7 +43,7 @@ import { setPlayerPanelPunch } from './MediaPlayer';
 // Versioned: the shipping defaults changed after the first round of tuning, and
 // a stored value from that round would silently win over the new default on the
 // very phone the change was made for. Bump this whenever a default moves.
-const STORE_KEY = 'ink-tuner-v8';
+const STORE_KEY = 'ink-tuner-v9';
 
 interface TunerState {
     card: number;
@@ -64,38 +69,42 @@ function store(state: TunerState): void {
     } catch { /* private mode — tuning just won't survive a reload */ }
 }
 
-// Day-mode --oc-panel as authored in style.css. Duplicated here because
-// getComputedStyle can only report the mode that is currently active, and the
-// tuner has to open with the right swatch while it is night. Keep in sync with
-// the .ocean-carousel rule.
-const DAY_PANEL_DEFAULT = '#1e617a';
-
-/** Scope a day-mode panel colour into the document as a real CSS rule rather
- *  than an inline style on <body>. Inline would beat BOTH mode rules at once —
- *  the bug --ink-water hit, where a value pinned at load froze whichever mode
- *  was active and the day/night swap stopped reaching the ink. A rule keyed on
- *  body.day-mode simply does not match at night. */
-let _dayPanelStyle: HTMLStyleElement | null = null;
-function applyDayPanel(hex: string): void {
-    if (!_dayPanelStyle) {
-        _dayPanelStyle = document.createElement('style');
-        _dayPanelStyle.id = 'ink-tuner-day-panel';
-        document.head.appendChild(_dayPanelStyle);
+/** Override endpoint custom properties on <body> as a real stylesheet rule.
+ *
+ *  Endpoints, never the live value. --ink-water and --oc-panel are mixed
+ *  between their day/night endpoints off --day-night-blend, so writing the
+ *  mixed property would pin it and kill the very transition it feeds. Writing
+ *  the endpoint flows through the mix and keeps moving with the sky.
+ *
+ *  A rule rather than an inline style for the same reason as before: inline on
+ *  <body> beats every mode-keyed rule at once, which is how --ink-water once
+ *  froze whichever mode was active at load. Same specificity as the stylesheet
+ *  and later in the document, so it wins without out-ranking anything. */
+const _endpoints: Record<string, string> = {};
+let _endpointStyle: HTMLStyleElement | null = null;
+function applyEndpoint(name: string, hex: string): void {
+    _endpoints[name] = hex;
+    if (!_endpointStyle) {
+        _endpointStyle = document.createElement('style');
+        _endpointStyle.id = 'ink-tuner-endpoints';
+        document.head.appendChild(_endpointStyle);
     }
-    _dayPanelStyle.textContent = `body.day-mode .ocean-carousel { --oc-panel: ${hex}; }`;
+    const decls = Object.entries(_endpoints).map(([k, v]) => `${k}: ${v};`).join(' ');
+    _endpointStyle.textContent = `body { ${decls} }`;
 }
 
-/** Current --ink-water for the active day/night mode, as #rrggbb. The stylesheet
- *  authors it per mode, so read it back rather than hard-coding a default. */
-function currentWater(): string {
-    const v = getComputedStyle(document.body).getPropertyValue('--ink-water').trim();
+/** An endpoint's authored value, as #rrggbb. Read from the live cascade rather
+ *  than duplicated here — endpoints are mode-independent, so this is correct
+ *  whichever mode happens to be active when the tuner opens. */
+function readEndpoint(name: string, fallback: string): string {
+    const v = getComputedStyle(document.body).getPropertyValue(name).trim();
     if (/^#[0-9a-f]{6}$/i.test(v)) return v;
     const m = v.match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
     if (m) {
         const hex = (n: string) => (+n).toString(16).padStart(2, '0');
         return `#${hex(m[1])}${hex(m[2])}${hex(m[3])}`;
     }
-    return '#0a2338';
+    return fallback;
 }
 
 export function mountInkTuner(): void {
@@ -103,20 +112,16 @@ export function mountInkTuner(): void {
 
     const stored = readStored();
     const punch = getInkPunch();
-    // --ink-water is authored PER MODE in style.css. Writing it inline on <body>
-    // beats both rules at once, so a value pinned at mount freezes whichever
-    // mode happened to be active then and the day/night swap silently stops
-    // working for the ink. Only pin it once the picker is actually used.
+    // An untouched tuner must not echo the stylesheet's own values back at it:
+    // editing style.css and forgetting a copy here would then silently do
+    // nothing. Endpoints are only overridden once their picker is used.
     let waterTouched = stored.water !== undefined;
-    // Same rule for the day panel: an untouched tuner must not inject
-    // DAY_PANEL_DEFAULT over the stylesheet, or editing style.css and
-    // forgetting the copy here would silently do nothing.
     let dayPanelTouched = stored.cardDay !== undefined;
     const state: TunerState = {
         card: stored.card ?? punch,
-        cardDay: stored.cardDay ?? DAY_PANEL_DEFAULT,
+        cardDay: stored.cardDay ?? readEndpoint('--oc-panel-day', '#1e617a'),
         all: stored.all ?? 1,
-        water: stored.water ?? currentWater(),
+        water: stored.water ?? readEndpoint('--ink-water-night', '#0a2338'),
         glass: stored.glass ?? 0.20,
         glassRough: stored.glassRough ?? 0.30,
         player: stored.player ?? 0.80,
@@ -179,7 +184,7 @@ export function mountInkTuner(): void {
                 <input type="range" data-k="all" min="0" max="1" step="0.01">
             </label>
             <label>
-                <span class="it-row"><span>WATER</span><span class="it-val" data-val="water"></span></span>
+                <span class="it-row"><span>WATER N</span><span class="it-val" data-val="water"></span></span>
                 <input type="color" data-k="water">
             </label>
             <label>
@@ -221,15 +226,10 @@ export function mountInkTuner(): void {
         setInkPunchStrength(state.all);
         setGlassParams(state.glass, state.glassRough);
         setPlayerPanelPunch(state.player);
-        if (dayPanelTouched) applyDayPanel(state.cardDay);
-        else state.cardDay = DAY_PANEL_DEFAULT;
-        if (waterTouched) {
-            document.body.style.setProperty('--ink-water', state.water);
-        } else {
-            // Untouched: leave the stylesheet in charge and just mirror what it
-            // is currently serving, so the readout matches the live mode.
-            state.water = currentWater();
-        }
+        if (dayPanelTouched) applyEndpoint('--oc-panel-day', state.cardDay);
+        else state.cardDay = readEndpoint('--oc-panel-day', state.cardDay);
+        if (waterTouched) applyEndpoint('--ink-water-night', state.water);
+        else state.water = readEndpoint('--ink-water-night', state.water);
         for (const el of vals) {
             const k = el.dataset.val as keyof TunerState;
             el.textContent = typeof state[k] === 'number' ? (state[k] as number).toFixed(2) : String(state[k]);
@@ -255,15 +255,14 @@ export function mountInkTuner(): void {
         try { localStorage.removeItem(STORE_KEY); } catch { /* ignore */ }
         waterTouched = false;
         dayPanelTouched = false;
-        _dayPanelStyle?.remove();
-        _dayPanelStyle = null;
+        for (const k of Object.keys(_endpoints)) delete _endpoints[k];
+        _endpointStyle?.remove();
+        _endpointStyle = null;
         state.card = 0.85;
-        state.cardDay = DAY_PANEL_DEFAULT;
         state.all = 1;
         state.glass = 0.20;
         state.glassRough = 0.30;
         state.player = 0.80;
-        document.body.style.removeProperty('--ink-water');
         apply(false);
     });
 

@@ -227,13 +227,91 @@ body
        derived. Day ink is a touch deeper and less saturated than the water
        around it, which is what keeps white letters carrying on a phone
        outdoors; matching the water exactly makes the letters float.
-       Keep the night value in sync with the inline fallback in index.html. */
-    --ink-water: #0a2338;
+       Keep the night value in sync with the inline fallback in index.html.
+
+       The two endpoints are authored here and the LIVE value is mixed between
+       them further down, off --day-night-blend, so the ink drifts with the sky
+       instead of snapping when the mode class flips. */
+    --ink-water-night: #0a2338;
+    --ink-water-day: #2a6a8c;
+
+    /* Fallback: the instant swap, for anything without color-mix(). The blended
+       rules below override this where it is supported. */
+    --ink-water: var(--ink-water-night);
     background: var(--ink-water);
 }
 
 body.day-mode {
-    --ink-water: #2a6a8c;
+    --ink-water: var(--ink-water-day);
+}
+
+/* ── Day/night colour blending ───────────────────────────────────────────────
+   The sky does not cut from day to night, it eases: Skybox holds a 0..1 blend
+   and UI.ts publishes it as --day-night-blend on the root every time it moves.
+   Anything that swaps on the body.day-mode / body.night-mode class instead
+   snaps mid-ease, which reads as a flicker against a sky that is still moving.
+
+   These surfaces ride the blend itself. Endpoints are authored as
+   --<name>-day / --<name>-night above; the live value is mixed here. Note the
+   mix runs toward NIGHT, because the blend is 0 = day, 1 = night.
+
+   Gated on @supports so the class-keyed rules above stay as the fallback: an
+   unsupported color-mix() would make the custom property invalid at computed
+   value time, and background: var(--oc-panel) would then resolve to nothing at
+   all — a card with no fill. Better to snap than to vanish. */
+@supports (color: color-mix(in srgb, red, blue)) {
+    /* Both selectors, one rule: body.day-mode also needs the mix, and
+       `--ink-water: var(--ink-water)` would be a cycle, not an inheritance. */
+    body, body.day-mode {
+        --ink-water: color-mix(in srgb,
+            var(--ink-water-night) calc(var(--day-night-blend, 0) * 100%),
+            var(--ink-water-day));
+    }
+}
+
+/* ── Carousel panel palette ──────────────────────────────────────────────────
+   Authored on <body> rather than on .ocean-carousel so the blended values can
+   be written once and inherit in. A rule matching .ocean-carousel directly
+   would beat anything inherited, which is what makes the endpoints live here.
+
+   Day panel is a mid teal-blue picked against the real water, not a neutral
+   grey — the card belongs to what it floats in (settled from the ink tuner's
+   CARD DAY picker). It is dark enough that the type has to be LIGHT by day too:
+   --text-color-day (#0a2540) on that fill lands around 2.3:1, unreadable. That
+   is the only reason day and night share a type colour — the panel choice made
+   day a dark surface. */
+body {
+    --oc-panel-day: #1e617a;
+    --oc-panel-night: rgb(20, 40, 60);
+    --oc-text-day: rgba(255, 255, 255, 0.94);
+    --oc-text-night: rgba(255, 255, 255, 0.92);
+    --oc-hairline-day: rgba(255, 255, 255, 0.42);
+    --oc-hairline-night: rgba(255, 255, 255, 0.5);
+
+    /* Fallback — instant swap (see the @supports note above). */
+    --oc-panel: var(--oc-panel-day);
+    --oc-text: var(--oc-text-day);
+    --oc-hairline: var(--oc-hairline-day);
+}
+
+body.night-mode {
+    --oc-panel: var(--oc-panel-night);
+    --oc-text: var(--oc-text-night);
+    --oc-hairline: var(--oc-hairline-night);
+}
+
+@supports (color: color-mix(in srgb, red, blue)) {
+    body, body.night-mode {
+        --oc-panel: color-mix(in srgb,
+            var(--oc-panel-night) calc(var(--day-night-blend, 0) * 100%),
+            var(--oc-panel-day));
+        --oc-text: color-mix(in srgb,
+            var(--oc-text-night) calc(var(--day-night-blend, 0) * 100%),
+            var(--oc-text-day));
+        --oc-hairline: color-mix(in srgb,
+            var(--oc-hairline-night) calc(var(--day-night-blend, 0) * 100%),
+            var(--oc-hairline-day));
+    }
 }
 
 /* ============================================
@@ -3020,18 +3098,6 @@ body.day-mode .css3d-panel-content .ct-body {
 
     /* Day panel: light grey slab, marine-blue type — .settings-panel's day
        tone. Night overrides all three below. */
-    /* Day panel: a mid teal-blue picked against the real water, not a neutral
-       grey — the card belongs to what it floats in. Settled from the ink
-       tuner's CARD DAY picker.
-
-       It is dark enough that the type has to be LIGHT here, same as at night:
-       --text-color-day (#0a2540) on this fill lands around 2.3:1, which is not
-       readable. That is the only reason day and night share a type colour now —
-       the panel choice made day a dark surface. */
-    --oc-panel: #1e617a;
-    --oc-text: rgba(255, 255, 255, 0.94);
-    --oc-hairline: rgba(255, 255, 255, 0.42);
-
     /* Day: no neon on the letters — they stay plain white on the panel. */
     --oc-ink-glow: none;
     --oc-line-glow: 0 0 calc(2.5px * var(--oc-ss)) rgba(170, 210, 240, 0.55);
@@ -3041,10 +3107,6 @@ body.day-mode .css3d-panel-content .ct-body {
 }
 
 body.night-mode .ocean-carousel {
-    --oc-panel: rgb(20, 40, 60);
-    --oc-text: rgba(255, 255, 255, 0.92);
-    --oc-hairline: rgba(255, 255, 255, 0.5);
-
     /* Night: the neon. Stacked radii — near layers saturate the pill around the
        glyphs, wide ones give the bloom that lands on the card frame. */
     --oc-ink-glow:
