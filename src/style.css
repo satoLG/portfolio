@@ -2989,12 +2989,16 @@ body.day-mode .css3d-panel-content .ct-body {
    per-pixel alpha holes punched by the carousel's mask planes. Whatever paints
    outside a punched region is simply never seen — so glows here are free to
    overflow.
-   Each line of text is punched as a roomy rounded PILL (PILL_PAD_X/Y in
-   CardCarousel.ts). Two things fill that pill now, and neither is a painted DOM
-   fill: the punch is only PARTIAL over text (INK_PUNCH_TEXT), so a slice of the
-   live rendered scene stays on top of the DOM, and what it lands on is
-   --ink-water rather than the old black page background. Between them the pill
-   reads as ink floating in the water instead of a hole cut out of it.
+   A card is punched as ONE rounded slab and a title as ONE pill, both at
+   inkPunch (0.80 — the media player's exact value). The DOM paints an opaque
+   panel underneath in --oc-panel, and the 20% the punch leaves behind is the
+   LIVE SCENE, so both read as sheets of tinted glass with fish moving behind
+   them. Palette is the settings menu's, same as the media player: dark slate
+   and white at night, light grey and marine blue by day.
+
+   The panel fills are OPAQUE on purpose. A DOM alpha here would reveal
+   --ink-water behind the canvas, not the scene; transparency is the punch's job
+   and the punch's alone, so there is exactly one thing to tune.
 
    THE PUNCH GEOMETRY IS IDENTICAL IN BOTH MODES. Only the light changes: neon
    at night, a plain water-toned fill by day. An earlier version widened the
@@ -3014,9 +3018,13 @@ body.day-mode .css3d-panel-content .ct-body {
        punch mask was baked from. Fallback 4 keeps this stylesheet standalone. */
     --oc-ss: 4;
 
-    /* Day: no neon on the letters — they stay plain white on the bare punched
-       pill, which shows the page background. Black ink, white letters, nothing
-       pooled behind them. */
+    /* Day panel: light grey slab, marine-blue type — .settings-panel's day
+       tone. Night overrides all three below. */
+    --oc-panel: rgb(212, 212, 212);
+    --oc-text: var(--text-color-day);
+    --oc-hairline: rgba(10, 37, 64, 0.45);
+
+    /* Day: no neon on the letters — they stay plain marine blue on the panel. */
     --oc-ink-glow: none;
     --oc-line-glow: 0 0 calc(2.5px * var(--oc-ss)) rgba(170, 210, 240, 0.55);
     --oc-frame-shadow:
@@ -3025,6 +3033,10 @@ body.day-mode .css3d-panel-content .ct-body {
 }
 
 body.night-mode .ocean-carousel {
+    --oc-panel: rgb(20, 40, 60);
+    --oc-text: rgba(255, 255, 255, 0.92);
+    --oc-hairline: rgba(255, 255, 255, 0.5);
+
     /* Night: the neon. Stacked radii — near layers saturate the pill around the
        glyphs, wide ones give the bloom that lands on the card frame. */
     --oc-ink-glow:
@@ -3051,7 +3063,7 @@ body.night-mode .ocean-carousel {
     top: 0;
     white-space: nowrap;
     text-align: center;
-    color: #fff;
+    color: var(--oc-text);
     font-family: 'Wotfard', ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     will-change: transform;
@@ -3064,12 +3076,29 @@ body.night-mode .ocean-carousel {
 .ocean-tab.is-dimmed { opacity: 0.52; }
 .ocean-tab.is-active { opacity: 1; }
 
+/* The pill, filled. Its insets come from --oc-pill-x/y, which CardCarousel
+   writes from the very pads it baked into the mask, so the paint and the hole
+   are one measurement and cannot drift. z-index:-1 puts it behind the glyphs
+   inside the tab's own stacking context (created by will-change: transform). */
+.ocean-tab::before {
+    content: '';
+    position: absolute;
+    left: calc(-1 * var(--oc-pill-x, 20px));
+    right: calc(-1 * var(--oc-pill-x, 20px));
+    top: calc(-1 * var(--oc-pill-y, 14px));
+    bottom: calc(-1 * var(--oc-pill-y, 14px));
+    border-radius: 999px;
+    background: var(--oc-panel);
+    z-index: -1;
+    pointer-events: none;
+}
+
 .ocean-tab-underline {
     position: absolute;
     left: 0;
     top: 0;
     transform-origin: 50% 50%;
-    background: rgba(255, 255, 255, 0.7);
+    background: var(--oc-hairline);
     box-shadow: var(--oc-line-glow);
     will-change: transform;
     pointer-events: none;
@@ -3085,9 +3114,9 @@ body.night-mode .ocean-carousel {
        this pivot in CardCarousel.updateCards(). */
     transform-origin: 50% 0%;
     border-style: solid;
-    border-color: rgba(255, 255, 255, 0.92);
-    background: transparent;   /* interior stays unpunched → live 3D scene */
-    color: #fff;
+    border-color: var(--oc-hairline);
+    background: var(--oc-panel);   /* opaque — see-through is the punch's job */
+    color: var(--oc-text);
     font-family: 'Wotfard', ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     will-change: transform, opacity;
@@ -3098,23 +3127,22 @@ body.night-mode .ocean-carousel {
 .ocean-card .oc-blk {
     position: absolute;
     white-space: nowrap;
-    color: #fff;
+    color: var(--oc-text);
     text-shadow: var(--oc-ink-glow);
 }
 
-/* NOTHING is painted behind a line of text, and nothing should be: an earlier
-   version pooled a water tone into the pill via ::before, and that is the pale
-   smudge under every line — a second, flat rectangle of colour that had to
-   register perfectly with the punch and never quite did. The ink's colour comes
-   from the two layers that need no registration at all: --ink-water behind the
-   canvas, and the live scene the partial punch leaves in front of it.
-   --oc-pill-x/y still drive the mask; they just have no fill to line up with. */
+/* NOTHING is painted behind a line of text INSIDE a card, and nothing should
+   be: the card itself is the panel now, so a per-line pool would be a second
+   flat rectangle sitting on top of it — the pale smudge under every line that
+   an earlier version had. The tab titles are the exception above, because they
+   float on their own with no card to sit on. --oc-pill-x/y still drive the card
+   mask's old per-line geometry only as far as the hit padding goes. */
 
 .ocean-card .oc-line {
     position: absolute;
     height: calc(2px * var(--oc-ss));   /* overridden inline — kept as fallback */
     border-radius: calc(2px * var(--oc-ss));
-    background: rgba(255, 255, 255, 0.5);
+    background: var(--oc-hairline);
     box-shadow: var(--oc-line-glow);
 }
 
@@ -3185,7 +3213,7 @@ body.night-mode .ocean-carousel {
    ink language as the card frame: an outline with the initials inside. */
 .ocean-card .oc-mono {
     border-style: solid;
-    border-color: rgba(255, 255, 255, 0.72);
+    border-color: var(--oc-hairline);
     background: transparent;
     box-shadow: var(--oc-frame-shadow);
 }

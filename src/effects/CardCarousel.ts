@@ -29,11 +29,12 @@
  *      those pixels and the crisp DOM shows through. The mask's alpha is the
  *      punch STRENGTH, not a binary stencil: 1 erases the canvas outright (the
  *      original all-or-nothing hole), anything less leaves that fraction of the
- *      rendered scene sitting on top of the DOM — see inkPunchText below.
- *   3. Card interiors are NOT punched, so the live 3D scene (water, fish behind
- *      the plane) stays visible through the cards — they read as border-only
- *      floating glass frames. Image boxes ARE punched solid, because their DOM
- *      is the thing you're meant to see.
+ *      rendered scene sitting on top of the DOM — see inkPunch below.
+ *   3. A card is punched as ONE rounded slab at inkPunch, not traced around its
+ *      ink. The DOM paints an opaque panel and the partial punch leaves the
+ *      rest of the live scene on top of it, so the whole card reads as a single
+ *      sheet of tinted glass with fish moving behind it — rather than a frame
+ *      with holes cut around each line.
  *   4. The punch planes write depth: WebGL objects BEHIND the plane are occluded
  *      at ink pixels (fish swim behind the borders), while objects IN FRONT are
  *      drawn over the holes (fish swim over the cards). NOTE: the punch group
@@ -171,9 +172,9 @@ const CARD_PAD = 48;                 // card box inset for all content
 // canvas, so growing it made a visibly fatter dark outline appear around every
 // letter the moment night fell. The geometry has to hold still; only the DOM
 // glow changes between day and night.
-const BAND = 12;             // punch band each side of a stroke (card border)
-const LINE_PAD = 8;          // divider-line punch pad
-const RECT_PAD = 6;          // filled-box (image) punch pad
+// BAND is now the only one left: the card is punched as a single slab reaching
+// BAND past its border, so there is no per-divider or per-image punch to pad.
+const BAND = 12;             // punch dilation past the card's border
 
 // Text is punched as a generous rounded PILL around each line — the roomy halo
 // the design wants. The pads are also written to --oc-pill-x/y on each element
@@ -196,29 +197,25 @@ const PILL_PAD_Y = 14;
 // anything nearer to the camera drawn after it. That is the honest limit of the
 // technique: the canvas can only be dissolved, never re-ordered under the DOM.
 //
-// SHIPPING VALUE: both at 1 — the ink is opaque and the punch is the original
-// all-or-nothing hole, bit for bit. Translucent ink was tried against the real
-// water and lost: what shows through is worth less than the legibility it costs,
-// and it drags a rendering-order constraint behind it (Scene.ts,
-// getUnderwaterTransparentTargets — the punch must draw AFTER the creatures to
-// see any of them, which at full punch would erase the ones in front instead).
-// The machinery stays because it is inert at 1 and one number brings it back.
-let inkPunchText = 1.0;
-let inkPunchSolid = 1.0;
+// One number, and it is the media player's (PLAYER_PUNCH in MediaPlayer.ts):
+// card and title pill alike dissolve the canvas by this much, leaving the rest
+// of the LIVE SCENE sitting on top of the DOM. It only reads as glass because
+// the punch now runs in the post-ocean pass — see the long note in
+// Scene.getUnderwaterTransparentTargets. Before that move the ink was
+// technically transparent onto a flat field of fog and showed nothing.
+let inkPunch = 0.80;
 
-/** Current ink punch strengths (text, solid) — 1 = opaque ink, 0 = no punch. */
-export function getInkPunch(): { text: number; solid: number } {
-    return { text: inkPunchText, solid: inkPunchSolid };
+/** Current ink punch strength — 1 = opaque ink, 0 = no punch. */
+export function getInkPunch(): number {
+    return inkPunch;
 }
 
-/** Set how hard each kind of ink dissolves the canvas and re-bake every live
- *  mask. Cheap enough to drive from a slider: a handful of 2D canvas fills plus
- *  a texture upload per card on screen. */
-export function setInkPunch(text: number, solid: number): void {
-    inkPunchText = MathUtils.clamp(text, 0, 1);
-    inkPunchSolid = MathUtils.clamp(solid, 0, 1);
+/** Set how hard the ink dissolves the canvas and re-bake every live mask. Cheap
+ *  enough to drive from a slider: one 2D canvas fill plus a texture upload per
+ *  card on screen. */
+export function setInkPunch(v: number): void {
+    inkPunch = MathUtils.clamp(v, 0, 1);
     bakeTabMasks();
-    bakeUnderlineMask();
     for (const slot of cards) {
         if (slot.blocks && slot.built) bakeCardMask(slot);
     }
@@ -384,7 +381,7 @@ function textWidth(text: string, size: number, weight: number, ls: number): numb
  *  fill). `top` is the block's top edge in canvas px.
  *
  *  Callers add every pill of a mask to one path and fill it ONCE at
- *  inkPunchText. Filling them individually at a partial alpha would compound
+ *  inkPunch. Filling them individually at a partial alpha would compound
  *  where two pills overlap (0.72 over 0.72 → 0.92), printing a brighter, harder
  *  patch between two close lines; a single nonzero-winding fill covers the union
  *  exactly once. Solid ink already in the mask is safe either way — source-over
@@ -1407,7 +1404,9 @@ function updateUnderline(fit: number): void {
         return;
     }
     underlineEl.style.display = '';
-    underlineMesh.visible = true;
+    // Mesh stays hidden — the title pill's punch already covers the underline
+    // (see bakeUnderlineMask). Only the DOM element moves.
+    underlineMesh.visible = false;
 
     const cx = underlineX;
     const cy = active.cy + TAB_UNDERLINE_DY * fit;
@@ -1798,72 +1797,27 @@ function bakeCardMask(slot: CardSlot): void {
 
     ctx.clearRect(0, 0, slot.maskCanvas.width, slot.maskCanvas.height);
     ctx.fillStyle = '#fff';
-    ctx.strokeStyle = '#fff';
-    ctx.lineJoin = 'round';
-    ctx.globalAlpha = inkPunchSolid;
 
-    const off = MASK_MARGIN;
-
-    // Border band — stroke centred on the card border line, fat enough to
-    // reveal the DOM box-shadow glow on both sides.
-    roundRectPath(ctx, off + 1, off + 1, CARD_W - 2, CARD_H - 2, CARD_RADIUS - 1);
-    ctx.lineWidth = BORDER_PX + 2 * BAND;
-    ctx.stroke();
-
-    for (const b of slot.blocks) {
-        if (b.kind === 'line') {
-            roundRectPath(
-                ctx,
-                off + b.x - LINE_PAD, off + b.y - LINE_PAD,
-                b.w + 2 * LINE_PAD, b.h + 2 * LINE_PAD,
-                LINE_PAD + 1,
-            );
-            ctx.fill();
-        } else if (b.kind === 'icons') {
-            // ONE pill for the whole row — the glyphs sit inside it, so the row
-            // reads as a bar of ink instead of a string of separate holes.
-            roundRectPath(
-                ctx,
-                off + b.x - RECT_PAD, off + b.y - RECT_PAD,
-                b.w + 2 * RECT_PAD, b.h + 2 * RECT_PAD,
-                (b.h + 2 * RECT_PAD) / 2,
-            );
-            ctx.fill();
-        } else if (b.kind === 'rect') {
-            if (b.stroke > 0) {
-                roundRectPath(ctx, off + b.x, off + b.y, b.w, b.h, b.radius);
-                ctx.lineWidth = b.stroke + 2 * BAND;
-                ctx.lineJoin = 'round';
-                ctx.stroke();
-            } else {
-                roundRectPath(
-                    ctx,
-                    off + b.x - RECT_PAD, off + b.y - RECT_PAD,
-                    b.w + 2 * RECT_PAD, b.h + 2 * RECT_PAD,
-                    b.radius + RECT_PAD,
-                );
-                ctx.fill();
-            }
-        }
-    }
-
-    // Text pills last, as ONE path filled ONCE at the translucent ink strength
-    // (see addTextPillPath for why they can't be filled one by one).
-    ctx.beginPath();
-    let hasPill = false;
-    for (const b of slot.blocks) {
-        if (b.kind !== 'text') continue;
-        addTextPillPath(
-            ctx, b.text, off + b.x, off + b.y, b.lineH,
-            b.size, b.weight, b.ls,
-            PILL_PAD_X * b.padMul, PILL_PAD_Y * b.padMul,
-        );
-        hasPill = true;
-    }
-    if (hasPill) {
-        ctx.globalAlpha = inkPunchText;
-        ctx.fill();
-    }
+    // ONE rounded rect for the whole card. The mask used to trace the ink —
+    // border stroke, a pill per line, a box per image — so the card read as a
+    // frame with lit text floating in it and the live water in the gaps. Now
+    // the card is a single translucent slab: the DOM paints an opaque panel
+    // (--oc-panel), the punch dissolves the canvas over all of it at inkPunch,
+    // and what comes through is the scene rather than the gaps.
+    //
+    // Dilated by BAND so the punch reaches past the border into the DOM's
+    // box-shadow glow, exactly as the old border stroke did. It is one path
+    // filled once, on purpose: a fill plus an overlapping stroke would compound
+    // where they meet (0.8 over 0.8 = 0.96) and print a brighter ring around
+    // every card.
+    ctx.globalAlpha = inkPunch;
+    roundRectPath(
+        ctx,
+        MASK_MARGIN - BAND, MASK_MARGIN - BAND,
+        CARD_W + 2 * BAND, CARD_H + 2 * BAND,
+        CARD_RADIUS + BAND,
+    );
+    ctx.fill();
     ctx.globalAlpha = 1;
 
     slot.maskTexture.needsUpdate = true;
@@ -1889,7 +1843,7 @@ function bakeTabMasks(): void {
         ctx.clearRect(0, 0, cw, ch);
         ctx.fillStyle = '#fff';
         // One pill, so a plain alpha fill can't compound with anything.
-        ctx.globalAlpha = inkPunchText;
+        ctx.globalAlpha = inkPunch;
         ctx.beginPath();
         addTextPillPath(
             ctx, text(TABS[i].label),
@@ -1903,25 +1857,12 @@ function bakeTabMasks(): void {
 }
 
 function bakeUnderlineMask(): void {
-    if (!underlineMesh) return;
-    const canvas = underlineMesh.userData.maskCanvas as HTMLCanvasElement;
-    const texture = underlineMesh.userData.maskTexture as CanvasTexture;
-    const cw = Math.ceil(underlineMaskW + 2 * LINE_PAD + 2 * MASK_MARGIN);
-    const ch = Math.ceil(TAB_UNDERLINE_H + 2 * LINE_PAD + 2 * MASK_MARGIN);
-    if (canvas.width !== cw || canvas.height !== ch) {
-        canvas.width = cw;
-        canvas.height = ch;
-        texture.dispose();
-    }
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, cw, ch);
-    ctx.fillStyle = '#fff';
-    ctx.globalAlpha = inkPunchSolid;
-    const pw = underlineMaskW + 2 * LINE_PAD;
-    const ph = TAB_UNDERLINE_H + 2 * LINE_PAD;
-    roundRectPath(ctx, (cw - pw) / 2, (ch - ph) / 2, pw, ph, LINE_PAD + 1);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    texture.needsUpdate = true;
+    // Nothing. The underline sits INSIDE the active title's pill — 40px below
+    // the title centre, where the pill still reaches 43 — so the pill's own
+    // punch already reveals it, and a second plane over the same pixels would
+    // punch them twice: 0.8 then 0.8 again leaves 4% of the scene instead of
+    // 20%, printing a clearly more transparent strip across the pill. The mesh
+    // stays hidden (see updateUnderline) rather than being deleted, so the
+    // DOM/mesh pairing the rest of this file assumes still holds.
 }
+

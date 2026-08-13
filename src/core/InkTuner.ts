@@ -9,10 +9,9 @@
  * lies about both the water's brightness and how much contrast a phone screen
  * gives you outdoors. So they get sliders instead of a commit round-trip:
  *
- *   • TEXT   — punch strength of the text pills. 1 = opaque ink (the original
- *              look), lower = more of the live scene left sitting inside it.
- *   • SOLID  — same for the structural ink: card border, dividers, image boxes.
- *   • ALL    — instant master multiplier over both (no mask re-bake), for
+ *   • CARD   — punch strength of the carousel's cards and title pills. 1 =
+ *              opaque ink, lower = more of the live scene left sitting on top.
+ *   • ALL    — instant master multiplier over it (no mask re-bake), for
  *              sweeping the whole effect to feel the range.
  *   • WATER  — --ink-water, the colour every fully-punched pixel lands on.
  *   • GLASS  — strength of the lit pane in front of the media player, and how
@@ -20,8 +19,7 @@
  *   • PLAYER — how see-through the media player panel is (1 = opaque). Zoom the
  *              radio for these three; the rest of the panel needs the ocean.
  *
- * Whatever you settle on maps back to, in order: inkPunchText / inkPunchSolid
- * in CardCarousel.ts, --ink-water in style.css (plus the inline fallback on
+ * Whatever you settle on maps back to, in order: inkPunch in CardCarousel.ts, --ink-water in style.css (plus the inline fallback on
  * <body> in index.html), and PLAYER_PUNCH / glassOpacity / glassRoughness on the
  * CSS3DPanel the media player builds in MediaPlayer.ts.
  *
@@ -36,11 +34,10 @@ import { setPlayerPanelPunch } from './MediaPlayer';
 // Versioned: the shipping defaults changed after the first round of tuning, and
 // a stored value from that round would silently win over the new default on the
 // very phone the change was made for. Bump this whenever a default moves.
-const STORE_KEY = 'ink-tuner-v5';
+const STORE_KEY = 'ink-tuner-v6';
 
 interface TunerState {
-    text: number;
-    solid: number;
+    card: number;
     all: number;
     water: string;
     glass: number;
@@ -86,8 +83,7 @@ export function mountInkTuner(): void {
     // working for the ink. Only pin it once the picker is actually used.
     let waterTouched = stored.water !== undefined;
     const state: TunerState = {
-        text: stored.text ?? punch.text,
-        solid: stored.solid ?? punch.solid,
+        card: stored.card ?? punch,
         all: stored.all ?? 1,
         water: stored.water ?? currentWater(),
         glass: stored.glass ?? 0.20,
@@ -144,12 +140,8 @@ export function mountInkTuner(): void {
             <h4>ink tuner</h4>
             <p class="it-hint">Tinta do carrossel: desça até o oceano e abra uma aba. GLASS: zoom no rádio.</p>
             <label>
-                <span class="it-row"><span>TEXT</span><span class="it-val" data-val="text"></span></span>
-                <input type="range" data-k="text" min="0" max="1" step="0.01">
-            </label>
-            <label>
-                <span class="it-row"><span>SOLID</span><span class="it-val" data-val="solid"></span></span>
-                <input type="range" data-k="solid" min="0" max="1" step="0.01">
+                <span class="it-row"><span>CARD</span><span class="it-val" data-val="card"></span></span>
+                <input type="range" data-k="card" min="0.2" max="1" step="0.01">
             </label>
             <label>
                 <span class="it-row"><span>ALL</span><span class="it-val" data-val="all"></span></span>
@@ -190,7 +182,7 @@ export function mountInkTuner(): void {
     const vals = [...root.querySelectorAll<HTMLSpanElement>('[data-val]')];
 
     function apply(persist: boolean): void {
-        setInkPunch(state.text, state.solid);
+        setInkPunch(state.card);
         setInkPunchStrength(state.all);
         setGlassParams(state.glass, state.glassRough);
         setPlayerPanelPunch(state.player);
@@ -224,8 +216,7 @@ export function mountInkTuner(): void {
     (root.querySelector('.it-reset') as HTMLButtonElement).addEventListener('click', () => {
         try { localStorage.removeItem(STORE_KEY); } catch { /* ignore */ }
         waterTouched = false;
-        state.text = 1;
-        state.solid = 1;
+        state.card = 0.80;
         state.all = 1;
         state.glass = 0.20;
         state.glassRough = 0.30;
