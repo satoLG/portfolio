@@ -91,6 +91,7 @@ import {
     Scene as ThreeScene,
     ShaderMaterial,
     Uniform,
+    Vector2,
     Vector3,
     ZeroFactor,
 } from 'three';
@@ -227,6 +228,42 @@ export function setInkPunch(v: number): void {
 // instance — every punch material references it, so a write is live everywhere
 // with no re-bake at all.
 const punchStrengthUniform = new Uniform(1.0);
+
+// ── Wobble: the ink's edge, rippling like the water it sits in ────────────────
+// Done by warping the MASK LOOKUP in the punch shader, never by re-baking the
+// mask. A card's mask canvas is ~474x632; redrawing and re-uploading that every
+// frame, per card, would cost more than the whole carousel does. Warping the uv
+// costs four sines a fragment and the interior does not care — it is uniform, so
+// only the edge shows the displacement.
+//
+// The DOM behind it does NOT wobble. It is inflated by the amplitude instead
+// (--oc-wobble-pad, spread onto the card's fill and the pill's ::before), so the
+// hole always lands on panel colour no matter which way the wave pushes it. The
+// visible edge is then entirely the punch's, and the DOM's own straight edge is
+// never reached. Get this wrong and the overhang shows as --ink-water on the
+// outward swings — the ring that took a round to track down.
+const WOBBLE_SPEED = 0.55;   // rad/s. Not exposed: "bem suave" is the brief, and
+                             // a fourth slider to make it un-suave is not.
+let wobbleAmp = 2.5;         // design px of displacement
+let wobbleFreq = 0.045;      // rad per design px (~140px wavelength)
+const wobbleAmpUniform = new Uniform(wobbleAmp);
+const wobbleFreqUniform = new Uniform(wobbleFreq);
+const wobbleTimeUniform = new Uniform(0);
+
+export function getWobble(): { amp: number; freq: number } {
+    return { amp: wobbleAmp, freq: wobbleFreq };
+}
+
+/** Edge wobble: amplitude in design px, frequency in radians per design px.
+ *  Live — no mask re-bake, the shader reads both every frame. */
+export function setWobble(amp: number, freq: number): void {
+    wobbleAmp = Math.max(0, amp);
+    wobbleFreq = Math.max(0, freq);
+    wobbleAmpUniform.value = wobbleAmp;
+    wobbleFreqUniform.value = wobbleFreq;
+    // The DOM's overhang has to keep covering the widest outward swing.
+    screenEl?.style.setProperty('--oc-wobble-pad', `${Math.ceil(wobbleAmp * 2) * DOM_SS}px`);
+}
 
 /** Global ink-transparency scale (0..1) — multiplies every punch, including the
  *  solid ink. Instant (no re-bake), so it is the knob to sweep when you want to
@@ -775,6 +812,7 @@ export function Start(glScene: ThreeScene, cssScene: ThreeScene): void {
     screenEl.style.height = '0px';
     screenEl.style.setProperty('--oc-pill-x', `${PILL_PAD_X * DOM_SS}px`);
     screenEl.style.setProperty('--oc-pill-y', `${PILL_PAD_Y * DOM_SS}px`);
+    setWobble(wobbleAmp, wobbleFreq);   // seeds --oc-wobble-pad from the defaults
     // Everything in the stylesheet that must hold a fixed DESIGN size — the glow
     // radii, the divider, the icon letterbox — is authored as design px × this.
     screenEl.style.setProperty('--oc-ss', `${DOM_SS}`);
@@ -873,6 +911,8 @@ export function Update(): void {
     }
     if (!_active) return;
 
+    wobbleTimeUniform.value = time * WOBBLE_SPEED;
+
     advanceAnimation();
     updateTabs();
     updateTrack();
@@ -896,7 +936,20 @@ function makePunchMaterial(texture: CanvasTexture): ShaderMaterial {
     // exactly as before. Where two punch planes overlap, the nearer one wins the
     // depth test rather than both multiplying, so the effect never compounds.
     return new ShaderMaterial({
-        uniforms: { uMask: { value: texture }, uPunch: punchStrengthUniform },
+        uniforms: {
+            uMask: { value: texture },
+            uPunch: punchStrengthUniform,
+            uWobbleAmp: wobbleAmpUniform,
+            uWobbleFreq: wobbleFreqUniform,
+            uWobbleTime: wobbleTimeUniform,
+            // Design px of this mesh's mask canvas — the wave is authored in px,
+            // and a card's canvas and a title's are nowhere near the same size,
+            // so a shared uv-space amplitude would ripple them differently.
+            uMaskSize: { value: new Vector2(
+                (texture.image as HTMLCanvasElement).width,
+                (texture.image as HTMLCanvasElement).height,
+            ) },
+        },
         vertexShader: /* glsl */`
             varying vec2 vUv;
             void main() {
@@ -907,9 +960,28 @@ function makePunchMaterial(texture: CanvasTexture): ShaderMaterial {
         fragmentShader: /* glsl */`
             uniform sampler2D uMask;
             uniform float uPunch;
+            uniform float uWobbleAmp;
+            uniform float uWobbleFreq;
+            uniform float uWobbleTime;
+            uniform vec2 uMaskSize;
             varying vec2 vUv;
             void main() {
-                float m = texture2D(uMask, vUv).a * uPunch;
+                // Warp WHERE the mask is read, so the hole's edge travels while
+                // the DOM behind it stays put. Two sines per axis at irrational
+                // frequency and phase ratios — the same trick the underwater
+                // distortion uses — so their zero crossings never line up and
+                // the ripple has no static nodes sitting on the card's edge.
+                vec2 px = vUv * uMaskSize;
+                float t = uWobbleTime;
+                vec2 d = vec2(
+                    sin(px.y * uWobbleFreq + t) * 0.62 +
+                    sin(px.y * uWobbleFreq * 1.73 + t * 1.31 + 1.9) * 0.38,
+                    cos(px.x * uWobbleFreq + t * 0.91) * 0.62 +
+                    cos(px.x * uWobbleFreq * 1.41 + t * 0.73 + 2.7) * 0.38
+                );
+                vec2 uv = vUv + (d * uWobbleAmp) / uMaskSize;
+
+                float m = texture2D(uMask, uv).a * uPunch;
                 // Discard rather than write a no-op: a zero-alpha fragment would
                 // still write DEPTH and occlude the scene for nothing.
                 if (m < 0.004) discard;
@@ -1836,6 +1908,10 @@ function bakeTabMasks(): void {
             tab.maskCanvas.width = cw;
             tab.maskCanvas.height = ch;
             tab.maskTexture.dispose();
+            // The wobble is authored in px and divides by this — a stale size
+            // would ripple a re-measured title at the wrong amplitude.
+            const u = (tab.mesh.material as ShaderMaterial).uniforms.uMaskSize;
+            (u.value as Vector2).set(cw, ch);
         }
         const ctx = tab.maskCanvas.getContext('2d');
         if (!ctx) continue;

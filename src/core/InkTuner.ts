@@ -1,58 +1,40 @@
 /**
- * InkTuner.ts — TEMPORARY on-screen tuner for the underwater ink.
+ * InkTuner.ts — TEMPORARY on-screen tuner for the underwater ink's edge wobble.
  *
  * ⚠️ SCAFFOLDING. Delete this file and its single call site in main.ts once the
- * ink is dialled in; nothing else imports it.
+ * wobble is dialled in; nothing else imports it.
  *
- * The three numbers that decide how the carousel's ink reads can only really be
- * judged against the real water, on the device it ships to — a desktop preview
- * lies about both the water's brightness and how much contrast a phone screen
- * gives you outdoors. So they get sliders instead of a commit round-trip:
+ * Everything this panel used to carry — punch strength, the water and card
+ * colours, the media player's glass and translucency — is settled and baked into
+ * the source. What is left is the one thing that still needs a real screen and
+ * real water to judge:
  *
- *   • CARD   — punch strength of the carousel's cards and title pills. 1 =
- *              opaque ink, lower = more of the live scene left sitting on top.
- *   • ALL    — instant master multiplier over it (no mask re-bake), for
- *              sweeping the whole effect to feel the range.
- *   • WATER N — --ink-water-night, the colour a fully-punched pixel lands on
- *              at night.
- *   • CARD DAY — --oc-panel-day: the carousel cards' and title pills' fill at
- *              midday.
+ *   • FREQ — wave frequency, radians per design px. Low is a long swell, high is
+ *            a tight chop. ~0.045 is a 140px wavelength, roughly three waves
+ *            across a card.
+ *   • AMP  — how far the edge travels, in design px.
  *
- * Both pickers write ENDPOINTS, never the live value. The live --ink-water and
- * --oc-panel are mixed between their day and night endpoints off
- * --day-night-blend (style.css), so pinning the mixed value would freeze the
- * transition the blend exists to produce.
- *   • GLASS  — strength of the lit pane in front of the media player, and how
- *              rough it is.
- *   • PLAYER — how see-through the media player panel is (1 = opaque). Zoom the
- *              radio for these three; the rest of the panel needs the ocean.
+ * Both are live: the punch shader reads them every frame, no mask re-bake. They
+ * map back to wobbleAmp / wobbleFreq in CardCarousel.ts. Speed is fixed at
+ * WOBBLE_SPEED there — the brief was "bem suave", and a slider for making it
+ * less so is not what this is for.
  *
- * Whatever you settle on maps back to, in order: inkPunch in CardCarousel.ts;
- * --ink-water and the day --oc-panel in style.css (--ink-water also has an
- * inline fallback on <body> in index.html); and PLAYER_PUNCH / glassOpacity /
- * glassRoughness on the CSS3DPanel the media player builds in MediaPlayer.ts.
+ * Underwater only, so scroll down and open a tab to see anything.
  *
  * The panel swallows its own pointer/touch/wheel events — the scene's input
  * lives on window and would otherwise scroll the camera while you drag a slider.
  */
 
-import { getInkPunch, setInkPunch, setInkPunchStrength } from '../effects/CardCarousel';
-import { setGlassParams } from '../effects/CSS3DPanel';
-import { setPlayerPanelPunch } from './MediaPlayer';
+import { getWobble, setWobble } from '../effects/CardCarousel';
 
-// Versioned: the shipping defaults changed after the first round of tuning, and
-// a stored value from that round would silently win over the new default on the
-// very phone the change was made for. Bump this whenever a default moves.
-const STORE_KEY = 'ink-tuner-v9';
+// Versioned: bumped whenever the stored shape or a default changes, so a value
+// left over from an earlier round cannot silently win over the new default on
+// the very phone it is being tuned on.
+const STORE_KEY = 'ink-tuner-v10';
 
 interface TunerState {
-    card: number;
-    cardDay: string;
-    all: number;
-    water: string;
-    glass: number;
-    glassRough: number;
-    player: number;
+    freq: number;
+    amp: number;
 }
 
 function readStored(): Partial<TunerState> {
@@ -69,62 +51,14 @@ function store(state: TunerState): void {
     } catch { /* private mode — tuning just won't survive a reload */ }
 }
 
-/** Override endpoint custom properties on <body> as a real stylesheet rule.
- *
- *  Endpoints, never the live value. --ink-water and --oc-panel are mixed
- *  between their day/night endpoints off --day-night-blend, so writing the
- *  mixed property would pin it and kill the very transition it feeds. Writing
- *  the endpoint flows through the mix and keeps moving with the sky.
- *
- *  A rule rather than an inline style for the same reason as before: inline on
- *  <body> beats every mode-keyed rule at once, which is how --ink-water once
- *  froze whichever mode was active at load. Same specificity as the stylesheet
- *  and later in the document, so it wins without out-ranking anything. */
-const _endpoints: Record<string, string> = {};
-let _endpointStyle: HTMLStyleElement | null = null;
-function applyEndpoint(name: string, hex: string): void {
-    _endpoints[name] = hex;
-    if (!_endpointStyle) {
-        _endpointStyle = document.createElement('style');
-        _endpointStyle.id = 'ink-tuner-endpoints';
-        document.head.appendChild(_endpointStyle);
-    }
-    const decls = Object.entries(_endpoints).map(([k, v]) => `${k}: ${v};`).join(' ');
-    _endpointStyle.textContent = `body { ${decls} }`;
-}
-
-/** An endpoint's authored value, as #rrggbb. Read from the live cascade rather
- *  than duplicated here — endpoints are mode-independent, so this is correct
- *  whichever mode happens to be active when the tuner opens. */
-function readEndpoint(name: string, fallback: string): string {
-    const v = getComputedStyle(document.body).getPropertyValue(name).trim();
-    if (/^#[0-9a-f]{6}$/i.test(v)) return v;
-    const m = v.match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
-    if (m) {
-        const hex = (n: string) => (+n).toString(16).padStart(2, '0');
-        return `#${hex(m[1])}${hex(m[2])}${hex(m[3])}`;
-    }
-    return fallback;
-}
-
 export function mountInkTuner(): void {
     if (document.getElementById('ink-tuner')) return;
 
     const stored = readStored();
-    const punch = getInkPunch();
-    // An untouched tuner must not echo the stylesheet's own values back at it:
-    // editing style.css and forgetting a copy here would then silently do
-    // nothing. Endpoints are only overridden once their picker is used.
-    let waterTouched = stored.water !== undefined;
-    let dayPanelTouched = stored.cardDay !== undefined;
+    const wobble = getWobble();
     const state: TunerState = {
-        card: stored.card ?? punch,
-        cardDay: stored.cardDay ?? readEndpoint('--oc-panel-day', '#1e617a'),
-        all: stored.all ?? 1,
-        water: stored.water ?? readEndpoint('--ink-water-night', '#0a2338'),
-        glass: stored.glass ?? 0.20,
-        glassRough: stored.glassRough ?? 0.30,
-        player: stored.player ?? 0.80,
+        freq: stored.freq ?? wobble.freq,
+        amp: stored.amp ?? wobble.amp,
     };
 
     const root = document.createElement('div');
@@ -162,9 +96,6 @@ export function mountInkTuner(): void {
             }
             #ink-tuner .it-val { opacity: 0.75; font-variant-numeric: tabular-nums; }
             #ink-tuner input[type=range] { width: 100%; margin: 0; height: 26px; }
-            #ink-tuner input[type=color] {
-                width: 100%; height: 30px; padding: 0; border: 0; background: none;
-            }
             #ink-tuner .it-hint { margin: 2px 0 10px; opacity: 0.5; font-size: 10px; line-height: 1.4; }
             #ink-tuner button.it-reset {
                 width: 100%; padding: 7px; border-radius: 7px; font: inherit; font-size: 11px;
@@ -173,35 +104,15 @@ export function mountInkTuner(): void {
             }
         </style>
         <div class="it-body">
-            <h4>ink tuner</h4>
-            <p class="it-hint">Carrossel (CARD, WATER, CARD DAY): desça até o oceano e abra uma aba. GLASS/PLAYER: zoom no rádio.</p>
+            <h4>wobble</h4>
+            <p class="it-hint">Desça até o oceano e abra uma aba. FREQ = quantas ondas na borda, AMP = quanto ela viaja (px).</p>
             <label>
-                <span class="it-row"><span>CARD</span><span class="it-val" data-val="card"></span></span>
-                <input type="range" data-k="card" min="0.2" max="1" step="0.01">
+                <span class="it-row"><span>FREQ</span><span class="it-val" data-val="freq"></span></span>
+                <input type="range" data-k="freq" min="0.005" max="0.15" step="0.005">
             </label>
             <label>
-                <span class="it-row"><span>ALL</span><span class="it-val" data-val="all"></span></span>
-                <input type="range" data-k="all" min="0" max="1" step="0.01">
-            </label>
-            <label>
-                <span class="it-row"><span>WATER N</span><span class="it-val" data-val="water"></span></span>
-                <input type="color" data-k="water">
-            </label>
-            <label>
-                <span class="it-row"><span>CARD DAY</span><span class="it-val" data-val="cardDay"></span></span>
-                <input type="color" data-k="cardDay">
-            </label>
-            <label>
-                <span class="it-row"><span>GLASS</span><span class="it-val" data-val="glass"></span></span>
-                <input type="range" data-k="glass" min="0" max="0.5" step="0.01">
-            </label>
-            <label>
-                <span class="it-row"><span>GLASS ROUGH</span><span class="it-val" data-val="glassRough"></span></span>
-                <input type="range" data-k="glassRough" min="0" max="1" step="0.01">
-            </label>
-            <label>
-                <span class="it-row"><span>PLAYER</span><span class="it-val" data-val="player"></span></span>
-                <input type="range" data-k="player" min="0.2" max="1" step="0.01">
+                <span class="it-row"><span>AMP</span><span class="it-val" data-val="amp"></span></span>
+                <input type="range" data-k="amp" min="0" max="10" step="0.1">
             </label>
             <button class="it-reset" type="button">reset</button>
         </div>
@@ -222,17 +133,10 @@ export function mountInkTuner(): void {
     const vals = [...root.querySelectorAll<HTMLSpanElement>('[data-val]')];
 
     function apply(persist: boolean): void {
-        setInkPunch(state.card);
-        setInkPunchStrength(state.all);
-        setGlassParams(state.glass, state.glassRough);
-        setPlayerPanelPunch(state.player);
-        if (dayPanelTouched) applyEndpoint('--oc-panel-day', state.cardDay);
-        else state.cardDay = readEndpoint('--oc-panel-day', state.cardDay);
-        if (waterTouched) applyEndpoint('--ink-water-night', state.water);
-        else state.water = readEndpoint('--ink-water-night', state.water);
+        setWobble(state.amp, state.freq);
         for (const el of vals) {
             const k = el.dataset.val as keyof TunerState;
-            el.textContent = typeof state[k] === 'number' ? (state[k] as number).toFixed(2) : String(state[k]);
+            el.textContent = state[k].toFixed(3);
         }
         for (const el of inputs) {
             const k = el.dataset.k as keyof TunerState;
@@ -243,26 +147,15 @@ export function mountInkTuner(): void {
 
     for (const el of inputs) {
         el.addEventListener('input', () => {
-            const k = el.dataset.k as keyof TunerState;
-            if (k === 'water') { state.water = el.value; waterTouched = true; }
-            else if (k === 'cardDay') { state.cardDay = el.value; dayPanelTouched = true; }
-            else (state[k] as number) = parseFloat(el.value);
+            state[el.dataset.k as keyof TunerState] = parseFloat(el.value);
             apply(true);
         });
     }
 
     (root.querySelector('.it-reset') as HTMLButtonElement).addEventListener('click', () => {
         try { localStorage.removeItem(STORE_KEY); } catch { /* ignore */ }
-        waterTouched = false;
-        dayPanelTouched = false;
-        for (const k of Object.keys(_endpoints)) delete _endpoints[k];
-        _endpointStyle?.remove();
-        _endpointStyle = null;
-        state.card = 0.85;
-        state.all = 1;
-        state.glass = 0.20;
-        state.glassRough = 0.30;
-        state.player = 0.80;
+        state.freq = 0.045;
+        state.amp = 2.5;
         apply(false);
     });
 

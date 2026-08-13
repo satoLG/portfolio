@@ -3153,10 +3153,12 @@ body.night-mode .ocean-carousel {
 .ocean-tab::before {
     content: '';
     position: absolute;
-    left: calc(-1 * var(--oc-pill-x, 20px));
-    right: calc(-1 * var(--oc-pill-x, 20px));
-    top: calc(-1 * var(--oc-pill-y, 14px));
-    bottom: calc(-1 * var(--oc-pill-y, 14px));
+    /* Insets carry --oc-wobble-pad for the same reason the card's spread does:
+       the punched edge ripples past the pill and must still find panel colour. */
+    left: calc(-1 * (var(--oc-pill-x, 20px) + var(--oc-wobble-pad, 0px)));
+    right: calc(-1 * (var(--oc-pill-x, 20px) + var(--oc-wobble-pad, 0px)));
+    top: calc(-1 * (var(--oc-pill-y, 14px) + var(--oc-wobble-pad, 0px)));
+    bottom: calc(-1 * (var(--oc-pill-y, 14px) + var(--oc-wobble-pad, 0px)));
     border-radius: 999px;
     background: var(--oc-panel);
     z-index: -1;
@@ -3187,7 +3189,15 @@ body.night-mode .ocean-carousel {
        the outer half could never be seen (the punch stops at the card's edge)
        and the inset half just redrew the outline the border was removed to get
        rid of. Inner elements keep their own --oc-frame-shadow — they sit inside
-       the hole, so theirs does show. */
+       the hole, so theirs does show.
+
+       The one box-shadow left is not decoration: it is a spread of the SAME
+       fill, widening the panel by --oc-wobble-pad without touching layout. The
+       punched edge ripples (see the wobble notes in CardCarousel), and every
+       outward swing has to land on panel colour — over the bare overhang it
+       would show --ink-water instead and the ripple would read as a coloured
+       fringe rather than a moving edge. */
+    box-shadow: 0 0 0 var(--oc-wobble-pad, 0px) var(--oc-panel);
     background: var(--oc-panel);   /* opaque — see-through is the punch's job */
     color: var(--oc-text);
     font-family: 'Wotfard', ui-sans-serif, system-ui, sans-serif;
