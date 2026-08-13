@@ -826,7 +826,6 @@ export function Start(): void {
 
 // Track previous blend class to avoid redundant DOM mutations
 let _lastBlendClass: 'day' | 'night' = 'day';
-let _lastBlendValue = -1;
 // Steps a paint-bound consumer sees across a full day/night transition. Raise it
 // for a smoother ramp and more repaints; lower it if a device still hitches.
 const DAY_NIGHT_STEPS = 6;
@@ -854,16 +853,18 @@ export function Update(): void {
         _fpsLast = now;
     }
 
-    // Update CSS custom properties for smooth day/night color transitions.
-    // Only written when the value actually changed (avoid style recalc every frame).
+    // Day/night colour transitions.
+    //
+    // There used to be a second, FINE property here (--day-night-blend, 3
+    // decimals) written on every frame of a transition. Nothing in the
+    // stylesheet ever read it. A custom property on the root invalidates style
+    // for everything that inherits it, so that was a full-document recalc per
+    // frame — across a CSS3D subtree with a surface per element — bought for
+    // nothing. Deleted. If something ever needs sub-step resolution, it can come
+    // back, but it must be worth a recalc a frame to whoever adds it.
     const blend = getDayNightBlend();
-    const rounded = Math.round(blend * 1000) / 1000; // 3 decimal places
-    if (rounded !== _lastBlendValue) {
-        _lastBlendValue = rounded;
-        document.documentElement.style.setProperty('--day-night-blend', rounded.toString());
-    }
 
-    // COARSE companion, and it exists for a very specific reason. The fine value
+    // This one is quantised, and it exists for a very specific reason. The fine value
     // above changes every frame of a transition, which is free while nothing
     // reads it — but anything that turns it into a colour makes every element
     // inheriting that colour repaint at 60fps. The CSS3D carousel cards are the

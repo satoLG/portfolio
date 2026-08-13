@@ -236,12 +236,17 @@ const punchStrengthUniform = new Uniform(1.0);
 // costs four sines a fragment and the interior does not care — it is uniform, so
 // only the edge shows the displacement.
 //
-// The DOM behind it does NOT wobble. It is inflated by the amplitude instead
-// (--oc-wobble-pad, spread onto the card's fill and the pill's ::before), so the
-// hole always lands on panel colour no matter which way the wave pushes it. The
-// visible edge is then entirely the punch's, and the DOM's own straight edge is
-// never reached. Get this wrong and the overhang shows as --ink-water on the
-// outward swings — the ring that took a round to track down.
+// The DOM behind it does NOT wobble, and the hole must never swing past it: out
+// there nothing paints, so the ripple would show --ink-water and read as a
+// coloured fringe. Two ways to guarantee that, and which one is used is a cost
+// decision, not a taste one:
+//
+//   titles — the DOM grows (--oc-wobble-pad on the pill's ::before). Small
+//            surfaces, so a wider one is free.
+//   cards  — the HOLE shrinks (inset in bakeCardMask). A card is the most
+//            expensive surface in the app; growing it costs memory on every one
+//            and, when the growth was a box-shadow in var(--oc-panel), a
+//            card-sized shadow repaint on every day/night colour step.
 const WOBBLE_SPEED = 0.55;   // rad/s. Not exposed: "bem suave" is the brief, and
                              // a fourth slider to make it un-suave is not.
 let wobbleAmp = 10.0;        // design px of displacement
@@ -249,6 +254,13 @@ let wobbleFreq = 0.030;      // rad per design px (~210px wavelength)
 const wobbleAmpUniform = new Uniform(wobbleAmp);
 const wobbleFreqUniform = new Uniform(wobbleFreq);
 const wobbleTimeUniform = new Uniform(0);
+
+/** How far the edge can travel, in design px. The two sines per axis sum to
+ *  exactly 1, so a straight edge moves at most `amp`; a corner takes both axes
+ *  at once and reaches amp * sqrt(2). Round up from that, plus a px of slack. */
+function wobbleReach(): number {
+    return Math.ceil(wobbleAmp * 1.42) + 1;
+}
 
 export function getWobble(): { amp: number; freq: number } {
     return { amp: wobbleAmp, freq: wobbleFreq };
@@ -261,11 +273,19 @@ export function setWobble(amp: number, freq: number): void {
     wobbleFreq = Math.max(0, freq);
     wobbleAmpUniform.value = wobbleAmp;
     wobbleFreqUniform.value = wobbleFreq;
-    // The DOM's overhang has to keep covering the widest outward swing. The two
-    // sines per axis sum to exactly 1, so a straight edge moves at most `amp`;
-    // a corner takes both axes at once and can reach amp * sqrt(2). Round up
-    // from that, plus a px of slack.
-    screenEl?.style.setProperty('--oc-wobble-pad', `${(Math.ceil(wobbleAmp * 1.42) + 1) * DOM_SS}px`);
+    // Titles keep the DOM-overhang strategy: their ::before grows by the wave's
+    // reach so an outward swing still finds panel colour. They are small
+    // elements and a wider one costs nothing.
+    screenEl?.style.setProperty('--oc-wobble-pad', `${wobbleReach() * DOM_SS}px`);
+    // Cards do NOT. Growing a card meant a box-shadow spread on the single most
+    // expensive surface in the app — it widened that surface on all four sides
+    // AND, being painted in var(--oc-panel), re-rendered a shadow the size of
+    // the card on every step of the day/night blend. The hole is inset instead,
+    // so the DOM card keeps exactly the bounds it always had and the ripple
+    // swings inside them. Costs a re-bake, which is a slider move, not a frame.
+    for (const slot of cards) {
+        if (slot.blocks && slot.built) bakeCardMask(slot);
+    }
 }
 
 /** Global ink-transparency scale (0..1) — multiplies every punch, including the
@@ -1896,14 +1916,25 @@ function bakeCardMask(slot: CardSlot): void {
     // (--oc-panel), the punch dissolves the canvas over all of it at inkPunch,
     // and what comes through is the scene rather than the gaps.
     //
-    // EXACTLY the card — no dilation. Punching a band past the edge is what
-    // printed a ring around every card: out there the hole is open but no DOM
-    // paints into it, so the band showed --ink-water instead of the panel and
-    // read as a border nobody asked for. The title pills never had this because
-    // their mask and their ::before fill are the same rectangle, which is now
-    // true of the cards too.
+    // The card, INSET by the wobble's reach. Two rules meet here:
+    //
+    //  • never punch past the DOM card. Out there the hole is open with nothing
+    //    painting into it, so it shows --ink-water — the ring that read as a
+    //    border nobody asked for, and it would now be a rippling one.
+    //  • never grow the DOM card to make room. That surface is the app's most
+    //    expensive; widening it costs memory on every card and a shadow repaint
+    //    on every colour step.
+    //
+    // Insetting satisfies both: the edge swings between (card - 2*reach) and the
+    // card's real edge, always over panel colour, with the DOM untouched.
+    const inset = wobbleReach();
     ctx.globalAlpha = inkPunch;
-    roundRectPath(ctx, MASK_MARGIN, MASK_MARGIN, CARD_W, CARD_H, CARD_RADIUS);
+    roundRectPath(
+        ctx,
+        MASK_MARGIN + inset, MASK_MARGIN + inset,
+        CARD_W - 2 * inset, CARD_H - 2 * inset,
+        Math.max(2, CARD_RADIUS - inset),
+    );
     ctx.fill();
     ctx.globalAlpha = 1;
 

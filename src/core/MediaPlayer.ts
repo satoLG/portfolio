@@ -1318,21 +1318,21 @@ export function setPlayerPanelPunch(v: number): void {
     playerPanel?.setPunchAlpha(v);
 }
 
-/** The connector line's colour, read from the panel's OWN computed background so
- *  the line and the panel can never drift apart — retint the player in CSS and
- *  the line follows on the next day/night flip with nothing to keep in sync
- *  here. Falls back to the old scene-contrast pair if the element isn't laid out
- *  yet (the line would otherwise flash black on the very first frame).
+/** The connector line's colour — the panel's own fill, so the line reads as the
+ *  panel reaching down to the radio rather than as a separate mark.
  *
- *  getComputedStyle is a layout read, so this is cached and only recomputed when
- *  the day/night class actually flips — never per frame. */
-let _connectorHex = 0xffffff;
+ *  These are hard-coded rather than read back with getComputedStyle, which is
+ *  what this did at first. That read is a FORCED SYNCHRONOUS STYLE RECALC, and
+ *  it fired on the day/night flip — the one moment the whole stylesheet has just
+ *  been invalidated by the class swap, over a CSS3D subtree with a composited
+ *  surface per element. Paying a full synchronous recalc exactly then is the
+ *  most expensive possible time to ask. Two constants and a note to keep them in
+ *  step with .media-player.expanded cost nothing and stall nothing. */
+const CONNECTOR_DAY = 0xd4d4d4;    // matches rgb(212,212,212) in style.css
+const CONNECTOR_NIGHT = 0x142838;  // matches rgb(20,40,60)
+let _connectorHex = CONNECTOR_NIGHT;
 function refreshConnectorColor(): void {
-    const day = document.body.classList.contains('day-mode');
-    _connectorHex = day ? 0xd4d4d4 : 0x142838;
-    if (!playerContainer) return;
-    const m = getComputedStyle(playerContainer).backgroundColor.match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
-    if (m) _connectorHex = (+m[1] << 16) | (+m[2] << 8) | +m[3];
+    _connectorHex = document.body.classList.contains('day-mode') ? CONNECTOR_DAY : CONNECTOR_NIGHT;
 }
 
 /** Anchor the CSS3D panel above the radio's REST position (static — see the
