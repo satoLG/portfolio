@@ -173,8 +173,8 @@ const CARD_PAD = 48;                 // card box inset for all content
 // letter the moment night fell. The geometry has to hold still; only the DOM
 // glow changes between day and night.
 // BAND is now the only one left: the card is punched as a single slab reaching
-// BAND past its border, so there is no per-divider or per-image punch to pad.
-const BAND = 12;             // punch dilation past the card's border
+// BAND past its edge, so there is no per-divider or per-image punch to pad.
+const BAND = 12;             // punch dilation past the card's edge
 
 // Text is punched as a generous rounded PILL around each line — the roomy halo
 // the design wants. The pads are also written to --oc-pill-x/y on each element
@@ -975,7 +975,9 @@ function buildCardSlots(): void {
         el.className = 'ocean-card';
         el.style.width = `${CARD_W * DOM_SS}px`;
         el.style.height = `${CARD_H * DOM_SS}px`;
-        el.style.borderWidth = `${BORDER_PX * DOM_SS}px`;
+        // No border: the card is a plain rounded slab now. Its edge is carried
+        // by the fill's own corner radius plus the inset half of
+        // --oc-frame-shadow, not by a drawn line.
         el.style.borderRadius = `${CARD_RADIUS * DOM_SS}px`;
         el.style.display = 'none';
         screenEl!.appendChild(el);

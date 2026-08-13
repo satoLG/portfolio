@@ -3020,7 +3020,10 @@ body.day-mode .css3d-panel-content .ct-body {
 
     /* Day panel: light grey slab, marine-blue type — .settings-panel's day
        tone. Night overrides all three below. */
-    --oc-panel: rgb(212, 212, 212);
+    /* Light blue rather than a neutral grey — it belongs to the water it floats
+       in. Live-tunable from the ink tuner (CARD DAY); if you change it there,
+       this is the line it comes back to. */
+    --oc-panel: #b8d4e8;
     --oc-text: var(--text-color-day);
     --oc-hairline: rgba(10, 37, 64, 0.45);
 
@@ -3113,8 +3116,9 @@ body.night-mode .ocean-carousel {
     /* Cards unfold downward from under the title row — the punch mesh mirrors
        this pivot in CardCarousel.updateCards(). */
     transform-origin: 50% 0%;
-    border-style: solid;
-    border-color: var(--oc-hairline);
+    /* No border. The rounded contour comes from border-radius clipping the
+       fill, and the inset half of --oc-frame-shadow keeps the edge from
+       reading as a hard cut. */
     background: var(--oc-panel);   /* opaque — see-through is the punch's job */
     color: var(--oc-text);
     font-family: 'Wotfard', ui-sans-serif, system-ui, sans-serif;

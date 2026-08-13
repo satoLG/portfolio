@@ -14,14 +14,18 @@
  *   • ALL    — instant master multiplier over it (no mask re-bake), for
  *              sweeping the whole effect to feel the range.
  *   • WATER  — --ink-water, the colour every fully-punched pixel lands on.
+ *   • CARD DAY — --oc-panel in DAY mode: the fill of the carousel's cards and
+ *              title pills. Scoped to day only (see applyDayPanel), so night is
+ *              never touched no matter what is stored.
  *   • GLASS  — strength of the lit pane in front of the media player, and how
  *              rough it is.
  *   • PLAYER — how see-through the media player panel is (1 = opaque). Zoom the
  *              radio for these three; the rest of the panel needs the ocean.
  *
- * Whatever you settle on maps back to, in order: inkPunch in CardCarousel.ts, --ink-water in style.css (plus the inline fallback on
- * <body> in index.html), and PLAYER_PUNCH / glassOpacity / glassRoughness on the
- * CSS3DPanel the media player builds in MediaPlayer.ts.
+ * Whatever you settle on maps back to, in order: inkPunch in CardCarousel.ts;
+ * --ink-water and the day --oc-panel in style.css (--ink-water also has an
+ * inline fallback on <body> in index.html); and PLAYER_PUNCH / glassOpacity /
+ * glassRoughness on the CSS3DPanel the media player builds in MediaPlayer.ts.
  *
  * The panel swallows its own pointer/touch/wheel events — the scene's input
  * lives on window and would otherwise scroll the camera while you drag a slider.
@@ -34,10 +38,11 @@ import { setPlayerPanelPunch } from './MediaPlayer';
 // Versioned: the shipping defaults changed after the first round of tuning, and
 // a stored value from that round would silently win over the new default on the
 // very phone the change was made for. Bump this whenever a default moves.
-const STORE_KEY = 'ink-tuner-v6';
+const STORE_KEY = 'ink-tuner-v7';
 
 interface TunerState {
     card: number;
+    cardDay: string;
     all: number;
     water: string;
     glass: number;
@@ -57,6 +62,27 @@ function store(state: TunerState): void {
     try {
         localStorage.setItem(STORE_KEY, JSON.stringify(state));
     } catch { /* private mode — tuning just won't survive a reload */ }
+}
+
+// Day-mode --oc-panel as authored in style.css. Duplicated here because
+// getComputedStyle can only report the mode that is currently active, and the
+// tuner has to open with the right swatch while it is night. Keep in sync with
+// the .ocean-carousel rule.
+const DAY_PANEL_DEFAULT = '#b8d4e8';
+
+/** Scope a day-mode panel colour into the document as a real CSS rule rather
+ *  than an inline style on <body>. Inline would beat BOTH mode rules at once —
+ *  the bug --ink-water hit, where a value pinned at load froze whichever mode
+ *  was active and the day/night swap stopped reaching the ink. A rule keyed on
+ *  body.day-mode simply does not match at night. */
+let _dayPanelStyle: HTMLStyleElement | null = null;
+function applyDayPanel(hex: string): void {
+    if (!_dayPanelStyle) {
+        _dayPanelStyle = document.createElement('style');
+        _dayPanelStyle.id = 'ink-tuner-day-panel';
+        document.head.appendChild(_dayPanelStyle);
+    }
+    _dayPanelStyle.textContent = `body.day-mode .ocean-carousel { --oc-panel: ${hex}; }`;
 }
 
 /** Current --ink-water for the active day/night mode, as #rrggbb. The stylesheet
@@ -82,8 +108,13 @@ export function mountInkTuner(): void {
     // mode happened to be active then and the day/night swap silently stops
     // working for the ink. Only pin it once the picker is actually used.
     let waterTouched = stored.water !== undefined;
+    // Same rule for the day panel: an untouched tuner must not inject
+    // DAY_PANEL_DEFAULT over the stylesheet, or editing style.css and
+    // forgetting the copy here would silently do nothing.
+    let dayPanelTouched = stored.cardDay !== undefined;
     const state: TunerState = {
         card: stored.card ?? punch,
+        cardDay: stored.cardDay ?? DAY_PANEL_DEFAULT,
         all: stored.all ?? 1,
         water: stored.water ?? currentWater(),
         glass: stored.glass ?? 0.20,
@@ -138,7 +169,7 @@ export function mountInkTuner(): void {
         </style>
         <div class="it-body">
             <h4>ink tuner</h4>
-            <p class="it-hint">Tinta do carrossel: desça até o oceano e abra uma aba. GLASS: zoom no rádio.</p>
+            <p class="it-hint">Carrossel (CARD, WATER, CARD DAY): desça até o oceano e abra uma aba. GLASS/PLAYER: zoom no rádio.</p>
             <label>
                 <span class="it-row"><span>CARD</span><span class="it-val" data-val="card"></span></span>
                 <input type="range" data-k="card" min="0.2" max="1" step="0.01">
@@ -150,6 +181,10 @@ export function mountInkTuner(): void {
             <label>
                 <span class="it-row"><span>WATER</span><span class="it-val" data-val="water"></span></span>
                 <input type="color" data-k="water">
+            </label>
+            <label>
+                <span class="it-row"><span>CARD DAY</span><span class="it-val" data-val="cardDay"></span></span>
+                <input type="color" data-k="cardDay">
             </label>
             <label>
                 <span class="it-row"><span>GLASS</span><span class="it-val" data-val="glass"></span></span>
@@ -186,6 +221,8 @@ export function mountInkTuner(): void {
         setInkPunchStrength(state.all);
         setGlassParams(state.glass, state.glassRough);
         setPlayerPanelPunch(state.player);
+        if (dayPanelTouched) applyDayPanel(state.cardDay);
+        else state.cardDay = DAY_PANEL_DEFAULT;
         if (waterTouched) {
             document.body.style.setProperty('--ink-water', state.water);
         } else {
@@ -208,6 +245,7 @@ export function mountInkTuner(): void {
         el.addEventListener('input', () => {
             const k = el.dataset.k as keyof TunerState;
             if (k === 'water') { state.water = el.value; waterTouched = true; }
+            else if (k === 'cardDay') { state.cardDay = el.value; dayPanelTouched = true; }
             else (state[k] as number) = parseFloat(el.value);
             apply(true);
         });
@@ -216,7 +254,11 @@ export function mountInkTuner(): void {
     (root.querySelector('.it-reset') as HTMLButtonElement).addEventListener('click', () => {
         try { localStorage.removeItem(STORE_KEY); } catch { /* ignore */ }
         waterTouched = false;
+        dayPanelTouched = false;
+        _dayPanelStyle?.remove();
+        _dayPanelStyle = null;
         state.card = 0.80;
+        state.cardDay = DAY_PANEL_DEFAULT;
         state.all = 1;
         state.glass = 0.20;
         state.glassRough = 0.30;
