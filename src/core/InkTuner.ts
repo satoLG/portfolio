@@ -16,13 +16,14 @@
  *              sweeping the whole effect to feel the range.
  *   • WATER  — --ink-water, the colour every fully-punched pixel lands on.
  *   • GLASS  — strength of the lit pane in front of the media player, and how
- *              rough it is. Zoom the radio to see these two; the rest of the
- *              panel needs the ocean.
+ *              rough it is.
+ *   • PLAYER — how see-through the media player panel is (1 = opaque). Zoom the
+ *              radio for these three; the rest of the panel needs the ocean.
  *
  * Whatever you settle on maps back to, in order: inkPunchText / inkPunchSolid
  * in CardCarousel.ts, --ink-water in style.css (plus the inline fallback on
- * <body> in index.html), and glassOpacity / glassRoughness on the CSS3DPanel
- * the media player builds in MediaPlayer.ts.
+ * <body> in index.html), and PLAYER_PUNCH / glassOpacity / glassRoughness on the
+ * CSS3DPanel the media player builds in MediaPlayer.ts.
  *
  * The panel swallows its own pointer/touch/wheel events — the scene's input
  * lives on window and would otherwise scroll the camera while you drag a slider.
@@ -30,11 +31,12 @@
 
 import { getInkPunch, setInkPunch, setInkPunchStrength } from '../effects/CardCarousel';
 import { setGlassParams } from '../effects/CSS3DPanel';
+import { setPlayerPanelPunch } from './MediaPlayer';
 
 // Versioned: the shipping defaults changed after the first round of tuning, and
 // a stored value from that round would silently win over the new default on the
 // very phone the change was made for. Bump this whenever a default moves.
-const STORE_KEY = 'ink-tuner-v3';
+const STORE_KEY = 'ink-tuner-v4';
 
 interface TunerState {
     text: number;
@@ -43,6 +45,7 @@ interface TunerState {
     water: string;
     glass: number;
     glassRough: number;
+    player: number;
 }
 
 function readStored(): Partial<TunerState> {
@@ -84,6 +87,7 @@ export function mountInkTuner(): void {
         water: stored.water ?? currentWater(),
         glass: stored.glass ?? 0.14,
         glassRough: stored.glassRough ?? 0.35,
+        player: stored.player ?? 0.68,
     };
 
     const root = document.createElement('div');
@@ -158,6 +162,10 @@ export function mountInkTuner(): void {
                 <span class="it-row"><span>GLASS ROUGH</span><span class="it-val" data-val="glassRough"></span></span>
                 <input type="range" data-k="glassRough" min="0" max="1" step="0.01">
             </label>
+            <label>
+                <span class="it-row"><span>PLAYER</span><span class="it-val" data-val="player"></span></span>
+                <input type="range" data-k="player" min="0.2" max="1" step="0.01">
+            </label>
             <button class="it-reset" type="button">reset</button>
         </div>
         <div class="it-chip">◐</div>
@@ -180,6 +188,7 @@ export function mountInkTuner(): void {
         setInkPunch(state.text, state.solid);
         setInkPunchStrength(state.all);
         setGlassParams(state.glass, state.glassRough);
+        setPlayerPanelPunch(state.player);
         document.body.style.setProperty('--ink-water', state.water);
         for (const el of vals) {
             const k = el.dataset.val as keyof TunerState;
@@ -208,6 +217,7 @@ export function mountInkTuner(): void {
         state.all = 1;
         state.glass = 0.14;
         state.glassRough = 0.35;
+        state.player = 0.68;
         document.body.style.removeProperty('--ink-water');
         state.water = currentWater();
         apply(false);

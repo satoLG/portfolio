@@ -181,6 +181,10 @@ let playerPanel: CSS3DPanel | null = null;
 // Bigger = smaller panel in-scene. High enough that the 320px DOM is scaled
 // DOWN (crisp) rather than up (blurry) at the radio-zoom framing. Tweak to resize.
 const PLAYER_PX_PER_UNIT = 545;
+
+// Panel translucency — how hard its punch dissolves the canvas. Mirrors the
+// settings menu's 66/70% background so the two surfaces read as the same UI.
+const PLAYER_PUNCH = 0.68;
 // With anchor:'top' this is where the panel's TOP edge sits; the body extends
 // downward from here (and further growth — playlist — also goes down, kept
 // off the island by the max-height cap in CSS). 1.15 puts the top just under
@@ -532,6 +536,16 @@ function createPlayerUI(): void {
         anchor: 'top',
         // Thin 3D line from the panel bottom down to the radio.
         connector: true,
+        // See-through panel, at the settings menu's own ratio (its background is
+        // 66% at night / 70% by day). Here the remaining fraction is the LIVE
+        // SCENE rather than a blurred page background, because the punch is what
+        // goes partial — the DOM fill stays opaque (see style.css).
+        //
+        // Text does not suffer for it: the residual scene is added equally to
+        // the glyphs and to the fill behind them, so it lifts both and leaves
+        // their separation at PLAYER_PUNCH x the full contrast — around 160
+        // levels, which carries easily.
+        punchAlpha: PLAYER_PUNCH,
         // A lit pane in front of the ink so the player answers to the scene's
         // light instead of sitting on it as a flat decal — it warms under the
         // midday sun and goes quiet at night, and the sheen slides across as the
@@ -1085,11 +1099,12 @@ function startAnalyserAnimation(): void {
     drawAnalyser();
 }
 
-/** Bar tone that contrasts with the panel ink fill (black in day mode → white
- *  bars; white in night mode → black bars). Day = body.day-mode. */
+/** Bar tone that contrasts with the panel ink fill, tracking the settings-menu
+ *  palette the panel now uses: light fill by day → marine-blue bars, dark fill
+ *  at night → white bars. Day = body.day-mode. */
 function _waveBaseColor(alpha = 1): string {
     const day = document.body.classList.contains('day-mode');
-    const c = day ? '255,255,255' : '0,0,0';
+    const c = day ? '10,37,64' : '255,255,255';
     return alpha >= 1 ? `rgb(${c})` : `rgba(${c},${alpha})`;
 }
 
@@ -1296,10 +1311,18 @@ function updateWaveformColors(): void {
 let isAnimating = false;  // Block resize during expand/collapse animation
 const ANIM_DURATION = 700;  // ms — full line+panel sequence (waveform right-sizes after)
 
+/** Live panel translucency (0..1) — 1 = opaque. Judging "see-through but still
+ *  readable" needs the real sky behind it, so it is settable at runtime. */
+export function setPlayerPanelPunch(v: number): void {
+    playerPanel?.setPunchAlpha(v);
+}
+
 /** Anchor the CSS3D panel above the radio's REST position (static — see the
  *  RADIO_REST_* note). Fixed pose so the panel never jitters with the beat.
- *  Also drives the connector line (down to the radio) + its colour (matches the
- *  ink fill: black in day mode, white at night). */
+ *  Also drives the connector line (down to the radio) + its colour. That colour
+ *  tracks the SCENE, not the panel fill: the line runs down over sunlit grass by
+ *  day and a dark island at night, so it stays black/white respectively even
+ *  though the panel's own palette is now the other way round. */
 function syncPanelAnchor(): void {
     if (!playerPanel) return;
     playerPanel.setWorldPosition(RADIO_REST_X, RADIO_REST_Y + PLAYER_ANCHOR_UP, RADIO_REST_Z);

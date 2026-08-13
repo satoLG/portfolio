@@ -2875,12 +2875,21 @@ body.day-mode .ct-body::after {
     margin: 0;
 }
 
-/* Solid ink fill wrapped by ONE punched bbox (no border, no neon). Day
-   (body.day-mode) = black fill + white ink; night (default) = white fill +
-   black ink. The scene shows AROUND the fill (outside the punched bbox). */
+/* Ink fill wrapped by ONE punched bbox. Palette is the settings menu's, so the
+   two surfaces read as the same UI: night = dark slate + white text, day =
+   light grey + marine blue text. (This is the inverse of what the player used
+   to be, which fought the settings panel sitting a few hundred px above it.)
+
+   The fills are OPAQUE on purpose even though the settings panel's are 66/70%.
+   Translucency here comes from the punch instead (punchAlpha on the panel in
+   MediaPlayer.ts), which leaves a slice of the LIVE SCENE on top of the DOM —
+   the real thing, where a DOM alpha would only reveal --ink-water behind the
+   canvas. Same ratio, better backdrop. What we cannot copy is the blur: a
+   backdrop-filter here would sample the page background, not the scene, which
+   is why the panels never had one. */
 .css3d-panel-content .media-player.expanded {
-    background: #ffffff;   /* night */
-    color: #111111;
+    background: rgb(20, 40, 60);   /* night — .settings-panel's tone */
+    color: rgba(255, 255, 255, 0.9);
     border: none;
     box-shadow: none;
     backdrop-filter: none;
@@ -2889,8 +2898,8 @@ body.day-mode .ct-body::after {
     max-height: none;
 }
 body.day-mode .css3d-panel-content .media-player.expanded {
-    background: #000000;   /* day */
-    color: #ffffff;
+    background: rgb(212, 212, 212);   /* day */
+    color: var(--text-color-day);
 }
 
 /* Text follows the ink tone (no more neon shadow) */
@@ -2907,16 +2916,17 @@ body.day-mode .css3d-panel-content .media-player.expanded {
     box-shadow: none;
 }
 
-/* Control buttons: icon = ink tone, subtle chip bg. Play keeps its red accent. */
+/* Control buttons: icon = ink tone, subtle chip bg — the same two washes
+   .settings-toggle uses. Play keeps its red accent. */
 .css3d-panel-content .player-btn { touch-action: manipulation; }
 .css3d-panel-content .player-btn:not(.player-play) {
-    background: rgba(0, 0, 0, 0.06);   /* night (white fill) */
+    background: rgba(255, 255, 255, 0.1);   /* night (dark fill) */
     color: inherit;
     border: none;
     box-shadow: none;
 }
 body.day-mode .css3d-panel-content .player-btn:not(.player-play) {
-    background: rgba(255, 255, 255, 0.14);   /* day (black fill) */
+    background: rgba(10, 37, 64, 0.1);   /* day (light fill) */
 }
 .css3d-panel-content .player-btn svg { fill: currentColor; }
 

@@ -571,6 +571,18 @@ export class CSS3DPanel {
     /** The occluder mesh — used by the manager's pointer raycast. */
     getOccluder(): Mesh { return this.occluder; }
 
+    /** How hard this panel's punch dissolves the canvas, live (see
+     *  PanelOptions.punchAlpha). 1 = opaque panel, lower = more live scene left
+     *  sitting on top of the DOM. */
+    setPunchAlpha(v: number): void {
+        const m = this.occluder.material as ShaderMaterial;
+        m.uniforms.uPunch.value = MathUtils.clamp(v, 0, 1);
+    }
+
+    getPunchAlpha(): number {
+        return (this.occluder.material as ShaderMaterial).uniforms.uPunch.value as number;
+    }
+
     /** Glass strength + roughness, live (see setGlassParams). No-op on a panel
      *  built without glass. */
     _setGlass(opacity: number, roughness: number): void {
