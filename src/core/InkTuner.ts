@@ -10,7 +10,7 @@
  * real water to judge:
  *
  *   • FREQ — wave frequency, radians per design px. Low is a long swell, high is
- *            a tight chop. ~0.045 is a 140px wavelength, roughly three waves
+ *            a tight chop. ~0.030 is a 210px wavelength, roughly two waves
  *            across a card.
  *   • AMP  — how far the edge travels, in design px.
  *
@@ -30,7 +30,7 @@ import { getWobble, setWobble } from '../effects/CardCarousel';
 // Versioned: bumped whenever the stored shape or a default changes, so a value
 // left over from an earlier round cannot silently win over the new default on
 // the very phone it is being tuned on.
-const STORE_KEY = 'ink-tuner-v10';
+const STORE_KEY = 'ink-tuner-v11';
 
 interface TunerState {
     freq: number;
@@ -154,8 +154,8 @@ export function mountInkTuner(): void {
 
     (root.querySelector('.it-reset') as HTMLButtonElement).addEventListener('click', () => {
         try { localStorage.removeItem(STORE_KEY); } catch { /* ignore */ }
-        state.freq = 0.045;
-        state.amp = 2.5;
+        state.freq = 0.030;
+        state.amp = 10;
         apply(false);
     });
 

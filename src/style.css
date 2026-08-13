@@ -251,9 +251,17 @@ body.day-mode {
    Anything that swaps on the body.day-mode / body.night-mode class instead
    snaps mid-ease, which reads as a flicker against a sky that is still moving.
 
-   These surfaces ride the blend itself. Endpoints are authored as
-   --<name>-day / --<name>-night above; the live value is mixed here. Note the
-   mix runs toward NIGHT, because the blend is 0 = day, 1 = night.
+   These surfaces ride the blend — but off --day-night-step, the COARSE
+   companion, never the fine --day-night-blend. Every one of these mixes ends up
+   as a background on a CSS3D element, and those are composited surfaces at
+   device resolution (see the surface-budget note in CardCarousel.ts): following
+   the fine value repaints every visible card sixty times a second for the whole
+   transition, which stalls the scene outright. The stepped value repaints a
+   handful of times instead, and between two blues this close it reads as a ramp
+   rather than as stairs. Anything cheap to repaint may use the fine one.
+
+   Endpoints are authored as --<name>-day / --<name>-night above; the live value
+   is mixed here. Note the mix runs toward NIGHT, because 0 = day, 1 = night.
 
    Gated on @supports so the class-keyed rules above stay as the fallback: an
    unsupported color-mix() would make the custom property invalid at computed
@@ -264,7 +272,7 @@ body.day-mode {
        `--ink-water: var(--ink-water)` would be a cycle, not an inheritance. */
     body, body.day-mode {
         --ink-water: color-mix(in srgb,
-            var(--ink-water-night) calc(var(--day-night-blend, 0) * 100%),
+            var(--ink-water-night) calc(var(--day-night-step, 0) * 100%),
             var(--ink-water-day));
     }
 }
@@ -283,34 +291,28 @@ body.day-mode {
 body {
     --oc-panel-day: #1e617a;
     --oc-panel-night: rgb(20, 40, 60);
-    --oc-text-day: rgba(255, 255, 255, 0.94);
-    --oc-text-night: rgba(255, 255, 255, 0.92);
-    --oc-hairline-day: rgba(255, 255, 255, 0.42);
-    --oc-hairline-night: rgba(255, 255, 255, 0.5);
+
+    /* Type and hairlines do NOT blend, and not for want of trying: both modes
+       want white here, so a mix between them is white either way. Blending them
+       bought an identical colour at the price of dragging `color` and
+       `text-shadow` into the repaint — on card surfaces full of text, the most
+       expensive part of the invalidation for the least visible gain. */
+    --oc-text: rgba(255, 255, 255, 0.93);
+    --oc-hairline: rgba(255, 255, 255, 0.46);
 
     /* Fallback — instant swap (see the @supports note above). */
     --oc-panel: var(--oc-panel-day);
-    --oc-text: var(--oc-text-day);
-    --oc-hairline: var(--oc-hairline-day);
 }
 
 body.night-mode {
     --oc-panel: var(--oc-panel-night);
-    --oc-text: var(--oc-text-night);
-    --oc-hairline: var(--oc-hairline-night);
 }
 
 @supports (color: color-mix(in srgb, red, blue)) {
     body, body.night-mode {
         --oc-panel: color-mix(in srgb,
-            var(--oc-panel-night) calc(var(--day-night-blend, 0) * 100%),
+            var(--oc-panel-night) calc(var(--day-night-step, 0) * 100%),
             var(--oc-panel-day));
-        --oc-text: color-mix(in srgb,
-            var(--oc-text-night) calc(var(--day-night-blend, 0) * 100%),
-            var(--oc-text-day));
-        --oc-hairline: color-mix(in srgb,
-            var(--oc-hairline-night) calc(var(--day-night-blend, 0) * 100%),
-            var(--oc-hairline-day));
     }
 }
 
@@ -1280,7 +1282,8 @@ body.night-mode #start-button .wave2 {
    DAY/NIGHT COLOR SCHEME
    ============================================ */
 :root {
-    --day-night-blend: 0;
+    --day-night-blend: 0;   /* fine, per-frame — cheap consumers only */
+    --day-night-step: 0;    /* coarse — anything that ends up as paint */
     --text-color-day: #0a2540;      /* Dark marine blue for day */
     --text-color-night: #ffffff;    /* White for night */
     --icon-color-day: #f5c542;      /* Yellow for sun */

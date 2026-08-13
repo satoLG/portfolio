@@ -244,8 +244,8 @@ const punchStrengthUniform = new Uniform(1.0);
 // outward swings — the ring that took a round to track down.
 const WOBBLE_SPEED = 0.55;   // rad/s. Not exposed: "bem suave" is the brief, and
                              // a fourth slider to make it un-suave is not.
-let wobbleAmp = 2.5;         // design px of displacement
-let wobbleFreq = 0.045;      // rad per design px (~140px wavelength)
+let wobbleAmp = 10.0;        // design px of displacement
+let wobbleFreq = 0.030;      // rad per design px (~210px wavelength)
 const wobbleAmpUniform = new Uniform(wobbleAmp);
 const wobbleFreqUniform = new Uniform(wobbleFreq);
 const wobbleTimeUniform = new Uniform(0);
@@ -261,8 +261,11 @@ export function setWobble(amp: number, freq: number): void {
     wobbleFreq = Math.max(0, freq);
     wobbleAmpUniform.value = wobbleAmp;
     wobbleFreqUniform.value = wobbleFreq;
-    // The DOM's overhang has to keep covering the widest outward swing.
-    screenEl?.style.setProperty('--oc-wobble-pad', `${Math.ceil(wobbleAmp * 2) * DOM_SS}px`);
+    // The DOM's overhang has to keep covering the widest outward swing. The two
+    // sines per axis sum to exactly 1, so a straight edge moves at most `amp`;
+    // a corner takes both axes at once and can reach amp * sqrt(2). Round up
+    // from that, plus a px of slack.
+    screenEl?.style.setProperty('--oc-wobble-pad', `${(Math.ceil(wobbleAmp * 1.42) + 1) * DOM_SS}px`);
 }
 
 /** Global ink-transparency scale (0..1) — multiplies every punch, including the
@@ -922,7 +925,14 @@ export function Update(): void {
 
 // ─── Build ────────────────────────────────────────────────────────────────────
 
-function makePunchMaterial(texture: CanvasTexture): ShaderMaterial {
+/** `seed` decorrelates one mesh's ripple from the next. Every punch plane shares
+ *  one clock, so without it every card and title breathes in lockstep and the
+ *  row reads as one rigid sheet. The seed becomes a phase offset AND a slight
+ *  rate scale: the phase separates them immediately, the rate keeps them
+ *  drifting apart instead of holding a fixed formation. Two extra floats in the
+ *  shader, no extra work — this is why the wobble is not a per-mesh time
+ *  uniform updated on the CPU. */
+function makePunchMaterial(texture: CanvasTexture, seed = 0): ShaderMaterial {
     // The punch DISSOLVES the canvas by the mask's alpha instead of stencilling
     // it away. Blending is dst *= (1 - src.a) on colour AND alpha (Zero /
     // OneMinusSrcAlpha), which keeps the premultiplied-alpha canvas consistent:
@@ -942,6 +952,10 @@ function makePunchMaterial(texture: CanvasTexture): ShaderMaterial {
             uWobbleAmp: wobbleAmpUniform,
             uWobbleFreq: wobbleFreqUniform,
             uWobbleTime: wobbleTimeUniform,
+            // Golden angle: successive seeds land as far apart on the phase
+            // circle as integers can, so neighbouring cards never sync up.
+            uWobblePhase: { value: (seed * 2.39996) % 6.28318 },
+            uWobbleRate: { value: 0.86 + ((seed * 0.37) % 1) * 0.28 },
             // Design px of this mesh's mask canvas — the wave is authored in px,
             // and a card's canvas and a title's are nowhere near the same size,
             // so a shared uv-space amplitude would ripple them differently.
@@ -963,6 +977,8 @@ function makePunchMaterial(texture: CanvasTexture): ShaderMaterial {
             uniform float uWobbleAmp;
             uniform float uWobbleFreq;
             uniform float uWobbleTime;
+            uniform float uWobblePhase;
+            uniform float uWobbleRate;
             uniform vec2 uMaskSize;
             varying vec2 vUv;
             void main() {
@@ -972,7 +988,7 @@ function makePunchMaterial(texture: CanvasTexture): ShaderMaterial {
                 // distortion uses — so their zero crossings never line up and
                 // the ripple has no static nodes sitting on the card's edge.
                 vec2 px = vUv * uMaskSize;
-                float t = uWobbleTime;
+                float t = uWobbleTime * uWobbleRate + uWobblePhase;
                 vec2 d = vec2(
                     sin(px.y * uWobbleFreq + t) * 0.62 +
                     sin(px.y * uWobbleFreq * 1.73 + t * 1.31 + 1.9) * 0.38,
@@ -1026,7 +1042,7 @@ function buildTabs(): void {
 
         // Sized for real in layoutTabs() once the label has been measured.
         const { canvas, texture } = makeMaskCanvas(4, 4);
-        const mesh = new Mesh(new PlaneGeometry(1, 1), makePunchMaterial(texture));
+        const mesh = new Mesh(new PlaneGeometry(1, 1), makePunchMaterial(texture, i + 1));
         occluderGroup.add(mesh);
 
         tabs.push({
@@ -1056,7 +1072,7 @@ function buildCardSlots(): void {
         screenEl!.appendChild(el);
 
         const { canvas, texture } = makeMaskCanvas(maskW, maskH);
-        const mesh = new Mesh(planeGeo, makePunchMaterial(texture));
+        const mesh = new Mesh(planeGeo, makePunchMaterial(texture, i + 11));
         mesh.visible = false;
         occluderGroup.add(mesh);
 

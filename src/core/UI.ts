@@ -827,6 +827,10 @@ export function Start(): void {
 // Track previous blend class to avoid redundant DOM mutations
 let _lastBlendClass: 'day' | 'night' = 'day';
 let _lastBlendValue = -1;
+// Steps a paint-bound consumer sees across a full day/night transition. Raise it
+// for a smoother ramp and more repaints; lower it if a device still hitches.
+const DAY_NIGHT_STEPS = 6;
+let _lastBlendStep = -1;
 
 // Live FPS readout shown in the settings graphics tab (next to the auto toggle).
 let _fpsCounterEl: HTMLElement | null = null;
@@ -850,13 +854,30 @@ export function Update(): void {
         _fpsLast = now;
     }
 
-    // Update CSS custom property for smooth day/night color transitions
-    // Only update when value actually changed (avoid style recalc every frame)
+    // Update CSS custom properties for smooth day/night color transitions.
+    // Only written when the value actually changed (avoid style recalc every frame).
     const blend = getDayNightBlend();
     const rounded = Math.round(blend * 1000) / 1000; // 3 decimal places
     if (rounded !== _lastBlendValue) {
         _lastBlendValue = rounded;
         document.documentElement.style.setProperty('--day-night-blend', rounded.toString());
+    }
+
+    // COARSE companion, and it exists for a very specific reason. The fine value
+    // above changes every frame of a transition, which is free while nothing
+    // reads it — but anything that turns it into a colour makes every element
+    // inheriting that colour repaint at 60fps. The CSS3D carousel cards are the
+    // worst possible thing to do that to: each is its own composited surface at
+    // device resolution (see the surface-budget note in CardCarousel.ts), and
+    // re-rastering them per frame is what turned a smooth toggle into a stall.
+    //
+    // So paint-bound consumers key off this instead: DAY_NIGHT_STEPS repaints
+    // across the whole transition rather than sixty-odd. The colours involved
+    // are close enough that the steps read as a ramp, not as stairs.
+    const stepped = Math.round(blend * DAY_NIGHT_STEPS) / DAY_NIGHT_STEPS;
+    if (stepped !== _lastBlendStep) {
+        _lastBlendStep = stepped;
+        document.documentElement.style.setProperty('--day-night-step', stepped.toString());
     }
     
     // Update body class for CSS targeting â€” only swap once at threshold
