@@ -172,9 +172,10 @@ const CARD_PAD = 48;                 // card box inset for all content
 // canvas, so growing it made a visibly fatter dark outline appear around every
 // letter the moment night fell. The geometry has to hold still; only the DOM
 // glow changes between day and night.
-// BAND is now the only one left: the card is punched as a single slab reaching
-// BAND past its edge, so there is no per-divider or per-image punch to pad.
-const BAND = 12;             // punch dilation past the card's edge
+// BAND no longer dilates anything punched — the card's hole is exactly the
+// card. It survives as the safety margin the mask canvas and the distortion
+// quiet rect are sized with, so both still reach past the card's edge.
+const BAND = 12;             // canvas / quiet-rect margin past the card's edge
 
 // Text is punched as a generous rounded PILL around each line — the roomy halo
 // the design wants. The pads are also written to --oc-pill-x/y on each element
@@ -203,7 +204,7 @@ const PILL_PAD_Y = 14;
 // the punch now runs in the post-ocean pass — see the long note in
 // Scene.getUnderwaterTransparentTargets. Before that move the ink was
 // technically transparent onto a flat field of fog and showed nothing.
-let inkPunch = 0.80;
+let inkPunch = 0.85;
 
 /** Current ink punch strength — 1 = opaque ink, 0 = no punch. */
 export function getInkPunch(): number {
@@ -1807,18 +1808,14 @@ function bakeCardMask(slot: CardSlot): void {
     // (--oc-panel), the punch dissolves the canvas over all of it at inkPunch,
     // and what comes through is the scene rather than the gaps.
     //
-    // Dilated by BAND so the punch reaches past the border into the DOM's
-    // box-shadow glow, exactly as the old border stroke did. It is one path
-    // filled once, on purpose: a fill plus an overlapping stroke would compound
-    // where they meet (0.8 over 0.8 = 0.96) and print a brighter ring around
-    // every card.
+    // EXACTLY the card — no dilation. Punching a band past the edge is what
+    // printed a ring around every card: out there the hole is open but no DOM
+    // paints into it, so the band showed --ink-water instead of the panel and
+    // read as a border nobody asked for. The title pills never had this because
+    // their mask and their ::before fill are the same rectangle, which is now
+    // true of the cards too.
     ctx.globalAlpha = inkPunch;
-    roundRectPath(
-        ctx,
-        MASK_MARGIN - BAND, MASK_MARGIN - BAND,
-        CARD_W + 2 * BAND, CARD_H + 2 * BAND,
-        CARD_RADIUS + BAND,
-    );
+    roundRectPath(ctx, MASK_MARGIN, MASK_MARGIN, CARD_W, CARD_H, CARD_RADIUS);
     ctx.fill();
     ctx.globalAlpha = 1;
 

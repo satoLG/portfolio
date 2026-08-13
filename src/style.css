@@ -3020,14 +3020,19 @@ body.day-mode .css3d-panel-content .ct-body {
 
     /* Day panel: light grey slab, marine-blue type — .settings-panel's day
        tone. Night overrides all three below. */
-    /* Light blue rather than a neutral grey — it belongs to the water it floats
-       in. Live-tunable from the ink tuner (CARD DAY); if you change it there,
-       this is the line it comes back to. */
-    --oc-panel: #b8d4e8;
-    --oc-text: var(--text-color-day);
-    --oc-hairline: rgba(10, 37, 64, 0.45);
+    /* Day panel: a mid teal-blue picked against the real water, not a neutral
+       grey — the card belongs to what it floats in. Settled from the ink
+       tuner's CARD DAY picker.
 
-    /* Day: no neon on the letters — they stay plain marine blue on the panel. */
+       It is dark enough that the type has to be LIGHT here, same as at night:
+       --text-color-day (#0a2540) on this fill lands around 2.3:1, which is not
+       readable. That is the only reason day and night share a type colour now —
+       the panel choice made day a dark surface. */
+    --oc-panel: #1e617a;
+    --oc-text: rgba(255, 255, 255, 0.94);
+    --oc-hairline: rgba(255, 255, 255, 0.42);
+
+    /* Day: no neon on the letters — they stay plain white on the panel. */
     --oc-ink-glow: none;
     --oc-line-glow: 0 0 calc(2.5px * var(--oc-ss)) rgba(170, 210, 240, 0.55);
     --oc-frame-shadow:
@@ -3116,16 +3121,17 @@ body.night-mode .ocean-carousel {
     /* Cards unfold downward from under the title row — the punch mesh mirrors
        this pivot in CardCarousel.updateCards(). */
     transform-origin: 50% 0%;
-    /* No border. The rounded contour comes from border-radius clipping the
-       fill, and the inset half of --oc-frame-shadow keeps the edge from
-       reading as a hard cut. */
+    /* Nothing but a filled rounded rect. No border, and no frame glow either:
+       the outer half could never be seen (the punch stops at the card's edge)
+       and the inset half just redrew the outline the border was removed to get
+       rid of. Inner elements keep their own --oc-frame-shadow — they sit inside
+       the hole, so theirs does show. */
     background: var(--oc-panel);   /* opaque — see-through is the punch's job */
     color: var(--oc-text);
     font-family: 'Wotfard', ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     will-change: transform, opacity;
     pointer-events: none;
-    box-shadow: var(--oc-frame-shadow);
 }
 
 .ocean-card .oc-blk {

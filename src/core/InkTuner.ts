@@ -38,7 +38,7 @@ import { setPlayerPanelPunch } from './MediaPlayer';
 // Versioned: the shipping defaults changed after the first round of tuning, and
 // a stored value from that round would silently win over the new default on the
 // very phone the change was made for. Bump this whenever a default moves.
-const STORE_KEY = 'ink-tuner-v7';
+const STORE_KEY = 'ink-tuner-v8';
 
 interface TunerState {
     card: number;
@@ -68,7 +68,7 @@ function store(state: TunerState): void {
 // getComputedStyle can only report the mode that is currently active, and the
 // tuner has to open with the right swatch while it is night. Keep in sync with
 // the .ocean-carousel rule.
-const DAY_PANEL_DEFAULT = '#b8d4e8';
+const DAY_PANEL_DEFAULT = '#1e617a';
 
 /** Scope a day-mode panel colour into the document as a real CSS rule rather
  *  than an inline style on <body>. Inline would beat BOTH mode rules at once —
@@ -257,7 +257,7 @@ export function mountInkTuner(): void {
         dayPanelTouched = false;
         _dayPanelStyle?.remove();
         _dayPanelStyle = null;
-        state.card = 0.80;
+        state.card = 0.85;
         state.cardDay = DAY_PANEL_DEFAULT;
         state.all = 1;
         state.glass = 0.20;
