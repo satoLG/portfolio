@@ -24,6 +24,12 @@
  *   4. Open/close is a single eased scalar driving BOTH the DOM (CSS scale +
  *      opacity on an inner wrapper) and the punch mesh scale, so the hole always
  *      stays registered with the visible panel through the pop animation.
+ *   5. Optional GLASS (PanelOptions.glass): a lit plane hung a hair in front of
+ *      the punch and shaped by the same mask. The DOM is flat pixels the
+ *      renderer knows nothing about, so on its own it never answers to the
+ *      scene's light — a panel next to a campfire at night looks exactly like
+ *      one at noon. The pane is real scene geometry, so it does, and it lends
+ *      that light to the DOM underneath it.
  *
  * Consumers (MediaPlayer, CoinTooltip) create a CSS3DPanel, drop their existing
  * DOM into `panel.content`, set its world anchor each frame, and call
@@ -46,6 +52,7 @@ import {
     LinearFilter,
     MathUtils,
     Mesh,
+    MeshStandardMaterial,
     OneMinusSrcAlphaFactor,
     PerspectiveCamera,
     PlaneGeometry,
@@ -120,6 +127,14 @@ export function preRender(cam: PerspectiveCamera): void {
     for (let s = quietSlot; s <= 2; s++) setDistortionQuietRect(s, 0, 0, 0, 0, false);
 }
 
+/** Live glass tuning across every panel that has one. "Imperceptible but
+ *  present" is a judgement that can only be made against the real lighting on
+ *  the real screen, so the two numbers that decide it are settable at runtime
+ *  rather than only at construction. */
+export function setGlassParams(opacity: number, roughness: number): void {
+    for (const p of _panels) p._setGlass(opacity, roughness);
+}
+
 /** Per-frame, AFTER PhoneScreen.render (the other writer of canvas
  *  pointer-events). Overrides to 'none' only while a panel wants the pointer;
  *  PhoneScreen restores 'auto' on its own every frame otherwise. */
@@ -183,6 +198,22 @@ export interface PanelOptions {
      *  the ocean carousel uses on its text ink (INK_PUNCH_TEXT there); the two
      *  punch materials are deliberately identical. */
     punchAlpha?: number;
+    /** Hang a lit sheet of "glass" in the scene, right in front of the panel and
+     *  shaped exactly like it, so the flat DOM picks up the scene's lighting —
+     *  brighter under the midday sun, quiet at night, with the specular sliding
+     *  across it as the camera moves. See the glass notes on the class. */
+    glass?: boolean;
+    /** Glass strength (0..1). Deliberately small: this is meant to be felt, not
+     *  seen. Above ~0.25 it stops reading as a pane and starts reading as fog
+     *  over the panel. */
+    glassOpacity?: number;
+    /** 0 = mirror-sharp highlight that almost never lines up with the sun,
+     *  1 = a flat matte wash. Mid values give a broad sheen that actually moves
+     *  as you orbit, which is what sells the pane. */
+    glassRoughness?: number;
+    /** Glass tint (THREE hex). A hair of blue reads as glass; pure white reads
+     *  as haze. */
+    glassColor?: number;
 }
 
 // easeOutBack — the subtle overshoot that gives the open/close a "pop".
@@ -200,6 +231,9 @@ function smoothstep(a: number, b: number, x: number): number {
 // seconds). Open: the connector LINE rises over [0, LINE_END], then the panel
 // bounces in over [PANEL_START, 1]. Close plays it in reverse (panel out first,
 // then the line retracts). Sequential — line fully up before the panel appears.
+// World units the glass pane sits in front of the punch plane. See _frame.
+const GLASS_OFFSET = 0.004;
+
 const SEQ_DURATION = 0.7;
 const LINE_END = 0.5;
 const PANEL_START = 0.5;
@@ -212,6 +246,7 @@ export class CSS3DPanel {
     private inner: HTMLDivElement;     // gets the open-scale + opacity
     private cssObject: CSS3DObject;
     private occluder: Mesh;
+    private glass: Mesh | null = null;
     private maskCanvas: HTMLCanvasElement;
     private maskTexture: CanvasTexture;
 
@@ -355,6 +390,70 @@ export class CSS3DPanel {
         this.occluder.visible = false;
         _occluderGroup.add(this.occluder);
 
+        // ── Glass ────────────────────────────────────────────────────────────
+        // A lit pane hung in the scene a hair in FRONT of the punch, shaped by
+        // the same mask, so the panel stops being a decal pasted onto the frame
+        // and starts belonging to the lighting around it.
+        //
+        // It works because of the order these two draw in. The punch leaves the
+        // canvas at (0,0,0,0) over the panel; the glass draws immediately after
+        // (added to the group right here, and sortObjects is false, so add-order
+        // is draw order) and blends onto that cleared pixel. Against a zero
+        // destination, premultiplied NormalBlending simply deposits the glass:
+        // the canvas ends up carrying the glass's own alpha there, and the
+        // browser composites the DOM under it at the remaining 1 - alpha. So the
+        // DOM stays crisp and legible and merely picks up the light on the pane.
+        //
+        // Nothing about interaction changes. The canvas is already
+        // pointer-events:none while a modal panel is open (syncCanvasPointer),
+        // so a WebGL plane in front of the DOM cannot intercept anything, and
+        // every raycast in this project targets a named subtree — never the
+        // whole scene — so the pane is invisible to picking too.
+        //
+        // alphaMap is the punch mask itself: MeshStandardMaterial reads its
+        // GREEN channel, and the mask is white-on-transparent, so the pane is
+        // shaped exactly like the ink with no second mask to keep registered.
+        // depthWrite is off — it must not occlude anything; the punch behind it
+        // already owns the panel's depth.
+        if (opts.glass) {
+            const glassMat = new MeshStandardMaterial({
+                color: opts.glassColor ?? 0xdcebff,
+                roughness: opts.glassRoughness ?? 0.35,
+                metalness: 0.0,
+                alphaMap: this.maskTexture,
+                transparent: true,
+                opacity: MathUtils.clamp(opts.glassOpacity ?? 0.14, 0, 1),
+                depthWrite: false,
+                depthTest: true,
+                side: DoubleSide,
+            });
+            // Read the mask's ALPHA, not its green. Stock alphaMap samples .g,
+            // and the mask is white-on-transparent: an edge pixel at 50%
+            // coverage still stores green 1.0 once unpremultiplied, so .g is a
+            // hard-edged stencil and the pane would keep a crisp rim where the
+            // punch beneath it is already fading out. The alpha channel carries
+            // the real coverage.
+            glassMat.onBeforeCompile = (shader) => {
+                const from = 'diffuseColor.a *= texture2D( alphaMap, vAlphaMapUv ).g;';
+                if (!shader.fragmentShader.includes(from)) {
+                    console.warn('[CSS3DPanel] alphamap_fragment chunk changed shape — glass edge falls back to the green channel (hard rim).');
+                    return;
+                }
+                shader.fragmentShader = shader.fragmentShader.replace(
+                    from, 'diffuseColor.a *= texture2D( alphaMap, vAlphaMapUv ).a;',
+                );
+            };
+            // Distinct cache key: without it three may hand this material a
+            // program compiled for an unpatched MeshStandardMaterial with the
+            // same defines (or hand ours to one), and the patch above silently
+            // applies to the wrong set of materials.
+            glassMat.customProgramCacheKey = () => 'css3d-panel-glass';
+
+            this.glass = new Mesh(new PlaneGeometry(1, 1), glassMat);
+            this.glass.visible = false;
+            _occluderGroup.add(this.glass);
+        }
+
         // Connector line — 2 points, updated per frame; lives in the WebGL scene
         // so it's part of the 3D world (occluded by geometry between it and the
         // camera, like any line).
@@ -416,6 +515,7 @@ export class CSS3DPanel {
         this._rasterFlushed = false;
         this.cssObject.visible = true;
         this.occluder.visible = true;
+        if (this.glass) this.glass.visible = true;
         // Bridge the frame gap so offsetWidth/Height measure correctly this frame
         // (CSS3DRenderer only flips display on its own render, which is later).
         this.wrapper.style.display = '';
@@ -453,6 +553,12 @@ export class CSS3DPanel {
         _occluderGroup.remove(this.occluder);
         (this.occluder.material as ShaderMaterial).dispose();
         this.occluder.geometry.dispose();
+        if (this.glass) {
+            _occluderGroup.remove(this.glass);
+            (this.glass.material as MeshStandardMaterial).dispose();
+            this.glass.geometry.dispose();
+            this.glass = null;
+        }
         this.maskTexture.dispose();
         if (this._connectorLine) {
             _occluderGroup.remove(this._connectorLine);
@@ -464,6 +570,22 @@ export class CSS3DPanel {
 
     /** The occluder mesh — used by the manager's pointer raycast. */
     getOccluder(): Mesh { return this.occluder; }
+
+    /** Glass strength + roughness, live (see setGlassParams). No-op on a panel
+     *  built without glass. */
+    _setGlass(opacity: number, roughness: number): void {
+        if (!this.glass) return;
+        const m = this.glass.material as MeshStandardMaterial;
+        m.opacity = MathUtils.clamp(opacity, 0, 1);
+        m.roughness = MathUtils.clamp(roughness, 0, 1);
+    }
+
+    /** Current glass settings, or null when this panel has no glass. */
+    getGlass(): { opacity: number; roughness: number } | null {
+        if (!this.glass) return null;
+        const m = this.glass.material as MeshStandardMaterial;
+        return { opacity: m.opacity, roughness: m.roughness };
+    }
 
     // ── Per-frame ────────────────────────────────────────────────────────────
 
@@ -595,6 +717,24 @@ export class CSS3DPanel {
         this.occluder.scale.set(worldW, worldH, 1);
         this.occluder.visible = s > 0.001;   // no punch while the line is still rising
 
+        // Glass rides the punch exactly, nudged toward the camera along its own
+        // view axis (matrixWorld's third column IS that axis for a billboarded
+        // plane). Coplanar would technically pass the depth test — depthFunc is
+        // LessEqual — but only until float error says otherwise on some GPU, and
+        // a pane that flickers out on one phone is worse than one that sits four
+        // thousandths of a unit proud on all of them.
+        if (this.glass) {
+            const e = cam.matrixWorld.elements;
+            this.glass.position.set(
+                this._wx + e[8] * GLASS_OFFSET,
+                cy + e[9] * GLASS_OFFSET,
+                this._wz + e[10] * GLASS_OFFSET,
+            );
+            this.glass.quaternion.copy(cam.quaternion);
+            this.glass.scale.set(worldW, worldH, 1);
+            this.glass.visible = this.occluder.visible;
+        }
+
         // Connector line: grows UP from the model to the panel's ink bottom.
         if (this._connectorLine && this._connectorGeom && this._connectorMat && this._hasConnectorTarget) {
             // Ink bottom at FULL scale (fixed) — where the line lands and the
@@ -618,6 +758,7 @@ export class CSS3DPanel {
         this._visible = false;
         this.cssObject.visible = false;
         this.occluder.visible = false;
+        if (this.glass) this.glass.visible = false;
         this.wrapper.style.display = 'none';
         if (this._connectorLine) this._connectorLine.visible = false;
     }

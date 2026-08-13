@@ -15,27 +15,34 @@
  *   • ALL    — instant master multiplier over both (no mask re-bake), for
  *              sweeping the whole effect to feel the range.
  *   • WATER  — --ink-water, the colour every fully-punched pixel lands on.
+ *   • GLASS  — strength of the lit pane in front of the media player, and how
+ *              rough it is. Zoom the radio to see these two; the rest of the
+ *              panel needs the ocean.
  *
  * Whatever you settle on maps back to, in order: inkPunchText / inkPunchSolid
- * in CardCarousel.ts, and --ink-water in style.css (plus the inline fallback on
- * <body> in index.html).
+ * in CardCarousel.ts, --ink-water in style.css (plus the inline fallback on
+ * <body> in index.html), and glassOpacity / glassRoughness on the CSS3DPanel
+ * the media player builds in MediaPlayer.ts.
  *
  * The panel swallows its own pointer/touch/wheel events — the scene's input
  * lives on window and would otherwise scroll the camera while you drag a slider.
  */
 
 import { getInkPunch, setInkPunch, setInkPunchStrength } from '../effects/CardCarousel';
+import { setGlassParams } from '../effects/CSS3DPanel';
 
 // Versioned: the shipping defaults changed after the first round of tuning, and
 // a stored value from that round would silently win over the new default on the
 // very phone the change was made for. Bump this whenever a default moves.
-const STORE_KEY = 'ink-tuner-v2';
+const STORE_KEY = 'ink-tuner-v3';
 
 interface TunerState {
     text: number;
     solid: number;
     all: number;
     water: string;
+    glass: number;
+    glassRough: number;
 }
 
 function readStored(): Partial<TunerState> {
@@ -75,6 +82,8 @@ export function mountInkTuner(): void {
         solid: stored.solid ?? punch.solid,
         all: stored.all ?? 1,
         water: stored.water ?? currentWater(),
+        glass: stored.glass ?? 0.14,
+        glassRough: stored.glassRough ?? 0.35,
     };
 
     const root = document.createElement('div');
@@ -124,7 +133,7 @@ export function mountInkTuner(): void {
         </style>
         <div class="it-body">
             <h4>ink tuner</h4>
-            <p class="it-hint">Desça até o oceano e abra uma aba. WATER é a cor da tinta; os punches ficam em 1 (tinta opaca) por padrão.</p>
+            <p class="it-hint">Tinta do carrossel: desça até o oceano e abra uma aba. GLASS: zoom no rádio.</p>
             <label>
                 <span class="it-row"><span>TEXT</span><span class="it-val" data-val="text"></span></span>
                 <input type="range" data-k="text" min="0" max="1" step="0.01">
@@ -140,6 +149,14 @@ export function mountInkTuner(): void {
             <label>
                 <span class="it-row"><span>WATER</span><span class="it-val" data-val="water"></span></span>
                 <input type="color" data-k="water">
+            </label>
+            <label>
+                <span class="it-row"><span>GLASS</span><span class="it-val" data-val="glass"></span></span>
+                <input type="range" data-k="glass" min="0" max="0.5" step="0.01">
+            </label>
+            <label>
+                <span class="it-row"><span>GLASS ROUGH</span><span class="it-val" data-val="glassRough"></span></span>
+                <input type="range" data-k="glassRough" min="0" max="1" step="0.01">
             </label>
             <button class="it-reset" type="button">reset</button>
         </div>
@@ -162,6 +179,7 @@ export function mountInkTuner(): void {
     function apply(persist: boolean): void {
         setInkPunch(state.text, state.solid);
         setInkPunchStrength(state.all);
+        setGlassParams(state.glass, state.glassRough);
         document.body.style.setProperty('--ink-water', state.water);
         for (const el of vals) {
             const k = el.dataset.val as keyof TunerState;
@@ -188,6 +206,8 @@ export function mountInkTuner(): void {
         state.text = 1;
         state.solid = 1;
         state.all = 1;
+        state.glass = 0.14;
+        state.glassRough = 0.35;
         document.body.style.removeProperty('--ink-water');
         state.water = currentWater();
         apply(false);

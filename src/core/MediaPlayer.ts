@@ -532,6 +532,15 @@ function createPlayerUI(): void {
         anchor: 'top',
         // Thin 3D line from the panel bottom down to the radio.
         connector: true,
+        // A lit pane in front of the ink so the player answers to the scene's
+        // light instead of sitting on it as a flat decal — it warms under the
+        // midday sun and goes quiet at night, and the sheen slides across as the
+        // camera moves. Interaction is untouched (see the glass notes in
+        // CSS3DPanel). Meant to be felt rather than noticed; if you can point at
+        // it, glassOpacity is too high.
+        glass: true,
+        glassOpacity: 0.14,
+        glassRoughness: 0.35,
     });
     playerPanel.content.appendChild(playerContainer);
     playerPanel.setOnOutsideClick(() => { if (isExpanded) collapsePlayer(); });
