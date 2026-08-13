@@ -35,14 +35,11 @@
  *      floating glass frames. Image boxes ARE punched solid, because their DOM
  *      is the thing you're meant to see.
  *   4. The punch planes write depth: WebGL objects BEHIND the plane are occluded
- *      at FULLY punched ink (the card's border, its images), while objects IN
- *      FRONT are drawn over the holes (fish swim over the cards). Where the ink
- *      is only partly punched the creatures behind survive, dimmed, inside it.
- *      NOTE: the punch group is added to the scene AFTER genericFishContainer
- *      and rides in the post-ocean transparents pass (Scene.ts,
- *      getUnderwaterTransparentTargets) — sortObjects is false, so add-order is
- *      draw order, and the punch has to come last or it dissolves a framebuffer
- *      the fish have not been drawn into yet.
+ *      at ink pixels (fish swim behind the borders), while objects IN FRONT are
+ *      drawn over the holes (fish swim over the cards). NOTE: the punch group
+ *      must be added to the scene BEFORE genericFishContainer — sortObjects is
+ *      false, so add-order decides draw order and the depthWrite:false jellies
+ *      must blend over the holes, not be erased by a later punch.
  *   5. The underwater post-process distortion would displace the punched holes
  *      while the DOM behind stays still, shearing the ink. PostProcess exposes a
  *      "quiet rect" (setDistortionQuietRect) that damps distortion over the
@@ -199,13 +196,14 @@ const PILL_PAD_Y = 14;
 // anything nearer to the camera drawn after it. That is the honest limit of the
 // technique: the canvas can only be dissolved, never re-ordered under the DOM.
 //
-// Text pills are the only ink that goes translucent by default. Structural ink
-// stays at full punch: image boxes ARE the content (a photo at 60% over ink is
-// mud), and the hairline border/divider strokes need every bit of contrast they
-// have. Both are live-tunable (see setInkPunch) because the right amount is a
-// legibility judgement that has to be made against the real water, on a real
-// screen — the masks are re-baked on change.
-let inkPunchText = 0.55;
+// SHIPPING VALUE: both at 1 — the ink is opaque and the punch is the original
+// all-or-nothing hole, bit for bit. Translucent ink was tried against the real
+// water and lost: what shows through is worth less than the legibility it costs,
+// and it drags a rendering-order constraint behind it (Scene.ts,
+// getUnderwaterTransparentTargets — the punch must draw AFTER the creatures to
+// see any of them, which at full punch would erase the ones in front instead).
+// The machinery stays because it is inert at 1 and one number brings it back.
+let inkPunchText = 1.0;
 let inkPunchSolid = 1.0;
 
 /** Current ink punch strengths (text, solid) — 1 = opaque ink, 0 = no punch. */

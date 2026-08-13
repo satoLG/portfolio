@@ -26,7 +26,10 @@
 
 import { getInkPunch, setInkPunch, setInkPunchStrength } from '../effects/CardCarousel';
 
-const STORE_KEY = 'ink-tuner';
+// Versioned: the shipping defaults changed after the first round of tuning, and
+// a stored value from that round would silently win over the new default on the
+// very phone the change was made for. Bump this whenever a default moves.
+const STORE_KEY = 'ink-tuner-v2';
 
 interface TunerState {
     text: number;
@@ -121,7 +124,7 @@ export function mountInkTuner(): void {
         </style>
         <div class="it-body">
             <h4>ink tuner</h4>
-            <p class="it-hint">Desça até o oceano e abra uma aba. 1 = tinta opaca, 0 = só a cena.</p>
+            <p class="it-hint">Desça até o oceano e abra uma aba. WATER é a cor da tinta; os punches ficam em 1 (tinta opaca) por padrão.</p>
             <label>
                 <span class="it-row"><span>TEXT</span><span class="it-val" data-val="text"></span></span>
                 <input type="range" data-k="text" min="0" max="1" step="0.01">
@@ -182,7 +185,7 @@ export function mountInkTuner(): void {
 
     (root.querySelector('.it-reset') as HTMLButtonElement).addEventListener('click', () => {
         try { localStorage.removeItem(STORE_KEY); } catch { /* ignore */ }
-        state.text = 0.55;
+        state.text = 1;
         state.solid = 1;
         state.all = 1;
         document.body.style.removeProperty('--ink-water');

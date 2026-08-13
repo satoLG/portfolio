@@ -191,24 +191,13 @@ function getUnderwaterTransparentTargets(): Object3D[] {
     if (bubbles) _underwaterTransparentTargets.push(bubbles);
     const particles = UnderwaterParticles.getRenderable();
     if (particles) _underwaterTransparentTargets.push(particles);
-    // The carousel's punch planes ride along, LAST, so they dissolve a
-    // framebuffer that already has the creatures in it. Left in the main render
-    // they would fire before this pass exists and see nothing but the volume fog
-    // and the sea floor — a flat blue field, which is exactly what the partly
-    // punched ink used to show through: technically transparent, visibly dead.
-    //
-    // Ordering inside this pass follows the same add-order rule as everywhere
-    // else, which is why Start() adds the carousel after genericFishContainer.
-    // What that buys, per creature:
-    //   • opaque fish write depth, so ones IN FRONT reject the punch entirely
-    //     (crisp, and the ink stays sealed behind them) while ones BEHIND get
-    //     dimmed into the ink — correct both ways.
-    //   • jellyfish, bubbles and ambient particles write no depth, so the punch
-    //     cannot tell front from behind and dims them wherever they cross the
-    //     ink. Behind reads right; in front they lose a little glow crossing a
-    //     card. That is the accepted cost of them being visible at all.
-    const carouselPunch = CardCarousel.getOccluderGroup();
-    if (carouselPunch.visible) _underwaterTransparentTargets.push(carouselPunch);
+    // NOTE: the carousel's punch planes deliberately do NOT ride along here.
+    // Moving them into this pass (so they dissolve a framebuffer the creatures
+    // are already in) is what lets partly punched ink show live fish through
+    // itself — but it only works while the ink IS partly punched. At full punch
+    // a late plane erases every depthWrite:false creature crossing IN FRONT of a
+    // card, which is the bug the add-before-fish rule in Start() exists to
+    // prevent. The ink ships opaque, so the punch stays in the main render.
     return _underwaterTransparentTargets;
 }
 
@@ -634,12 +623,17 @@ export function Start(): void
     // Initialize underwater floating particles
     UnderwaterParticles.Start();
 
-    // In-scene CSS3D panels (media player + coin tooltips). Added BEFORE
+    // CSS3D card carousel in the fish band. MUST be added to the scene BEFORE
     // genericFishContainer: sortObjects is false, so add-order decides the
     // transparent-pass draw order, and the depthWrite:false jellyfish need to
-    // draw AFTER these punch planes to blend over the holes instead of being
-    // erased by them. These panels live above water and punch at full strength,
-    // so they keep the original rule.
+    // draw AFTER the carousel's punch planes to blend over the holes instead of
+    // being erased by them.
+    CardCarousel.Start(scene, cssScene);
+    CardCarousel.applyPixelSize(pixelSizeValue);
+
+    // In-scene CSS3D panels (media player + coin tooltips). Same add-before-fish
+    // ordering rule as the carousel — the punch planes must precede the
+    // depthWrite:false jellyfish in the transparent pass.
     CSS3DPanel.Start(scene, cssScene);
 
     // Initialize fish
@@ -647,16 +641,6 @@ export function Start(): void
     scene.add(Fish.clownFish);
     scene.add(Fish.doriFish);
     scene.add(Fish.genericFishContainer);
-
-    // CSS3D card carousel in the fish band. This one is added AFTER the fish,
-    // the opposite of the rule above, and it is deliberate: its ink is only
-    // PARTLY punched, so drawing last dims the creatures it overlaps instead of
-    // erasing them — which is the only way anything alive can be seen through
-    // the ink at all. See getUnderwaterTransparentTargets, which also moves
-    // these punch planes into the post-ocean pass so they land after the fish
-    // are drawn rather than before.
-    CardCarousel.Start(scene, cssScene);
-    CardCarousel.applyPixelSize(pixelSizeValue);
 
     // Initialize media player (for radio)
     MediaPlayer.Start();

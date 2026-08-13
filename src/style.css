@@ -213,20 +213,27 @@ body
        dead code), which is why the ink read as a black chip stamped over the
        water instead of ink IN the water.
 
-       The values below are the water's own colour family: the underwater view
-       is roughly exp((camY - MAX_VIEW_DEPTH*DENSITY) * oceanAbsorption) * _Light
+       The values below are the water's own colour family. The night one came
+       out of the model — the underwater view is roughly
+       exp((camY - MAX_VIEW_DEPTH*DENSITY) * oceanAbsorption) * _Light
        (OceanShaders volumeFragment) mixed 35% toward underwaterTintColor
-       (PostProcess), which lands near rgb(9,36,53) at night and rgb(21,88,114)
-       by day around the depth the carousel lives at. Ink is deliberately a
-       touch deeper than that so white letters still carry — this is the one
-       knob to nudge if the ink reads too light or too dark against the water.
+       (PostProcess), which lands near rgb(9,36,53) at the depth the carousel
+       lives at — and it matches on the device.
+
+       DAY DOES NOT: the model says rgb(21,88,114) and that reads far too dark
+       and grey against the real thing. Sunlit water gets brightness the fog
+       term alone never accounts for — god rays, a lit sea floor, the surface
+       overhead — so the day value below is set by eye against the water, not
+       derived. Day ink is a touch deeper and less saturated than the water
+       around it, which is what keeps white letters carrying on a phone
+       outdoors; matching the water exactly makes the letters float.
        Keep the night value in sync with the inline fallback in index.html. */
     --ink-water: #0a2338;
     background: var(--ink-water);
 }
 
 body.day-mode {
-    --ink-water: #155872;
+    --ink-water: #2a6a8c;
 }
 
 /* ============================================
