@@ -184,7 +184,7 @@ const PLAYER_PX_PER_UNIT = 545;
 
 // Panel translucency — how hard its punch dissolves the canvas. Mirrors the
 // settings menu's 66/70% background so the two surfaces read as the same UI.
-const PLAYER_PUNCH = 0.68;
+const PLAYER_PUNCH = 0.80;
 // With anchor:'top' this is where the panel's TOP edge sits; the body extends
 // downward from here (and further growth — playlist — also goes down, kept
 // off the island by the max-height cap in CSS). 1.15 puts the top just under
@@ -553,10 +553,11 @@ function createPlayerUI(): void {
         // CSS3DPanel). Meant to be felt rather than noticed; if you can point at
         // it, glassOpacity is too high.
         glass: true,
-        glassOpacity: 0.14,
-        glassRoughness: 0.35,
+        glassOpacity: 0.20,
+        glassRoughness: 0.30,
     });
     playerPanel.content.appendChild(playerContainer);
+    refreshConnectorColor();
     playerPanel.setOnOutsideClick(() => { if (isExpanded) collapsePlayer(); });
 
     // Get elements (header/playlist/close removed — collapse via outside click)
@@ -1317,18 +1318,34 @@ export function setPlayerPanelPunch(v: number): void {
     playerPanel?.setPunchAlpha(v);
 }
 
+/** The connector line's colour, read from the panel's OWN computed background so
+ *  the line and the panel can never drift apart — retint the player in CSS and
+ *  the line follows on the next day/night flip with nothing to keep in sync
+ *  here. Falls back to the old scene-contrast pair if the element isn't laid out
+ *  yet (the line would otherwise flash black on the very first frame).
+ *
+ *  getComputedStyle is a layout read, so this is cached and only recomputed when
+ *  the day/night class actually flips — never per frame. */
+let _connectorHex = 0xffffff;
+function refreshConnectorColor(): void {
+    const day = document.body.classList.contains('day-mode');
+    _connectorHex = day ? 0xd4d4d4 : 0x142838;
+    if (!playerContainer) return;
+    const m = getComputedStyle(playerContainer).backgroundColor.match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+    if (m) _connectorHex = (+m[1] << 16) | (+m[2] << 8) | +m[3];
+}
+
 /** Anchor the CSS3D panel above the radio's REST position (static — see the
  *  RADIO_REST_* note). Fixed pose so the panel never jitters with the beat.
- *  Also drives the connector line (down to the radio) + its colour. That colour
- *  tracks the SCENE, not the panel fill: the line runs down over sunlit grass by
- *  day and a dark island at night, so it stays black/white respectively even
- *  though the panel's own palette is now the other way round. */
+ *  Also drives the connector line (down to the radio) + its colour, which is the
+ *  panel's own fill: the line reads as the panel reaching down to the radio
+ *  rather than as a separate mark drawn over the island. */
 function syncPanelAnchor(): void {
     if (!playerPanel) return;
     playerPanel.setWorldPosition(RADIO_REST_X, RADIO_REST_Y + PLAYER_ANCHOR_UP, RADIO_REST_Z);
     // Reach down into the radio body (was stopping above the antenna).
     playerPanel.setConnectorTarget(RADIO_REST_X, RADIO_REST_Y - 0.10, RADIO_REST_Z);
-    playerPanel.setConnectorColor(document.body.classList.contains('day-mode') ? 0x000000 : 0xffffff);
+    playerPanel.setConnectorColor(_connectorHex);
 }
 
 export function expandPlayer(): void {
@@ -1828,6 +1845,7 @@ export function Update(): void {
     if (isDayMode !== wasDayMode) {
         wasDayMode = isDayMode;
         updateWaveformColors();
+        refreshConnectorColor();
     }
     
     // Check underwater state from body class

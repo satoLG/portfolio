@@ -36,7 +36,7 @@ import { setPlayerPanelPunch } from './MediaPlayer';
 // Versioned: the shipping defaults changed after the first round of tuning, and
 // a stored value from that round would silently win over the new default on the
 // very phone the change was made for. Bump this whenever a default moves.
-const STORE_KEY = 'ink-tuner-v4';
+const STORE_KEY = 'ink-tuner-v5';
 
 interface TunerState {
     text: number;
@@ -80,14 +80,19 @@ export function mountInkTuner(): void {
 
     const stored = readStored();
     const punch = getInkPunch();
+    // --ink-water is authored PER MODE in style.css. Writing it inline on <body>
+    // beats both rules at once, so a value pinned at mount freezes whichever
+    // mode happened to be active then and the day/night swap silently stops
+    // working for the ink. Only pin it once the picker is actually used.
+    let waterTouched = stored.water !== undefined;
     const state: TunerState = {
         text: stored.text ?? punch.text,
         solid: stored.solid ?? punch.solid,
         all: stored.all ?? 1,
         water: stored.water ?? currentWater(),
-        glass: stored.glass ?? 0.14,
-        glassRough: stored.glassRough ?? 0.35,
-        player: stored.player ?? 0.68,
+        glass: stored.glass ?? 0.20,
+        glassRough: stored.glassRough ?? 0.30,
+        player: stored.player ?? 0.80,
     };
 
     const root = document.createElement('div');
@@ -189,7 +194,13 @@ export function mountInkTuner(): void {
         setInkPunchStrength(state.all);
         setGlassParams(state.glass, state.glassRough);
         setPlayerPanelPunch(state.player);
-        document.body.style.setProperty('--ink-water', state.water);
+        if (waterTouched) {
+            document.body.style.setProperty('--ink-water', state.water);
+        } else {
+            // Untouched: leave the stylesheet in charge and just mirror what it
+            // is currently serving, so the readout matches the live mode.
+            state.water = currentWater();
+        }
         for (const el of vals) {
             const k = el.dataset.val as keyof TunerState;
             el.textContent = typeof state[k] === 'number' ? (state[k] as number).toFixed(2) : String(state[k]);
@@ -204,7 +215,7 @@ export function mountInkTuner(): void {
     for (const el of inputs) {
         el.addEventListener('input', () => {
             const k = el.dataset.k as keyof TunerState;
-            if (k === 'water') state.water = el.value;
+            if (k === 'water') { state.water = el.value; waterTouched = true; }
             else (state[k] as number) = parseFloat(el.value);
             apply(true);
         });
@@ -212,14 +223,14 @@ export function mountInkTuner(): void {
 
     (root.querySelector('.it-reset') as HTMLButtonElement).addEventListener('click', () => {
         try { localStorage.removeItem(STORE_KEY); } catch { /* ignore */ }
+        waterTouched = false;
         state.text = 1;
         state.solid = 1;
         state.all = 1;
-        state.glass = 0.14;
-        state.glassRough = 0.35;
-        state.player = 0.68;
+        state.glass = 0.20;
+        state.glassRough = 0.30;
+        state.player = 0.80;
         document.body.style.removeProperty('--ink-water');
-        state.water = currentWater();
         apply(false);
     });
 
