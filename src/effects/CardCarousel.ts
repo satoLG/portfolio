@@ -35,11 +35,14 @@
  *      floating glass frames. Image boxes ARE punched solid, because their DOM
  *      is the thing you're meant to see.
  *   4. The punch planes write depth: WebGL objects BEHIND the plane are occluded
- *      at ink pixels (fish swim behind the borders), while objects IN FRONT are
- *      drawn over the holes (fish swim over the cards). NOTE: the punch group
- *      must be added to the scene BEFORE genericFishContainer — sortObjects is
- *      false, so add-order decides draw order and the depthWrite:false jellies
- *      must blend over the holes, not be erased by a later punch.
+ *      at FULLY punched ink (the card's border, its images), while objects IN
+ *      FRONT are drawn over the holes (fish swim over the cards). Where the ink
+ *      is only partly punched the creatures behind survive, dimmed, inside it.
+ *      NOTE: the punch group is added to the scene AFTER genericFishContainer
+ *      and rides in the post-ocean transparents pass (Scene.ts,
+ *      getUnderwaterTransparentTargets) — sortObjects is false, so add-order is
+ *      draw order, and the punch has to come last or it dissolves a framebuffer
+ *      the fish have not been drawn into yet.
  *   5. The underwater post-process distortion would displace the punched holes
  *      while the DOM behind stays still, shearing the ink. PostProcess exposes a
  *      "quiet rect" (setDistortionQuietRect) that damps distortion over the
