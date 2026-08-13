@@ -29,7 +29,7 @@
  *      those pixels and the crisp DOM shows through. The mask's alpha is the
  *      punch STRENGTH, not a binary stencil: 1 erases the canvas outright (the
  *      original all-or-nothing hole), anything less leaves that fraction of the
- *      rendered scene sitting on top of the DOM — see INK_PUNCH_* below.
+ *      rendered scene sitting on top of the DOM — see inkPunchText below.
  *   3. Card interiors are NOT punched, so the live 3D scene (water, fish behind
  *      the plane) stays visible through the cards — they read as border-only
  *      floating glass frames. Image boxes ARE punched solid, because their DOM
@@ -196,20 +196,42 @@ const PILL_PAD_Y = 14;
 // anything nearer to the camera drawn after it. That is the honest limit of the
 // technique: the canvas can only be dissolved, never re-ordered under the DOM.
 //
-// Text pills are the only ink that goes translucent. Structural ink stays at
-// full punch: image boxes ARE the content (a photo at 70% over ink is mud), and
-// the hairline border/divider strokes need every bit of contrast they have.
-const INK_PUNCH_TEXT = 0.72;
-const INK_PUNCH_SOLID = 1.0;
+// Text pills are the only ink that goes translucent by default. Structural ink
+// stays at full punch: image boxes ARE the content (a photo at 60% over ink is
+// mud), and the hairline border/divider strokes need every bit of contrast they
+// have. Both are live-tunable (see setInkPunch) because the right amount is a
+// legibility judgement that has to be made against the real water, on a real
+// screen — the masks are re-baked on change.
+let inkPunchText = 0.55;
+let inkPunchSolid = 1.0;
+
+/** Current ink punch strengths (text, solid) — 1 = opaque ink, 0 = no punch. */
+export function getInkPunch(): { text: number; solid: number } {
+    return { text: inkPunchText, solid: inkPunchSolid };
+}
+
+/** Set how hard each kind of ink dissolves the canvas and re-bake every live
+ *  mask. Cheap enough to drive from a slider: a handful of 2D canvas fills plus
+ *  a texture upload per card on screen. */
+export function setInkPunch(text: number, solid: number): void {
+    inkPunchText = MathUtils.clamp(text, 0, 1);
+    inkPunchSolid = MathUtils.clamp(solid, 0, 1);
+    bakeTabMasks();
+    bakeUnderlineMask();
+    for (const slot of cards) {
+        if (slot.blocks && slot.built) bakeCardMask(slot);
+    }
+}
 
 // Master multiplier over every mask, so the whole effect can be dialled from one
 // place (1 = use the per-ink values above, 0 = no punch at all). Shared Uniform
-// instance — every punch material references it, so a write is live everywhere.
+// instance — every punch material references it, so a write is live everywhere
+// with no re-bake at all.
 const punchStrengthUniform = new Uniform(1.0);
 
-/** Global ink-transparency scale (0..1) — multiplies every punch. 1 = as
- *  authored (INK_PUNCH_*), lower = more of the live scene bleeds through all
- *  the ink at once. Exposed for tuning; nothing calls it in normal play. */
+/** Global ink-transparency scale (0..1) — multiplies every punch, including the
+ *  solid ink. Instant (no re-bake), so it is the knob to sweep when you want to
+ *  see the whole effect move at once. */
 export function setInkPunchStrength(v: number): void {
     punchStrengthUniform.value = MathUtils.clamp(v, 0, 1);
 }
@@ -361,7 +383,7 @@ function textWidth(text: string, size: number, weight: number, ls: number): numb
  *  fill). `top` is the block's top edge in canvas px.
  *
  *  Callers add every pill of a mask to one path and fill it ONCE at
- *  INK_PUNCH_TEXT. Filling them individually at a partial alpha would compound
+ *  inkPunchText. Filling them individually at a partial alpha would compound
  *  where two pills overlap (0.72 over 0.72 → 0.92), printing a brighter, harder
  *  patch between two close lines; a single nonzero-winding fill covers the union
  *  exactly once. Solid ink already in the mask is safe either way — source-over
@@ -1777,7 +1799,7 @@ function bakeCardMask(slot: CardSlot): void {
     ctx.fillStyle = '#fff';
     ctx.strokeStyle = '#fff';
     ctx.lineJoin = 'round';
-    ctx.globalAlpha = INK_PUNCH_SOLID;
+    ctx.globalAlpha = inkPunchSolid;
 
     const off = MASK_MARGIN;
 
@@ -1838,10 +1860,10 @@ function bakeCardMask(slot: CardSlot): void {
         hasPill = true;
     }
     if (hasPill) {
-        ctx.globalAlpha = INK_PUNCH_TEXT;
+        ctx.globalAlpha = inkPunchText;
         ctx.fill();
-        ctx.globalAlpha = 1;
     }
+    ctx.globalAlpha = 1;
 
     slot.maskTexture.needsUpdate = true;
 }
@@ -1866,7 +1888,7 @@ function bakeTabMasks(): void {
         ctx.clearRect(0, 0, cw, ch);
         ctx.fillStyle = '#fff';
         // One pill, so a plain alpha fill can't compound with anything.
-        ctx.globalAlpha = INK_PUNCH_TEXT;
+        ctx.globalAlpha = inkPunchText;
         ctx.beginPath();
         addTextPillPath(
             ctx, text(TABS[i].label),
@@ -1894,9 +1916,11 @@ function bakeUnderlineMask(): void {
     if (!ctx) return;
     ctx.clearRect(0, 0, cw, ch);
     ctx.fillStyle = '#fff';
+    ctx.globalAlpha = inkPunchSolid;
     const pw = underlineMaskW + 2 * LINE_PAD;
     const ph = TAB_UNDERLINE_H + 2 * LINE_PAD;
     roundRectPath(ctx, (cw - pw) / 2, (ch - ph) / 2, pw, ph, LINE_PAD + 1);
     ctx.fill();
+    ctx.globalAlpha = 1;
     texture.needsUpdate = true;
 }
