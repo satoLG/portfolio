@@ -8,6 +8,7 @@ import { getCameraY, setIntroProgress, enableScroll, onDescentComplete } from ".
 import { beginDescent as beginCloudDescent } from "../effects/CloudSprites.ts";
 import { showWelcomeText } from "../effects/WelcomeText";
 import { t, setLanguage, type Language } from "./i18n";
+import { fps } from "./Time";
 
 const THEME_STORAGE_KEY = 'portfolio-theme-mode';
 
@@ -491,7 +492,7 @@ export function Start(): void {
                     </div>
                 </div>
                 <div class="settings-row" style="padding-top:6px;display:flex;align-items:center;justify-content:flex-end">
-                    <span class="fps-counter" style="font-size:0.9em;opacity:0.8;font-variant-numeric:tabular-nums;white-space:nowrap">-- FPS</span>
+                    <span class="fps-counter">-- FPS</span>
                 </div>
 
             </div>
@@ -833,26 +834,20 @@ let _lastBlendClass: 'day' | 'night' = 'day';
 const DAY_NIGHT_STEPS = 24;
 let _lastBlendStep = -1;
 
-// Live FPS readout shown in the settings graphics tab (next to the auto toggle).
+// Live FPS readout shown in the settings graphics tab.
 let _fpsCounterEl: HTMLElement | null = null;
-let _fpsLast = 0;
-let _fpsAccum = 0;
-let _fpsFrames = 0;
+let _fpsShown = -1;
 
 export function Update(): void {
-    // Live FPS counter (throttled to ~4 updates/sec to avoid layout thrash).
+    // Frame rate comes from Time.ts, which measures it once per frame. Counting
+    // calls to this function instead would report whatever rate this function
+    // happens to run at, which is not the same thing.
     if (_fpsCounterEl) {
-        const now = performance.now();
-        if (_fpsLast > 0) {
-            _fpsAccum += now - _fpsLast;
-            _fpsFrames++;
-            if (_fpsAccum >= 250) {
-                _fpsCounterEl.textContent = `${Math.round((_fpsFrames * 1000) / _fpsAccum)} FPS`;
-                _fpsAccum = 0;
-                _fpsFrames = 0;
-            }
+        const shown = Math.round(fps);
+        if (shown !== _fpsShown) {
+            _fpsShown = shown;
+            _fpsCounterEl.textContent = `${shown} FPS`;
         }
-        _fpsLast = now;
     }
 
     // Day/night colour transitions.
