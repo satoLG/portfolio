@@ -232,8 +232,8 @@ body
        The two endpoints are authored here and the LIVE value is mixed between
        them further down, off --day-night-blend, so the ink drifts with the sky
        instead of snapping when the mode class flips. */
-    --ink-water-night: #0a2338;
-    --ink-water-day: #2a6a8c;
+    --ink-water-night: #142838;
+    --ink-water-day: #1e617a;
 
     /* Fallback: the instant swap, for anything without color-mix(). The blended
        rules below override this where it is supported. */
@@ -265,8 +265,9 @@ body.day-mode {
 
    Gated on @supports so the class-keyed rules above stay as the fallback: an
    unsupported color-mix() would make the custom property invalid at computed
-   value time, and background: var(--oc-panel) would then resolve to nothing at
-   all — a card with no fill. Better to snap than to vanish. */
+   value time, and background: var(--ink-water) would then resolve to nothing at
+   all — every punched surface losing its colour. Better to snap than to
+   vanish. */
 @supports (color: color-mix(in srgb, red, blue)) {
     /* Both selectors, one rule: body.day-mode also needs the mix, and
        `--ink-water: var(--ink-water)` would be a cycle, not an inheritance. */
@@ -289,31 +290,13 @@ body.day-mode {
    is the only reason day and night share a type colour — the panel choice made
    day a dark surface. */
 body {
-    --oc-panel-day: #1e617a;
-    --oc-panel-night: rgb(20, 40, 60);
-
     /* Type and hairlines do NOT blend, and not for want of trying: both modes
        want white here, so a mix between them is white either way. Blending them
        bought an identical colour at the price of dragging `color` and
-       `text-shadow` into the repaint — on card surfaces full of text, the most
-       expensive part of the invalidation for the least visible gain. */
+       `text-shadow` into the repaint — the most expensive part of a card's
+       invalidation for the least visible gain. */
     --oc-text: rgba(255, 255, 255, 0.93);
     --oc-hairline: rgba(255, 255, 255, 0.46);
-
-    /* Fallback — instant swap (see the @supports note above). */
-    --oc-panel: var(--oc-panel-day);
-}
-
-body.night-mode {
-    --oc-panel: var(--oc-panel-night);
-}
-
-@supports (color: color-mix(in srgb, red, blue)) {
-    body, body.night-mode {
-        --oc-panel: color-mix(in srgb,
-            var(--oc-panel-night) calc(var(--day-night-step, 0) * 100%),
-            var(--oc-panel-day));
-    }
 }
 
 /* ============================================
@@ -3071,15 +3054,16 @@ body.day-mode .css3d-panel-content .ct-body {
    outside a punched region is simply never seen — so glows here are free to
    overflow.
    A card is punched as ONE rounded slab and a title as ONE pill, both at
-   inkPunch (0.80 — the media player's exact value). The DOM paints an opaque
-   panel underneath in --oc-panel, and the 20% the punch leaves behind is the
-   LIVE SCENE, so both read as sheets of tinted glass with fish moving behind
-   them. Palette is the settings menu's, same as the media player: dark slate
-   and white at night, light grey and marine blue by day.
+   inkPunch. Neither paints a fill: the DOM is transparent and the hole reaches
+   through to the page background (--ink-water), while the fraction the punch
+   leaves behind is the LIVE SCENE. So both read as sheets of tinted glass with
+   fish moving behind them, and their colour is one property on <body> rather
+   than a fill on every card — which is what keeps the day/night transition off
+   the cards' composited layers (see .ocean-card).
 
-   The panel fills are OPAQUE on purpose. A DOM alpha here would reveal
-   --ink-water behind the canvas, not the scene; transparency is the punch's job
-   and the punch's alone, so there is exactly one thing to tune.
+   Transparency is the punch's job and the punch's alone. A DOM alpha would only
+   reveal the same page background it already shows, so there is exactly one
+   thing to tune.
 
    THE PUNCH GEOMETRY IS IDENTICAL IN BOTH MODES. Only the light changes: neon
    at night, a plain water-toned fill by day. An earlier version widened the
@@ -3149,26 +3133,12 @@ body.night-mode .ocean-carousel {
 .ocean-tab.is-dimmed { opacity: 0.52; }
 .ocean-tab.is-active { opacity: 1; }
 
-/* The pill, filled. Its insets come from --oc-pill-x/y, which CardCarousel
-   writes from the very pads it baked into the mask, so the paint and the hole
-   are one measurement and cannot drift. z-index:-1 puts it behind the glyphs
-   inside the tab's own stacking context (created by will-change: transform). */
-.ocean-tab::before {
-    content: '';
-    position: absolute;
-    /* Insets carry --oc-wobble-pad: the punched edge ripples past the pill and
-       must still find panel colour under it. Titles can afford to grow — they
-       are small surfaces. Cards cannot, so their hole is inset instead (see
-       bakeCardMask). Two strategies for one problem, and the split is cost. */
-    left: calc(-1 * (var(--oc-pill-x, 20px) + var(--oc-wobble-pad, 0px)));
-    right: calc(-1 * (var(--oc-pill-x, 20px) + var(--oc-wobble-pad, 0px)));
-    top: calc(-1 * (var(--oc-pill-y, 14px) + var(--oc-wobble-pad, 0px)));
-    bottom: calc(-1 * (var(--oc-pill-y, 14px) + var(--oc-wobble-pad, 0px)));
-    border-radius: 999px;
-    background: var(--oc-panel);
-    z-index: -1;
-    pointer-events: none;
-}
+/* The pill needs no fill of its own: the punch reaches through the transparent
+   title straight to the page background, exactly as a card does. This used to be
+   a ::before with z-index:-1, which also meant relying on negative z-index
+   resolving sanely inside a preserve-3d subtree. One less thing to be right
+   about, and one less box to keep registered with the mask. */
+
 
 .ocean-tab-underline {
     position: absolute;
@@ -3196,12 +3166,22 @@ body.night-mode .ocean-carousel {
        rid of. Inner elements keep their own --oc-frame-shadow — they sit inside
        the hole, so theirs does show.
 
-       No box-shadow either, and that one is a performance rule rather than a
-       visual one: a spread shadow here (it briefly carried the wobble's
-       overhang) widens the card's composited surface on all four sides and
-       repaints, at card size, on every step of the day/night blend. The wobble
-       gets its room by insetting the HOLE instead — see bakeCardMask. */
-    background: var(--oc-panel);   /* opaque — see-through is the punch's job */
+       No background either, and that is the day/night performance fix. A fill
+       here is a fill on the card's own composited layer, and that layer holds
+       all of its text, images and glows — so recolouring it for a day/night
+       step re-rasters the whole card. Six steps meant six of those, per visible
+       card, which is what read as the stall.
+
+       The colour comes from <body> instead. The card is transparent, so the
+       punched hole reaches straight through to the page background
+       (--ink-water), and recolouring THAT is one viewport-sized solid fill with
+       no text in it. Nothing else was ever showing --ink-water anyway — every
+       punched surface used to paint over it — so the two collapse into one
+       colour with no loss.
+
+       What the card still owns is its shape, and it does not own that either:
+       with no fill, the visible rounded rect is entirely the punch mask's. */
+    background: transparent;
     color: var(--oc-text);
     font-family: 'Wotfard', ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;

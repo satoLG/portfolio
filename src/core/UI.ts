@@ -826,9 +826,11 @@ export function Start(): void {
 
 // Track previous blend class to avoid redundant DOM mutations
 let _lastBlendClass: 'day' | 'night' = 'day';
-// Steps a paint-bound consumer sees across a full day/night transition. Raise it
-// for a smoother ramp and more repaints; lower it if a device still hitches.
-const DAY_NIGHT_STEPS = 6;
+// Steps a paint-bound consumer sees across a full day/night transition. It sat
+// at 6 while the card fills followed this, because each step re-rastered every
+// visible card. They do not any more — the only consumer left is one solid
+// viewport background — so it can afford a much finer ramp.
+const DAY_NIGHT_STEPS = 24;
 let _lastBlendStep = -1;
 
 // Live FPS readout shown in the settings graphics tab (next to the auto toggle).

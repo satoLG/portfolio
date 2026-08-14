@@ -236,17 +236,13 @@ const punchStrengthUniform = new Uniform(1.0);
 // costs four sines a fragment and the interior does not care — it is uniform, so
 // only the edge shows the displacement.
 //
-// The DOM behind it does NOT wobble, and the hole must never swing past it: out
-// there nothing paints, so the ripple would show --ink-water and read as a
-// coloured fringe. Two ways to guarantee that, and which one is used is a cost
-// decision, not a taste one:
-//
-//   titles — the DOM grows (--oc-wobble-pad on the pill's ::before). Small
-//            surfaces, so a wider one is free.
-//   cards  — the HOLE shrinks (inset in bakeCardMask). A card is the most
-//            expensive surface in the app; growing it costs memory on every one
-//            and, when the growth was a box-shadow in var(--oc-panel), a
-//            card-sized shadow repaint on every day/night colour step.
+// The DOM behind it does not wobble, and no longer has to. Both surfaces are
+// transparent and the colour comes from the page background, which extends
+// everywhere — so wherever the wave pushes the hole, it still lands on the
+// panel colour. Two earlier attempts existed only to keep the hole inside a
+// per-element fill (grow the DOM with a spread shadow, then shrink the hole
+// with an inset); dropping the fill dropped the problem. The wave's only bound
+// now is MASK_MARGIN, the empty room around the shape in its own mask canvas.
 const WOBBLE_SPEED = 0.55;   // rad/s. Not exposed: "bem suave" is the brief, and
                              // a fourth slider to make it un-suave is not.
 let wobbleAmp = 10.0;        // design px of displacement
@@ -257,7 +253,8 @@ const wobbleTimeUniform = new Uniform(0);
 
 /** How far the edge can travel, in design px. The two sines per axis sum to
  *  exactly 1, so a straight edge moves at most `amp`; a corner takes both axes
- *  at once and reaches amp * sqrt(2). Round up from that, plus a px of slack. */
+ *  at once and reaches amp * sqrt(2). Round up from that, plus a px of slack.
+ *  Only bound now is the mask canvas's own margin. */
 function wobbleReach(): number {
     return Math.ceil(wobbleAmp * 1.42) + 1;
 }
@@ -273,18 +270,11 @@ export function setWobble(amp: number, freq: number): void {
     wobbleFreq = Math.max(0, freq);
     wobbleAmpUniform.value = wobbleAmp;
     wobbleFreqUniform.value = wobbleFreq;
-    // Titles keep the DOM-overhang strategy: their ::before grows by the wave's
-    // reach so an outward swing still finds panel colour. They are small
-    // elements and a wider one costs nothing.
-    screenEl?.style.setProperty('--oc-wobble-pad', `${wobbleReach() * DOM_SS}px`);
-    // Cards do NOT. Growing a card meant a box-shadow spread on the single most
-    // expensive surface in the app — it widened that surface on all four sides
-    // AND, being painted in var(--oc-panel), re-rendered a shadow the size of
-    // the card on every step of the day/night blend. The hole is inset instead,
-    // so the DOM card keeps exactly the bounds it always had and the ripple
-    // swings inside them. Costs a re-bake, which is a slider move, not a frame.
-    for (const slot of cards) {
-        if (slot.blocks && slot.built) bakeCardMask(slot);
+    if (wobbleReach() > MASK_MARGIN) {
+        console.warn(
+            `[CardCarousel] wobble reach ${wobbleReach()}px exceeds the ${MASK_MARGIN}px ` +
+            'mask margin — the wave will be clipped flat at its outward peaks.',
+        );
     }
 }
 
@@ -835,7 +825,6 @@ export function Start(glScene: ThreeScene, cssScene: ThreeScene): void {
     screenEl.style.height = '0px';
     screenEl.style.setProperty('--oc-pill-x', `${PILL_PAD_X * DOM_SS}px`);
     screenEl.style.setProperty('--oc-pill-y', `${PILL_PAD_Y * DOM_SS}px`);
-    setWobble(wobbleAmp, wobbleFreq);   // seeds --oc-wobble-pad from the defaults
     // Everything in the stylesheet that must hold a fixed DESIGN size — the glow
     // radii, the divider, the icon letterbox — is authored as design px × this.
     screenEl.style.setProperty('--oc-ss', `${DOM_SS}`);
@@ -1916,25 +1905,11 @@ function bakeCardMask(slot: CardSlot): void {
     // (--oc-panel), the punch dissolves the canvas over all of it at inkPunch,
     // and what comes through is the scene rather than the gaps.
     //
-    // The card, INSET by the wobble's reach. Two rules meet here:
-    //
-    //  • never punch past the DOM card. Out there the hole is open with nothing
-    //    painting into it, so it shows --ink-water — the ring that read as a
-    //    border nobody asked for, and it would now be a rippling one.
-    //  • never grow the DOM card to make room. That surface is the app's most
-    //    expensive; widening it costs memory on every card and a shadow repaint
-    //    on every colour step.
-    //
-    // Insetting satisfies both: the edge swings between (card - 2*reach) and the
-    // card's real edge, always over panel colour, with the DOM untouched.
-    const inset = wobbleReach();
+    // Exactly the card. The wave is free to swing either side of it: the DOM is
+    // transparent and the colour lives on the page background, so an outward
+    // peak lands on the same panel tone an inward one does.
     ctx.globalAlpha = inkPunch;
-    roundRectPath(
-        ctx,
-        MASK_MARGIN + inset, MASK_MARGIN + inset,
-        CARD_W - 2 * inset, CARD_H - 2 * inset,
-        Math.max(2, CARD_RADIUS - inset),
-    );
+    roundRectPath(ctx, MASK_MARGIN, MASK_MARGIN, CARD_W, CARD_H, CARD_RADIUS);
     ctx.fill();
     ctx.globalAlpha = 1;
 

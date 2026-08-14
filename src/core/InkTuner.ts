@@ -15,11 +15,9 @@
  *   • AMP  — how far the edge travels, in design px. AMP 0 also doubles as the
  *            wobble's off switch when you need to know whether it is the thing
  *            costing frames.
- *   • BLEND — smooth vs instant day/night card colour. A DIAGNOSTIC, not a
- *            setting: the smooth path repaints every card a handful of times
- *            across a transition, and if a device still stalls with it off, the
- *            cost is somewhere else entirely and worth knowing before guessing
- *            again. Remove it with the rest of this file.
+ *
+ * (The BLEND diagnostic that briefly lived here is gone: it confirmed the stall
+ * was the card fills repainting, and those no longer carry a fill at all.)
  *
  * Both are live: the punch shader reads them every frame, no mask re-bake. They
  * map back to wobbleAmp / wobbleFreq in CardCarousel.ts. Speed is fixed at
@@ -37,12 +35,11 @@ import { getWobble, setWobble } from '../effects/CardCarousel';
 // Versioned: bumped whenever the stored shape or a default changes, so a value
 // left over from an earlier round cannot silently win over the new default on
 // the very phone it is being tuned on.
-const STORE_KEY = 'ink-tuner-v12';
+const STORE_KEY = 'ink-tuner-v13';
 
 interface TunerState {
     freq: number;
     amp: number;
-    blend: boolean;
 }
 
 function readStored(): Partial<TunerState> {
@@ -67,7 +64,6 @@ export function mountInkTuner(): void {
     const state: TunerState = {
         freq: stored.freq ?? wobble.freq,
         amp: stored.amp ?? wobble.amp,
-        blend: stored.blend ?? true,
     };
 
     const root = document.createElement('div');
@@ -123,10 +119,6 @@ export function mountInkTuner(): void {
                 <span class="it-row"><span>AMP</span><span class="it-val" data-val="amp"></span></span>
                 <input type="range" data-k="amp" min="0" max="10" step="0.1">
             </label>
-            <label>
-                <span class="it-row"><span>BLEND</span><span class="it-val" data-val="blend"></span></span>
-                <button class="it-reset" type="button" data-toggle="blend">alternar</button>
-            </label>
             <button class="it-reset" type="button">reset</button>
         </div>
         <div class="it-chip">◐</div>
@@ -145,33 +137,11 @@ export function mountInkTuner(): void {
     const inputs = [...root.querySelectorAll<HTMLInputElement>('input[data-k]')];
     const vals = [...root.querySelectorAll<HTMLSpanElement>('[data-val]')];
 
-    /** Force the card fill back to an instant class swap, bypassing the stepped
-     *  colour mix. Appended after the stylesheet, same specificity, so it wins
-     *  on order alone — no !important needed. */
-    let _blendOff: HTMLStyleElement | null = null;
-    function applyBlendMode(smooth: boolean): void {
-        if (smooth) {
-            _blendOff?.remove();
-            _blendOff = null;
-            return;
-        }
-        if (!_blendOff) {
-            _blendOff = document.createElement('style');
-            document.head.appendChild(_blendOff);
-        }
-        _blendOff.textContent =
-            'body { --oc-panel: var(--oc-panel-day); --ink-water: var(--ink-water-day); }' +
-            'body.night-mode { --oc-panel: var(--oc-panel-night); }' +
-            'body:not(.day-mode) { --ink-water: var(--ink-water-night); }';
-    }
-
     function apply(persist: boolean): void {
         setWobble(state.amp, state.freq);
-        applyBlendMode(state.blend);
         for (const el of vals) {
             const k = el.dataset.val as keyof TunerState;
-            const v = state[k];
-            el.textContent = typeof v === 'number' ? v.toFixed(3) : (v ? 'suave' : 'instantâneo');
+            el.textContent = state[k].toFixed(3);
         }
         for (const el of inputs) {
             const k = el.dataset.k as 'freq' | 'amp';
@@ -187,16 +157,10 @@ export function mountInkTuner(): void {
         });
     }
 
-    (root.querySelector('[data-toggle="blend"]') as HTMLButtonElement).addEventListener('click', () => {
-        state.blend = !state.blend;
-        apply(true);
-    });
-
-    (root.querySelector('button.it-reset:not([data-toggle])') as HTMLButtonElement).addEventListener('click', () => {
+    (root.querySelector('button.it-reset') as HTMLButtonElement).addEventListener('click', () => {
         try { localStorage.removeItem(STORE_KEY); } catch { /* ignore */ }
         state.freq = 0.030;
         state.amp = 10;
-        state.blend = true;
         apply(false);
     });
 
