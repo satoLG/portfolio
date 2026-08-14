@@ -181,6 +181,10 @@ let playerPanel: CSS3DPanel | null = null;
 // Bigger = smaller panel in-scene. High enough that the 320px DOM is scaled
 // DOWN (crisp) rather than up (blurry) at the radio-zoom framing. Tweak to resize.
 const PLAYER_PX_PER_UNIT = 545;
+
+// Panel translucency — how hard its punch dissolves the canvas. Mirrors the
+// settings menu's 66/70% background so the two surfaces read as the same UI.
+const PLAYER_PUNCH = 0.80;
 // With anchor:'top' this is where the panel's TOP edge sits; the body extends
 // downward from here (and further growth — playlist — also goes down, kept
 // off the island by the max-height cap in CSS). 1.15 puts the top just under
@@ -532,8 +536,28 @@ function createPlayerUI(): void {
         anchor: 'top',
         // Thin 3D line from the panel bottom down to the radio.
         connector: true,
+        // See-through panel, at the settings menu's own ratio (its background is
+        // 66% at night / 70% by day). Here the remaining fraction is the LIVE
+        // SCENE rather than a blurred page background, because the punch is what
+        // goes partial — the DOM fill stays opaque (see style.css).
+        //
+        // Text does not suffer for it: the residual scene is added equally to
+        // the glyphs and to the fill behind them, so it lifts both and leaves
+        // their separation at PLAYER_PUNCH x the full contrast — around 160
+        // levels, which carries easily.
+        punchAlpha: PLAYER_PUNCH,
+        // A lit pane in front of the ink so the player answers to the scene's
+        // light instead of sitting on it as a flat decal — it warms under the
+        // midday sun and goes quiet at night, and the sheen slides across as the
+        // camera moves. Interaction is untouched (see the glass notes in
+        // CSS3DPanel). Meant to be felt rather than noticed; if you can point at
+        // it, glassOpacity is too high.
+        glass: true,
+        glassOpacity: 0.20,
+        glassRoughness: 0.30,
     });
     playerPanel.content.appendChild(playerContainer);
+    refreshConnectorColor();
     playerPanel.setOnOutsideClick(() => { if (isExpanded) collapsePlayer(); });
 
     // Get elements (header/playlist/close removed — collapse via outside click)
@@ -1076,11 +1100,12 @@ function startAnalyserAnimation(): void {
     drawAnalyser();
 }
 
-/** Bar tone that contrasts with the panel ink fill (black in day mode → white
- *  bars; white in night mode → black bars). Day = body.day-mode. */
+/** Bar tone that contrasts with the panel ink fill, tracking the settings-menu
+ *  palette the panel now uses: light fill by day → marine-blue bars, dark fill
+ *  at night → white bars. Day = body.day-mode. */
 function _waveBaseColor(alpha = 1): string {
     const day = document.body.classList.contains('day-mode');
-    const c = day ? '255,255,255' : '0,0,0';
+    const c = day ? '10,37,64' : '255,255,255';
     return alpha >= 1 ? `rgb(${c})` : `rgba(${c},${alpha})`;
 }
 
@@ -1287,16 +1312,40 @@ function updateWaveformColors(): void {
 let isAnimating = false;  // Block resize during expand/collapse animation
 const ANIM_DURATION = 700;  // ms — full line+panel sequence (waveform right-sizes after)
 
+/** Live panel translucency (0..1) — 1 = opaque. Judging "see-through but still
+ *  readable" needs the real sky behind it, so it is settable at runtime. */
+export function setPlayerPanelPunch(v: number): void {
+    playerPanel?.setPunchAlpha(v);
+}
+
+/** The connector line's colour — the panel's own fill, so the line reads as the
+ *  panel reaching down to the radio rather than as a separate mark.
+ *
+ *  These are hard-coded rather than read back with getComputedStyle, which is
+ *  what this did at first. That read is a FORCED SYNCHRONOUS STYLE RECALC, and
+ *  it fired on the day/night flip — the one moment the whole stylesheet has just
+ *  been invalidated by the class swap, over a CSS3D subtree with a composited
+ *  surface per element. Paying a full synchronous recalc exactly then is the
+ *  most expensive possible time to ask. Two constants and a note to keep them in
+ *  step with .media-player.expanded cost nothing and stall nothing. */
+const CONNECTOR_DAY = 0xd4d4d4;    // matches rgb(212,212,212) in style.css
+const CONNECTOR_NIGHT = 0x142838;  // matches rgb(20,40,60)
+let _connectorHex = CONNECTOR_NIGHT;
+function refreshConnectorColor(): void {
+    _connectorHex = document.body.classList.contains('day-mode') ? CONNECTOR_DAY : CONNECTOR_NIGHT;
+}
+
 /** Anchor the CSS3D panel above the radio's REST position (static — see the
  *  RADIO_REST_* note). Fixed pose so the panel never jitters with the beat.
- *  Also drives the connector line (down to the radio) + its colour (matches the
- *  ink fill: black in day mode, white at night). */
+ *  Also drives the connector line (down to the radio) + its colour, which is the
+ *  panel's own fill: the line reads as the panel reaching down to the radio
+ *  rather than as a separate mark drawn over the island. */
 function syncPanelAnchor(): void {
     if (!playerPanel) return;
     playerPanel.setWorldPosition(RADIO_REST_X, RADIO_REST_Y + PLAYER_ANCHOR_UP, RADIO_REST_Z);
     // Reach down into the radio body (was stopping above the antenna).
     playerPanel.setConnectorTarget(RADIO_REST_X, RADIO_REST_Y - 0.10, RADIO_REST_Z);
-    playerPanel.setConnectorColor(document.body.classList.contains('day-mode') ? 0x000000 : 0xffffff);
+    playerPanel.setConnectorColor(_connectorHex);
 }
 
 export function expandPlayer(): void {
@@ -1796,6 +1845,7 @@ export function Update(): void {
     if (isDayMode !== wasDayMode) {
         wasDayMode = isDayMode;
         updateWaveformColors();
+        refreshConnectorColor();
     }
     
     // Check underwater state from body class

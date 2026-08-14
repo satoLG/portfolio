@@ -282,7 +282,18 @@ const fragmentShader = /* glsl */`
         // bubbles/particles are already baked into tDiffuse at this point
         // (drawn before this pass captures the framebuffer), so they pick
         // up the tint too without any changes to their own shaders.
-        color.rgb = mix(color.rgb, uTintColor, underwaterMix * uTintStrength);
+        //
+        // PREMULTIPLIED: the target is uTintColor * color.a, not uTintColor.
+        // This buffer is premultiplied alpha and the CSS3D punch planes leave
+        // pixels with alpha < 1 (partly dissolved ink) or 0 (a full hole).
+        // Mixing toward the raw tint there writes colour a transparent pixel
+        // has no right to carry, and the browser composites it ADDITIVELY over
+        // the DOM behind the canvas: a flat navy wash poured into every punched
+        // hole. That wash is most of the reason the see-through ink looked
+        // flat — at 28% residual scene the tint was contributing more colour
+        // than the scene was. Scaling by alpha keeps a hole a hole and tints
+        // partly-punched ink by exactly the fraction of scene still in it.
+        color.rgb = mix(color.rgb, uTintColor * color.a, underwaterMix * uTintStrength);
 
         gl_FragColor = color;
     }

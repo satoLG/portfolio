@@ -191,6 +191,32 @@ function getUnderwaterTransparentTargets(): Object3D[] {
     if (bubbles) _underwaterTransparentTargets.push(bubbles);
     const particles = UnderwaterParticles.getRenderable();
     if (particles) _underwaterTransparentTargets.push(particles);
+    // The carousel's punch planes ride along too, and WHERE they land in this
+    // pass is the whole reason the see-through cards work.
+    //
+    // Left in the main render they fire before this pass exists, dissolving a
+    // framebuffer that holds only volume fog and sea floor — a flat blue field,
+    // which is why partly punched ink used to be transparent onto nothing.
+    //
+    // In here, the split falls out of how three orders a render list. Opaque
+    // materials always draw before transparent ones, and within the transparent
+    // list add-order decides (sortObjects is false). Start() adds this group
+    // BEFORE genericFishContainer, so:
+    //
+    //   opaque fish  → drawn first, already in the buffer, DIMMED into the card
+    //                  when behind it; and when in front they wrote nearer depth,
+    //                  so the punch is rejected and they stay crisp.
+    //   punch planes → here.
+    //   whale, jellyfish, bubbles, particles → drawn after, and depth-tested
+    //                  against the depth the punch just wrote: behind the card
+    //                  they are rejected, in front they draw at FULL strength.
+    //
+    // So nothing translucent is dimmed or erased by the punch — the earlier
+    // attempt at this moved the group after the fish, which put the punch last
+    // and cost exactly that. The only change is that opaque fish become visible
+    // through the ink, which is the point.
+    const carouselPunch = CardCarousel.getOccluderGroup();
+    if (carouselPunch.visible) _underwaterTransparentTargets.push(carouselPunch);
     return _underwaterTransparentTargets;
 }
 

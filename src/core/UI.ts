@@ -826,7 +826,12 @@ export function Start(): void {
 
 // Track previous blend class to avoid redundant DOM mutations
 let _lastBlendClass: 'day' | 'night' = 'day';
-let _lastBlendValue = -1;
+// Steps a paint-bound consumer sees across a full day/night transition. It sat
+// at 6 while the card fills followed this, because each step re-rastered every
+// visible card. They do not any more — the only consumer left is one solid
+// viewport background — so it can afford a much finer ramp.
+const DAY_NIGHT_STEPS = 24;
+let _lastBlendStep = -1;
 
 // Live FPS readout shown in the settings graphics tab (next to the auto toggle).
 let _fpsCounterEl: HTMLElement | null = null;
@@ -850,13 +855,32 @@ export function Update(): void {
         _fpsLast = now;
     }
 
-    // Update CSS custom property for smooth day/night color transitions
-    // Only update when value actually changed (avoid style recalc every frame)
+    // Day/night colour transitions.
+    //
+    // There used to be a second, FINE property here (--day-night-blend, 3
+    // decimals) written on every frame of a transition. Nothing in the
+    // stylesheet ever read it. A custom property on the root invalidates style
+    // for everything that inherits it, so that was a full-document recalc per
+    // frame — across a CSS3D subtree with a surface per element — bought for
+    // nothing. Deleted. If something ever needs sub-step resolution, it can come
+    // back, but it must be worth a recalc a frame to whoever adds it.
     const blend = getDayNightBlend();
-    const rounded = Math.round(blend * 1000) / 1000; // 3 decimal places
-    if (rounded !== _lastBlendValue) {
-        _lastBlendValue = rounded;
-        document.documentElement.style.setProperty('--day-night-blend', rounded.toString());
+
+    // This one is quantised, and it exists for a very specific reason. The fine value
+    // above changes every frame of a transition, which is free while nothing
+    // reads it — but anything that turns it into a colour makes every element
+    // inheriting that colour repaint at 60fps. The CSS3D carousel cards are the
+    // worst possible thing to do that to: each is its own composited surface at
+    // device resolution (see the surface-budget note in CardCarousel.ts), and
+    // re-rastering them per frame is what turned a smooth toggle into a stall.
+    //
+    // So paint-bound consumers key off this instead: DAY_NIGHT_STEPS repaints
+    // across the whole transition rather than sixty-odd. The colours involved
+    // are close enough that the steps read as a ramp, not as stairs.
+    const stepped = Math.round(blend * DAY_NIGHT_STEPS) / DAY_NIGHT_STEPS;
+    if (stepped !== _lastBlendStep) {
+        _lastBlendStep = stepped;
+        document.documentElement.style.setProperty('--day-night-step', stepped.toString());
     }
     
     // Update body class for CSS targeting â€” only swap once at threshold

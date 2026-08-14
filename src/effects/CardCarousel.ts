@@ -24,13 +24,17 @@
  *   1. The DOM lives in the shared CSS3D scene, rendered BEHIND the WebGL canvas
  *      (Scene.ts adds #css before #webgl).
  *   2. For each title and each card, a WebGL "punch" plane with a per-pixel
- *      alpha MASK writes (0,0,0,0) with NoBlending ONLY where there is ink
- *      (border strokes, glyphs, image boxes), slightly dilated. The canvas
- *      becomes transparent at those pixels and the crisp DOM shows through.
- *   3. Card interiors are NOT punched, so the live 3D scene (water, fish behind
- *      the plane) stays visible through the cards — they read as border-only
- *      floating glass frames. Image boxes ARE punched solid, because their DOM
- *      is the thing you're meant to see.
+ *      alpha MASK dissolves the canvas ONLY where there is ink (border strokes,
+ *      glyphs, image boxes), slightly dilated. The canvas becomes transparent at
+ *      those pixels and the crisp DOM shows through. The mask's alpha is the
+ *      punch STRENGTH, not a binary stencil: 1 erases the canvas outright (the
+ *      original all-or-nothing hole), anything less leaves that fraction of the
+ *      rendered scene sitting on top of the DOM — see inkPunch below.
+ *   3. A card is punched as ONE rounded slab at inkPunch, not traced around its
+ *      ink. The DOM paints an opaque panel and the partial punch leaves the
+ *      rest of the live scene on top of it, so the whole card reads as a single
+ *      sheet of tinted glass with fish moving behind it — rather than a frame
+ *      with holes cut around each line.
  *   4. The punch planes write depth: WebGL objects BEHIND the plane are occluded
  *      at ink pixels (fish swim behind the borders), while objects IN FRONT are
  *      drawn over the holes (fish swim over the cards). NOTE: the punch group
@@ -74,17 +78,22 @@
 
 import { CSS3DObject } from 'three/examples/jsm/renderers/CSS3DRenderer';
 import {
+    AddEquation,
     CanvasTexture,
+    CustomBlending,
     DoubleSide,
     Group,
     LinearFilter,
     MathUtils,
     Mesh,
-    NoBlending,
+    OneMinusSrcAlphaFactor,
     PlaneGeometry,
     Scene as ThreeScene,
     ShaderMaterial,
+    Uniform,
+    Vector2,
     Vector3,
+    ZeroFactor,
 } from 'three';
 // Runtime-only access (function bodies) — Scene/Control/Fish all sit on the same
 // import cycle this project already uses (see the alias note in Fish.ts).
@@ -160,21 +169,121 @@ const CARD_PAD = 48;                 // card box inset for all content
 // distortion inside the quiet rect (damped to 12% there, so a few px covers it).
 //
 // These are DELIBERATELY MODE-INDEPENDENT. An earlier version widened them at
-// night to give the neon more room, but the hole shows the page background
-// (black — index.html sets it inline), so growing it made a visibly fatter dark
-// outline appear around every letter the moment night fell. The geometry has to
-// hold still; only the DOM glow changes between day and night.
-const BAND = 12;             // punch band each side of a stroke (card border)
-const LINE_PAD = 8;          // divider-line punch pad
-const RECT_PAD = 6;          // filled-box (image) punch pad
+// night to give the neon more room, but the hole shows whatever is behind the
+// canvas, so growing it made a visibly fatter dark outline appear around every
+// letter the moment night fell. The geometry has to hold still; only the DOM
+// glow changes between day and night.
+// BAND no longer dilates anything punched — the card's hole is exactly the
+// card. It survives as the safety margin the mask canvas and the distortion
+// quiet rect are sized with, so both still reach past the card's edge.
+const BAND = 12;             // canvas / quiet-rect margin past the card's edge
 
 // Text is punched as a generous rounded PILL around each line — the roomy halo
-// the design wants. Nothing is painted into it: the hole shows the page
-// background, and black ink under white letters IS the look. The pads are still
-// written to --oc-pill-x/y on each element for anything that needs to line up
-// with the punched rect.
+// the design wants. The pads are also written to --oc-pill-x/y on each element
+// for anything that needs to line up with the punched rect.
 const PILL_PAD_X = 20;
 const PILL_PAD_Y = 14;
+
+// ── Ink transparency (how hard each kind of ink dissolves the canvas) ─────────
+// The mask's alpha IS the punch strength (see makePunchMaterial): the canvas is
+// multiplied by (1 - alpha) there, so
+//
+//   1.0 → the canvas is erased outright. The pixel is 100% DOM, composited on
+//         whatever paints behind the canvas (--ink-water, see style.css).
+//   0.7 → 30% of the LIVE rendered scene stays on top of the DOM: the ink reads
+//         as tinted glass you can actually see the water move through, instead
+//         of a flat chip of page background.
+//
+// What is behind the plane is still occluded (the punch writes depth), so what
+// shows through is the water/godrays/floor in FRONT of the panel's depth, plus
+// anything nearer to the camera drawn after it. That is the honest limit of the
+// technique: the canvas can only be dissolved, never re-ordered under the DOM.
+//
+// One number, and it is the media player's (PLAYER_PUNCH in MediaPlayer.ts):
+// card and title pill alike dissolve the canvas by this much, leaving the rest
+// of the LIVE SCENE sitting on top of the DOM. It only reads as glass because
+// the punch now runs in the post-ocean pass — see the long note in
+// Scene.getUnderwaterTransparentTargets. Before that move the ink was
+// technically transparent onto a flat field of fog and showed nothing.
+let inkPunch = 0.85;
+
+/** Current ink punch strength — 1 = opaque ink, 0 = no punch. */
+export function getInkPunch(): number {
+    return inkPunch;
+}
+
+/** Set how hard the ink dissolves the canvas and re-bake every live mask. Cheap
+ *  enough to drive from a slider: one 2D canvas fill plus a texture upload per
+ *  card on screen. */
+export function setInkPunch(v: number): void {
+    inkPunch = MathUtils.clamp(v, 0, 1);
+    bakeTabMasks();
+    for (const slot of cards) {
+        if (slot.blocks && slot.built) bakeCardMask(slot);
+    }
+}
+
+// Master multiplier over every mask, so the whole effect can be dialled from one
+// place (1 = use the per-ink values above, 0 = no punch at all). Shared Uniform
+// instance — every punch material references it, so a write is live everywhere
+// with no re-bake at all.
+const punchStrengthUniform = new Uniform(1.0);
+
+// ── Wobble: the ink's edge, rippling like the water it sits in ────────────────
+// Done by warping the MASK LOOKUP in the punch shader, never by re-baking the
+// mask. A card's mask canvas is ~474x632; redrawing and re-uploading that every
+// frame, per card, would cost more than the whole carousel does. Warping the uv
+// costs four sines a fragment and the interior does not care — it is uniform, so
+// only the edge shows the displacement.
+//
+// The DOM behind it does not wobble, and no longer has to. Both surfaces are
+// transparent and the colour comes from the page background, which extends
+// everywhere — so wherever the wave pushes the hole, it still lands on the
+// panel colour. Two earlier attempts existed only to keep the hole inside a
+// per-element fill (grow the DOM with a spread shadow, then shrink the hole
+// with an inset); dropping the fill dropped the problem. The wave's only bound
+// now is MASK_MARGIN, the empty room around the shape in its own mask canvas.
+const WOBBLE_SPEED = 0.55;   // rad/s. Not exposed: "bem suave" is the brief, and
+                             // a fourth slider to make it un-suave is not.
+let wobbleAmp = 10.0;        // design px of displacement
+let wobbleFreq = 0.030;      // rad per design px (~210px wavelength)
+const wobbleAmpUniform = new Uniform(wobbleAmp);
+const wobbleFreqUniform = new Uniform(wobbleFreq);
+const wobbleTimeUniform = new Uniform(0);
+
+/** How far the edge can travel, in design px. The two sines per axis sum to
+ *  exactly 1, so a straight edge moves at most `amp`; a corner takes both axes
+ *  at once and reaches amp * sqrt(2). Round up from that, plus a px of slack.
+ *  Only bound now is the mask canvas's own margin. */
+function wobbleReach(): number {
+    return Math.ceil(wobbleAmp * 1.42) + 1;
+}
+
+export function getWobble(): { amp: number; freq: number } {
+    return { amp: wobbleAmp, freq: wobbleFreq };
+}
+
+/** Edge wobble: amplitude in design px, frequency in radians per design px.
+ *  Live — no mask re-bake, the shader reads both every frame. */
+export function setWobble(amp: number, freq: number): void {
+    wobbleAmp = Math.max(0, amp);
+    wobbleFreq = Math.max(0, freq);
+    wobbleAmpUniform.value = wobbleAmp;
+    wobbleFreqUniform.value = wobbleFreq;
+    if (wobbleReach() > MASK_MARGIN) {
+        console.warn(
+            `[CardCarousel] wobble reach ${wobbleReach()}px exceeds the ${MASK_MARGIN}px ` +
+            'mask margin — the wave will be clipped flat at its outward peaks.',
+        );
+    }
+}
+
+/** Global ink-transparency scale (0..1) — multiplies every punch, including the
+ *  solid ink. Instant (no re-bake), so it is the knob to sweep when you want to
+ *  see the whole effect move at once. */
+export function setInkPunchStrength(v: number): void {
+    punchStrengthUniform.value = MathUtils.clamp(v, 0, 1);
+}
 const BTN_PILL_MUL = 0.78;   // tighter pill for a link label, so it reads as a
                              // lit word rather than a slab
 
@@ -319,18 +428,23 @@ function textWidth(text: string, size: number, weight: number, ls: number): numb
     return native ? w : w + ls * text.length;
 }
 
-/** Punch one line of text as a rounded pill around its measured box. `top` is
- *  the block's top edge in canvas px. The DOM paints the same rect via
- *  ::before (--oc-pill-x/y), so the hole is always filled with light. */
-function punchTextPill(
+/** Append one line of text's rounded pill to the CURRENT path (no beginPath, no
+ *  fill). `top` is the block's top edge in canvas px.
+ *
+ *  Callers add every pill of a mask to one path and fill it ONCE at
+ *  inkPunch. Filling them individually at a partial alpha would compound
+ *  where two pills overlap (0.72 over 0.72 → 0.92), printing a brighter, harder
+ *  patch between two close lines; a single nonzero-winding fill covers the union
+ *  exactly once. Solid ink already in the mask is safe either way — source-over
+ *  with dst alpha 1 stays at 1. */
+function addTextPillPath(
     ctx: CanvasRenderingContext2D, text: string,
     x: number, top: number, lineH: number,
     size: number, weight: number, ls: number, padX: number, padY: number,
 ): void {
     const w = textWidth(text, size, weight, ls);
     const ph = lineH + 2 * padY;
-    roundRectPath(ctx, x - padX, top - padY, w + 2 * padX, ph, ph / 2);
-    ctx.fill();
+    roundRectSubPath(ctx, x - padX, top - padY, w + 2 * padX, ph, ph / 2);
 }
 
 function wrapText(text: string, size: number, weight: number, ls: number, maxW: number): string[] {
@@ -809,6 +923,8 @@ export function Update(): void {
     }
     if (!_active) return;
 
+    wobbleTimeUniform.value = time * WOBBLE_SPEED;
+
     advanceAnimation();
     updateTabs();
     updateTrack();
@@ -818,12 +934,45 @@ export function Update(): void {
 
 // ─── Build ────────────────────────────────────────────────────────────────────
 
-function makePunchMaterial(texture: CanvasTexture): ShaderMaterial {
-    // NoBlending + hard alpha-test discard: fragments on ink write (0,0,0,0) +
-    // depth (the punch), everything else leaves the scene untouched (the
-    // see-through interior).
+/** `seed` decorrelates one mesh's ripple from the next. Every punch plane shares
+ *  one clock, so without it every card and title breathes in lockstep and the
+ *  row reads as one rigid sheet. The seed becomes a phase offset AND a slight
+ *  rate scale: the phase separates them immediately, the rate keeps them
+ *  drifting apart instead of holding a fixed formation. Two extra floats in the
+ *  shader, no extra work — this is why the wobble is not a per-mesh time
+ *  uniform updated on the CPU. */
+function makePunchMaterial(texture: CanvasTexture, seed = 0): ShaderMaterial {
+    // The punch DISSOLVES the canvas by the mask's alpha instead of stencilling
+    // it away. Blending is dst *= (1 - src.a) on colour AND alpha (Zero /
+    // OneMinusSrcAlpha), which keeps the premultiplied-alpha canvas consistent:
+    // at alpha 1 the destination becomes (0,0,0,0) — bit-for-bit the old
+    // NoBlending hole — and at 0.72 it keeps 28% of the rendered scene, which
+    // the browser then composites OVER the DOM. That residual is the whole
+    // point: the ink stops being a flat chip of page background and becomes
+    // glass with the water still moving inside it.
+    //
+    // Depth still writes, so the front/behind relationship with the fish is
+    // exactly as before. Where two punch planes overlap, the nearer one wins the
+    // depth test rather than both multiplying, so the effect never compounds.
     return new ShaderMaterial({
-        uniforms: { uMask: { value: texture } },
+        uniforms: {
+            uMask: { value: texture },
+            uPunch: punchStrengthUniform,
+            uWobbleAmp: wobbleAmpUniform,
+            uWobbleFreq: wobbleFreqUniform,
+            uWobbleTime: wobbleTimeUniform,
+            // Golden angle: successive seeds land as far apart on the phase
+            // circle as integers can, so neighbouring cards never sync up.
+            uWobblePhase: { value: (seed * 2.39996) % 6.28318 },
+            uWobbleRate: { value: 0.86 + ((seed * 0.37) % 1) * 0.28 },
+            // Design px of this mesh's mask canvas — the wave is authored in px,
+            // and a card's canvas and a title's are nowhere near the same size,
+            // so a shared uv-space amplitude would ripple them differently.
+            uMaskSize: { value: new Vector2(
+                (texture.image as HTMLCanvasElement).width,
+                (texture.image as HTMLCanvasElement).height,
+            ) },
+        },
         vertexShader: /* glsl */`
             varying vec2 vUv;
             void main() {
@@ -833,13 +982,44 @@ function makePunchMaterial(texture: CanvasTexture): ShaderMaterial {
         `,
         fragmentShader: /* glsl */`
             uniform sampler2D uMask;
+            uniform float uPunch;
+            uniform float uWobbleAmp;
+            uniform float uWobbleFreq;
+            uniform float uWobbleTime;
+            uniform float uWobblePhase;
+            uniform float uWobbleRate;
+            uniform vec2 uMaskSize;
             varying vec2 vUv;
             void main() {
-                if (texture2D(uMask, vUv).a < 0.5) discard;
-                gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+                // Warp WHERE the mask is read, so the hole's edge travels while
+                // the DOM behind it stays put. Two sines per axis at irrational
+                // frequency and phase ratios — the same trick the underwater
+                // distortion uses — so their zero crossings never line up and
+                // the ripple has no static nodes sitting on the card's edge.
+                vec2 px = vUv * uMaskSize;
+                float t = uWobbleTime * uWobbleRate + uWobblePhase;
+                vec2 d = vec2(
+                    sin(px.y * uWobbleFreq + t) * 0.62 +
+                    sin(px.y * uWobbleFreq * 1.73 + t * 1.31 + 1.9) * 0.38,
+                    cos(px.x * uWobbleFreq + t * 0.91) * 0.62 +
+                    cos(px.x * uWobbleFreq * 1.41 + t * 0.73 + 2.7) * 0.38
+                );
+                vec2 uv = vUv + (d * uWobbleAmp) / uMaskSize;
+
+                float m = texture2D(uMask, uv).a * uPunch;
+                // Discard rather than write a no-op: a zero-alpha fragment would
+                // still write DEPTH and occlude the scene for nothing.
+                if (m < 0.004) discard;
+                gl_FragColor = vec4(0.0, 0.0, 0.0, m);
             }
         `,
-        blending: NoBlending,
+        blending: CustomBlending,
+        blendEquation: AddEquation,
+        blendSrc: ZeroFactor,
+        blendDst: OneMinusSrcAlphaFactor,
+        blendEquationAlpha: AddEquation,
+        blendSrcAlpha: ZeroFactor,
+        blendDstAlpha: OneMinusSrcAlphaFactor,
         transparent: true,   // → transparent render list (after opaque fish)
         depthWrite: true,
         depthTest: true,
@@ -871,7 +1051,7 @@ function buildTabs(): void {
 
         // Sized for real in layoutTabs() once the label has been measured.
         const { canvas, texture } = makeMaskCanvas(4, 4);
-        const mesh = new Mesh(new PlaneGeometry(1, 1), makePunchMaterial(texture));
+        const mesh = new Mesh(new PlaneGeometry(1, 1), makePunchMaterial(texture, i + 1));
         occluderGroup.add(mesh);
 
         tabs.push({
@@ -893,13 +1073,15 @@ function buildCardSlots(): void {
         el.className = 'ocean-card';
         el.style.width = `${CARD_W * DOM_SS}px`;
         el.style.height = `${CARD_H * DOM_SS}px`;
-        el.style.borderWidth = `${BORDER_PX * DOM_SS}px`;
+        // No border: the card is a plain rounded slab now. Its edge is carried
+        // by the fill's own corner radius plus the inset half of
+        // --oc-frame-shadow, not by a drawn line.
         el.style.borderRadius = `${CARD_RADIUS * DOM_SS}px`;
         el.style.display = 'none';
         screenEl!.appendChild(el);
 
         const { canvas, texture } = makeMaskCanvas(maskW, maskH);
-        const mesh = new Mesh(planeGeo, makePunchMaterial(texture));
+        const mesh = new Mesh(planeGeo, makePunchMaterial(texture, i + 11));
         mesh.visible = false;
         occluderGroup.add(mesh);
 
@@ -1322,7 +1504,9 @@ function updateUnderline(fit: number): void {
         return;
     }
     underlineEl.style.display = '';
-    underlineMesh.visible = true;
+    // Mesh stays hidden — the title pill's punch already covers the underline
+    // (see bakeUnderlineMask). Only the DOM element moves.
+    underlineMesh.visible = false;
 
     const cx = underlineX;
     const cy = active.cy + TAB_UNDERLINE_DY * fit;
@@ -1691,8 +1875,14 @@ function getFrustumHalfWidthPx(): number {
 // ─── Punch mask baking ────────────────────────────────────────────────────────
 
 function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
-    const rr = Math.max(0, Math.min(r, w / 2, h / 2));
     ctx.beginPath();
+    roundRectSubPath(ctx, x, y, w, h, r);
+}
+
+/** Same rounded rect, appended to whatever path is already open — lets several
+ *  shapes share one fill (see addTextPillPath). */
+function roundRectSubPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+    const rr = Math.max(0, Math.min(r, w / 2, h / 2));
     ctx.moveTo(x + rr, y);
     ctx.arcTo(x + w, y, x + w, y + h, rr);
     ctx.arcTo(x + w, y + h, x, y + h, rr);
@@ -1707,59 +1897,21 @@ function bakeCardMask(slot: CardSlot): void {
 
     ctx.clearRect(0, 0, slot.maskCanvas.width, slot.maskCanvas.height);
     ctx.fillStyle = '#fff';
-    ctx.strokeStyle = '#fff';
-    ctx.lineJoin = 'round';
 
-    const off = MASK_MARGIN;
-
-    // Border band — stroke centred on the card border line, fat enough to
-    // reveal the DOM box-shadow glow on both sides.
-    roundRectPath(ctx, off + 1, off + 1, CARD_W - 2, CARD_H - 2, CARD_RADIUS - 1);
-    ctx.lineWidth = BORDER_PX + 2 * BAND;
-    ctx.stroke();
-
-    for (const b of slot.blocks) {
-        if (b.kind === 'line') {
-            roundRectPath(
-                ctx,
-                off + b.x - LINE_PAD, off + b.y - LINE_PAD,
-                b.w + 2 * LINE_PAD, b.h + 2 * LINE_PAD,
-                LINE_PAD + 1,
-            );
-            ctx.fill();
-        } else if (b.kind === 'icons') {
-            // ONE pill for the whole row — the glyphs sit inside it, so the row
-            // reads as a bar of ink instead of a string of separate holes.
-            roundRectPath(
-                ctx,
-                off + b.x - RECT_PAD, off + b.y - RECT_PAD,
-                b.w + 2 * RECT_PAD, b.h + 2 * RECT_PAD,
-                (b.h + 2 * RECT_PAD) / 2,
-            );
-            ctx.fill();
-        } else if (b.kind === 'rect') {
-            if (b.stroke > 0) {
-                roundRectPath(ctx, off + b.x, off + b.y, b.w, b.h, b.radius);
-                ctx.lineWidth = b.stroke + 2 * BAND;
-                ctx.lineJoin = 'round';
-                ctx.stroke();
-            } else {
-                roundRectPath(
-                    ctx,
-                    off + b.x - RECT_PAD, off + b.y - RECT_PAD,
-                    b.w + 2 * RECT_PAD, b.h + 2 * RECT_PAD,
-                    b.radius + RECT_PAD,
-                );
-                ctx.fill();
-            }
-        } else {
-            punchTextPill(
-                ctx, b.text, off + b.x, off + b.y, b.lineH,
-                b.size, b.weight, b.ls,
-                PILL_PAD_X * b.padMul, PILL_PAD_Y * b.padMul,
-            );
-        }
-    }
+    // ONE rounded rect for the whole card. The mask used to trace the ink —
+    // border stroke, a pill per line, a box per image — so the card read as a
+    // frame with lit text floating in it and the live water in the gaps. Now
+    // the card is a single translucent slab: the DOM paints an opaque panel
+    // (--oc-panel), the punch dissolves the canvas over all of it at inkPunch,
+    // and what comes through is the scene rather than the gaps.
+    //
+    // Exactly the card. The wave is free to swing either side of it: the DOM is
+    // transparent and the colour lives on the page background, so an outward
+    // peak lands on the same panel tone an inward one does.
+    ctx.globalAlpha = inkPunch;
+    roundRectPath(ctx, MASK_MARGIN, MASK_MARGIN, CARD_W, CARD_H, CARD_RADIUS);
+    ctx.fill();
+    ctx.globalAlpha = 1;
 
     slot.maskTexture.needsUpdate = true;
 }
@@ -1778,38 +1930,36 @@ function bakeTabMasks(): void {
             tab.maskCanvas.width = cw;
             tab.maskCanvas.height = ch;
             tab.maskTexture.dispose();
+            // The wobble is authored in px and divides by this — a stale size
+            // would ripple a re-measured title at the wrong amplitude.
+            const u = (tab.mesh.material as ShaderMaterial).uniforms.uMaskSize;
+            (u.value as Vector2).set(cw, ch);
         }
         const ctx = tab.maskCanvas.getContext('2d');
         if (!ctx) continue;
         ctx.clearRect(0, 0, cw, ch);
         ctx.fillStyle = '#fff';
-        punchTextPill(
+        // One pill, so a plain alpha fill can't compound with anything.
+        ctx.globalAlpha = inkPunch;
+        ctx.beginPath();
+        addTextPillPath(
             ctx, text(TABS[i].label),
             (cw - tab.textW) / 2, (ch - TAB_LINE_H) / 2, TAB_LINE_H,
             TAB_SIZE, TAB_WEIGHT, TAB_LS, PILL_PAD_X, PILL_PAD_Y,
         );
+        ctx.fill();
+        ctx.globalAlpha = 1;
         tab.maskTexture.needsUpdate = true;
     }
 }
 
 function bakeUnderlineMask(): void {
-    if (!underlineMesh) return;
-    const canvas = underlineMesh.userData.maskCanvas as HTMLCanvasElement;
-    const texture = underlineMesh.userData.maskTexture as CanvasTexture;
-    const cw = Math.ceil(underlineMaskW + 2 * LINE_PAD + 2 * MASK_MARGIN);
-    const ch = Math.ceil(TAB_UNDERLINE_H + 2 * LINE_PAD + 2 * MASK_MARGIN);
-    if (canvas.width !== cw || canvas.height !== ch) {
-        canvas.width = cw;
-        canvas.height = ch;
-        texture.dispose();
-    }
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, cw, ch);
-    ctx.fillStyle = '#fff';
-    const pw = underlineMaskW + 2 * LINE_PAD;
-    const ph = TAB_UNDERLINE_H + 2 * LINE_PAD;
-    roundRectPath(ctx, (cw - pw) / 2, (ch - ph) / 2, pw, ph, LINE_PAD + 1);
-    ctx.fill();
-    texture.needsUpdate = true;
+    // Nothing. The underline sits INSIDE the active title's pill — 40px below
+    // the title centre, where the pill still reaches 43 — so the pill's own
+    // punch already reveals it, and a second plane over the same pixels would
+    // punch them twice: 0.8 then 0.8 again leaves 4% of the scene instead of
+    // 20%, printing a clearly more transparent strip across the pill. The mesh
+    // stays hidden (see updateUnderline) rather than being deleted, so the
+    // DOM/mesh pairing the rest of this file assumes still holds.
 }
+

@@ -203,11 +203,103 @@ body
     font-family: 'Wotfard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
     touch-action: none;
     user-select: none;
-    background: #0a1628;  /* Dark blue background to prevent white blur edges */
+
+    /* --ink-water: THE COLOUR OF EVERY PUNCHED HOLE.
+       The CSS3D layers sit behind the WebGL canvas, so the only place the page
+       background is ever seen is through the alpha holes the punch planes cut
+       in that canvas — overwhelmingly the ocean carousel's ink (its text pills,
+       card border band, dividers). It used to be pure black (an inline style on
+       <body> in index.html, which beat the rule here and made these two values
+       dead code), which is why the ink read as a black chip stamped over the
+       water instead of ink IN the water.
+
+       The values below are the water's own colour family. The night one came
+       out of the model — the underwater view is roughly
+       exp((camY - MAX_VIEW_DEPTH*DENSITY) * oceanAbsorption) * _Light
+       (OceanShaders volumeFragment) mixed 35% toward underwaterTintColor
+       (PostProcess), which lands near rgb(9,36,53) at the depth the carousel
+       lives at — and it matches on the device.
+
+       DAY DOES NOT: the model says rgb(21,88,114) and that reads far too dark
+       and grey against the real thing. Sunlit water gets brightness the fog
+       term alone never accounts for — god rays, a lit sea floor, the surface
+       overhead — so the day value below is set by eye against the water, not
+       derived. Day ink is a touch deeper and less saturated than the water
+       around it, which is what keeps white letters carrying on a phone
+       outdoors; matching the water exactly makes the letters float.
+       The boot colour in index.html's head <style> should track the night
+       endpoint. It is a :where(body) rule, at zero specificity, precisely so it
+       can never win over this one — it used to be an inline style on <body>,
+       which outranked everything and pinned the ink to a single colour.
+
+       The two endpoints are authored here and the LIVE value is mixed between
+       them further down, off --day-night-blend, so the ink drifts with the sky
+       instead of snapping when the mode class flips. */
+    --ink-water-night: #142838;
+    --ink-water-day: #1e617a;
+
+    /* Fallback: the instant swap, for anything without color-mix(). The blended
+       rules below override this where it is supported. */
+    --ink-water: var(--ink-water-night);
+    background: var(--ink-water);
 }
 
 body.day-mode {
-    background: #1a5a8a;  /* Lighter blue for day mode */
+    --ink-water: var(--ink-water-day);
+}
+
+/* ── Day/night colour blending ───────────────────────────────────────────────
+   The sky does not cut from day to night, it eases: Skybox holds a 0..1 blend
+   and UI.ts publishes it as --day-night-blend on the root every time it moves.
+   Anything that swaps on the body.day-mode / body.night-mode class instead
+   snaps mid-ease, which reads as a flicker against a sky that is still moving.
+
+   These surfaces ride the blend — but off --day-night-step, the COARSE
+   companion, never the fine --day-night-blend. Every one of these mixes ends up
+   as a background on a CSS3D element, and those are composited surfaces at
+   device resolution (see the surface-budget note in CardCarousel.ts): following
+   the fine value repaints every visible card sixty times a second for the whole
+   transition, which stalls the scene outright. The stepped value repaints a
+   handful of times instead, and between two blues this close it reads as a ramp
+   rather than as stairs. Anything cheap to repaint may use the fine one.
+
+   Endpoints are authored as --<name>-day / --<name>-night above; the live value
+   is mixed here. Note the mix runs toward NIGHT, because 0 = day, 1 = night.
+
+   Gated on @supports so the class-keyed rules above stay as the fallback: an
+   unsupported color-mix() would make the custom property invalid at computed
+   value time, and background: var(--ink-water) would then resolve to nothing at
+   all — every punched surface losing its colour. Better to snap than to
+   vanish. */
+@supports (color: color-mix(in srgb, red, blue)) {
+    /* Both selectors, one rule: body.day-mode also needs the mix, and
+       `--ink-water: var(--ink-water)` would be a cycle, not an inheritance. */
+    body, body.day-mode {
+        --ink-water: color-mix(in srgb,
+            var(--ink-water-night) calc(var(--day-night-step, 0) * 100%),
+            var(--ink-water-day));
+    }
+}
+
+/* ── Carousel panel palette ──────────────────────────────────────────────────
+   Authored on <body> rather than on .ocean-carousel so the blended values can
+   be written once and inherit in. A rule matching .ocean-carousel directly
+   would beat anything inherited, which is what makes the endpoints live here.
+
+   Day panel is a mid teal-blue picked against the real water, not a neutral
+   grey — the card belongs to what it floats in (settled from the ink tuner's
+   CARD DAY picker). It is dark enough that the type has to be LIGHT by day too:
+   --text-color-day (#0a2540) on that fill lands around 2.3:1, unreadable. That
+   is the only reason day and night share a type colour — the panel choice made
+   day a dark surface. */
+body {
+    /* Type and hairlines do NOT blend, and not for want of trying: both modes
+       want white here, so a mix between them is white either way. Blending them
+       bought an identical colour at the price of dragging `color` and
+       `text-shadow` into the repaint — the most expensive part of a card's
+       invalidation for the least visible gain. */
+    --oc-text: rgba(255, 255, 255, 0.93);
+    --oc-hairline: rgba(255, 255, 255, 0.46);
 }
 
 /* ============================================
@@ -1176,7 +1268,8 @@ body.night-mode #start-button .wave2 {
    DAY/NIGHT COLOR SCHEME
    ============================================ */
 :root {
-    --day-night-blend: 0;
+    --day-night-blend: 0;   /* fine, per-frame — cheap consumers only */
+    --day-night-step: 0;    /* coarse — anything that ends up as paint */
     --text-color-day: #0a2540;      /* Dark marine blue for day */
     --text-color-night: #ffffff;    /* White for night */
     --icon-color-day: #f5c542;      /* Yellow for sun */
@@ -2849,12 +2942,21 @@ body.day-mode .ct-body::after {
     margin: 0;
 }
 
-/* Solid ink fill wrapped by ONE punched bbox (no border, no neon). Day
-   (body.day-mode) = black fill + white ink; night (default) = white fill +
-   black ink. The scene shows AROUND the fill (outside the punched bbox). */
+/* Ink fill wrapped by ONE punched bbox. Palette is the settings menu's, so the
+   two surfaces read as the same UI: night = dark slate + white text, day =
+   light grey + marine blue text. (This is the inverse of what the player used
+   to be, which fought the settings panel sitting a few hundred px above it.)
+
+   The fills are OPAQUE on purpose even though the settings panel's are 66/70%.
+   Translucency here comes from the punch instead (punchAlpha on the panel in
+   MediaPlayer.ts), which leaves a slice of the LIVE SCENE on top of the DOM —
+   the real thing, where a DOM alpha would only reveal --ink-water behind the
+   canvas. Same ratio, better backdrop. What we cannot copy is the blur: a
+   backdrop-filter here would sample the page background, not the scene, which
+   is why the panels never had one. */
 .css3d-panel-content .media-player.expanded {
-    background: #ffffff;   /* night */
-    color: #111111;
+    background: rgb(20, 40, 60);   /* night — .settings-panel's tone */
+    color: rgba(255, 255, 255, 0.9);
     border: none;
     box-shadow: none;
     backdrop-filter: none;
@@ -2863,8 +2965,8 @@ body.day-mode .ct-body::after {
     max-height: none;
 }
 body.day-mode .css3d-panel-content .media-player.expanded {
-    background: #000000;   /* day */
-    color: #ffffff;
+    background: rgb(212, 212, 212);   /* day */
+    color: var(--text-color-day);
 }
 
 /* Text follows the ink tone (no more neon shadow) */
@@ -2881,16 +2983,17 @@ body.day-mode .css3d-panel-content .media-player.expanded {
     box-shadow: none;
 }
 
-/* Control buttons: icon = ink tone, subtle chip bg. Play keeps its red accent. */
+/* Control buttons: icon = ink tone, subtle chip bg — the same two washes
+   .settings-toggle uses. Play keeps its red accent. */
 .css3d-panel-content .player-btn { touch-action: manipulation; }
 .css3d-panel-content .player-btn:not(.player-play) {
-    background: rgba(0, 0, 0, 0.06);   /* night (white fill) */
+    background: rgba(255, 255, 255, 0.1);   /* night (dark fill) */
     color: inherit;
     border: none;
     box-shadow: none;
 }
 body.day-mode .css3d-panel-content .player-btn:not(.player-play) {
-    background: rgba(255, 255, 255, 0.14);   /* day (black fill) */
+    background: rgba(10, 37, 64, 0.1);   /* day (light fill) */
 }
 .css3d-panel-content .player-btn svg { fill: currentColor; }
 
@@ -2953,11 +3056,17 @@ body.day-mode .css3d-panel-content .ct-body {
    per-pixel alpha holes punched by the carousel's mask planes. Whatever paints
    outside a punched region is simply never seen — so glows here are free to
    overflow.
-   Each line of text is punched as a roomy rounded PILL (PILL_PAD_X/Y in
-   CardCarousel.ts). A hole shows whatever is behind the canvas — the page
-   background, which is black — so every pill needs something painted into it or
-   it reads as a dark chip. That is the ::before pool below: it fills exactly the
-   punched rect, driven by the same --oc-pill-x/y the mask was baked from.
+   A card is punched as ONE rounded slab and a title as ONE pill, both at
+   inkPunch. Neither paints a fill: the DOM is transparent and the hole reaches
+   through to the page background (--ink-water), while the fraction the punch
+   leaves behind is the LIVE SCENE. So both read as sheets of tinted glass with
+   fish moving behind them, and their colour is one property on <body> rather
+   than a fill on every card — which is what keeps the day/night transition off
+   the cards' composited layers (see .ocean-card).
+
+   Transparency is the punch's job and the punch's alone. A DOM alpha would only
+   reveal the same page background it already shows, so there is exactly one
+   thing to tune.
 
    THE PUNCH GEOMETRY IS IDENTICAL IN BOTH MODES. Only the light changes: neon
    at night, a plain water-toned fill by day. An earlier version widened the
@@ -2977,9 +3086,9 @@ body.day-mode .css3d-panel-content .ct-body {
        punch mask was baked from. Fallback 4 keeps this stylesheet standalone. */
     --oc-ss: 4;
 
-    /* Day: no neon on the letters — they stay plain white on the bare punched
-       pill, which shows the page background. Black ink, white letters, nothing
-       pooled behind them. */
+    /* Day panel: light grey slab, marine-blue type — .settings-panel's day
+       tone. Night overrides all three below. */
+    /* Day: no neon on the letters — they stay plain white on the panel. */
     --oc-ink-glow: none;
     --oc-line-glow: 0 0 calc(2.5px * var(--oc-ss)) rgba(170, 210, 240, 0.55);
     --oc-frame-shadow:
@@ -3014,7 +3123,7 @@ body.night-mode .ocean-carousel {
     top: 0;
     white-space: nowrap;
     text-align: center;
-    color: #fff;
+    color: var(--oc-text);
     font-family: 'Wotfard', ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     will-change: transform;
@@ -3027,12 +3136,19 @@ body.night-mode .ocean-carousel {
 .ocean-tab.is-dimmed { opacity: 0.52; }
 .ocean-tab.is-active { opacity: 1; }
 
+/* The pill needs no fill of its own: the punch reaches through the transparent
+   title straight to the page background, exactly as a card does. This used to be
+   a ::before with z-index:-1, which also meant relying on negative z-index
+   resolving sanely inside a preserve-3d subtree. One less thing to be right
+   about, and one less box to keep registered with the mask. */
+
+
 .ocean-tab-underline {
     position: absolute;
     left: 0;
     top: 0;
     transform-origin: 50% 50%;
-    background: rgba(255, 255, 255, 0.7);
+    background: var(--oc-hairline);
     box-shadow: var(--oc-line-glow);
     will-change: transform;
     pointer-events: none;
@@ -3047,36 +3163,54 @@ body.night-mode .ocean-carousel {
     /* Cards unfold downward from under the title row — the punch mesh mirrors
        this pivot in CardCarousel.updateCards(). */
     transform-origin: 50% 0%;
-    border-style: solid;
-    border-color: rgba(255, 255, 255, 0.92);
-    background: transparent;   /* interior stays unpunched → live 3D scene */
-    color: #fff;
+    /* Nothing but a filled rounded rect. No border, and no frame glow either:
+       the outer half could never be seen (the punch stops at the card's edge)
+       and the inset half just redrew the outline the border was removed to get
+       rid of. Inner elements keep their own --oc-frame-shadow — they sit inside
+       the hole, so theirs does show.
+
+       No background either, and that is the day/night performance fix. A fill
+       here is a fill on the card's own composited layer, and that layer holds
+       all of its text, images and glows — so recolouring it for a day/night
+       step re-rasters the whole card. Six steps meant six of those, per visible
+       card, which is what read as the stall.
+
+       The colour comes from <body> instead. The card is transparent, so the
+       punched hole reaches straight through to the page background
+       (--ink-water), and recolouring THAT is one viewport-sized solid fill with
+       no text in it. Nothing else was ever showing --ink-water anyway — every
+       punched surface used to paint over it — so the two collapse into one
+       colour with no loss.
+
+       What the card still owns is its shape, and it does not own that either:
+       with no fill, the visible rounded rect is entirely the punch mask's. */
+    background: transparent;
+    color: var(--oc-text);
     font-family: 'Wotfard', ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     will-change: transform, opacity;
     pointer-events: none;
-    box-shadow: var(--oc-frame-shadow);
 }
 
 .ocean-card .oc-blk {
     position: absolute;
     white-space: nowrap;
-    color: #fff;
+    color: var(--oc-text);
     text-shadow: var(--oc-ink-glow);
 }
 
-/* NOTHING is painted behind a line of text. The punched pill shows the page
-   background — black — and that IS the look: black ink, white letters. An
-   earlier version pooled a water tone into the pill so it would read as light
-   rather than a hole; that is the pale smudge under every line, and it is gone
-   on purpose. --oc-pill-x/y still drive the mask; they just have no fill to
-   line up with any more. */
+/* NOTHING is painted behind a line of text INSIDE a card, and nothing should
+   be: the card itself is the panel now, so a per-line pool would be a second
+   flat rectangle sitting on top of it — the pale smudge under every line that
+   an earlier version had. The tab titles are the exception above, because they
+   float on their own with no card to sit on. --oc-pill-x/y still drive the card
+   mask's old per-line geometry only as far as the hit padding goes. */
 
 .ocean-card .oc-line {
     position: absolute;
     height: calc(2px * var(--oc-ss));   /* overridden inline — kept as fallback */
     border-radius: calc(2px * var(--oc-ss));
-    background: rgba(255, 255, 255, 0.5);
+    background: var(--oc-hairline);
     box-shadow: var(--oc-line-glow);
 }
 
@@ -3147,7 +3281,7 @@ body.night-mode .ocean-carousel {
    ink language as the card frame: an outline with the initials inside. */
 .ocean-card .oc-mono {
     border-style: solid;
-    border-color: rgba(255, 255, 255, 0.72);
+    border-color: var(--oc-hairline);
     background: transparent;
     box-shadow: var(--oc-frame-shadow);
 }
