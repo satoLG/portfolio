@@ -227,7 +227,10 @@ body
        derived. Day ink is a touch deeper and less saturated than the water
        around it, which is what keeps white letters carrying on a phone
        outdoors; matching the water exactly makes the letters float.
-       Keep the night value in sync with the inline fallback in index.html.
+       The boot colour in index.html's head <style> should track the night
+       endpoint. It is a :where(body) rule, at zero specificity, precisely so it
+       can never win over this one — it used to be an inline style on <body>,
+       which outranked everything and pinned the ink to a single colour.
 
        The two endpoints are authored here and the LIVE value is mixed between
        them further down, off --day-night-blend, so the ink drifts with the sky

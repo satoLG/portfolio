@@ -58,14 +58,22 @@
     <style>
       #webgl { pointer-events: none; }
       #css   { cursor: pointer; }
+
+      /* Boot colour, so the first paint is water rather than a white flash
+         before style.css lands. :where() is deliberate: it has ZERO
+         specificity, so the real rule in style.css (plain `body`) always wins
+         no matter which order the two end up in.
+
+         This used to be an inline background-color on <body>, which was fine
+         while nothing could see the page background — every punched surface
+         painted its own fill over it. Now the carousel's ink IS this
+         background, and an inline style outranks every stylesheet rule, so it
+         pinned the ink to one colour and the day/night blend never reached the
+         pixel. Do not move it back onto the element. */
+      :where(body) { background-color: #142838; }
     </style>
   </head>
-  <!-- The background colour is what every punched hole in the canvas shows
-       through (the ocean carousel's ink, mainly) — see --ink-water in
-       style.css, which owns the day/night values. Kept inline as well so the
-       first paint, before the stylesheet lands, is already water and not a
-       black flash; the two must stay in sync. -->
-  <body style="background-color: #0a2338; margin: 0;">
+  <body style="margin: 0;">
     <div id="css"></div>
     <div id="webgl"></div>
     <!-- SVG filter for dialog bubble hand-drawn wobble effect -->
