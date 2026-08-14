@@ -224,23 +224,48 @@ export function setPugCamOffset(dx: number, dz: number): void {
     _pugCamOffsetZ = dz;
 }
 
-// Pug zoom target — computed from IslandConfig respecting pug rotation
-const PUG_ZOOM_DIST    = 1.2;   // World-units in front of pug face
+// Pug zoom framing — computed from IslandConfig respecting pug rotation.
 const _pugWorldX = cfgIslandPos.x + cfgPugOffset.x;
 const _pugWorldY = cfgIslandPos.y + cfgPugOffset.y;
 const _pugWorldZ = cfgIslandPos.z + cfgPugOffset.z;
-const PUG_ZOOM_TARGET_X = _pugWorldX + PUG_ZOOM_DIST * Math.sin(cfgPugRotY);
-const PUG_ZOOM_TARGET_Y = _pugWorldY + 0.25;
-const PUG_ZOOM_TARGET_Z = _pugWorldZ + PUG_ZOOM_DIST * Math.cos(cfgPugRotY);
-// phi = 2π − rotY makes camera look along −frontNormal (same derivation as radio)
+// phi = 2π − rotY makes camera look along −frontNormal (same derivation as radio):
+// straight at the pug's face. The framing below then ANGLES OFF that base.
 const PUG_ZOOM_PHI = Math.PI * 2 - cfgPugRotY;
 
-// Shift camera rightward (in camera-local space) during pug zoom so the character
-// appears left-of-centre, leaving visual room for the dialog bubble on the right.
-// Camera-right at PUG_ZOOM_PHI = (cos(cfgPugRotY), 0, −sin(cfgPugRotY)).
-const PUG_LATERAL = 0.15;   // world-unit rightward offset
-const PUG_FINAL_X = PUG_ZOOM_TARGET_X + PUG_LATERAL * Math.cos(cfgPugRotY);
-const PUG_FINAL_Z = PUG_ZOOM_TARGET_Z - PUG_LATERAL * Math.sin(cfgPugRotY);
+/**
+ * Pug-zoom framing, set by eye against the real scene. Read by the Update loop
+ * every frame, so it stays a mutable object rather than five constants.
+ *
+ * The camera no longer stares straight down the pug's facing normal (which
+ * pointed AWAY from the island, so the zoom framed open sea). It still stands
+ * in front of the pug, but yaws a little to the LEFT and pitches a little UP,
+ * which drops the pug into the bottom-right of the frame and gives the rest of
+ * the shot to the island behind it.
+ *
+ *   dist    — world units out along the pug's facing normal (smaller = closer).
+ *   height  — camera Y above the pug's origin.
+ *   lateral — camera-right shift at the base yaw (negative = left).
+ *   yaw     — radians added to PUG_ZOOM_PHI. Increasing phi turns the camera to
+ *             its own right, so a NEGATIVE value looks left and the pug slides
+ *             RIGHT across the frame.
+ *   pitch   — radians of camera pitch. POSITIVE looks up, so the pug slides DOWN
+ *             the frame and the island fills the space above it.
+ */
+export const pugZoomConfig = {
+    dist:    2.2000,
+    height:  0.6100,
+    lateral: 0.4900,
+    yaw:    -0.4500,
+    pitch:   0.1800,
+};
+
+/** Camera world position for the current pug framing (before the cutscene offset). */
+function _pugCamX(): number {
+    return _pugWorldX + pugZoomConfig.dist * Math.sin(cfgPugRotY) + pugZoomConfig.lateral * Math.cos(cfgPugRotY);
+}
+function _pugCamZ(): number {
+    return _pugWorldZ + pugZoomConfig.dist * Math.cos(cfgPugRotY) - pugZoomConfig.lateral * Math.sin(cfgPugRotY);
+}
 
 // Phone zoom target — camera looks nearly straight down at the phone lying flat
 // Tweak these live from the debug GUI (H key) while zoomed into the phone.
@@ -785,9 +810,9 @@ export function Update(): void
                 zoomTargetY = cz.camY;
                 zoomTargetZ = cz.camZ;
             } else if (pugZoomActive) {
-                zoomTargetX = PUG_FINAL_X + _pugCamOffsetX;
-                zoomTargetY = PUG_ZOOM_TARGET_Y;
-                zoomTargetZ = PUG_FINAL_Z + _pugCamOffsetZ;
+                zoomTargetX = _pugCamX() + _pugCamOffsetX;
+                zoomTargetY = _pugWorldY + pugZoomConfig.height;
+                zoomTargetZ = _pugCamZ() + _pugCamOffsetZ;
             } else if (chestZoomActive) {
                 zoomTargetX = sfDecorConfig.chest.x;
                 zoomTargetY = sfDecorConfig.chest.y + sfDecorConfig.chestZoomHeight;
@@ -841,7 +866,10 @@ export function Update(): void
             } else if (radioZoomActive) {
                 zoomPhi = MathUtils.damp(zoomPhi, RADIO_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
             } else if (pugZoomActive) {
-                zoomPhi = MathUtils.damp(zoomPhi, PUG_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
+                // Yaw off the look-at-pug base + a small upward pitch, so the pug
+                // sits bottom-right and the island fills the rest (pugZoomConfig).
+                zoomPhi = MathUtils.damp(zoomPhi, PUG_ZOOM_PHI + pugZoomConfig.yaw, ZOOM_SMOOTH, deltaTime);
+                zoomTetha = MathUtils.damp(zoomTetha, pugZoomConfig.pitch, ZOOM_SMOOTH, deltaTime);
             } else if (chestZoomActive) {
                 zoomPhi = MathUtils.damp(zoomPhi, CHEST_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
                 // Tilt camera down to look at chest from above

@@ -142,7 +142,7 @@ function isInteractiveSceneScrollTarget(target: EventTarget | null): boolean {
     if (!el) return false;
     return !!el.closest(
         '.settings-panel, .settings-button, .media-player, .player-container, .playlist-items, ' +
-        '.confirm-modal-overlay, .dialog-bubble, .dialog-reply, .coin-tooltip, button, input, select, textarea, a, iframe'
+        '.confirm-modal-overlay, .dialog-panel, .dialog-reply-panel, .coin-tooltip, button, input, select, textarea, a, iframe'
     );
 }
 

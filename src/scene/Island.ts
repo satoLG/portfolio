@@ -3844,17 +3844,19 @@ const pugRaycaster = new Raycaster();
 const pugMouse = new Vector2();
 let isPugHovered = false;
 
-// Reusable Vector3 for projecting pug world-pos to screen coords (avoids per-frame allocation)
-const _pugScreenVec = new Vector3();
+/**
+ * The pug's WORLD position — the anchor both dialog panels hang off (they live
+ * in the 3D scene now, so no screen projection is involved; Dialog.ts adds its
+ * own world offsets on top, and the connector thread runs back down to here).
+ * Reused object: this is read every frame while a dialog is open.
+ */
+const _pugWorldPos = { x: 0, y: 0, z: 0 };
 
-function _getPugScreenPos(): { x: number; y: number } | null {
-    _pugScreenVec.copy(pug.position);
-    _pugScreenVec.y += 0.35;  // project from well above pug head so bubble sits higher
-    _pugScreenVec.project(camera);
-    return {
-        x: (_pugScreenVec.x * 0.5 + 0.5) * window.innerWidth,
-        y: (-_pugScreenVec.y * 0.5 + 0.5) * window.innerHeight,
-    };
+function _getPugWorldPos(): { x: number; y: number; z: number } | null {
+    _pugWorldPos.x = pug.position.x;
+    _pugWorldPos.y = pug.position.y;
+    _pugWorldPos.z = pug.position.z;
+    return _pugWorldPos;
 }
 
 // ── Configurable pug animation indices ────────────────────────────────────────
@@ -3888,7 +3890,7 @@ function _buildPlaceBranch(): DialogLine[] {
                                 textKey: 'pug.reply.response.likeit',
                                 onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
                             },
-                        ], _getPugScreenPos, _onPugDialogComplete);
+                        ], _getPugWorldPos, _onPugDialogComplete);
                     },
                 } as ReplyOption,
             ],
@@ -3902,7 +3904,7 @@ function _buildSecondLevelReplies(): ReplyOption[] {
         {
             textKey: 'pug.reply.thisplace',
             onSelect: () => {
-                showDialog(_buildPlaceBranch(), _getPugScreenPos, _onPugDialogComplete);
+                showDialog(_buildPlaceBranch(), _getPugWorldPos, _onPugDialogComplete);
             },
         } as ReplyOption,
         {
@@ -3914,7 +3916,7 @@ function _buildSecondLevelReplies(): ReplyOption[] {
                         sound: '/audio/character/pug/freesound_community-pug-woof-2-103762_PRIMEIRA.mp3',
                         onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
                     },
-                ], _getPugScreenPos, _onPugDialogComplete);
+                ], _getPugWorldPos, _onPugDialogComplete);
             },
         } as ReplyOption,
         {
@@ -3957,7 +3959,7 @@ const PUG_DIALOG_LINES: DialogLine[] = [
                             onLineStart: () => playPugAnimationThenReturn(PUG_ANIM_BARK),
                             replies: _buildSecondLevelReplies(),
                         },
-                    ], _getPugScreenPos, _onPugDialogComplete);
+                    ], _getPugWorldPos, _onPugDialogComplete);
                 },
             } as ReplyOption,
             {
@@ -3988,7 +3990,7 @@ const PUG_NIGHT_DIALOG_LINES: DialogLine[] = [
                             textKey: 'pug.reply.response.hi.night',
                             onLineStart: () => playPugSnoreOnce(),
                         },
-                    ], _getPugScreenPos, _onPugDialogComplete);
+                    ], _getPugWorldPos, _onPugDialogComplete);
                 },
             } as ReplyOption,
             {
@@ -4646,7 +4648,7 @@ function _startPugDialog(): void {
 
     const lines = useNightDialog ? PUG_NIGHT_DIALOG_LINES : PUG_DIALOG_LINES;
 
-    showDialog(lines, _getPugScreenPos, _onPugDialogComplete);
+    showDialog(lines, _getPugWorldPos, _onPugDialogComplete);
 }
 
 function setupPugInteraction(): void {

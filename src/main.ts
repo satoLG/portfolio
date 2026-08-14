@@ -6,9 +6,6 @@ import * as UI from "./core/UI";
 import * as CABANA_EXIT from "./core/CabanaExit";
 import * as DEBUG from "./core/Debug";
 import * as SETTINGS from "./shaders/Settings"
-// TEMP — on-screen ink tuner (see InkTuner.ts). Remove this import and the
-// mountInkTuner() call below once the underwater ink values are settled.
-import { mountInkTuner } from "./core/InkTuner";
 import "./style.css";
 
 // Register Service Worker for PWA
@@ -32,7 +29,6 @@ CONTROL.Start();
 UI.Start();
 CABANA_EXIT.Start();
 DEBUG.Start();
-mountInkTuner();   // TEMP — see InkTuner.ts
 
 // Cap the render loop at 60 FPS. High refresh-rate displays (120Hz+) would
 // otherwise drive the scene update/render cycle at the monitor's native rate,

@@ -2598,64 +2598,32 @@ a:visited
 }
 
 /* ============================================
-   DIALOG SPEECH BUBBLE
+   DIALOG — IN-SCENE CSS3D PANELS (core/Dialog.ts)
    ============================================ */
 
-/* drop-shadow() is a CSS filter function, not an SVG filter — works on all
-   browsers including iOS Safari. No suppression needed. */
+/* The pug's speech and the player's replies are not screen-space overlays any
+   more: they are CSS3D panels hosted INSIDE the scene (effects/CSS3DPanel.ts).
+   Three consequences shape everything below.
 
-/* No speech-bubble box — the dialog text is written straight onto the page.
-   The element only positions the text + continue prompt; it shrink-wraps to the
-   text so the ▼ can sit right where the words end. */
-.dialog-bubble {
-    position: fixed;
-    z-index: 1200;
-    /* Give the text plenty of room to grow on one line before it has to wrap —
-       on desktop it can run almost to the page edge (the JS positioner keeps it
-       off the very edge via EDGE_MARGIN). Short lines still shrink-wrap.
-       The 56px reserve = 2×EDGE_MARGIN (28px each side): it guarantees the box —
-       and the right-aligned ▼ at its edge — always fits within the screen margins
-       on mobile, where a full-width line would otherwise push the arrow off-screen. */
-    max-width: min(1100px, calc(100vw - 56px));
-    width: max-content;
-    pointer-events: auto;
-    cursor: pointer;
-    user-select: none;
-    display: none;
-}
+   1. Everything is authored LARGE and scaled down by the panel's pxPerUnit — the
+      same "supersample" the coin tooltip uses, and what keeps the type crisp
+      instead of upscaled.
+   2. The panels sit BEHIND the canvas, so backdrop-filter would blur the page
+      background rather than the scene. There is none anywhere here.
+   3. Only `.dialog-prompt` keeps screen-space base styles, because the intro's
+      continue arrow reuses that class verbatim (see WelcomeText.ts). Everything
+      the panels restyle is scoped under `.css3d-panel-content` so the intro is
+      never dragged along with it. */
 
-.dialog-bubble.dialog-visible {
-    display: block;
-    animation: dialog-fade-in 0.28s ease-out forwards;
-}
-
-.dialog-bubble.dialog-out {
-    display: block;
-    /* Faded out → must not intercept clicks. Without this the boxless text keeps
-       its hit area and swallows clicks after the dialog is gone. */
-    pointer-events: none;
-    animation: dialog-fade-out 0.18s ease-in forwards;
-}
-
-.dialog-text {
-    margin: 0;
-    font-size: 54px !important;
-    font-family: 'Pangolin', cursive !important;
-    font-weight: 400 !important;
-    color: var(--intro-white);
-    line-height: 1.32;
-    min-height: 1.32em;
-    white-space: pre-wrap;
-}
-
+/* ── The continue prompt (▼) — shared with the intro ───────────────────────── */
 .dialog-prompt {
     /* Rounded down-triangle drawn as a mask, so it looks identical on every
        platform — the ▼ glyph rendered sharp on desktop but rounded on mobile.
        background-color: currentColor makes it inherit the text colour (and the
        --visible fade/bob); the mask paints only the triangle, at the right edge
-       just under where the typed text ends (replaces the old text-align:right). */
+       just under where the typed text ends. */
     display: block;
-    height: 17px;            /* desktop arrow size — mobile shrinks it below */
+    height: 17px;            /* intro arrow size — the panel scales it up below */
     color: var(--intro-white);
     background-color: currentColor;
     -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 16'%3E%3Cpath d='M10 14 L2.5 3 L17.5 3 Z' fill='%23000' stroke='%23000' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E") right center / contain no-repeat;
@@ -2676,93 +2644,101 @@ a:visited
     animation: dialog-prompt-bob 0.75s ease-in-out infinite;
 }
 
-@keyframes dialog-fade-in {
-    from { opacity: 0; transform: translateY(4px); }
-    to   { opacity: 1; transform: translateY(0);   }
-}
-
-@keyframes dialog-fade-out {
-    from { opacity: 1; }
-    to   { opacity: 0; }
-}
-
 @keyframes dialog-prompt-bob {
     0%, 100% { transform: translateY(0);   }
     50%      { transform: translateY(3px); }
 }
 
-/* ============================================
-   DIALOG REPLY BUBBLE (user side — right edge)
-   ============================================ */
+/* ── Speech panel ──────────────────────────────────────────────────────────── */
 
-/* User replies — also boxless, written onto the page toward the bottom-right. */
-.dialog-reply-bubble {
-    position: fixed;
-    z-index: 1200;
-    /* 56px reserve = 2×EDGE_MARGIN, same as the pug dialog — keeps the reply list
-       within the screen margins on mobile. */
-    max-width: min(1100px, calc(100vw - 56px));
-    width: max-content;
-    pointer-events: auto;
-    cursor: default;
+/* An opaque white sheet floating in the scene. Its punch is a filled rounded
+   rect (SPEECH_RADIUS_PX in Dialog.ts) that dissolves the canvas over exactly
+   this shape, and the lit glass pane hung in front of it is what lets the
+   scene's own light land on the white — the panel warms at midday and goes
+   quiet at night instead of reading as a flat decal pasted on the frame. */
+.css3d-panel-content .dialog-panel {
+    box-sizing: border-box;
+    width: 720px;
+    padding: 34px 40px 22px;
+    border-radius: 30px;   /* keep in step with SPEECH_RADIUS_PX in Dialog.ts */
+    background: #ffffff;
+    color: #14171c;
     user-select: none;
-    display: none;
-    text-align: right;
 }
 
-.dialog-reply-bubble.dialog-visible {
-    display: block;
-    animation: dialog-fade-in 0.28s ease-out forwards;
+.css3d-panel-content .dialog-text {
+    margin: 0;
+    font-family: 'Pangolin', cursive !important;
+    font-weight: 400 !important;
+    font-size: 40px !important;
+    line-height: 1.3;
+    /* Three lines held open. Every authored line fits inside them, so the sheet's
+       height — and with it the punched hole and the glass — never moves while the
+       words are being typed. Dialog.ts locks the measured height on top of this,
+       which only matters for a translation that runs longer than three lines. */
+    min-height: 3.9em;
+    color: inherit;
+    white-space: pre-wrap;
 }
 
-.dialog-reply-bubble.dialog-out {
-    display: block;
-    /* Once a reply is picked (or the dialog ends) the options fade out but stay
-       in the DOM at full size — kill their hit area so an accidental click on
-       the invisible option can't re-fire onSelect and corrupt the dialog. */
-    pointer-events: none;
-    animation: dialog-fade-out 0.18s ease-in forwards;
+/* The arrow lives on the white sheet now, so it takes the sheet's ink and the
+   sheet's scale (the intro keeps the small translucent one). */
+.css3d-panel-content .dialog-prompt {
+    height: 26px;
+    margin-top: 8px;
+    color: #14171c;
 }
 
-.dialog-reply-options {
+/* ── Reply pills ───────────────────────────────────────────────────────────── */
+
+/* The player's answers, as small inked pills — one punched pill per option, with
+   the canvas left untouched in the gaps between them, so the scene shows
+   straight through the list. */
+.css3d-panel-content .dialog-reply-panel {
+    box-sizing: border-box;
+    width: 560px;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    gap: 6px;
-    margin: 0;
-    padding: 0;
+    gap: 16px;
+    user-select: none;
 }
 
-.dialog-reply-option {
-    display: block;
-    font-size: 54px !important;
+/* No fill of its own, deliberately: the punch reaches through the transparent
+   option straight to the page background (--ink-water), which is what makes it
+   read as ink IN the water rather than a chip stamped over it. Exactly the deal
+   the underwater carousel's tab pills have — minus their edge wobble, which
+   belongs to the water and has no business up here on the island. */
+.css3d-panel-content .dialog-reply-option {
+    display: inline-block;
+    box-sizing: border-box;
+    padding: 12px 30px;
+    background: transparent;
+    color: var(--oc-text);
     font-family: 'Pangolin', cursive !important;
     font-weight: 400 !important;
-    color: var(--intro-white);
-    line-height: 1.32;
-    cursor: pointer;
-    transition: color 0.12s ease, opacity 0.12s ease;
+    font-size: 34px !important;
+    line-height: 1.2;
     white-space: nowrap;
+    cursor: pointer;
+    pointer-events: auto;
+    touch-action: manipulation;
+    /* Night neon on the letters, same family as the carousel's --oc-ink-glow.
+       Local rather than inherited: those custom properties are authored on
+       .ocean-carousel, which is a different subtree entirely. */
+    text-shadow:
+        0 0 3px rgba(255, 255, 255, 0.55),
+        0 0 9px rgba(150, 215, 255, 0.50);
+    transition: color 0.12s ease;
 }
 
-.dialog-reply-option:hover {
-    /* Lift the translucent white toward full white on hover for affordance. */
-    color: #e8eced;
+/* Day: no neon — plain white letters on the ink, matching .ocean-tab by day. */
+body.day-mode .css3d-panel-content .dialog-reply-option {
+    text-shadow: none;
 }
 
-/* Mobile: the doubled desktop sizes are too big on a phone — restore the
-   original dialog sizes, which already read well there. Only the pug dialog is
-   affected; the intro word scales on its own via clamp(). 767px = the project's
-   mobile breakpoint (innerWidth < 768). Declared after the base rules so these
-   win the !important tie. */
-@media (max-width: 767px) {
-    .dialog-text,
-    .dialog-reply-option {
-        font-size: 32px !important;
-    }
-    .dialog-prompt {
-        height: 11px;  /* smaller arrow on mobile (already looked good there) */
-    }
+.css3d-panel-content .dialog-reply-option:hover {
+    color: #ffffff;
 }
 
 /* ============================================
