@@ -8,7 +8,6 @@ import * as Island from "../scene/Island";
 import * as Fire from "../scene/Fire.ts";
 import * as Fish from "../scene/Fish.ts";
 import * as Audio from "./Audio.ts";
-import * as UI from "./UI.ts";
 import * as MediaPlayer from "./MediaPlayer.ts";
 import * as PostProcess from "../effects/PostProcess.ts";
 import * as Bubbles from "../effects/Bubbles.ts";
@@ -1028,7 +1027,11 @@ export function Update(): void
     CloudSprites.Update(camera.position.y, deltaTime, Skybox.getDayNightBlend());
     Ocean.Update();
     Audio.Update(camera.position.y);
-    UI.Update();
+    // UI.Update() is NOT called here. main.ts already drives it once per frame,
+    // after Control.Update(), and running it from here as well ran the whole UI
+    // pass twice per frame. That doubled the settings FPS readout (it counts its
+    // own invocations) and made the surface-crossing detection below read a
+    // camera position from before Control moved it, since this runs first.
     MediaPlayer.Update();
     PostProcess.updateCameraProjectionUniforms(camera);
     // Disable the screen-space underwater effect while a prop zoom reframes the

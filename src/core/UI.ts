@@ -8,7 +8,6 @@ import { getCameraY, setIntroProgress, enableScroll, onDescentComplete } from ".
 import { beginDescent as beginCloudDescent } from "../effects/CloudSprites.ts";
 import { showWelcomeText } from "../effects/WelcomeText";
 import { t, setLanguage, type Language } from "./i18n";
-import { frameStats } from "./FrameStats";   // TEMP — see FrameStats.ts
 
 const THEME_STORAGE_KEY = 'portfolio-theme-mode';
 
@@ -848,15 +847,7 @@ export function Update(): void {
             _fpsAccum += now - _fpsLast;
             _fpsFrames++;
             if (_fpsAccum >= 250) {
-                // TEMP — `raw` is every rAF callback, `gated` is what the 60 FPS
-                // cap in main.ts let through. They should read ~120 and ~60 on a
-                // ProMotion screen. See FrameStats.ts.
-                const raw = Math.round((frameStats.raw * 1000) / _fpsAccum);
-                const gated = Math.round((frameStats.gated * 1000) / _fpsAccum);
-                _fpsCounterEl.textContent =
-                    `${Math.round((_fpsFrames * 1000) / _fpsAccum)} FPS (raw ${raw} / gate ${gated})`;
-                frameStats.raw = 0;
-                frameStats.gated = 0;
+                _fpsCounterEl.textContent = `${Math.round((_fpsFrames * 1000) / _fpsAccum)} FPS`;
                 _fpsAccum = 0;
                 _fpsFrames = 0;
             }
