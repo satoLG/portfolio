@@ -6,6 +6,7 @@ import * as UI from "./core/UI";
 import * as CABANA_EXIT from "./core/CabanaExit";
 import * as DEBUG from "./core/Debug";
 import * as SETTINGS from "./shaders/Settings"
+import * as FRAME_STATS from "./core/FrameStats";   // TEMP — see FrameStats.ts
 // TEMP — on-screen ink tuner (see InkTuner.ts). Remove this import and the
 // mountInkTuner() call below once the underwater ink values are settled.
 import { mountInkTuner } from "./core/InkTuner";
@@ -58,6 +59,8 @@ function UpdateFrame(now: number): void
 {
     requestAnimationFrame(UpdateFrame);
 
+    FRAME_STATS.frameStats.raw++;   // TEMP — see FrameStats.ts
+
     if (now < nextFrameDue - FRAME_TOLERANCE_MS) return;
     // Falling more than a whole budget behind means the loop was suspended (a
     // hidden tab, a long stall), not that it is running late. Re-anchor to now
@@ -65,6 +68,8 @@ function UpdateFrame(now: number): void
     nextFrameDue = now - nextFrameDue > FRAME_BUDGET_MS
         ? now + FRAME_BUDGET_MS
         : nextFrameDue + FRAME_BUDGET_MS;
+
+    FRAME_STATS.frameStats.gated++;   // TEMP — see FrameStats.ts
 
     DEBUG.Begin();
 
