@@ -490,6 +490,14 @@ export class CSS3DPanel {
         this._wx = x; this._wy = y; this._wz = z;
     }
 
+    /** CSS px per world unit — HIGHER = SMALLER panel in the scene. Live: the
+     *  next _frame rebuilds the DOM/occluder/glass scales from it, and the punch
+     *  mask is authored in design px so it needs no re-bake. */
+    setPxPerUnit(v: number): void {
+        if (!(v > 0)) return;
+        this.pxPerUnit = v;
+    }
+
     /** Force the hosted DOM to re-rasterise NOW. This subtree is composited
      *  behind the canvas, so a change that Chrome decides it can serve from the
      *  existing tiles (or a raster that went stale mid-animation) leaves the

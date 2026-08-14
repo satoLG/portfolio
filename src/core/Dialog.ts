@@ -1,24 +1,38 @@
 /**
- * Dialog — pixel-art speech bubble with typewriter effect.
+ * Dialog — the pug's speech, as CSS3D panels that live INSIDE the scene.
+ *
+ * Two panels, both built on effects/CSS3DPanel (the same technique the media
+ * player and the coin tooltip use), so they are part of the world rather than
+ * an overlay pasted on the frame:
+ *
+ *   • SPEECH  — an opaque white panel with the typewriter text on it. It carries
+ *     `glass`, the lit pane hung in front of the punch, so the sheet answers to
+ *     the scene's light: warm under the midday sun, quiet at night, with the
+ *     sheen sliding across as the camera moves. And `connector`, the thin 3D
+ *     line that grows out of the pug up to the panel — the "fiozinho" — which is
+ *     also what drives the panel's two-phase entrance (line first, then the
+ *     panel bounces in). It only plays on the FIRST line of a conversation:
+ *     branching into a follow-up re-uses the panel that is already open, so the
+ *     thread is drawn once, when the pug starts talking.
+ *
+ *   • REPLIES — the player's answers, as small "inked" pills: a TRANSPARENT
+ *     panel that punches one rounded pill per option, so each one reads like the
+ *     underwater carousel's tab pills (the punched hole shows --ink-water, the
+ *     label sits on top) — minus the wobble, which belongs to the water.
+ *
+ * Both anchor to the pug's WORLD position through `dialogAnchorConfig`, which
+ * the on-screen tuner (PugCamTuner.ts) writes live.
  *
  * Usage:
- *   showDialog(lines, getAnchorScreen, onComplete)
+ *   showDialog(lines, getSpeakerWorld, onComplete)
  *   advanceDialog()          — call from surrounding click handler
  *   dismissDialog()          — force-close (e.g. on zoom-out)
  *   isDialogActive() → bool
  */
 
+import { CSS3DPanel } from '../effects/CSS3DPanel';
 import { playDialogSound, playDialogAppearSound, playDialogTypeSound } from './Audio';
 import { t, onLanguageChange } from './i18n';
-
-// ─── iOS detection (run once at module load) ──────────────────────────────────
-// iOS Safari has a compositing bug where filter:url(#svg)+border-radius creates
-// visible gaps at the rounded corners. Marking the body suppresses the filter.
-{
-    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    if (ios) document.body.classList.add('no-svg-filter');
-}
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -46,12 +60,49 @@ export interface DialogLine {
     replies?: ReplyOption[];
 }
 
+/** World-space position of whoever is talking (the pug). */
+export interface WorldPoint { x: number; y: number; z: number }
+
+// ─── Placement ────────────────────────────────────────────────────────────────
+
+/**
+ * Where the two panels hang relative to the SPEAKER, in world units, plus how
+ * big they are in the scene. Mutable — PugCamTuner.ts drives these live, since
+ * "does the box sit nicely in the empty upper-left of the shot" is a judgement
+ * that can only be made against the real framing.
+ *
+ * `scale` is a multiplier on the panels' px-per-world-unit: HIGHER = SMALLER in
+ * the scene (the DOM is authored large and scaled down, which is what keeps it
+ * crisp — see the coin tooltip's note).
+ */
+export const dialogAnchorConfig = {
+    /** Speech panel offset from the speaker (world units). */
+    speechX: -0.4500,
+    speechY:  0.6000,
+    speechZ: -0.2200,
+    /** Reply pills offset from the speaker (world units). */
+    replyX:  -0.1000,
+    replyY:   0.1000,
+    replyZ:  -0.0500,
+    /** Panel px-per-unit — bigger = smaller panel. */
+    speechPxPerUnit: 900,
+    replyPxPerUnit:  1000,
+    /** Where on the pug the connector thread attaches (world Y above its origin). */
+    connectorY: 0.1800,
+};
+
+/** Corner radius of the speech panel's punched hole — matches the CSS. */
+const SPEECH_RADIUS_PX = 30;
+/** Ink punch strength for the reply pills — the carousel's own value, so the
+ *  pills keep the same slice of live scene sitting on the ink that its tabs do. */
+const REPLY_INK_PUNCH = 0.85;
+
 // ─── Internal state ───────────────────────────────────────────────────────────
 
 interface ActiveState {
     lines: DialogLine[];
     lineIdx: number;
-    getAnchorScreen: () => { x: number; y: number } | null;
+    getSpeakerWorld: () => WorldPoint | null;
     onComplete: () => void;
     typeTimer: ReturnType<typeof setInterval> | null;
     typeIndex: number;
@@ -61,25 +112,42 @@ interface ActiveState {
 
 let _state: ActiveState | null = null;
 
-// ─── DOM elements (created once, reused) ──────────────────────────────────────
+// ─── Panels + DOM (created once, reused) ──────────────────────────────────────
 
-let _bubbleEl: HTMLDivElement | null = null;
+let _speechPanel: CSS3DPanel | null = null;
+let _boxEl: HTMLDivElement | null = null;
 let _textEl: HTMLParagraphElement | null = null;
 let _promptEl: HTMLSpanElement | null = null;
 
-// Reply bubble (user-side, right edge)
-let _replyBubbleEl: HTMLDivElement | null = null;
-let _replyOptionsEl: HTMLDivElement | null = null;
+let _replyPanel: CSS3DPanel | null = null;
+let _replyListEl: HTMLDivElement | null = null;
 let _replyActive = false;
 
-function ensureBubble(): void {
-    // ─ Character text ──────────────────────────────────────────────────────────
-    // No speech-bubble box anymore — the text is written straight onto the page.
-    // The continue prompt (▼) is wrapped together with the text so it can sit
-    // right after where the typed text ends (see _onLineDoneTyping).
-    if (!_bubbleEl) {
-        _bubbleEl = document.createElement('div');
-        _bubbleEl.className = 'dialog-bubble';
+function ensurePanels(): void {
+    // ─ Speech panel ────────────────────────────────────────────────────────────
+    if (!_speechPanel) {
+        _speechPanel = new CSS3DPanel({
+            pxPerUnit: dialogAnchorConfig.speechPxPerUnit,
+            radiusPx: SPEECH_RADIUS_PX,
+            // NOT modal: the canvas keeps the pointer, so a click anywhere on the
+            // scene still advances the dialog through Island's click handler.
+            modal: false,
+            maskPad: 14,
+            // Seeded so the punch + wrapper are correct from frame 1 (the DOM
+            // only measures once the CSS renderer has drawn it at least once).
+            initialSize: { w: 620, h: 196 },
+            // The thread out of the pug, and the two-phase entrance it drives.
+            connector: true,
+            // The lit pane that makes a flat white sheet belong to the scene's
+            // light instead of sitting on top of it. Same numbers as the media
+            // player, so the two surfaces read as the same material.
+            glass: true,
+            glassOpacity: 0.20,
+            glassRoughness: 0.30,
+        });
+
+        _boxEl = document.createElement('div');
+        _boxEl.className = 'dialog-panel';
 
         _textEl = document.createElement('p');
         _textEl.className = 'dialog-text';
@@ -87,66 +155,67 @@ function ensureBubble(): void {
         _promptEl = document.createElement('span');
         _promptEl.className = 'dialog-prompt';  // triangle is drawn via CSS mask
 
-        _bubbleEl.appendChild(_textEl);
-        _bubbleEl.appendChild(_promptEl);
-        document.body.appendChild(_bubbleEl);
-
-        // Clicking the text itself advances the dialog (the canvas click handler
-        // also advances, so this is just a convenience for clicking the words).
-        _bubbleEl.addEventListener('pointerdown', (e) => {
-            e.stopPropagation();
-            advanceDialog();
-        });
+        _boxEl.appendChild(_textEl);
+        _boxEl.appendChild(_promptEl);
+        _speechPanel.content.appendChild(_boxEl);
+        // The panel is white; so is the thread, so it reads as the sheet reaching
+        // down to the pug rather than as a separate mark over the island.
+        _speechPanel.setConnectorColor(0xffffff);
     }
 
-    // ─ Reply text ──────────────────────────────────────────────────────────────
-    if (!_replyBubbleEl) {
-        _replyBubbleEl = document.createElement('div');
-        _replyBubbleEl.className = 'dialog-reply-bubble';
+    // ─ Reply panel ─────────────────────────────────────────────────────────────
+    if (!_replyPanel) {
+        _replyPanel = new CSS3DPanel({
+            pxPerUnit: dialogAnchorConfig.replyPxPerUnit,
+            modal: true,          // the options must be clickable DOM
+            maskPad: 18,
+            initialSize: { w: 560, h: 210 },
+            // Ink mode: punch ONE pill per option, nothing else. The gaps between
+            // them stay canvas, so the scene shows straight through the list.
+            transparent: true,
+            inkBounds: false,
+            inkSelectors: ['.dialog-reply-option'],
+            inkPad: 10,
+            inkRadius: 999,       // clamped to half the box height → a true pill
+            inkBorderBand: 0,
+            punchAlpha: REPLY_INK_PUNCH,
+        });
 
-        _replyOptionsEl = document.createElement('div');
-        _replyOptionsEl.className = 'dialog-reply-options';
-
-        _replyBubbleEl.appendChild(_replyOptionsEl);
-        document.body.appendChild(_replyBubbleEl);
+        _replyListEl = document.createElement('div');
+        _replyListEl.className = 'dialog-reply-panel';
+        _replyPanel.content.appendChild(_replyListEl);
     }
 }
 
-// ─── Positioning ──────────────────────────────────────────────────────────────
+// ─── Anchoring ────────────────────────────────────────────────────────────────
 
-const BUBBLE_ABOVE   = 24;  // px — clearance between the text bottom and the anchor point
-// px — how far right of the character the text floats. Pushed well clear of the
-// pug so the (now larger) boxless text reads as sitting to its right.
-const DIALOG_OFFSET_X = 96;
-// px — keep the text this far from the viewport edges (don't go near the edge).
-const EDGE_MARGIN     = 28;
+function _syncAnchors(): void {
+    if (!_state) return;
+    const p = _state.getSpeakerWorld();
+    if (!p) return;
+    const c = dialogAnchorConfig;
 
-function _updatePosition(): void {
-    if (!_state || !_bubbleEl) return;
-    const anchor = _state.getAnchorScreen();
-    if (!anchor) return;
-
-    const bw = _bubbleEl.offsetWidth || 240;
-    const bh = _bubbleEl.offsetHeight || 60;
-    const ww = window.innerWidth;
-    const wh = window.innerHeight;
-
-    // Text floats up and to the RIGHT of the character.
-    const rawLeft = anchor.x + DIALOG_OFFSET_X;
-    const left = Math.max(EDGE_MARGIN, Math.min(ww - bw - EDGE_MARGIN, rawLeft));
-
-    // Place the text above the anchor.
-    const top = Math.max(EDGE_MARGIN, Math.min(wh - bh - EDGE_MARGIN, anchor.y - bh - BUBBLE_ABOVE));
-
-    _bubbleEl.style.left = `${left}px`;
-    _bubbleEl.style.top  = `${top}px`;
+    if (_speechPanel) {
+        _speechPanel.setWorldPosition(p.x + c.speechX, p.y + c.speechY, p.z + c.speechZ);
+        // The thread runs down into the pug (its head, not its feet).
+        _speechPanel.setConnectorTarget(p.x, p.y + c.connectorY, p.z);
+    }
+    if (_replyPanel) {
+        _replyPanel.setWorldPosition(p.x + c.replyX, p.y + c.replyY, p.z + c.replyZ);
+    }
 }
 
 function _trackLoop(): void {
     if (!_state) return;
-    _updatePosition();
-    if (_replyActive) _positionReplyBubble();
+    _syncAnchors();
     _state.rafId = requestAnimationFrame(_trackLoop);
+}
+
+/** Re-read the live sizing knobs (the tuner writes them between frames). */
+export function refreshDialogPlacement(): void {
+    if (_speechPanel) _speechPanel.setPxPerUnit(dialogAnchorConfig.speechPxPerUnit);
+    if (_replyPanel)  _replyPanel.setPxPerUnit(dialogAnchorConfig.replyPxPerUnit);
+    _syncAnchors();
 }
 
 // ─── Typewriter ───────────────────────────────────────────────────────────────
@@ -157,31 +226,21 @@ const CHARS_PER_SEC = 20;
 const MAX_CHARS_PER_FRAME = 3;
 
 function _startTyping(text: string): void {
-    if (!_state || !_textEl || !_promptEl || !_bubbleEl) return;
+    if (!_state || !_textEl || !_promptEl || !_boxEl) return;
     _state.typeIndex = 0;
     _state.isTyping  = true;
     _promptEl.classList.remove('dialog-prompt--visible');
 
-    // Pre-fix the bubble's dimensions to prevent width/height oscillation
-    // while characters are added one by one (line-wraps would cause jarring reflow).
-    // We lock the box to the WIDEST actually-rendered line, not the max-content
-    // width. When the text is long enough to wrap (capped by the CSS max-width),
-    // measuring the block would return the full max-width — which on mobile leaves
-    // the right-aligned ▼ floating at the screen edge, far from the real text. A
-    // Range over the text node returns the union of its per-line rects, i.e. the
-    // widest line, so the box shrink-wraps to the words and the ▼ stays beside them.
-    // Fractional width is rounded UP plus a 1px guard: offsetWidth truncates the
-    // sub-pixel width, which can leave the box a hair too narrow and wrap the last
-    // word (e.g. "au au" → "au"/"au").
-    _bubbleEl.style.width     = '';
-    _bubbleEl.style.minHeight = '';
+    // Lock the box's HEIGHT to the finished line before typing it. The panel's
+    // width is fixed in CSS, so the only thing a growing string can move is the
+    // line count — and every change there re-bakes the punch mask and slides the
+    // panel a few pixels while the words are still arriving. Measuring the whole
+    // line once and holding that height keeps the sheet dead still.
+    _boxEl.style.height = '';
     _textEl.textContent = text;
-    void _bubbleEl.offsetWidth;                         // force reflow
-    const _range = document.createRange();
-    _range.selectNodeContents(_textEl);
-    const _lineW = _range.getBoundingClientRect().width;
-    _bubbleEl.style.width     = `${Math.ceil(_lineW) + 1}px`;
-    _bubbleEl.style.minHeight = `${_bubbleEl.offsetHeight}px`;
+    void _boxEl.offsetHeight;                       // force reflow
+    const h = _boxEl.offsetHeight;
+    if (h > 0) _boxEl.style.height = `${h}px`;
     _textEl.textContent = '';
 
     const msPerChar = 1000 / CHARS_PER_SEC;
@@ -232,10 +291,10 @@ function _onLineDoneTyping(): void {
     const currentLine = _state.lines[_state.lineIdx];
     // The ▼ indicator stays visible even on the line that waits for a reply —
     // it signals "the pug is done talking" regardless of whether the next step is
-    // an advance-click or picking a reply. The reply bubble appears alongside it.
+    // an advance-click or picking a reply. The reply pills appear alongside it.
     _promptEl.classList.add('dialog-prompt--visible');
     if (currentLine.replies?.length) {
-        _showReplyBubble(currentLine.replies);
+        _showReplies(currentLine.replies);
     }
 }
 
@@ -250,82 +309,41 @@ function _completeTyping(): void {
     _onLineDoneTyping();
 }
 
-// ─── Reply bubble ─────────────────────────────────────────────────────────────
+// ─── Reply pills ──────────────────────────────────────────────────────────────
 
-/** px — gap between the reply text bottom and the viewport bottom */
-const REPLY_BOTTOM_MARGIN = 40;
-/**
- * px — keep the reply text this far from the right edge (mobile baseline). Matches
- * the pug dialog's EDGE_MARGIN so the reply list and the pug's text respect the
- * exact same distance from the screen border.
- */
-const REPLY_RIGHT_MARGIN  = EDGE_MARGIN;
-/**
- * Desktop centering: below this width the reply hugs the right edge (mobile —
- * looks good there). Above it, the reply's right edge is pulled left a fraction
- * of the extra width so on wide screens it lands nearer the middle, relatively
- * close to the pug dialog instead of glued to the right edge.
- */
-const REPLY_CENTER_FROM_WIDTH = 600;
-const REPLY_CENTER_PULL_RATE  = 0.3;
-
-function _positionReplyBubble(): void {
-    if (!_replyBubbleEl) return;
-
-    const replyW = _replyBubbleEl.offsetWidth  || 200;
-    const replyH = _replyBubbleEl.offsetHeight || 60;
-    const ww     = window.innerWidth;
-    const wh     = window.innerHeight;
-
-    // User replies sit toward the RIGHT, near the bottom of the viewport. On wide
-    // screens the right edge is pulled inward so it reads closer to the pug dialog
-    // instead of touching the screen edge; on mobile it stays near the edge.
-    const extraPull  = Math.max(0, ww - REPLY_CENTER_FROM_WIDTH) * REPLY_CENTER_PULL_RATE;
-    const rightEdge  = ww - (REPLY_RIGHT_MARGIN + extraPull);
-    const left = Math.max(28, rightEdge - replyW);
-    const top  = wh - replyH - REPLY_BOTTOM_MARGIN;
-
-    _replyBubbleEl.style.left = `${left}px`;
-    _replyBubbleEl.style.top  = `${Math.max(28, top)}px`;
-}
-
-function _showReplyBubble(replies: ReplyOption[]): void {
-    if (!_replyBubbleEl || !_replyOptionsEl) return;
+function _showReplies(replies: ReplyOption[]): void {
+    if (!_replyPanel || !_replyListEl) return;
     _replyActive = true;
 
-    _replyOptionsEl.innerHTML = '';
+    _replyListEl.innerHTML = '';
     for (const reply of replies) {
         const optEl = document.createElement('span');
         optEl.className = 'dialog-reply-option';
         optEl.textContent = t(reply.textKey);
         optEl.dataset.textKey = reply.textKey;
-        // Select on `click`, not `pointerdown`: handling it on pointerdown hides the
-        // reply bubble before the browser dispatches the follow-up synthetic click,
-        // which then hit-tests through to the canvas underneath and fires
-        // advanceDialog() — instantly dumping the next line instead of letting it
-        // type. With `click` the option stays the event target, so it never falls
-        // through, and a deliberate second tap on the scene can still skip-ahead.
-        optEl.addEventListener('click', (e) => {
+        // Bound on POINTERUP, not click: this DOM lives behind the WebGL canvas
+        // in the CSS3D subtree, where iOS WebKit does not reliably synthesize a
+        // click — the media player's buttons hit the same wall. stopPropagation
+        // keeps the tap off the panel manager's outside-click path.
+        optEl.addEventListener('pointerup', (e) => {
             e.stopPropagation();
-            _hideReplyBubble();
+            e.preventDefault();
+            _hideReplies();
             reply.onSelect();
         });
-        _replyOptionsEl.appendChild(optEl);
+        _replyListEl.appendChild(optEl);
     }
 
-    _positionReplyBubble();
-
-    _replyBubbleEl.classList.remove('dialog-out');
-    void _replyBubbleEl.offsetWidth;  // force reflow for animation restart
-    _replyBubbleEl.classList.add('dialog-visible');
+    _syncAnchors();
+    _replyPanel.open();
+    // The list content changed on a panel that may still be composited from the
+    // previous open — force the raster (see CSS3DPanel.requestRepaint).
+    _replyPanel.requestRepaint();
 }
 
-function _hideReplyBubble(): void {
+function _hideReplies(): void {
     _replyActive = false;
-    if (_replyBubbleEl) {
-        _replyBubbleEl.classList.remove('dialog-visible');
-        _replyBubbleEl.classList.add('dialog-out');
-    }
+    _replyPanel?.close();
 }
 
 // ─── Audio ────────────────────────────────────────────────────────────────────
@@ -334,49 +352,27 @@ function _hideReplyBubble(): void {
 
 function _playSound(url: string, onEnd?: () => void): void {
     playDialogSound(url, onEnd);
-    return;
-/*
-
-    const ctx  = getAudioContext();
-    const dest = getCharacterDestination();  // routes through characterGain — respects Character volume/mute
-    if (!ctx || !dest) { onEnd?.(); return; }
-    try {
-        let buf = _audioCache.get(url);
-        if (!buf) {
-            const resp = await fetch(url);
-            const arr  = await resp.arrayBuffer();
-            buf = await ctx.decodeAudioData(arr);
-            _audioCache.set(url, buf);
-        }
-        const src  = ctx.createBufferSource();
-        src.buffer = buf;
-        const gain = ctx.createGain();
-        gain.gain.value = 0.85;
-        src.connect(gain);
-        gain.connect(dest);
-        if (onEnd) src.addEventListener('ended', onEnd, { once: true });
-        src.start();
-    } catch (e) {
-        console.warn('[Dialog] Audio play error:', e);
-        onEnd?.();
-    }
-*/
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Open a dialog bubble anchored above the screen position returned by
- * `getAnchorScreen()`.  `onComplete` is called after the last line is
- * dismissed.
+ * Open the speech panel anchored to the world position returned by
+ * `getSpeakerWorld()`. `onComplete` is called after the last line is dismissed.
+ *
+ * Calling this again while a panel is already open (a reply branching into a
+ * follow-up) swaps the lines WITHOUT replaying the entrance — the thread out of
+ * the pug is drawn once, when the conversation starts.
  */
 export function showDialog(
     lines: DialogLine[],
-    getAnchorScreen: () => { x: number; y: number } | null,
+    getSpeakerWorld: () => WorldPoint | null,
     onComplete: () => void,
 ): void {
     if (!lines.length) return;
-    ensureBubble();
+    ensurePanels();
+
+    const wasOpen = _speechPanel!.isOpen();
 
     // Tear down any previous dialog cleanly
     _clearState();
@@ -384,7 +380,7 @@ export function showDialog(
     _state = {
         lines,
         lineIdx: 0,
-        getAnchorScreen,
+        getSpeakerWorld,
         onComplete,
         typeTimer: null,
         typeIndex: 0,
@@ -392,14 +388,13 @@ export function showDialog(
         rafId: 0,
     };
 
-    // Position before making visible so transform-origin is correct
-    _updatePosition();
+    // Anchor before opening so the entrance plays at the right place.
+    refreshDialogPlacement();
 
-    // Show with bounce animation
-    _bubbleEl!.classList.remove('dialog-out');
-    void _bubbleEl!.offsetWidth;  // force reflow so animation restarts
-    _bubbleEl!.classList.add('dialog-visible');
-    playDialogAppearSound();  // soft "pop" the first time the bubble appears
+    if (!wasOpen) {
+        _speechPanel!.open();
+        playDialogAppearSound();  // soft "pop" the first time the panel appears
+    }
 
     const line = lines[0];
     line.onLineStart?.();
@@ -414,7 +409,7 @@ export function showDialog(
  * Advance the dialog:
  * - If still typing → instantly complete the current line.
  * - If done typing  → move to next line, or complete if it was the last.
- * - If reply bubble is active → ignore (waiting for reply selection).
+ * - If reply pills are up → ignore (waiting for reply selection).
  * Returns `true` while dialog is still active, `false` when it finishes.
  */
 export function advanceDialog(): boolean {
@@ -442,20 +437,13 @@ export function advanceDialog(): boolean {
     return true;
 }
 
-/** Force-close the bubble immediately (e.g. triggered by external zoom-out). */
+/** Force-close both panels immediately (e.g. triggered by external zoom-out). */
 export function dismissDialog(): void {
     _replyActive = false;
-    if (_replyBubbleEl) {
-        _replyBubbleEl.classList.remove('dialog-visible');
-        _replyBubbleEl.classList.add('dialog-out');
-    }
+    _replyPanel?.close();
     _clearState();
-    if (_bubbleEl) {
-        _bubbleEl.style.width     = '';
-        _bubbleEl.style.minHeight = '';
-        _bubbleEl.classList.remove('dialog-visible');
-        _bubbleEl.classList.add('dialog-out');
-    }
+    if (_promptEl) _promptEl.classList.remove('dialog-prompt--visible');
+    _speechPanel?.close();
 }
 
 export function isDialogActive(): boolean {
@@ -483,10 +471,14 @@ onLanguageChange(() => {
         _textEl.textContent = t(key);
     }
     // Re-translate visible reply options
-    if (_replyActive && _replyOptionsEl) {
-        _replyOptionsEl.querySelectorAll<HTMLElement>('.dialog-reply-option').forEach(el => {
+    if (_replyActive && _replyListEl) {
+        _replyListEl.querySelectorAll<HTMLElement>('.dialog-reply-option').forEach(el => {
             const rk = el.dataset.textKey;
             if (rk) el.textContent = t(rk);
         });
     }
+    // Both panels are composited behind the canvas — a text swap with no
+    // animation running would otherwise keep serving the old raster.
+    _speechPanel?.requestRepaint();
+    _replyPanel?.requestRepaint();
 });
