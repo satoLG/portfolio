@@ -8,7 +8,7 @@
 
 import { BufferGeometry, Group, Line, LineBasicMaterial, Vector3 } from "three";
 import { webglContainer, camera, cameraForward } from "./Scene";
-import { deltaTime } from "./Time";
+import { fps } from "./Time";
 
 // ── Performance panel ────────────────────────────────────────────────────────
 
@@ -67,7 +67,7 @@ const cpuDiv = document.createElement("div");
 const memDiv = document.createElement("div");
 const posDiv = document.createElement("div");
 
-let fps = 0, frameTime = 0, deltaTimeSum = 0, cpuTime = 0, cpuUsage = 0;
+let cpuTime = 0, cpuUsage = 0;
 let mem: Performance["memory"] | undefined = undefined;
 let lastRefresh = 0, frameCount = 0, cpuSum = 0, cpuDeltaSum = 0, lastFrame = 0;
 let _now: number, _axesVec: Vector3;
@@ -102,21 +102,20 @@ function initPerfPanel(): void {
 
 export function Update(): void {
     frameCount++;
-    deltaTimeSum += deltaTime;
     _now = performance.now();
     cpuDeltaSum += _now - lastFrame;
     lastFrame = _now;
     if (lastRefresh + 500 <= _now) {
-        frameTime  = deltaTimeSum / frameCount;
-        fps        = Math.round(1 / frameTime * 10) / 10;
-        frameTime  = Math.round(frameTime * 10000) / 10;
         cpuTime    = Math.round(cpuSum / frameCount * 10) / 10;
         cpuUsage   = Math.round(cpuTime / (cpuDeltaSum / frameCount) * 1000) / 10;
-        frameCount = 0; deltaTimeSum = 0; cpuSum = 0; cpuDeltaSum = 0;
+        frameCount = 0; cpuSum = 0; cpuDeltaSum = 0;
         mem = performance.memory;
         lastRefresh = _now;
     }
-    fpsDiv.textContent = "FPS: " + fps + " (" + frameTime + " MS)";
+    // Frame rate comes from Time.ts so this panel and the settings readout are
+    // the same measurement and cannot disagree.
+    fpsDiv.textContent = "FPS: " + Math.round(fps * 10) / 10
+        + " (" + (fps > 0 ? Math.round(10000 / fps) / 10 : 0) + " MS)";
     cpuDiv.textContent = "CPU: " + cpuTime + " MS (" + cpuUsage + "%)";
     memDiv.textContent = mem
         ? "Memory: " + Math.round(mem.usedJSHeapSize / 1048576 * 10) / 10 + " MB / " + Math.round(mem.jsHeapSizeLimit / 104857.6) / 10 + " MB"

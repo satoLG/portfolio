@@ -1600,6 +1600,22 @@ body.day-mode .settings-label {
     color: var(--text-color-day);
 }
 
+/* Tracks .settings-label above so the readout re-colours with the rest of the
+   panel on the day/night swap. Tabular figures keep the number from shifting
+   width as the digits change. */
+.fps-counter {
+    font-size: 0.9em;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    opacity: 0.8;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+body.day-mode .fps-counter {
+    color: var(--text-color-day);
+}
+
 .settings-toggle {
     width: 36px;
     height: 36px;
