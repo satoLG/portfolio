@@ -233,8 +233,8 @@ const _pugWorldZ = cfgIslandPos.z + cfgPugOffset.z;
 const PUG_ZOOM_PHI = Math.PI * 2 - cfgPugRotY;
 
 /**
- * Pug-zoom framing. Mutable so the on-screen tuner (core/PugCamTuner.ts) can
- * dial it in against the real scene; the Update loop reads it every frame.
+ * Pug-zoom framing, set by eye against the real scene. Read by the Update loop
+ * every frame, so it stays a mutable object rather than five constants.
  *
  * The camera no longer stares straight down the pug's facing normal (which
  * pointed AWAY from the island, so the zoom framed open sea). It still stands

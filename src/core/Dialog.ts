@@ -5,7 +5,9 @@
  * player and the coin tooltip use), so they are part of the world rather than
  * an overlay pasted on the frame:
  *
- *   • SPEECH  — an opaque white panel with the typewriter text on it. It carries
+ *   • SPEECH  — a white sheet with the typewriter text on it, left a little
+ *     see-through so the island reads through the paper (the punch stops short
+ *     of erasing the canvas — see speechPunch below). It carries
  *     `glass`, the lit pane hung in front of the punch, so the sheet answers to
  *     the scene's light: warm under the midday sun, quiet at night, with the
  *     sheen sliding across as the camera moves. And `connector`, the thin 3D
@@ -20,8 +22,7 @@
  *     underwater carousel's tab pills (the punched hole shows --ink-water, the
  *     label sits on top) — minus the wobble, which belongs to the water.
  *
- * Both anchor to the pug's WORLD position through `dialogAnchorConfig`, which
- * the on-screen tuner (PugCamTuner.ts) writes live.
+ * Both anchor to the pug's WORLD position through `dialogAnchorConfig`.
  *
  * Usage:
  *   showDialog(lines, getSpeakerWorld, onComplete)
@@ -67,13 +68,15 @@ export interface WorldPoint { x: number; y: number; z: number }
 
 /**
  * Where the two panels hang relative to the SPEAKER, in world units, plus how
- * big they are in the scene. Mutable — PugCamTuner.ts drives these live, since
- * "does the box sit nicely in the empty upper-left of the shot" is a judgement
- * that can only be made against the real framing.
+ * big they are in the scene. Every value here was set by eye against the real
+ * framing on a real screen — "does the box sit nicely in the empty upper-left
+ * of the shot" is not a thing that can be derived — so treat them as a set:
+ * moving one usually means re-judging its neighbours.
  *
- * `scale` is a multiplier on the panels' px-per-world-unit: HIGHER = SMALLER in
- * the scene (the DOM is authored large and scaled down, which is what keeps it
- * crisp — see the coin tooltip's note).
+ * The two px-per-unit values are sizes, and they run BACKWARDS: higher is a
+ * SMALLER panel in the scene, because the DOM is authored large and scaled down
+ * — which is exactly what keeps it crisp rather than upscaled (see the coin
+ * tooltip's note).
  */
 export const dialogAnchorConfig = {
     /** Speech panel offset from the speaker (world units) — its CENTRE. */
@@ -246,8 +249,10 @@ function _trackLoop(): void {
     _state.rafId = requestAnimationFrame(_trackLoop);
 }
 
-/** Re-read the live sizing knobs (the tuner writes them between frames). */
-export function refreshDialogPlacement(): void {
+/** Push dialogAnchorConfig into the two panels. Size and translucency are
+ *  construction-time options on a CSS3DPanel, so they need handing over
+ *  explicitly; the world anchors are read per frame by _syncAnchors. */
+function _applyPlacement(): void {
     if (_speechPanel) {
         _speechPanel.setPxPerUnit(dialogAnchorConfig.speechPxPerUnit);
         _speechPanel.setPunchAlpha(dialogAnchorConfig.speechPunch);
@@ -427,7 +432,7 @@ export function showDialog(
     };
 
     // Anchor before opening so the entrance plays at the right place.
-    refreshDialogPlacement();
+    _applyPlacement();
 
     if (!wasOpen) {
         _speechPanel!.open();
