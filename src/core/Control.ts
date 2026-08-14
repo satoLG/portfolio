@@ -252,11 +252,11 @@ const PUG_ZOOM_PHI = Math.PI * 2 - cfgPugRotY;
  *             the frame and the island fills the space above it.
  */
 export const pugZoomConfig = {
-    dist:    1.0500,
-    height:  0.3000,
-    lateral: -0.1000,
-    yaw:     -0.2800,
-    pitch:    0.1300,
+    dist:    2.2000,
+    height:  0.6100,
+    lateral: 0.4900,
+    yaw:    -0.4500,
+    pitch:   0.1800,
 };
 
 /** Camera world position for the current pug framing (before the cutscene offset). */

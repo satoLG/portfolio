@@ -184,10 +184,15 @@ export interface PanelOptions {
      *  a separate box per element. The DOM fill shows inside it; the scene shows
      *  around it. */
     inkBounds?: boolean;
-    /** Vertical anchoring of setWorldPosition's point: 'center' (default) or
-     *  'top' — the anchor is the panel's TOP edge and any height growth
-     *  (playlist expanding, etc.) extends DOWNWARD, keeping the top fixed. */
-    anchor?: 'center' | 'top';
+    /** Vertical anchoring of setWorldPosition's point:
+     *  'center' (default) — the point is the panel's middle;
+     *  'top'    — the point is the panel's TOP edge, so height growth (a playlist
+     *             expanding, etc.) extends DOWNWARD and the top stays put;
+     *  'bottom' — the point is the panel's BOTTOM edge, so growth extends UPWARD
+     *             and the bottom stays put. Use this when the panel has to clear
+     *             something below it (ground, waterline) no matter how tall its
+     *             content turns out to be. */
+    anchor?: 'center' | 'top' | 'bottom';
     /** Draw a thin 3D line in the WebGL scene from the panel's bottom-centre to
      *  a target (its linked model), same colour as the ink. */
     connector?: boolean;
@@ -259,7 +264,7 @@ export class CSS3DPanel {
     private _inkRadius: number;
     private _inkBorderBand: number;
     private _inkBounds: boolean;
-    private _anchor: 'center' | 'top';
+    private _anchor: 'center' | 'top' | 'bottom';
     private _inkBakedBoxes = 0;       // ink boxes punched on the last bake
     private _inkMaxB = 0;             // ink bbox bottom (design px) — connector attach point
     private _zeroInkWarnCountdown = 60;
@@ -715,12 +720,7 @@ export class CSS3DPanel {
             this.requestRepaint();
         }
 
-        // 'top' anchor: the anchor point is the panel's TOP edge — the centre
-        // sits half the (unscaled) height below it, so height growth extends
-        // downward and the top edge stays put.
-        const cy = this._anchor === 'top'
-            ? this._wy - (h2 / 2) / this.pxPerUnit
-            : this._wy;
+        const cy = this._anchorCentreY(h2);
 
         // Billboard the DOM (kept visible at scale 0 through the line phase so it
         // stays measurable and the mask is baked before the panel pops in).
@@ -774,6 +774,16 @@ export class CSS3DPanel {
         }
     }
 
+    /** World Y of the panel's CENTRE for a given (unscaled) content height, given
+     *  which edge setWorldPosition's point is pinning (see PanelOptions.anchor).
+     *  Deliberately off the UNSCALED height: the edge must stay put as the
+     *  content grows or shrinks, which is the whole point of a non-centre anchor. */
+    private _anchorCentreY(h: number): number {
+        if (this._anchor === 'top')    return this._wy - (h / 2) / this.pxPerUnit;
+        if (this._anchor === 'bottom') return this._wy + (h / 2) / this.pxPerUnit;
+        return this._wy;
+    }
+
     private _applyHidden(): void {
         this._visible = false;
         this.cssObject.visible = false;
@@ -801,7 +811,7 @@ export class CSS3DPanel {
         const halfH = ((this._lastH / 2 + this.maskPad) / this.pxPerUnit);
         if (halfW <= 0 || halfH <= 0) return false;
         // Same anchor-adjusted centre the occluder uses (see _frame).
-        const cy = this._anchor === 'top' ? this._wy - (this._lastH / 2) / this.pxPerUnit : this._wy;
+        const cy = this._anchorCentreY(this._lastH);
 
         const e = cam.matrixWorld.elements;
         // camera right = (e0,e1,e2), camera up = (e4,e5,e6)

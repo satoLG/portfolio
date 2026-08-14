@@ -76,19 +76,34 @@ export interface WorldPoint { x: number; y: number; z: number }
  * crisp — see the coin tooltip's note).
  */
 export const dialogAnchorConfig = {
-    /** Speech panel offset from the speaker (world units). */
-    speechX: -0.4500,
-    speechY:  0.6000,
+    /** Speech panel offset from the speaker (world units) — its CENTRE. */
+    speechX: -0.4100,
+    speechY:  0.8300,
     speechZ: -0.2200,
-    /** Reply pills offset from the speaker (world units). */
-    replyX:  -0.1000,
-    replyY:   0.1000,
-    replyZ:  -0.0500,
+    /**
+     * How translucent the white sheet is, 0..1. This is the PUNCH, not a DOM
+     * alpha: 1 erases the canvas outright and the panel is flat white, while
+     * lower values leave that fraction of the LIVE SCENE sitting on top of the
+     * DOM — the island actually showing through the paper. A DOM alpha would
+     * only reveal the page background behind the canvas (--ink-water), which is
+     * not what is behind the panel at all. Same knob the media player uses.
+     */
+    speechPunch: 0.8800,
+    /**
+     * Reply pills. X/Z are the list's centre; Y is its BOTTOM EDGE, measured up
+     * from the pug's feet — i.e. from the island surface it is standing on.
+     * Bottom-anchored on purpose: the list grows UPWARD as options are added, so
+     * two replies and four replies both clear the ground by exactly this much
+     * instead of the taller one sinking into it.
+     */
+    replyX:      -1.0500,
+    replyBottomY: 0.0300,
+    replyZ:      -0.0500,
     /** Panel px-per-unit — bigger = smaller panel. */
-    speechPxPerUnit: 900,
-    replyPxPerUnit:  1000,
+    speechPxPerUnit: 570,
+    replyPxPerUnit:  450,
     /** Where on the pug the connector thread attaches (world Y above its origin). */
-    connectorY: 0.1800,
+    connectorY: 0.1200,
 };
 
 /** Corner radius of the speech panel's punched hole — matches the CSS. */
@@ -96,6 +111,10 @@ const SPEECH_RADIUS_PX = 30;
 /** Ink punch strength for the reply pills — the carousel's own value, so the
  *  pills keep the same slice of live scene sitting on the ink that its tabs do. */
 const REPLY_INK_PUNCH = 0.85;
+/** Design px the punched pill is dilated past its DOM box on every side. The
+ *  bottom anchor has to give this back (see _syncAnchors), or replyBottomY would
+ *  clear the ground by the pill's INK bottom minus this much. */
+const REPLY_INK_PAD = 10;
 
 // ─── Internal state ───────────────────────────────────────────────────────────
 
@@ -135,7 +154,10 @@ function ensurePanels(): void {
             maskPad: 14,
             // Seeded so the punch + wrapper are correct from frame 1 (the DOM
             // only measures once the CSS renderer has drawn it at least once).
-            initialSize: { w: 620, h: 196 },
+            initialSize: { w: 720, h: 214 },
+            // Slightly see-through: the punch stops short of erasing the canvas,
+            // so a little of the live island stays on top of the white sheet.
+            punchAlpha: dialogAnchorConfig.speechPunch,
             // The thread out of the pug, and the two-phase entrance it drives.
             connector: true,
             // The lit pane that makes a flat white sheet belong to the scene's
@@ -169,13 +191,17 @@ function ensurePanels(): void {
             pxPerUnit: dialogAnchorConfig.replyPxPerUnit,
             modal: true,          // the options must be clickable DOM
             maskPad: 18,
-            initialSize: { w: 560, h: 210 },
+            initialSize: { w: 560, h: 146 },
+            // The list is pinned by its BOTTOM edge, so adding a third or fourth
+            // option grows it upward instead of pushing the lowest pill down
+            // through the island (see dialogAnchorConfig.replyBottomY).
+            anchor: 'bottom',
             // Ink mode: punch ONE pill per option, nothing else. The gaps between
             // them stay canvas, so the scene shows straight through the list.
             transparent: true,
             inkBounds: false,
             inkSelectors: ['.dialog-reply-option'],
-            inkPad: 10,
+            inkPad: REPLY_INK_PAD,
             inkRadius: 999,       // clamped to half the box height → a true pill
             inkBorderBand: 0,
             punchAlpha: REPLY_INK_PUNCH,
@@ -201,7 +227,16 @@ function _syncAnchors(): void {
         _speechPanel.setConnectorTarget(p.x, p.y + c.connectorY, p.z);
     }
     if (_replyPanel) {
-        _replyPanel.setWorldPosition(p.x + c.replyX, p.y + c.replyY, p.z + c.replyZ);
+        // Bottom-anchored: the Y handed over is the panel's BOTTOM EDGE, lifted by
+        // the ink dilation so what actually clears the ground by replyBottomY is
+        // the lowest PILL, not the invisible DOM box it was punched from. Whatever
+        // the option count, that bottom stays where it is and the list grows up.
+        const inkLift = REPLY_INK_PAD / c.replyPxPerUnit;
+        _replyPanel.setWorldPosition(
+            p.x + c.replyX,
+            p.y + c.replyBottomY + inkLift,
+            p.z + c.replyZ,
+        );
     }
 }
 
@@ -213,8 +248,11 @@ function _trackLoop(): void {
 
 /** Re-read the live sizing knobs (the tuner writes them between frames). */
 export function refreshDialogPlacement(): void {
-    if (_speechPanel) _speechPanel.setPxPerUnit(dialogAnchorConfig.speechPxPerUnit);
-    if (_replyPanel)  _replyPanel.setPxPerUnit(dialogAnchorConfig.replyPxPerUnit);
+    if (_speechPanel) {
+        _speechPanel.setPxPerUnit(dialogAnchorConfig.speechPxPerUnit);
+        _speechPanel.setPunchAlpha(dialogAnchorConfig.speechPunch);
+    }
+    if (_replyPanel) _replyPanel.setPxPerUnit(dialogAnchorConfig.replyPxPerUnit);
     _syncAnchors();
 }
 

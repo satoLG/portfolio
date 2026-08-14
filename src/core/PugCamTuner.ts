@@ -22,8 +22,13 @@
  *   PITCH   radians. POSITIVE looks up, sliding the pug DOWN the frame.
  *
  * DIALOG
- *   SPEECH X/Y/Z   the white panel's offset from the pug, in world units.
- *   REPLY  X/Y/Z   the reply pills' offset from the pug.
+ *   SPEECH X/Y/Z   the white panel's CENTRE, offset from the pug in world units.
+ *   SPEECH OPACITY how solid the white sheet is. Below 1 the punch leaves that
+ *           much of the live island sitting on top of the paper.
+ *   REPLY X/Z      the pill list's centre, offset from the pug.
+ *   REPLY BOTTOM Y where the LOWEST pill's bottom edge sits, measured up from the
+ *           pug's feet — i.e. from the island surface. The list grows upward from
+ *           there, so this clearance holds for any number of options.
  *   SPEECH/REPLY SIZE  px per world unit — HIGHER IS SMALLER (the DOM is authored
  *           large and scaled down; that is what keeps it crisp).
  *   THREAD Y  how far up the pug the connector line attaches.
@@ -37,7 +42,7 @@ import { dialogAnchorConfig, refreshDialogPlacement } from './Dialog';
 
 // Versioned: bumped whenever the stored shape or a default changes, so a value
 // left over from an earlier round cannot silently win over the new default.
-const STORE_KEY = 'pug-cam-tuner-v1';
+const STORE_KEY = 'pug-cam-tuner-v2';
 
 interface Field {
     key: string;
@@ -52,7 +57,7 @@ interface Field {
 }
 
 const FIELDS: Field[] = [
-    { target: 'cam', key: 'dist',    label: 'DIST',    min: 0.35, max: 2.2,  step: 0.01, dp: 4 },
+    { target: 'cam', key: 'dist',    label: 'DIST',    min: 0.35, max: 3.5,  step: 0.01, dp: 4 },
     { target: 'cam', key: 'height',  label: 'HEIGHT',  min: -0.3, max: 1.0,  step: 0.01, dp: 4 },
     { target: 'cam', key: 'lateral', label: 'LATERAL', min: -0.8, max: 0.8,  step: 0.01, dp: 4 },
     { target: 'cam', key: 'yaw',     label: 'YAW',     min: -1.2, max: 1.2,  step: 0.01, dp: 4 },
@@ -62,8 +67,9 @@ const FIELDS: Field[] = [
     { target: 'dlg', key: 'speechY', label: 'SPEECH Y', min: -1.0, max: 1.8, step: 0.01, dp: 4 },
     { target: 'dlg', key: 'speechZ', label: 'SPEECH Z', min: -1.6, max: 1.6, step: 0.01, dp: 4 },
     { target: 'dlg', key: 'speechPxPerUnit', label: 'SPEECH SIZE', min: 300, max: 2600, step: 10, dp: 0 },
+    { target: 'dlg', key: 'speechPunch', label: 'SPEECH OPACITY', min: 0.3, max: 1, step: 0.01, dp: 4 },
     { target: 'dlg', key: 'replyX',  label: 'REPLY X',  min: -1.6, max: 1.6, step: 0.01, dp: 4 },
-    { target: 'dlg', key: 'replyY',  label: 'REPLY Y',  min: -1.0, max: 1.8, step: 0.01, dp: 4 },
+    { target: 'dlg', key: 'replyBottomY', label: 'REPLY BOTTOM Y', min: -0.4, max: 1.4, step: 0.01, dp: 4 },
     { target: 'dlg', key: 'replyZ',  label: 'REPLY Z',  min: -1.6, max: 1.6, step: 0.01, dp: 4 },
     { target: 'dlg', key: 'replyPxPerUnit', label: 'REPLY SIZE', min: 300, max: 2600, step: 10, dp: 0 },
     { target: 'dlg', key: 'connectorY', label: 'THREAD Y', min: -0.3, max: 0.9, step: 0.01, dp: 4 },
@@ -181,7 +187,7 @@ export function mountPugCamTuner(): void {
             }
         </style>
         <div class="pt-body">
-            <p class="pt-hint">Clique no pug pra dar zoom, depois arraste. YAW negativo olha pra esquerda (pug vai pra direita), PITCH positivo olha pra cima (pug desce). SIZE maior = painel menor.</p>
+            <p class="pt-hint">Clique no pug pra dar zoom, depois arraste. YAW negativo olha pra esquerda (pug vai pra direita), PITCH positivo olha pra cima (pug desce). SIZE maior = painel menor. REPLY BOTTOM Y = altura da pílula mais baixa acima do chão (a lista cresce pra cima).</p>
             ${group('camera', 'cam')}
             <hr>
             ${group('dialog', 'dlg')}
