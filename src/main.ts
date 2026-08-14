@@ -34,10 +34,23 @@ CABANA_EXIT.Start();
 DEBUG.Start();
 mountInkTuner();   // TEMP — see InkTuner.ts
 
+// Cap the render loop at 60 FPS. High refresh-rate displays (120Hz+) would
+// otherwise drive the scene update/render cycle at the monitor's native
+// rate, wasting GPU/CPU for no visual benefit on this content.
+const MAX_FPS = 60;
+const MIN_FRAME_MS = 1000 / MAX_FPS;
+let lastFrameTime = 0;
+
 requestAnimationFrame(UpdateFrame);
 
-function UpdateFrame(): void
+function UpdateFrame(now: number): void
 {
+    requestAnimationFrame(UpdateFrame);
+
+    const elapsed = now - lastFrameTime;
+    if (elapsed < MIN_FRAME_MS) return;
+    lastFrameTime = now - (elapsed % MIN_FRAME_MS);
+
     DEBUG.Begin();
 
     TIME.Update();
@@ -49,6 +62,4 @@ function UpdateFrame(): void
     DEBUG.Update();
 
     DEBUG.End();
-
-    requestAnimationFrame(UpdateFrame);
 }
