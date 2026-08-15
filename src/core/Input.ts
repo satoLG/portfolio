@@ -186,6 +186,23 @@ function hasFallbackTouch(touches: TouchList): boolean {
 
 export function Start(): void
 {
+    // Every interaction here is a hold or a drag on the 3D scene, and the
+    // browser's default reading of those gestures is "begin selecting text" —
+    // hold too long and the whole page turns blue mid-interaction. The CSS
+    // (user-select: none, globally) blocks the gesture-driven paths; these two
+    // listeners close what CSS alone does not: the keyboard Select All, and the
+    // native element drag a long press can kick off. Nothing on the page is
+    // meant to be copied, so both are refused unconditionally.
+    document.addEventListener("selectstart", function(e)
+    {
+        e.preventDefault();
+    });
+
+    document.addEventListener("dragstart", function(e)
+    {
+        e.preventDefault();
+    });
+
     document.addEventListener("keydown", function(e)
     {
         if (!keysPressed.includes(e.code))

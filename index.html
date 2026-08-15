@@ -71,6 +71,19 @@
          pinned the ink to one colour and the day/night blend never reached the
          pixel. Do not move it back onto the element. */
       :where(body) { background-color: #142838; }
+
+      /* Selection block, duplicated from style.css on purpose. style.css is
+         pulled in by the module graph, so in dev it only lands after main.ts
+         parses — a hold gesture on the very first frames would still be able
+         to start a selection. This closes that window. */
+      *, *::before, *::after {
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+      }
+      html, body { -webkit-tap-highlight-color: transparent; }
     </style>
   </head>
   <body style="margin: 0;">
