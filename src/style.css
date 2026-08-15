@@ -6,6 +6,36 @@ body {
 }
 
 /* ============================================
+   GLOBAL TEXT-SELECTION BLOCK
+   Nothing on this page is text the user is meant to copy — it is a 3D scene
+   driven by drag/hold gestures. A held touch or a click-drag would otherwise
+   start a selection and paint the whole page blue mid-interaction.
+
+   `body { user-select: none }` further down was already doing this on Chrome
+   (the property inherits), but WebKit only honours the -webkit- prefixed form
+   for the long-press selection path, which is exactly the gesture that was
+   selecting everything on iOS. Hence the universal selector plus all four
+   vendor spellings, so no element and no engine is left out.
+
+   -webkit-touch-callout kills the iOS long-press "Copy / Look Up" bubble, and
+   the transparent tap highlight removes the grey flash Android draws on tap.
+   ============================================ */
+*,
+*::before,
+*::after {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+
+html,
+body {
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* ============================================
    iOS / WebKit CSS3D iframe fix
    A running transform animation forces WebKit to composite the element inside
    preserve-3d, making iframes visible on iOS Safari.
