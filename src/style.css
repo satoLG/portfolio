@@ -2281,6 +2281,428 @@ body.day-mode .confirm-modal-btn.confirm:hover {
     background: rgba(198, 40, 40, 1);
 }
 
+/* ============================================
+   CREDITS MODAL
+   Same sheet language as the confirmation modal above, but sized for a long
+   scrolling list: the header and footer are pinned and only the body scrolls.
+   ============================================ */
+.credits-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.credits-overlay.open {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.credits-modal {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 560px;
+    max-height: min(80dvh, 720px);
+    border-radius: 16px;
+    background: rgba(20, 40, 60, 0.97);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    color: rgba(255, 255, 255, 0.9);
+    overflow: hidden;
+    transform: scale(0.9) translateY(10px);
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.credits-overlay.open .credits-modal {
+    transform: scale(1) translateY(0);
+}
+
+body.day-mode .credits-modal {
+    background: rgba(255, 255, 255, 0.97);
+    color: var(--text-color-day);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.credits-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 20px 20px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    flex-shrink: 0;
+}
+
+body.day-mode .credits-modal-header {
+    border-bottom-color: rgba(10, 37, 64, 0.1);
+}
+
+.credits-title {
+    font-size: 16px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.credits-subtitle {
+    font-size: 12px;
+    line-height: 1.5;
+    opacity: 0.65;
+    margin-top: 4px;
+}
+
+.credits-close {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.75);
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.credits-close:hover {
+    background: rgba(255, 255, 255, 0.16);
+    color: rgba(255, 255, 255, 0.95);
+}
+
+body.day-mode .credits-close {
+    background: rgba(10, 37, 64, 0.06);
+    color: rgba(10, 37, 64, 0.6);
+}
+
+body.day-mode .credits-close:hover {
+    background: rgba(10, 37, 64, 0.12);
+    color: var(--text-color-day);
+}
+
+.credits-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 12px;
+}
+
+.credits-body::-webkit-scrollbar {
+    width: 3px;
+}
+
+.credits-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.credits-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 2px;
+}
+
+body.day-mode .credits-body::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.1);
+}
+
+/* ── Group accordion ─────────────────────────────────────────────────────── */
+.credits-group {
+    border-radius: 8px;
+    margin-bottom: 6px;
+}
+
+.credits-group:last-child {
+    margin-bottom: 0;
+}
+
+.credits-group-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    min-height: 42px;
+    box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: background 0.2s ease;
+}
+
+.credits-group-header:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+body.day-mode .credits-group-header {
+    background: rgba(10, 37, 64, 0.06);
+    color: var(--text-color-day);
+}
+
+body.day-mode .credits-group-header:hover {
+    background: rgba(10, 37, 64, 0.1);
+}
+
+.credits-group-title {
+    flex: 1 1 auto;
+    text-align: left;
+}
+
+/* Reads "credited / total" — the whole point of the list is watching this
+   climb, so it stays visible on the collapsed header. */
+.credits-group-count {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    padding: 2px 7px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.1);
+    opacity: 0.75;
+}
+
+.credits-group-count.complete {
+    background: rgba(64, 164, 255, 0.22);
+    color: #9ed0ff;
+    opacity: 1;
+}
+
+body.day-mode .credits-group-count {
+    background: rgba(10, 37, 64, 0.08);
+}
+
+body.day-mode .credits-group-count.complete {
+    background: rgba(25, 113, 194, 0.15);
+    color: #1971c2;
+}
+
+.credits-group-arrow {
+    flex-shrink: 0;
+    transition: transform 0.3s ease;
+}
+
+.credits-group.open .credits-group-arrow {
+    transform: rotate(180deg);
+}
+
+.credits-group-content {
+    display: none;
+    padding: 8px 2px 2px;
+}
+
+.credits-group.open .credits-group-content {
+    display: block;
+}
+
+.credits-section {
+    margin-bottom: 10px;
+}
+
+.credits-section:last-child {
+    margin-bottom: 0;
+}
+
+.credits-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    opacity: 0.5;
+    padding: 4px 4px 6px;
+}
+
+/* ── Entry ───────────────────────────────────────────────────────────────── */
+.credit-entry {
+    padding: 8px 10px;
+    border-radius: 8px;
+    margin-bottom: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    border-left: 2px solid rgba(64, 164, 255, 0.6);
+}
+
+body.day-mode .credit-entry {
+    background: rgba(10, 37, 64, 0.03);
+    border-left-color: rgba(25, 113, 194, 0.55);
+}
+
+/* Anything still missing an author is dashed and drained of colour, so the
+   holes in the list are findable at a glance. */
+.credit-entry.pending {
+    border-left-style: dashed;
+    border-left-color: rgba(255, 255, 255, 0.25);
+}
+
+body.day-mode .credit-entry.pending {
+    border-left-color: rgba(10, 37, 64, 0.2);
+}
+
+.credit-head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.credit-name {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.credit-original {
+    font-size: 11px;
+    opacity: 0.55;
+    font-style: italic;
+}
+
+.credit-file {
+    font-size: 10.5px;
+    opacity: 0.45;
+    margin-top: 2px;
+    word-break: break-all;
+}
+
+.credit-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.credit-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.6;
+    text-decoration: none;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.8);
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.credit-chip svg {
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+a.credit-chip:hover {
+    background: rgba(64, 164, 255, 0.25);
+    color: #cfe6ff;
+}
+
+.credit-chip.author {
+    background: rgba(64, 164, 255, 0.16);
+    color: #a9d4ff;
+}
+
+.credit-chip.todo {
+    background: rgba(255, 193, 87, 0.16);
+    color: #ffcf80;
+    font-style: italic;
+}
+
+.credit-chip.todo.soft {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.5);
+}
+
+body.day-mode .credit-chip {
+    background: rgba(10, 37, 64, 0.07);
+    color: rgba(10, 37, 64, 0.75);
+}
+
+body.day-mode a.credit-chip:hover {
+    background: rgba(25, 113, 194, 0.18);
+    color: #10538f;
+}
+
+body.day-mode .credit-chip.author {
+    background: rgba(25, 113, 194, 0.13);
+    color: #1465ac;
+}
+
+body.day-mode .credit-chip.todo {
+    background: rgba(191, 122, 0, 0.14);
+    color: #8a5b00;
+}
+
+body.day-mode .credit-chip.todo.soft {
+    background: rgba(10, 37, 64, 0.05);
+    color: rgba(10, 37, 64, 0.45);
+}
+
+.credit-note {
+    font-size: 11px;
+    line-height: 1.5;
+    opacity: 0.55;
+    margin-top: 5px;
+}
+
+.credit-note code {
+    font-size: 10.5px;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+body.day-mode .credit-note code {
+    background: rgba(10, 37, 64, 0.07);
+}
+
+.credits-modal-footer {
+    flex-shrink: 0;
+    padding: 12px 20px 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 11px;
+    line-height: 1.5;
+    opacity: 0.55;
+}
+
+body.day-mode .credits-modal-footer {
+    border-top-color: rgba(10, 37, 64, 0.1);
+}
+
+@media (max-width: 600px) {
+    .credits-overlay {
+        padding: 10px;
+    }
+
+    .credits-modal {
+        max-height: min(88dvh, 100%);
+    }
+
+    .credits-modal-header {
+        padding: 16px 16px 12px;
+    }
+
+    .credits-modal-footer {
+        padding: 10px 16px 14px;
+    }
+}
+
 /* Settings panel scrollbar */
 .settings-panel::-webkit-scrollbar {
     width: 3px;
