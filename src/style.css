@@ -2618,6 +2618,12 @@ a.credit-chip:hover {
     color: #a9d4ff;
 }
 
+/* Sits between author and source: which bundle the model shipped in. */
+.credit-chip.pack {
+    background: rgba(126, 211, 168, 0.14);
+    color: #9fe0bd;
+}
+
 .credit-chip.todo {
     background: rgba(255, 193, 87, 0.16);
     color: #ffcf80;
@@ -2642,6 +2648,11 @@ body.day-mode a.credit-chip:hover {
 body.day-mode .credit-chip.author {
     background: rgba(25, 113, 194, 0.13);
     color: #1465ac;
+}
+
+body.day-mode .credit-chip.pack {
+    background: rgba(23, 132, 90, 0.12);
+    color: #11694a;
 }
 
 body.day-mode .credit-chip.todo {

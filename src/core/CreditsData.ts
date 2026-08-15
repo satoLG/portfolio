@@ -44,6 +44,9 @@ export interface CreditEntry {
     source?: string;
     /** Direct link to the asset page. */
     sourceUrl?: string;
+    /** Asset pack the model belongs to, for authors who publish in bundles. */
+    pack?: string;
+    packUrl?: string;
     license?: string;
     licenseUrl?: string;
     /** Texture atlas baked into the model — a lead on which pack it came from. */
@@ -78,6 +81,48 @@ const FREETOUSE = {
 /** Freesound uploads are addressable by id — the license still varies per upload. */
 function freesound(id: string) {
     return { source: 'Freesound', sourceUrl: `https://freesound.org/s/${id}/` };
+}
+
+// ── Quaternius ───────────────────────────────────────────────────────────────
+// Everything Quaternius publishes is CC0, so none of this is legally required —
+// it is here because the work deserves the name on it.
+//
+// He publishes by PACK, and the pack is what the evidence in the GLBs points
+// at: the baked texture atlas is per-pack, so `Atlas_Pirate` says Pirate Kit
+// and the `Leaves_NormalTree_<letter>` variant scheme says the nature megakit
+// (its selling point is seven swappable leaf varieties). That makes the pack
+// page the stable, checkable link; an individual model page is a bonus and is
+// only filled in where the model's own name was matched.
+const QUATERNIUS = {
+    author: 'Quaternius',
+    authorUrl: 'https://quaternius.com/',
+    license: 'CC0 1.0',
+    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+};
+
+const QUATERNIUS_PACKS = {
+    nature: { pack: 'Stylized Nature MegaKit', packUrl: 'https://poly.pizza/bundle/Stylized-Nature-MegaKit-T34GZFA0fm' },
+    pirate: { pack: 'Pirate Kit', packUrl: 'https://poly.pizza/bundle/Pirate-kit-0q5ulmIYqQ' },
+    survival: { pack: 'Survival Pack', packUrl: 'https://poly.pizza/bundle/Survival-Pack-XzvQPP0yWB' },
+    fish: { pack: 'Animated Fish Bundle', packUrl: 'https://poly.pizza/bundle/Animated-Fish-Bundle-ZkGbjS8m8g' },
+    animals: { pack: 'Animated Animal Pack', packUrl: 'https://poly.pizza/bundle/Animated-Animal-Pack-ILAPXeUYiS' },
+} as const;
+
+/** A Quaternius model. `modelUrl` is its own Poly Pizza page, when known. */
+function quaternius(
+    name: string,
+    file: string,
+    packKey: keyof typeof QUATERNIUS_PACKS,
+    extra: Partial<CreditEntry> = {},
+): CreditEntry {
+    return {
+        name,
+        file,
+        ...QUATERNIUS,
+        ...QUATERNIUS_PACKS[packKey],
+        source: 'Poly Pizza',
+        ...extra,
+    };
 }
 
 /** An asset whose author is still unknown — `atlas` carries the only lead. */
@@ -135,11 +180,15 @@ const MODELS: CreditGroup = {
                     sourceUrl: 'https://sketchfab.com/3d-models/folding-tray-table-b254e5104cd64ce3a1af32431d706f98',
                     ...CC_BY_4,
                 },
-                pending('Palm tree', 'models/surface/tree.glb', 'Bark_NormalTree.png / Leaves_NormalTree_C.png'),
-                pending('Bushes', 'models/surface/bush.glb', 'Leaves_NormalTree_C.png / Flowers.png'),
-                pending('Mossy rock 1', 'models/surface/moss_rock1.glb', 'Rocks_Diffuse.png'),
-                pending('Mossy rock 2', 'models/surface/moss_rock2.glb', 'Rocks_Diffuse.png'),
-                pending('Mossy rock 3', 'models/surface/moss_rock3.glb', 'PathRocks_Diffuse.png'),
+                quaternius('Palm tree', 'models/surface/tree.glb', 'nature', {
+                    atlas: 'Bark_NormalTree.png / Leaves_NormalTree_C.png',
+                }),
+                quaternius('Bushes', 'models/surface/bush.glb', 'nature', {
+                    atlas: 'Leaves_NormalTree_C.png / Flowers.png',
+                }),
+                quaternius('Mossy rock 1', 'models/surface/moss_rock1.glb', 'nature', { atlas: 'Rocks_Diffuse.png' }),
+                quaternius('Mossy rock 2', 'models/surface/moss_rock2.glb', 'nature', { atlas: 'Rocks_Diffuse.png' }),
+                quaternius('Mossy rock 3', 'models/surface/moss_rock3.glb', 'nature', { atlas: 'PathRocks_Diffuse.png' }),
                 pending('Bonfire', 'models/surface/bonfire.glb'),
                 pending('Radio', 'models/surface/radio.glb'),
                 pending('Sword', 'models/surface/sword.glb'),
@@ -189,16 +238,18 @@ const MODELS: CreditGroup = {
                     sourceUrl: 'https://sketchfab.com/3d-models/seaturtle-animated-low-poly-14e7719da5d54841b43b2ab76240345c',
                     ...CC_BY_4,
                 },
-                pending('Coral-encrusted rock 1', 'models/underwater/coral_rock1.glb', 'Atlas_Pirate.png'),
-                pending('Coral-encrusted rock 2', 'models/underwater/coral_rock2.glb', 'Atlas_Pirate.png'),
-                pending('Coral-encrusted rock 3', 'models/underwater/coral_rock3.glb', 'Atlas_Pirate.png'),
+                quaternius('Coral-encrusted rock 1', 'models/underwater/coral_rock1.glb', 'pirate', { atlas: 'Atlas_Pirate.png' }),
+                quaternius('Coral-encrusted rock 2', 'models/underwater/coral_rock2.glb', 'pirate', { atlas: 'Atlas_Pirate.png' }),
+                quaternius('Coral-encrusted rock 3', 'models/underwater/coral_rock3.glb', 'pirate', { atlas: 'Atlas_Pirate.png' }),
                 pending('Coral variant 1', 'models/underwater/coral1.glb'),
                 pending('Coral variant 2', 'models/underwater/coral2.glb'),
                 pending('Kelp', 'models/underwater/kelp.glb'),
                 pending('Anemone', 'models/underwater/anemone.glb'),
                 pending('Starfish', 'models/underwater/starfish.glb'),
                 pending('Crab', 'models/underwater/crab.glb'),
-                pending('Clownfish', 'models/underwater/clownfish.glb'),
+                quaternius('Clownfish', 'models/underwater/clownfish.glb', 'fish', {
+                    sourceUrl: 'https://poly.pizza/m/769fHo3eEB',
+                }),
                 pending('Blue tang ("Dori")', 'models/underwater/dorifish.glb'),
                 pending('Generic fish (shoal)', 'models/underwater/genericfish.glb'),
                 pending('Anglerfish', 'models/underwater/anglerfish.glb'),
@@ -209,21 +260,35 @@ const MODELS: CreditGroup = {
         {
             labelKey: 'credits.section.character',
             entries: [
-                pending('Pug ("Bartô")', 'models/character/pug.glb', 'Zombie_Atlas.png'),
+                quaternius('Pug ("Bartô")', 'models/character/pug.glb', 'animals', {
+                    title: 'Characters Pug',
+                    sourceUrl: 'https://poly.pizza/m/xvcUwuKl4c',
+                    atlas: 'Zombie_Atlas.png',
+                    note: {
+                        en: 'The atlas name points at a character pack rather than the animal one — worth confirming which pack it shipped in.',
+                        pt: 'O nome do atlas aponta para um pacote de personagens, não o de animais — vale confirmar em qual pacote veio.',
+                    },
+                }),
             ],
         },
         {
             labelKey: 'credits.section.props',
             entries: [
                 pending('Gold chest', 'models/overall/gold_chest.glb'),
-                pending('Chest (unused)', 'models/overall/chest.glb', 'colormap.png'),
+                {
+                    ...pending('Chest (unused)', 'models/overall/chest.glb', 'colormap.png'),
+                    note: {
+                        en: 'A single "colormap" atlas is the Kenney / KayKit convention, not Quaternius\' per-pack atlas — likely a different author.',
+                        pt: 'Um único atlas "colormap" é a convenção da Kenney / KayKit, não o atlas por pacote do Quaternius — provavelmente outro autor.',
+                    },
+                },
                 pending('Coin', 'models/overall/coin.glb'),
                 pending('Phone', 'models/overall/phone.glb'),
                 {
                     ...pending('Shared prop atlas', 'models/overall/Textures/colormap.png'),
                     note: {
-                        en: 'Colour-atlas texture shared by the low-poly props — identifies the pack they came from.',
-                        pt: 'Textura de atlas de cores compartilhada pelos props low-poly — identifica o pacote de origem.',
+                        en: 'The colour atlas that ships beside chest.glb — same Kenney / KayKit lead.',
+                        pt: 'O atlas de cores que acompanha o chest.glb — mesma pista da Kenney / KayKit.',
                     },
                 },
             ],
