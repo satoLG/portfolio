@@ -18,6 +18,8 @@
 //   • freetouse.com: the music filenames carry "Artist - Title (freetouse.com)".
 //   • simple-icons: the tech glyphs are generated from the npm package by
 //     scripts/generate-tech-icons.cjs, so their provenance is in the repo.
+//   • Quaternius and Kenney: named by the project author, then pinned to a pack
+//     by the texture atlas baked into each GLB (see the helpers below).
 //
 // `atlas` is a lead, not an attribution: it is the texture name baked into the
 // GLB, which usually identifies the asset pack the model came from. Models that
@@ -108,22 +110,43 @@ const QUATERNIUS_PACKS = {
     animals: { pack: 'Animated Animal Pack', packUrl: 'https://poly.pizza/bundle/Animated-Animal-Pack-ILAPXeUYiS' },
 } as const;
 
-/** A Quaternius model. `modelUrl` is its own Poly Pizza page, when known. */
+const QUATERNIUS_INDEX = 'https://poly.pizza/u/Quaternius';
+
+/** A Quaternius model.
+ *
+ *  `packKey` is only passed where something actually establishes the pack — a
+ *  baked atlas name, or a model page matched by name. Pass null for the rest:
+ *  the author is confirmed either way, and a pack chip nobody checked would be
+ *  a guess wearing the same styling as the evidence. Those fall back to his
+ *  Poly Pizza index, which is where a deep link would be found. */
 function quaternius(
     name: string,
     file: string,
-    packKey: keyof typeof QUATERNIUS_PACKS,
+    packKey: keyof typeof QUATERNIUS_PACKS | null,
     extra: Partial<CreditEntry> = {},
 ): CreditEntry {
     return {
         name,
         file,
         ...QUATERNIUS,
-        ...QUATERNIUS_PACKS[packKey],
+        ...(packKey ? QUATERNIUS_PACKS[packKey] : {}),
         source: 'Poly Pizza',
+        sourceUrl: QUATERNIUS_INDEX,
         ...extra,
     };
 }
+
+// ── Kenney ───────────────────────────────────────────────────────────────────
+// Also CC0, also credited by choice. Identified by the single `colormap` atlas
+// his packs share, which is a different scheme from Quaternius' per-pack atlas.
+const KENNEY = {
+    author: 'Kenney',
+    authorUrl: 'https://kenney.nl/',
+    source: 'kenney.nl',
+    sourceUrl: 'https://kenney.nl/assets',
+    license: 'CC0 1.0',
+    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
+};
 
 /** An asset whose author is still unknown — `atlas` carries the only lead. */
 function pending(name: string, file: string, atlas?: string): CreditEntry {
@@ -189,20 +212,19 @@ const MODELS: CreditGroup = {
                 quaternius('Mossy rock 1', 'models/surface/moss_rock1.glb', 'nature', { atlas: 'Rocks_Diffuse.png' }),
                 quaternius('Mossy rock 2', 'models/surface/moss_rock2.glb', 'nature', { atlas: 'Rocks_Diffuse.png' }),
                 quaternius('Mossy rock 3', 'models/surface/moss_rock3.glb', 'nature', { atlas: 'PathRocks_Diffuse.png' }),
-                pending('Bonfire', 'models/surface/bonfire.glb'),
-                pending('Radio', 'models/surface/radio.glb'),
-                pending('Sword', 'models/surface/sword.glb'),
-                {
-                    ...pending('Tent', 'models/surface/custom_tent.glb'),
+                quaternius('Bonfire', 'models/surface/bonfire.glb', null),
+                quaternius('Radio', 'models/surface/radio.glb', null),
+                quaternius('Sword', 'models/surface/sword.glb', null),
+                quaternius('Tent', 'models/surface/custom_tent.glb', null, {
                     note: {
-                        en: 'Filename suggests an in-house edit — confirm whether a third-party base mesh was used.',
-                        pt: 'O nome do arquivo sugere edição própria — confirmar se partiu de uma malha de terceiros.',
+                        en: 'Filename says custom_ — the mesh was edited here, so the shape may not match the original any more.',
+                        pt: 'O nome traz custom_ — a malha foi editada aqui, então pode não bater mais com a original.',
                     },
-                },
-                pending('Lantern', 'models/surface/lantern.glb'),
-                pending('Round rug', 'models/surface/rug_round.glb'),
-                pending('Dog bowl', 'models/surface/dog_bowl.glb'),
-                pending('Dog biscuit', 'models/surface/dog_biscuit.glb'),
+                }),
+                quaternius('Lantern', 'models/surface/lantern.glb', null),
+                quaternius('Round rug', 'models/surface/rug_round.glb', null),
+                quaternius('Dog bowl', 'models/surface/dog_bowl.glb', null),
+                quaternius('Dog biscuit', 'models/surface/dog_biscuit.glb', null),
             ],
         },
         {
@@ -241,20 +263,20 @@ const MODELS: CreditGroup = {
                 quaternius('Coral-encrusted rock 1', 'models/underwater/coral_rock1.glb', 'pirate', { atlas: 'Atlas_Pirate.png' }),
                 quaternius('Coral-encrusted rock 2', 'models/underwater/coral_rock2.glb', 'pirate', { atlas: 'Atlas_Pirate.png' }),
                 quaternius('Coral-encrusted rock 3', 'models/underwater/coral_rock3.glb', 'pirate', { atlas: 'Atlas_Pirate.png' }),
-                pending('Coral variant 1', 'models/underwater/coral1.glb'),
-                pending('Coral variant 2', 'models/underwater/coral2.glb'),
-                pending('Kelp', 'models/underwater/kelp.glb'),
-                pending('Anemone', 'models/underwater/anemone.glb'),
-                pending('Starfish', 'models/underwater/starfish.glb'),
-                pending('Crab', 'models/underwater/crab.glb'),
+                quaternius('Coral variant 1', 'models/underwater/coral1.glb', null),
+                quaternius('Coral variant 2', 'models/underwater/coral2.glb', null),
+                quaternius('Kelp', 'models/underwater/kelp.glb', null),
+                quaternius('Anemone', 'models/underwater/anemone.glb', null),
+                quaternius('Starfish', 'models/underwater/starfish.glb', null),
+                quaternius('Crab', 'models/underwater/crab.glb', null),
                 quaternius('Clownfish', 'models/underwater/clownfish.glb', 'fish', {
                     sourceUrl: 'https://poly.pizza/m/769fHo3eEB',
                 }),
-                pending('Blue tang ("Dori")', 'models/underwater/dorifish.glb'),
-                pending('Generic fish (shoal)', 'models/underwater/genericfish.glb'),
-                pending('Anglerfish', 'models/underwater/anglerfish.glb'),
-                pending('Seahorse', 'models/underwater/seahorse.glb'),
-                pending('Whale', 'models/underwater/whale.glb'),
+                quaternius('Blue tang ("Dori")', 'models/underwater/dorifish.glb', 'fish'),
+                quaternius('Generic fish (shoal)', 'models/underwater/genericfish.glb', 'fish'),
+                quaternius('Anglerfish', 'models/underwater/anglerfish.glb', 'fish'),
+                quaternius('Whale', 'models/underwater/whale.glb', 'fish'),
+                quaternius('Seahorse', 'models/underwater/seahorse.glb', null),
             ],
         },
         {
@@ -274,21 +296,26 @@ const MODELS: CreditGroup = {
         {
             labelKey: 'credits.section.props',
             entries: [
-                pending('Gold chest', 'models/overall/gold_chest.glb'),
+                quaternius('Gold chest', 'models/overall/gold_chest.glb', null),
+                quaternius('Coin', 'models/overall/coin.glb', null),
+                quaternius('Phone', 'models/overall/phone.glb', null),
                 {
-                    ...pending('Chest (unused)', 'models/overall/chest.glb', 'colormap.png'),
+                    name: 'Chest (unused)',
+                    file: 'models/overall/chest.glb',
+                    atlas: 'colormap.png',
+                    ...KENNEY,
                     note: {
-                        en: 'A single "colormap" atlas is the Kenney / KayKit convention, not Quaternius\' per-pack atlas — likely a different author.',
-                        pt: 'Um único atlas "colormap" é a convenção da Kenney / KayKit, não o atlas por pacote do Quaternius — provavelmente outro autor.',
+                        en: 'Identified by the single colormap atlas his packs share. Which pack it came from is still open.',
+                        pt: 'Identificado pelo atlas colormap único que os pacotes dele compartilham. De qual pacote veio ainda está em aberto.',
                     },
                 },
-                pending('Coin', 'models/overall/coin.glb'),
-                pending('Phone', 'models/overall/phone.glb'),
                 {
-                    ...pending('Shared prop atlas', 'models/overall/Textures/colormap.png'),
+                    name: 'Shared prop atlas',
+                    file: 'models/overall/Textures/colormap.png',
+                    ...KENNEY,
                     note: {
-                        en: 'The colour atlas that ships beside chest.glb — same Kenney / KayKit lead.',
-                        pt: 'O atlas de cores que acompanha o chest.glb — mesma pista da Kenney / KayKit.',
+                        en: 'The colour atlas that ships beside chest.glb.',
+                        pt: 'O atlas de cores que acompanha o chest.glb.',
                     },
                 },
             ],
