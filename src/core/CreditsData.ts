@@ -136,17 +136,28 @@ function quaternius(
     };
 }
 
-// ── Kenney ───────────────────────────────────────────────────────────────────
-// Also CC0, also credited by choice. Identified by the single `colormap` atlas
-// his packs share, which is a different scheme from Quaternius' per-pack atlas.
-const KENNEY = {
-    author: 'Kenney',
-    authorUrl: 'https://kenney.nl/',
-    source: 'kenney.nl',
-    sourceUrl: 'https://kenney.nl/assets',
-    license: 'CC0 1.0',
-    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
-};
+// Kenney had two rows here — chest.glb and the colormap atlas beside it, both
+// identified by that atlas naming. Both were unused by the scene and have been
+// deleted, so the credit went with them.
+
+// ── Three.js Ocean Scene ─────────────────────────────────────────────────────
+// The ocean and sky here started from a fork of Nugget8's project, and its
+// texture set came along. Verified against the repo's own images/ directory,
+// which carries basicChecker, bluenoise, sand and waterNormal1/2 under exactly
+// these names — ours are the same files, re-encoded to webp by the asset
+// pipeline. MIT, so attribution is required rather than optional here.
+function oceanScene(name: string, file: string): CreditEntry {
+    return {
+        name,
+        file,
+        author: 'Nugget8',
+        authorUrl: 'https://github.com/Nugget8',
+        source: 'Three.js Ocean Scene',
+        sourceUrl: 'https://github.com/Nugget8/Three.js-Ocean-Scene',
+        license: 'MIT',
+        licenseUrl: 'https://github.com/Nugget8/Three.js-Ocean-Scene/blob/main/LICENSE',
+    };
+}
 
 /** An asset whose author is still unknown — `atlas` carries the only lead. */
 function pending(name: string, file: string, atlas?: string): CreditEntry {
@@ -209,9 +220,7 @@ const MODELS: CreditGroup = {
                 quaternius('Bushes', 'models/surface/bush.glb', 'nature', {
                     atlas: 'Leaves_NormalTree_C.png / Flowers.png',
                 }),
-                quaternius('Mossy rock 1', 'models/surface/moss_rock1.glb', 'nature', { atlas: 'Rocks_Diffuse.png' }),
-                quaternius('Mossy rock 2', 'models/surface/moss_rock2.glb', 'nature', { atlas: 'Rocks_Diffuse.png' }),
-                quaternius('Mossy rock 3', 'models/surface/moss_rock3.glb', 'nature', { atlas: 'PathRocks_Diffuse.png' }),
+                quaternius('Mossy rock', 'models/surface/moss_rock1.glb', 'nature', { atlas: 'Rocks_Diffuse.png' }),
                 quaternius('Bonfire', 'models/surface/bonfire.glb', null),
                 quaternius('Radio', 'models/surface/radio.glb', null),
                 quaternius('Sword', 'models/surface/sword.glb', null),
@@ -276,7 +285,6 @@ const MODELS: CreditGroup = {
                 quaternius('Generic fish (shoal)', 'models/underwater/genericfish.glb', 'fish'),
                 quaternius('Anglerfish', 'models/underwater/anglerfish.glb', 'fish'),
                 quaternius('Whale', 'models/underwater/whale.glb', 'fish'),
-                quaternius('Seahorse', 'models/underwater/seahorse.glb', null),
             ],
         },
         {
@@ -299,25 +307,6 @@ const MODELS: CreditGroup = {
                 quaternius('Gold chest', 'models/overall/gold_chest.glb', null),
                 quaternius('Coin', 'models/overall/coin.glb', null),
                 quaternius('Phone', 'models/overall/phone.glb', null),
-                {
-                    name: 'Chest (unused)',
-                    file: 'models/overall/chest.glb',
-                    atlas: 'colormap.png',
-                    ...KENNEY,
-                    note: {
-                        en: 'Identified by the single colormap atlas his packs share. Which pack it came from is still open.',
-                        pt: 'Identificado pelo atlas colormap único que os pacotes dele compartilham. De qual pacote veio ainda está em aberto.',
-                    },
-                },
-                {
-                    name: 'Shared prop atlas',
-                    file: 'models/overall/Textures/colormap.png',
-                    ...KENNEY,
-                    note: {
-                        en: 'The colour atlas that ships beside chest.glb.',
-                        pt: 'O atlas de cores que acompanha o chest.glb.',
-                    },
-                },
             ],
         },
     ],
@@ -393,7 +382,6 @@ const SFX: CreditGroup = {
                 { name: 'Bubble pop (expand)', file: 'audio/ui/universfield-bubble-pop-293342.mp3', author: 'Universfield', ...PIXABAY },
                 { name: 'Bubble pop (collapse)', file: 'audio/ui/universfield-bubble-pop-06-351337.mp3', author: 'Universfield', ...PIXABAY },
                 { name: 'Settings cog spin', file: 'audio/ui/712916__greyfeather__spinning-a-crank-fast.mp3', author: 'greyfeather', ...freesound('712916') },
-                { name: 'Writing tick (unused)', file: 'audio/ui/335518__newagesoup__writing-short-8.mp3', author: 'newagesoup', ...freesound('335518') },
                 {
                     ...pending('Dialog bubble pop', 'audio/ui/drop_002.ogg'),
                     note: {
@@ -427,7 +415,6 @@ const SFX: CreditGroup = {
                 { name: 'Underwater ambience loop', file: 'audio/nature/underwater/366159__dcsfx__underwater-loop-amb.opus', author: 'dcsfx', ...freesound('366159') },
                 { name: 'Underwater bubbles', file: 'audio/nature/underwater/96742__robinhood76__01650-underwater-bubbles.mp3', author: 'Robinhood76', ...freesound('96742') },
                 pending('Waves', 'audio/nature/surface/waves.mp3'),
-                pending('Ocean loop', 'audio/nature/surface/ocean.opus'),
                 pending('Breeze', 'audio/nature/surface/breeze.mp3'),
                 pending('Fireplace', 'audio/nature/surface/fireplace.opus'),
                 pending('Night crickets', 'audio/nature/surface/Crickets.mp3'),
@@ -445,12 +432,12 @@ const SFX: CreditGroup = {
                 },
                 {
                     name: 'Pug bark',
-                    file: 'audio/character/pug/freesound_community-pug-woof-2-103762.mp3',
+                    file: 'audio/character/pug/freesound_community-pug-woof-2-103762_{PRIMEIRA,SEGUNDA}.mp3',
                     author: 'Freesound Community',
                     ...PIXABAY,
                     note: {
-                        en: 'Pixabay id 103762. Split in two (_PRIMEIRA / _SEGUNDA) for the dialog cues.',
-                        pt: 'Id 103762 no Pixabay. Dividido em dois (_PRIMEIRA / _SEGUNDA) para as falas.',
+                        en: 'Pixabay id 103762, cut in two so the dialog can alternate. The uncut original was dropped — it was never loaded.',
+                        pt: 'Id 103762 no Pixabay, cortado em dois para o diálogo alternar. O original inteiro foi removido — nunca era carregado.',
                     },
                 },
             ],
@@ -468,11 +455,11 @@ const IMAGES: CreditGroup = {
         {
             labelKey: 'credits.section.sceneTextures',
             entries: [
-                pending('Water normal map 1', 'images/waterNormal1.webp'),
-                pending('Water normal map 2', 'images/waterNormal2.webp'),
-                pending('Blue-noise dither', 'images/bluenoise.webp'),
-                pending('Sand', 'images/sand.webp'),
-                pending('Checker (debug)', 'images/basicChecker.png'),
+                oceanScene('Water normal map 1', 'images/waterNormal1.webp'),
+                oceanScene('Water normal map 2', 'images/waterNormal2.webp'),
+                oceanScene('Blue-noise dither', 'images/bluenoise.webp'),
+                oceanScene('Sand', 'images/sand.webp'),
+                oceanScene('Checker (debug)', 'images/basicChecker.png'),
                 pending('Cloud sprite', 'images/cloud10.png'),
                 {
                     ...pending('Fire spritesheet', 'images/fire_spritesheet.png'),
@@ -489,9 +476,11 @@ const IMAGES: CreditGroup = {
                 {
                     name: 'Radio playlist cover art',
                     file: 'images/music/*.webp',
+                    author: 'Each track\'s own artist',
+                    ...FREETOUSE,
                     note: {
-                        en: 'Artwork belongs to each track\'s artist (see the Music group). Confirm per cover whether it may be reproduced.',
-                        pt: 'As artes pertencem ao artista de cada faixa (ver o grupo Música). Confirmar por capa se pode ser reproduzida.',
+                        en: 'Taken from each track\'s own page on the site it was downloaded from, so a cover carries the same credit as its track — see the Music group for who made which. The exception is yellowtree.jpg, which came off the Freesound page instead.',
+                        pt: 'Baixadas da própria página de cada faixa no site de origem, então cada capa carrega o mesmo crédito da música — veja no grupo Músicas quem fez qual. A exceção é a yellowtree.jpg, que veio da página do Freesound.',
                     },
                 },
                 {
