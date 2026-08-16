@@ -14,13 +14,14 @@ import {
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../core/Time";
 import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../core/MediaPlayer";
-import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive, zoomToCabana, isCabanaZoomActive, getCabanaPhase, registerCabanaInterior, registerChestClose, touchControls } from "../core/Control";
+import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive, zoomToCabana, isCabanaZoomActive, getCabanaPhase, registerCabanaInterior, registerChestClose, zoomToNoticeBoard, zoomOutFromNoticeBoard, isNoticeBoardZoomActive, registerNoticeBoardPose, touchControls } from "../core/Control";
 import { cabanaShadeX, cabanaShadeY, cabanaShadeZ, cabanaShadeRadiusX, cabanaShadeRadiusY, cabanaShadeRadiusZ, cabanaShadeEdge, cabanaShadeColor, cabanaShadeStrength, cabanaShadeRevealSpeed, cabanaShadeCoverSpeed, cabanaDomeX, cabanaDomeY, cabanaDomeZ, cabanaDomeRadius, cabanaDomeColor, cabanaDomeOpacity } from "./config/CabanaConfig";
 import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../core/Dialog";
 import * as CoinTooltip from '../core/CoinTooltip';
 import type { DialogLine, ReplyOption } from "../core/Dialog";
 import { isBreezeActive, playAppleImpactSound, playChestCloseSound, playChestOpenSound, playPugSnoreOnce, stopPugSnore } from "../core/Audio";
 import { createGrassMesh, createPerlinTexture, createShadowFloorMesh, grassColorBase, grassColorTip, type GrassUniforms } from './ProceduralGrass';
+import { createNoticeBoard } from './NoticeBoard';
 import { camera, renderer, scene as threeScene, isMobile } from "../core/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
 import * as PhoneScreen from '../core/PhoneScreen';
@@ -30,15 +31,15 @@ import {
     pugOffset, tentOffset, dogBedOffset, phoneOffset,
     apple1Offset, apple2Offset, apple3Offset,
     mossRock2aOffset, mossRock2bOffset,
-    foldingTrayTableOffset, tentDogBedOffset, rugRoundOffset, lanternOffset, dogBowlOffset, dogBiscuitOffset,
+    foldingTrayTableOffset, tentDogBedOffset, rugRoundOffset, lanternOffset, dogBowlOffset, dogBiscuitOffset, noticeBoardOffset,
     islandScale, firecampScale, treeScale, bushScale, bushRadioScale, bushRadio2Scale, bushPugScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, phoneScale,
     apple1Scale, apple2Scale, apple3Scale,
     mossRock2aScale, mossRock2bScale,
-    foldingTrayTableScale, tentDogBedScale, rugRoundScale, lanternScale, dogBowlScale, dogBiscuitScale,
+    foldingTrayTableScale, tentDogBedScale, rugRoundScale, lanternScale, dogBowlScale, dogBiscuitScale, noticeBoardScale,
     treeRotY, bushRotY, bushRadioRotY, bushRadio2RotY, bushPugRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, phoneRot,
     apple1RotY, apple2RotY, apple3RotY,
     mossRock2aRot, mossRock2bRot,
-    foldingTrayTableRot, tentDogBedRot, rugRoundRot, lanternRot, dogBowlRot, dogBiscuitRot,
+    foldingTrayTableRot, tentDogBedRot, rugRoundRot, lanternRot, dogBowlRot, dogBiscuitRot, noticeBoardRotY, noticeBoardModelPath,
     ISLAND_SURFACE_GRASS_COLOR,
     ISLAND_SURFACE_GRASS_STRENGTH,
     ISLAND_SURFACE_GRASS_GREEN_THRESHOLD,
@@ -101,6 +102,9 @@ export const bushRadio = new Group();
 export const bushRadio2 = new Group();
 export const bushPug = new Group();
 export const radio = new Group();
+// Warning board nailed to the tree trunk, just above the radio. Its contents are
+// built procedurally (or loaded from noticeBoardModelPath) in _buildNoticeBoard().
+export const noticeBoard = new Group();
 export const sword = new Group();
 export const pug = new Group();
 export const tent = new Group();
@@ -3222,6 +3226,9 @@ export function Start(): void {
         }
     );
 
+    // Nail the notice board to the tree trunk, just above the radio
+    _buildNoticeBoard(loader);
+
     // Load sword stuck in the middle of the bonfire
     loader.load(
         'models/surface/sword.glb',
@@ -3528,6 +3535,12 @@ export function Start(): void {
     // Setup radio click/hover interaction
     setupRadioInteraction();
 
+    // Setup notice board click/hover interaction → zoom in on the notice.
+    // Registered right after the radio so the two above-water zooms resolve in a
+    // predictable order; every handler below this line checks
+    // _noticeBoardBlocksClick() so the board's click-away can't leak into them.
+    setupNoticeBoardInteraction();
+
     // Setup pug click/hover interaction
     setupPugInteraction();
 
@@ -3570,6 +3583,7 @@ function setupAppleInteraction(): void {
         }
         if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
         if (isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive() || isChestZoomActive()) return;
+        if (_noticeBoardBlocksClick()) return;
 
         appleMouse.x = (clientX / window.innerWidth) * 2 - 1;
         appleMouse.y = -(clientY / window.innerHeight) * 2 + 1;
@@ -3614,6 +3628,7 @@ function setupAppleInteraction(): void {
         if (isMobile) return;   // Apple drag is desktop-only — taps on mobile still trigger the fall click handler
         if (_groundAppleDrag.active) return;
         if (isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive() || isChestZoomActive()) return;
+        if (isNoticeBoardZoomActive()) return;
         const ga = _findGroundAppleAtPointer(e.clientX, e.clientY);
         if (!ga) return;
 
@@ -4057,8 +4072,8 @@ function setupPhoneInteraction(): void {
         if (!phone.visible) return;
         // Ignore interactions while underwater
         if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
-        // Ignore clicks while pug or radio zoom is active
-        if (isPugZoomActive() || isRadioZoomActive()) return;
+        // Ignore clicks while pug, radio or notice-board zoom is active
+        if (isPugZoomActive() || isRadioZoomActive() || _noticeBoardBlocksClick()) return;
 
         // If already zoomed into phone, zoom out only if the click missed the
         // phone model entirely — clicking on the model itself does nothing.
@@ -4659,7 +4674,7 @@ function setupPugInteraction(): void {
         // Ignore interactions while underwater — models are above water
         if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
         // Ignore clicks while another zoom is active — let that handler close itself first
-        if (isRadioZoomActive() || isPhoneZoomActive()) return;
+        if (isRadioZoomActive() || isPhoneZoomActive() || _noticeBoardBlocksClick()) return;
         // If already zoomed in: advance dialog (which calls zoomOut when done) or just zoom out
         if (isPugZoomActive()) {
             if (isDialogActive()) {
@@ -4715,6 +4730,160 @@ function setupPugInteraction(): void {
 }
 
 // ============================================
+// NOTICE BOARD  (nailed to the tree trunk, just above the radio)
+// ============================================
+
+/**
+ * Seat the notice board on the trunk and publish its pose to the zoom camera.
+ *
+ * Geometry comes from NoticeBoard.ts by default. Pointing `noticeBoardModelPath`
+ * (IslandConfig) at a GLB under public/ swaps in a downloaded model instead —
+ * a failed load there is not fatal, it falls back to the procedural board so the
+ * trunk is never left with a bare patch where the sign should be.
+ */
+function _buildNoticeBoard(loader: GLTFLoader): void {
+    const place = (content: Object3D) => {
+        noticeBoard.add(content);
+        noticeBoard.position.set(
+            islandPosition.x + noticeBoardOffset.x,
+            islandPosition.y + noticeBoardOffset.y,
+            islandPosition.z + noticeBoardOffset.z,
+        );
+        noticeBoard.scale.setScalar(noticeBoardScale);
+        noticeBoard.rotation.y = noticeBoardRotY;
+        applyOceanLightingToModel(noticeBoard);
+        noticeBoard.traverse((child) => {
+            if ((child as any).isMesh) {
+                child.castShadow = true;
+                (child as any).receiveShadow = true;
+            }
+        });
+
+        // Publish the pose only once there is something to look at, so a zoom can
+        // never frame an empty group. The board is a top-level scene child with no
+        // parent transform, so its local position IS its world position.
+        registerNoticeBoardPose(() => ({
+            x: noticeBoard.position.x,
+            y: noticeBoard.position.y,
+            z: noticeBoard.position.z,
+            rotY: noticeBoard.rotation.y,
+        }));
+    };
+
+    if (noticeBoardModelPath) {
+        loader.load(
+            noticeBoardModelPath,
+            (gltf) => {
+                place(gltf.scene);
+                console.log(`Notice board loaded from ${noticeBoardModelPath}`);
+            },
+            undefined,
+            (error) => {
+                console.error(`Error loading ${noticeBoardModelPath} — using the procedural board instead:`, error);
+                place(createNoticeBoard());
+            },
+        );
+    } else {
+        place(createNoticeBoard());
+    }
+}
+
+const noticeBoardRaycaster = new Raycaster();
+const noticeBoardMouse = new Vector2();
+let isNoticeBoardHovered = false;
+// Set for the duration of one click/tap when the board handler acted on it.
+// Every canvas 'click' listener fires for the same event, and the board's
+// "click anywhere to back out" clears the zoom flag partway down that list — so
+// handlers registered AFTER this one would otherwise see a clean, un-zoomed
+// scene and treat the same tap as a fresh interaction (tapping an apple that
+// happens to be behind the board, say). They check
+// _noticeBoardBlocksClick() instead, which stays true until the event is done.
+let _noticeBoardClaimedClick = false;
+
+/** True while the board owns this click — see _noticeBoardClaimedClick. */
+function _noticeBoardBlocksClick(): boolean {
+    return isNoticeBoardZoomActive() || _noticeBoardClaimedClick;
+}
+
+function setupNoticeBoardInteraction(): void {
+    const canvas = renderer.domElement;
+    if (!canvas) return;
+
+    const _claimClick = () => {
+        _noticeBoardClaimedClick = true;
+        // Cleared on the next task — after every listener for this event has run.
+        setTimeout(() => { _noticeBoardClaimedClick = false; }, 0);
+    };
+
+    const _hitsBoard = (clientX: number, clientY: number): boolean => {
+        noticeBoardMouse.x = (clientX / window.innerWidth) * 2 - 1;
+        noticeBoardMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+        noticeBoardRaycaster.setFromCamera(noticeBoardMouse, camera);
+        return noticeBoardRaycaster.intersectObjects(noticeBoard.children, true).length > 0;
+    };
+
+    const onNoticeBoardClick = (clientX: number, clientY: number) => {
+        if (noticeBoard.children.length === 0) return;   // not built yet
+        // Above-water prop — ignore everything below the surface
+        if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
+
+        // Already zoomed: ANY canvas click backs out. Don't raycast to decide —
+        // the board fills most of the frame at zoom distance, so a hit test would
+        // read even a deliberate "click away" as a click on the board and trap
+        // the user in the zoom (the same reasoning as the radio handler above).
+        if (isNoticeBoardZoomActive()) {
+            zoomOutFromNoticeBoard();
+            _claimClick();
+            return;
+        }
+
+        // Let whichever other zoom currently owns the camera close itself first
+        if (isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive() || isChestZoomActive() || isCabanaZoomActive()) return;
+        // Media player open — this click belongs to the player's collapse
+        if (getIsExpanded()) return;
+
+        if (_hitsBoard(clientX, clientY)) {
+            // Clear hover state so the cursor resets before the camera moves
+            isNoticeBoardHovered = false;
+            canvas.style.cursor = '';
+            zoomToNoticeBoard();
+            _claimClick();
+        }
+    };
+
+    canvas.addEventListener('click', (e: MouseEvent) => {
+        onNoticeBoardClick(e.clientX, e.clientY);
+    });
+
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (_touchWasMulti || _touchDragged) return;  // was a scroll gesture — skip click
+        if (e.changedTouches.length > 0) {
+            const touch = e.changedTouches[0];
+            onNoticeBoardClick(touch.clientX, touch.clientY);
+        }
+    });
+
+    // Hover — cursor only. The board is nailed to a trunk, so the usual
+    // scale-up-on-hover affordance would visibly tear it off the tree.
+    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+        if (noticeBoard.children.length === 0 || isNoticeBoardZoomActive() ||
+            camera.position.y < UNDERWATER_Y_THRESHOLD) {
+            if (isNoticeBoardHovered) { isNoticeBoardHovered = false; canvas.style.cursor = ''; }
+            return;
+        }
+        if (_hitsBoard(e.clientX, e.clientY)) {
+            if (!isNoticeBoardHovered) { isNoticeBoardHovered = true; canvas.style.cursor = 'pointer'; }
+        } else {
+            if (isNoticeBoardHovered) { isNoticeBoardHovered = false; canvas.style.cursor = ''; }
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (isNoticeBoardHovered) { isNoticeBoardHovered = false; canvas.style.cursor = ''; }
+    });
+}
+
+// ============================================
 // RADIO CLICK/HOVER INTERACTION
 // ============================================
 const radioRaycaster = new Raycaster();
@@ -4733,7 +4902,7 @@ function setupRadioInteraction(): void {
         // Ignore interactions while underwater — models are above water
         if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
         // Ignore clicks while another zoom is active — let that handler close itself first
-        if (isPugZoomActive() || isPhoneZoomActive()) return;
+        if (isPugZoomActive() || isPhoneZoomActive() || isNoticeBoardZoomActive()) return;
 
         // Any canvas click while the player is open closes it.
         // Don't raycast here — the zoomed-in model fills most of the canvas so hitsRadio

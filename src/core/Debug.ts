@@ -161,6 +161,7 @@ import {
     lantern,
     dogBowl,
     dogBiscuit,
+    noticeBoard,
     clusterMainPatches,
     clusterTreePatches,
     proceduralGrassMesh,
@@ -245,7 +246,7 @@ import {
     type FoliageCluster,
 } from '../scene/Island';
 import * as Island from '../scene/Island';
-import { APPLE_RESPAWN_FADE_DURATION, APPLE_CLICK_COUNT_TO_FALL, MAX_GROUND_APPLES, APPLE_RESPAWN_DELAY } from '../scene/config/IslandConfig';
+import { APPLE_RESPAWN_FADE_DURATION, APPLE_CLICK_COUNT_TO_FALL, MAX_GROUND_APPLES, APPLE_RESPAWN_DELAY, noticeBoardModelPath } from '../scene/config/IslandConfig';
 import { physicsConfig, refreshContactMaterial, setDebugEnabled, rebuildPhysicsWorld } from '../scene/Physics';
 import {
     oceanAbsorptionUniform,
@@ -333,7 +334,7 @@ import {
     edgeFoamFadeStartZMobile as CFG_EF_FADE_START_Z_MOBILE,
     edgeFoamFadeEndZMobile as CFG_EF_FADE_END_Z_MOBILE,
 } from '../scene/config/OceanConfig';
-import { phoneZoomConfig, cabanaZoomConfig, cabanaRevealConfig, mainCameraConfig, isWebPageMode, toggleCameraMode } from './Control';
+import { phoneZoomConfig, cabanaZoomConfig, cabanaRevealConfig, mainCameraConfig, noticeBoardZoomConfig, isWebPageMode, toggleCameraMode } from './Control';
 import { cabanaDomeRadius } from '../scene/config/CabanaConfig';
 import { mobileFov, mobileBreakpointWidth, aboveWaterBottomY as CFG_ABOVE_BOTTOM, aboveWaterBottomYMobile as CFG_ABOVE_BOTTOM_MOBILE, underwaterTopY as CFG_UNDER_TOP, underwaterTopYMobile as CFG_UNDER_TOP_MOBILE } from '../scene/config/CameraConfig';
 import { SetFOV, scene as threeScene } from './Scene';
@@ -790,6 +791,7 @@ function buildGUI(): void {
                 `export const lanternOffset          = { x: ${f(lantern.position.x          - ip.x)}, y: ${f(lantern.position.y          - ip.y)}, z: ${f(lantern.position.z          - ip.z)} };`,
                 `export const dogBowlOffset          = { x: ${f(dogBowl.position.x          - ip.x)}, y: ${f(dogBowl.position.y          - ip.y)}, z: ${f(dogBowl.position.z          - ip.z)} };`,
                 `export const dogBiscuitOffset       = { x: ${f(dogBiscuit.position.x       - ip.x)}, y: ${f(dogBiscuit.position.y       - ip.y)}, z: ${f(dogBiscuit.position.z       - ip.z)} };`,
+                `export const noticeBoardOffset      = { x: ${f(noticeBoard.position.x      - ip.x)}, y: ${f(noticeBoard.position.y      - ip.y)}, z: ${f(noticeBoard.position.z      - ip.z)} };`,
                 ``,
                 `// ── Scales ────────────────────────────────────────────────────────────────────`,
                 `export const islandScale      = ${f(island.scale.x)};`,
@@ -820,6 +822,7 @@ function buildGUI(): void {
                 `export const lanternScale          = ${f(lantern.scale.x)};`,
                 `export const dogBowlScale          = ${f(dogBowl.scale.x)};`,
                 `export const dogBiscuitScale       = ${f(dogBiscuit.scale.x)};`,
+                `export const noticeBoardScale      = ${f(noticeBoard.scale.x)};`,
                 ``,
                 `// ── Rotations ─────────────────────────────────────────────────────────────────`,
                 `export const treeRotY   = ${f(tree.rotation.y)};`,
@@ -848,6 +851,7 @@ function buildGUI(): void {
                 `export const lanternRot          = { x: ${f(lantern.rotation.x)},          y: ${f(lantern.rotation.y)},          z: ${f(lantern.rotation.z)} };`,
                 `export const dogBowlRot          = { x: ${f(dogBowl.rotation.x)},          y: ${f(dogBowl.rotation.y)},          z: ${f(dogBowl.rotation.z)} };`,
                 `export const dogBiscuitRot       = { x: ${f(dogBiscuit.rotation.x)},       y: ${f(dogBiscuit.rotation.y)},       z: ${f(dogBiscuit.rotation.z)} };`,
+                `export const noticeBoardRotY     = ${f(noticeBoard.rotation.y)};`,
                 ``,
                 `// ── Island surface grass filter ──────────────────────────────────────────────`,
                 `export const ISLAND_SURFACE_GRASS_COLOR = '${Island.islandSurfaceGrassColor}'; // sRGB hex`,
@@ -930,6 +934,14 @@ function buildGUI(): void {
                 `export const FIRE_LIGHT_RANGE     = ${fireLightConfig.range.toFixed(2)};   // PointLight max range in world units`,
                 `export const FIRE_LIGHT_DECAY     = 2.0;   // Light falloff (2 = physically based)`,
                 `export const FIRE_LIGHT_FLICKER   = ${fireLightConfig.flicker.toFixed(2)};   // 0 = steady, 1 = heavy flicker`,
+                ``,
+                `// ── Notice board ──────────────────────────────────────────────────────────────`,
+                `export const noticeBoardModelPath: string | null = ${noticeBoardModelPath === null ? 'null' : `'${noticeBoardModelPath}'`};`,
+                `export const noticeBoardZoomDist      = ${f(noticeBoardZoomConfig.dist)};`,
+                `export const noticeBoardZoomHeight    = ${f(noticeBoardZoomConfig.height)};`,
+                `export const noticeBoardZoomFov       = ${f(noticeBoardZoomConfig.fov)};`,
+                `export const noticeBoardZoomMobileFov = ${f(noticeBoardZoomConfig.mobileFov)};`,
+                `export const noticeBoardZoomPitch     = ${f(noticeBoardZoomConfig.pitch)};`,
                 ``,
                 `// ── Phone ─────────────────────────────────────────────────────────────────────`,
                 `export const phoneZoomHeight = ${f(phoneZoomConfig.height)};`,
@@ -1735,6 +1747,18 @@ function buildGUI(): void {
     addObjectFolder(surfaceFolder, 'Radio',     radio,     { scaleRange: [0.01, 1.0], rotAxes: ['y']           });
     addObjectFolder(surfaceFolder, 'Sword',     sword,     { scaleRange: [0.01, 1.0], rotAxes: ['x', 'y', 'z'] });
     addObjectFolder(surfaceFolder, 'Tent',      tent,      { scaleRange: [0.1,  5.0], rotAxes: ['y']           });
+
+    // Notice board — placement plus the framing its click-zoom uses. The zoom
+    // target is derived from the group's live transform (see registerNoticeBoardPose),
+    // so dragging the Pos sliders while zoomed in carries the camera along.
+    const noticeBoardFolder = addObjectFolder(surfaceFolder, 'Notice Board', noticeBoard, { scaleRange: [0.05, 1.5], rotAxes: ['y'] });
+    const noticeBoardZoomFolder = noticeBoardFolder.addFolder('Zoom');
+    noticeBoardZoomFolder.add(noticeBoardZoomConfig, 'dist',      0.2,  4.0,  0.01).name('Zoom Dist').listen();
+    noticeBoardZoomFolder.add(noticeBoardZoomConfig, 'height',   -0.5,  0.5,  0.01).name('Zoom Height').listen();
+    noticeBoardZoomFolder.add(noticeBoardZoomConfig, 'fov',        5,   80,   0.5 ).name('Zoom FOV (desktop)').listen();
+    noticeBoardZoomFolder.add(noticeBoardZoomConfig, 'mobileFov',  5,   80,   0.5 ).name('Zoom FOV (mobile)').listen();
+    noticeBoardZoomFolder.add(noticeBoardZoomConfig, 'pitch', -Math.PI / 2, Math.PI / 2, 0.01).name('Zoom Pitch').listen();
+    noticeBoardZoomFolder.close();
 
     // ── Ocean Reflection ────────────────────────────────────────────────
     const reflProxy = {

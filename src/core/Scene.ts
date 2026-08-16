@@ -1,5 +1,5 @@
 import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap, Object3D, Quaternion, MeshLambertMaterial } from "three";
-import { getIsUnderwater, isPugZoomActive, isRadioZoomActive, isRadioPugZoomSettling } from "./Control";
+import { getIsUnderwater, isPugZoomActive, isRadioZoomActive, isRadioPugZoomSettling, isNoticeBoardZoomActive } from "./Control";
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
 import * as SeaFloor from "../scene/SeaFloor";
@@ -597,6 +597,7 @@ export function Start(): void
     scene.add(Island.bushRadio2);
     scene.add(Island.bushPug);
     scene.add(Island.radio);
+    scene.add(Island.noticeBoard);
     scene.add(Island.sword);
     scene.add(Island.pug);
     scene.add(Island.tent);
@@ -939,7 +940,7 @@ let _matMode: MatMode = 'standard';
 function _matRoots(): Array<Object3D | null | undefined> {
     return [
         Island.firecamp, Island.tree, Island.bush, Island.bushRadio, Island.bushRadio2, Island.bushPug,
-        Island.radio, Island.sword, Island.pug, Island.dogBed,
+        Island.radio, Island.noticeBoard, Island.sword, Island.pug, Island.dogBed,
         Island.apple1, Island.apple2, Island.apple3,
         Island.mossRock1, Island.mossRock2a, Island.mossRock2b, Island.mossRock3a, Island.mossRock3b, Island.mossRock3c,
         Island.tent, Island.chest,
@@ -1040,7 +1041,7 @@ export function Update(): void
     // default pose. The over/under line assumes a level scroll camera, so a zoom
     // (or its return trip) would smear the tint/distortion across dry land — and
     // you can never see below the ocean line during any of that anyway.
-    PostProcess.setUnderwaterEffectEnabled(!(isRadioZoomActive() || isPugZoomActive() || isRadioPugZoomSettling()));
+    PostProcess.setUnderwaterEffectEnabled(!(isRadioZoomActive() || isPugZoomActive() || isNoticeBoardZoomActive() || isRadioPugZoomSettling()));
 
     // ── Visibility gating ─────────────────────────────────────────────────────
     // Only update systems relevant to the current view (surface vs underwater).
@@ -1102,6 +1103,7 @@ export function Update(): void
         Island.bushRadio2.visible = showOutside;
         Island.bushPug.visible = showOutside;
         Island.radio.visible = showOutside;
+        Island.noticeBoard.visible = showOutside;
         Island.sword.visible = showOutside;
         Island.pug.visible = showOutside;
         Island.dogBed.visible = showOutside;

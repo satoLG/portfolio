@@ -31,6 +31,9 @@ export const rugRoundOffset         = { x: 0.5800, y: 1.0110, z: -0.3500 };
 export const lanternOffset          = { x: 0.3500, y: 1.1000, z: -0.6900 };
 export const dogBowlOffset          = { x: 0.7000, y: 1.0810, z: -0.3200 };
 export const dogBiscuitOffset       = { x: 0.6300, y: 1.1900, z: -0.2200 };
+// Nailed to the tree trunk, a little above the radio: the radio sits at y=1.0000
+// with a 0.22 scale, so its top is around y=1.22 in this offset space.
+export const noticeBoardOffset      = { x: -0.4500, y: 1.4500, z: -0.1850 };
 
 // ── Scales ────────────────────────────────────────────────────────────────────
 export const islandScale      = 0.2500;
@@ -61,6 +64,8 @@ export const rugRoundScale         = 0.3500;
 export const lanternScale          = 0.3000;
 export const dogBowlScale          = 0.0400;
 export const dogBiscuitScale       = 3.5810;
+// The board's plank panel is 1.0 wide in local units, so this IS its world width.
+export const noticeBoardScale      = 0.4000;
 
 // ── Rotations ─────────────────────────────────────────────────────────────────
 export const treeRotY   = 0.0000;
@@ -89,6 +94,8 @@ export const rugRoundRot         = { x: 0.0000,         y: 0.0000,         z: 0.
 export const lanternRot          = { x: 0.0000,          y: 1.5184,          z: 0.0000 };
 export const dogBowlRot          = { x: 0.0000,          y: 0.0000,          z: 0.0000 };
 export const dogBiscuitRot       = { x: 0.0000,       y: 0.0000,       z: 0.0000 };
+// 0 = the notice faces +Z, straight at the default camera.
+export const noticeBoardRotY     = 0.0000;
 
 // ── Island surface grass filter ──────────────────────────────────────────────
 export const ISLAND_SURFACE_GRASS_COLOR = '#293c00'; // sRGB hex
@@ -171,6 +178,19 @@ export const FIRE_LIGHT_INTENSITY = 2.60;   // Base intensity multiplier (before
 export const FIRE_LIGHT_RANGE     = 1.50;   // PointLight max range in world units
 export const FIRE_LIGHT_DECAY     = 2.0;   // Light falloff (2 = physically based)
 export const FIRE_LIGHT_FLICKER   = 0.30;   // 0 = steady, 1 = heavy flicker
+
+// ── Notice board ──────────────────────────────────────────────────────────────
+// Optional GLB to use instead of the procedural board built by NoticeBoard.ts.
+// Path is relative to public/ (e.g. 'models/surface/notice_board.glb'). Leave
+// null to keep the procedural one — a non-null path that 404s falls back to it.
+export const noticeBoardModelPath: string | null = null;
+// Zoom framing. The camera stands `dist` out along the board's facing normal, so
+// these are read the same way as the radio zoom.
+export const noticeBoardZoomDist      = 1.2500;
+export const noticeBoardZoomHeight    = 0.0200;
+export const noticeBoardZoomFov       = 24.0000;
+export const noticeBoardZoomMobileFov = 45.0000;
+export const noticeBoardZoomPitch     = 0.0000;
 
 // ── Phone ─────────────────────────────────────────────────────────────────────
 export const phoneZoomHeight = 0.0500;

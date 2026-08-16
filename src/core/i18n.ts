@@ -149,6 +149,12 @@ const translations: Record<Language, TranslationDict> = {
         // Leo description sequence
         'pug.day.leo.0': "well.. he's the guy who gives me water, food and brought me here for a walk",
         'pug.day.leo.1': 'he also does other stuff in his free time, like these... let me show you on my phone',
+
+        // Notice board nailed to the tree (drawn into a canvas texture)
+        'board.title': 'BEWARE',
+        'board.line1': 'wild pug roaming free',
+        'board.line2': 'apples fall without warning',
+        'board.sign': '— the management',
     },
 
     'pt-br': {
@@ -291,6 +297,12 @@ const translations: Record<Language, TranslationDict> = {
         // Sequência descrição do Leo
         'pug.day.leo.0': 'bom.. é o cara que me dá água, comida e me trouxe pra passear aqui',
         'pug.day.leo.1': 'ele faz outras coisas também no tempo livre, tipo essas aqui... deixa eu mostrar no meu celular',
+
+        // Placa pregada na árvore (desenhada numa textura de canvas)
+        'board.title': 'CUIDADO',
+        'board.line1': 'pug solto na ilha',
+        'board.line2': 'maçãs caem sem aviso',
+        'board.sign': '— a gerência',
     }
 };
 

@@ -3,7 +3,7 @@ import { deltaTime, time } from "./Time";
 import { camera, cameraRight, cameraForward, UpdateCameraRotation, renderer, staticCamera } from "./Scene.ts"; //body,
 import { KeyCodes, PointerPhase, PointerType, keysJustPressed, keysPressed, lastPointerLockChange, mouseMovement, pointers } from "./Input";
 import { spotLightDistance, spotLightDistanceUniform } from "../materials/OceanMaterial";
-import { islandPosition as cfgIslandPos, radioOffset as cfgRadioOffset, radioRotY as cfgRadioRotY, pugOffset as cfgPugOffset, pugRotY as cfgPugRotY, phoneOffset as cfgPhoneOffset } from '../scene/config/IslandConfig';
+import { islandPosition as cfgIslandPos, radioOffset as cfgRadioOffset, radioRotY as cfgRadioRotY, pugOffset as cfgPugOffset, pugRotY as cfgPugRotY, phoneOffset as cfgPhoneOffset, noticeBoardZoomDist, noticeBoardZoomHeight, noticeBoardZoomFov, noticeBoardZoomMobileFov, noticeBoardZoomPitch } from '../scene/config/IslandConfig';
 import { defaultCameraX, defaultCameraZ, defaultFov, mobileFov, mobileBreakpointWidth, aboveWaterBottomY as cfgAboveWaterBottomY, aboveWaterBottomYMobile as cfgAboveWaterBottomYMobile, underwaterTopY as cfgUnderwaterTopY, underwaterTopYMobile as cfgUnderwaterTopYMobile } from '../scene/config/CameraConfig';
 import { phoneZoomHeight, phoneZoomTilt, phoneZoomPitch, phoneZoomFov } from '../scene/config/PhoneConfig';
 import { cabanaCamX, cabanaCamY, cabanaCamZ, cabanaPhi, cabanaPitch, cabanaFov, cabanaCamXMobile, cabanaCamYMobile, cabanaCamZMobile, cabanaPhiMobile, cabanaPitchMobile, cabanaFovMobile, cabanaArriveDist } from '../scene/config/CabanaConfig';
@@ -114,6 +114,7 @@ let radioZoomActive = false;
 let pugZoomActive = false;
 let phoneZoomActive = false;
 let chestZoomActive = false;
+let noticeBoardZoomActive = false;
 // True from the instant zoomOutFromRadio/zoomOutFromPug is called until the camera has
 // fully eased back to its default pose (X/Z, yaw, pitch, FOV). radioZoomActive/pugZoomActive
 // flip false immediately when zoom-out starts, but the camera position/orientation are
@@ -313,6 +314,26 @@ const PHONE_ZOOM_PHI = Math.PI * 2;
 // Chest zoom — target is read live each frame from sfDecorConfig for debug-GUI responsiveness
 const CHEST_ZOOM_PHI = Math.PI * 2; // look straight ahead (-Z)
 
+// ── Notice board zoom ────────────────────────────────────────────────────────
+// Unlike the radio (whose target is baked from IslandConfig at module load), the
+// board's pose is read LIVE from the scene group through this bridge. The board
+// is meant to be nudged around the trunk from the debug GUI, and re-deriving the
+// camera pose every frame means the zoom framing follows it without a reload.
+// Island registers the provider; until then the zoom simply refuses to start.
+let _noticeBoardPose: (() => { x: number; y: number; z: number; rotY: number }) | null = null;
+export function registerNoticeBoardPose(get: () => { x: number; y: number; z: number; rotY: number }): void {
+    _noticeBoardPose = get;
+}
+
+/** Framing for the notice-board zoom — mutable so the debug GUI can dial it in. */
+export const noticeBoardZoomConfig = {
+    dist:      noticeBoardZoomDist,       // world units out along the board's facing normal
+    height:    noticeBoardZoomHeight,     // camera Y above the board's origin
+    fov:       noticeBoardZoomFov,        // desktop FOV (telephoto — lower = tighter)
+    mobileFov: noticeBoardZoomMobileFov,  // FOV at or below mobileBreakpointWidth
+    pitch:     noticeBoardZoomPitch,      // camera pitch in radians
+};
+
 export function isRadioZoomActive(): boolean {
     return radioZoomActive;
 }
@@ -327,6 +348,10 @@ export function isPhoneZoomActive(): boolean {
 
 export function isChestZoomActive(): boolean {
     return chestZoomActive;
+}
+
+export function isNoticeBoardZoomActive(): boolean {
+    return noticeBoardZoomActive;
 }
 
 /** True while the camera is still easing back from a radio/pug zoom-out — see
@@ -365,7 +390,7 @@ function saveAndStartZoom(): void {
 
 // Zoom camera to focus on radio (called when expanding media player above water)
 export function zoomToRadio(): void {
-    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside' || isUnderwater) return;
+    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || noticeBoardZoomActive || cabanaPhase !== 'outside' || isUnderwater) return;
     saveAndStartZoom();
     radioZoomActive = true;
 }
@@ -373,7 +398,7 @@ export function zoomToRadio(): void {
 // Zoom camera INTO the cabana (tent interior). Outer level — the phone zoom nests
 // inside it. Mounts the phone iframe so the interior phone screen is already live.
 export function zoomToCabana(): void {
-    if (cabanaPhase !== 'outside' || radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || isUnderwater) return;
+    if (cabanaPhase !== 'outside' || radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || noticeBoardZoomActive || isUnderwater) return;
     saveAndStartZoom();
     cabanaPhase = 'entering';
     // Kick off the (idempotent) interior lazy-load; the dark dive masks it. The
@@ -406,7 +431,7 @@ export function zoomOutFromRadio(): void {
 
 // Zoom camera to focus on pug
 export function zoomToPug(): void {
-    if (pugZoomActive || radioZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside' || isUnderwater) return;
+    if (pugZoomActive || radioZoomActive || phoneZoomActive || chestZoomActive || noticeBoardZoomActive || cabanaPhase !== 'outside' || isUnderwater) return;
     saveAndStartZoom();
     pugZoomActive = true;
 }
@@ -437,9 +462,28 @@ export function zoomOutFromPhone(): void {
     phoneZoomActive = false;
 }
 
+// Zoom camera to focus on the notice board nailed to the tree. Above-water only,
+// same as the radio — so its zoom-out joins the radio/pug settling family below,
+// which keeps the underwater over/under effect suppressed through the return trip.
+export function zoomToNoticeBoard(): void {
+    if (noticeBoardZoomActive || radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside' || isUnderwater) return;
+    if (!_noticeBoardPose) return;  // Island hasn't built the board yet
+    saveAndStartZoom();
+    noticeBoardZoomActive = true;
+}
+
+// Zoom out from the notice board. Always snaps targetY to the scene's top — see zoomOutFromRadio.
+export function zoomOutFromNoticeBoard(): void {
+    if (!noticeBoardZoomActive) return;
+    noticeBoardZoomActive = false;
+    radioPugZoomSettling = true;
+    zoomReturnSettling = true;
+    targetY = aboveWaterTopY;
+}
+
 // Zoom camera to focus on chest (underwater)
 export function zoomToChest(): void {
-    if (chestZoomActive || radioZoomActive || pugZoomActive || phoneZoomActive || cabanaPhase !== 'outside' || !isUnderwater) return;
+    if (chestZoomActive || radioZoomActive || pugZoomActive || phoneZoomActive || noticeBoardZoomActive || cabanaPhase !== 'outside' || !isUnderwater) return;
     saveAndStartZoom();
     chestZoomActive = true;
 }
@@ -462,6 +506,7 @@ function forceExitZoom(): void {
     if (phoneZoomActive) { phoneZoomActive = false; }
     if (cabanaPhase !== 'outside'){ cabanaPhase = 'outside'; targetY = savedTargetY; unmountPhoneIframe(); }
     if (chestZoomActive) { chestZoomActive = false;  zoomReturnSettling = true; targetY = savedTargetY; _chestClose?.(); }
+    if (noticeBoardZoomActive) { noticeBoardZoomActive = false; radioPugZoomSettling = true; zoomReturnSettling = true; targetY = aboveWaterTopY; }
 }
 
 // Get saved camera position (for calculating where radio will be after zoomout)
@@ -511,7 +556,7 @@ export function handleScroll(deltaY: number): void {
     // Dragging the underwater card carousel — the horizontal swipe's vertical
     // component must not also scroll the camera (covers wheel + touch paths).
     if (isCarouselDragging()) return;
-    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside' || zoomReturnSettling) {
+    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || noticeBoardZoomActive || cabanaPhase !== 'outside' || zoomReturnSettling) {
         // Safety: user is trying to scroll while a zoom flag is active.
         // Increment a counter — if they keep scrolling, force-clear the stuck zoom.
         _zoomScrollAttempts++;
@@ -540,7 +585,7 @@ export function handleScroll(deltaY: number): void {
 export function scrollCameraToY(y: number): boolean {
     if (!scrollEnabled || !webPageMode) return false;
     if (isDialogActive()) return false;
-    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive
+    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || noticeBoardZoomActive
         || cabanaPhase !== 'outside' || zoomReturnSettling) return false;
     targetY = MathUtils.clamp(y, underwaterBottomY, aboveWaterTopY);
     return true;
@@ -555,7 +600,7 @@ export function isSceneScrollEnabled(): boolean {
     // stopped the internal camera and let native scroll leak through for zooms
     // that don't open a dialog (radio, chest) or during the return trip.
     return scrollEnabled && !isDialogActive() &&
-        !(radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside' || zoomReturnSettling);
+        !(radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || noticeBoardZoomActive || cabanaPhase !== 'outside' || zoomReturnSettling);
 }
 
 declare global {
@@ -796,7 +841,7 @@ export function Update(): void
         // The cabana drives the camera only while diving in / settled inside. On
         // 'exiting' it falls through to NORMAL MODE so the camera eases back out.
         const cabanaDrivingCamera = cabanaPhase === 'entering' || cabanaPhase === 'inside';
-        if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaDrivingCamera) {
+        if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || noticeBoardZoomActive || cabanaDrivingCamera) {
             // ZOOM MODE: Smoothly move camera to target position
             let zoomTargetX: number, zoomTargetY: number, zoomTargetZ: number;
             if (phoneZoomActive) {
@@ -817,6 +862,14 @@ export function Update(): void
                 zoomTargetX = sfDecorConfig.chest.x;
                 zoomTargetY = sfDecorConfig.chest.y + sfDecorConfig.chestZoomHeight;
                 zoomTargetZ = sfDecorConfig.chest.z + sfDecorConfig.chestZoomDist;
+            } else if (noticeBoardZoomActive) {
+                // Stand out along the board's facing normal — same derivation as
+                // the radio, but read live from the scene so debug-GUI nudges to
+                // the board carry the camera with them.
+                const b = _noticeBoardPose!();
+                zoomTargetX = b.x + noticeBoardZoomConfig.dist * Math.sin(b.rotY);
+                zoomTargetY = b.y + noticeBoardZoomConfig.height;
+                zoomTargetZ = b.z + noticeBoardZoomConfig.dist * Math.cos(b.rotY);
             } else {
                 zoomTargetX = RADIO_ZOOM_TARGET_X;
                 zoomTargetY = RADIO_ZOOM_TARGET_Y;
@@ -870,6 +923,16 @@ export function Update(): void
                 // sits bottom-right and the island fills the rest (pugZoomConfig).
                 zoomPhi = MathUtils.damp(zoomPhi, PUG_ZOOM_PHI + pugZoomConfig.yaw, ZOOM_SMOOTH, deltaTime);
                 zoomTetha = MathUtils.damp(zoomTetha, pugZoomConfig.pitch, ZOOM_SMOOTH, deltaTime);
+            } else if (noticeBoardZoomActive) {
+                // phi = 2π − rotY looks along −frontNormal, straight at the notice.
+                const b = _noticeBoardPose!();
+                zoomPhi = MathUtils.damp(zoomPhi, Math.PI * 2 - b.rotY, ZOOM_SMOOTH, deltaTime);
+                zoomTetha = MathUtils.damp(zoomTetha, noticeBoardZoomConfig.pitch, ZOOM_SMOOTH, deltaTime);
+                // Telephoto so the notice fills the frame without shoving the
+                // near clip plane through the planks.
+                currentFov = MathUtils.damp(currentFov,
+                    _getResponsiveFov(noticeBoardZoomConfig.fov, noticeBoardZoomConfig.mobileFov),
+                    ZOOM_SMOOTH, deltaTime);
             } else if (chestZoomActive) {
                 zoomPhi = MathUtils.damp(zoomPhi, CHEST_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
                 // Tilt camera down to look at chest from above
