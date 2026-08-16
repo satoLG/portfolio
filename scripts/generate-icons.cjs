@@ -22,7 +22,9 @@ const fs = require('fs');
 const path = require('path');
 
 const ICON_SIZES = [
-  16, 32, 72, 96, 128, 144, 152, 180, 192, 384, 512
+  // 180 is deliberately absent: the only 180px consumer is the Apple touch
+  // icon, which is written separately below under its own name.
+  16, 32, 72, 96, 128, 144, 152, 192, 384, 512
 ];
 
 const SOURCE_SVG = path.join(__dirname, '..', 'favicon.svg');

@@ -8,6 +8,7 @@ import { getCameraY, setIntroProgress, enableScroll, onDescentComplete } from ".
 import { beginDescent as beginCloudDescent } from "../effects/CloudSprites.ts";
 import { showWelcomeText } from "../effects/WelcomeText";
 import { t, setLanguage, type Language } from "./i18n";
+import { initCreditsModal, openCreditsModal } from "./CreditsModal";
 import { fps } from "./Time";
 
 const THEME_STORAGE_KEY = 'portfolio-theme-mode';
@@ -399,6 +400,9 @@ export function Start(): void {
     const volumeOffSvg = `<svg class="icon-off icon-normal" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/></svg><svg class="icon-off icon-pixel" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2h-2v2H9v2H7v2H3v8h4v2h2v2h2v2h2V2zM9 18v-2H7v-2H5v-4h2V8h2V6h2v12H9zm10-6.777h-2v-2h-2v2h2v2h-2v2h2v-2h2v2h2v-2h-2v-2zm0 0h2v-2h-2v2z"/></svg>`;
     const toggleOnSvg = `<svg class="icon-on icon-normal" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><svg class="icon-on icon-pixel" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18 6h2v2h-2V6zm-2 4V8h2v2h-2zm-2 2v-2h2v2h-2zm-2 2h2v-2h-2v2zm-2 2h2v-2h-2v2zm-2 0v2h2v-2H8zm-2-2h2v2H6v-2zm0 0H4v-2h2v2z"/></svg>`;
     const toggleOffSvg = `<svg class="icon-off icon-normal" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg><svg class="icon-off icon-pixel" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5 5h2v2H5V5zm4 4H7V7h2v2zm2 2H9V9h2v2zm2 0h-2v2H9v2H7v2H5v2h2v-2h2v-2h2v-2h2v2h2v2h2v2h2v-2h-2v-2h-2v-2h-2v-2zm2-2v2h-2V9h2zm2-2v2h-2V7h2zm0 0V5h2v2h-2z"/></svg>`;
+    // The credits row opens a modal instead of expanding, so it wears an
+    // "opens elsewhere" glyph rather than the tabs' chevron.
+    const creditsIconSvg = `<svg class="tab-arrow icon-normal" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg><svg class="tab-arrow icon-pixel" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 2h6v2H9V2zM7 6V4h2v2H7zm-2 2V6h2v2H5zm0 8H3V8h2v8zm2 2H5v-2h2v2zm2 2H7v-2h2v2zm6 0v2H9v-2h6zm2-2v2h-2v-2h2zm2-2v2h-2v-2h2zm0-8h2v8h-2V8zm0 0V6h-2v2h2zm-2-2V4h-2v2h2zm-6 1h2v2h-2V7zm0 4h2v6h-2v-6z"/></svg>`;
     const tabArrowSvg = `<svg class="tab-arrow icon-normal" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg><svg class="tab-arrow icon-pixel" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 8H5v2h2v2h2v2h2v2h2v-2h2v-2h2v-2h2V8h-2v2h-2v2h-2v2h-2v-2H9v-2H7V8z"/></svg>`;
     
     // Current settings for initial UI state
@@ -563,6 +567,12 @@ export function Start(): void {
                 </div>
             </div>
         </div>
+        <div class="settings-tab" data-tab="credits">
+            <button class="settings-tab-header credits-trigger">
+                <span data-i18n="tab.credits">${t('tab.credits')}</span>
+                ${creditsIconSvg}
+            </button>
+        </div>
     `;
     settingsContainer.appendChild(settingsPanel);
     headerControls.appendChild(settingsContainer);
@@ -576,8 +586,9 @@ export function Start(): void {
         e.stopPropagation();
     }, { passive: false });
     
-    // Collapsible tab headers with state persistence
-    settingsPanel.querySelectorAll('.settings-tab-header').forEach(tabHeader => {
+    // Collapsible tab headers with state persistence. The credits row is styled
+    // like a tab header but opens a modal, so it is excluded from the toggle.
+    settingsPanel.querySelectorAll('.settings-tab-header:not(.credits-trigger)').forEach(tabHeader => {
         tabHeader.addEventListener('click', (e) => {
             e.stopPropagation();
             const tab = (tabHeader as HTMLElement).parentElement!;
@@ -595,6 +606,28 @@ export function Start(): void {
     
     // Settings button click - toggle panel
     let settingsOpen = false;
+
+    /** Collapse the panel and rewind the cog. No-op when already closed. */
+    function closeSettings(): void {
+        if (!settingsOpen) return;
+        settingsOpen = false;
+        settingsPanel.classList.remove('open');
+        settingsButton.classList.remove('active');
+        settingsButton.classList.remove('cog-open');
+        settingsButton.classList.add('cog-close');
+        playUISpinClose();
+    }
+
+    // ---- Credits modal ----
+    // Built up front so the first click has nothing to wait on.
+    initCreditsModal();
+    const creditsTrigger = settingsPanel.querySelector('.credits-trigger') as HTMLButtonElement;
+    creditsTrigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeSettings();
+        openCreditsModal();
+    });
+
     settingsButton.addEventListener('click', () => {
         settingsOpen = !settingsOpen;
         settingsPanel.classList.toggle('open', settingsOpen);
@@ -613,27 +646,11 @@ export function Start(): void {
     });
     
     // Close settings when media player opens
-    document.addEventListener('player-opened', () => {
-        if (settingsOpen) {
-            settingsOpen = false;
-            settingsPanel.classList.remove('open');
-            settingsButton.classList.remove('active');
-            settingsButton.classList.remove('cog-open');
-            settingsButton.classList.add('cog-close');
-            playUISpinClose();
-        }
-    });
-    
+    document.addEventListener('player-opened', closeSettings);
+
     // Close settings when clicking outside
     document.addEventListener('click', (e) => {
-        if (settingsOpen && !settingsContainer.contains(e.target as Node)) {
-            settingsOpen = false;
-            settingsPanel.classList.remove('open');
-            settingsButton.classList.remove('active');
-            settingsButton.classList.remove('cog-open');
-            settingsButton.classList.add('cog-close');
-            playUISpinClose();
-        }
+        if (!settingsContainer.contains(e.target as Node)) closeSettings();
     });
     
     // ---- Confirmation Modal ----
