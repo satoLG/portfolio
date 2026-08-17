@@ -166,6 +166,24 @@ export const cabanaRevealConfig = { arriveDist: cabanaArriveDist };
 // Counter for scroll attempts during zoom (stuck-zoom safety valve)
 let _zoomScrollAttempts = 0;
 
+/**
+ * Hard hold on every path that can end a zoom.
+ *
+ * Some flows own the screen while the camera is parked — writing a post-it,
+ * then dragging it around the board to place it. A drag is a long stream of
+ * move events, and the machinery that normally protects the user from a STUCK
+ * zoom (three scroll attempts and the camera bails out) reads that stream as
+ * "the user is trying to leave". It is not: they are using the thing the zoom
+ * exists for.
+ *
+ * While this is set, scroll does not accumulate attempts, the safety valve does
+ * nothing, and an explicit zoom-out is refused. The flow clears it when it
+ * finishes or is cancelled, and both of those paths are unconditional.
+ */
+let _zoomExitLocked = false;
+export function setZoomExitLock(locked: boolean): void { _zoomExitLocked = locked; }
+export function isZoomExitLocked(): boolean { return _zoomExitLocked; }
+
 // Saved camera state before zoom
 let savedCameraX = 0;
 let savedCameraY = 0;
@@ -474,7 +492,7 @@ export function zoomToNoticeBoard(): void {
 
 // Zoom out from the notice board. Always snaps targetY to the scene's top — see zoomOutFromRadio.
 export function zoomOutFromNoticeBoard(): void {
-    if (!noticeBoardZoomActive) return;
+    if (!noticeBoardZoomActive || _zoomExitLocked) return;
     noticeBoardZoomActive = false;
     radioPugZoomSettling = true;
     zoomReturnSettling = true;
@@ -500,6 +518,8 @@ export function zoomOutFromChest(): void {
 // Force-clear all zoom flags (safety valve for stuck zooms on mobile)
 function forceExitZoom(): void {
     _zoomScrollAttempts = 0;
+    // A flow that owns the screen is not a stuck zoom — see setZoomExitLock.
+    if (_zoomExitLocked) return;
     if (radioZoomActive) { radioZoomActive = false; radioPugZoomSettling = true; zoomReturnSettling = true; targetY = aboveWaterTopY; }
     if (pugZoomActive)   { pugZoomActive = false;   radioPugZoomSettling = true; zoomReturnSettling = true; targetY = aboveWaterTopY; }
     // Phone is the inner level — the cabana below owns the restore + iframe teardown.
@@ -556,6 +576,9 @@ export function handleScroll(deltaY: number): void {
     // Dragging the underwater card carousel — the horizontal swipe's vertical
     // component must not also scroll the camera (covers wheel + touch paths).
     if (isCarouselDragging()) return;
+    // Locked flows swallow scroll outright, WITHOUT counting it toward the
+    // stuck-zoom valve below — otherwise placing a note trips the escape hatch.
+    if (_zoomExitLocked) return;
     if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || noticeBoardZoomActive || cabanaPhase !== 'outside' || zoomReturnSettling) {
         // Safety: user is trying to scroll while a zoom flag is active.
         // Increment a counter — if they keep scrolling, force-clear the stuck zoom.

@@ -39,6 +39,7 @@ import { CSS3DPanel } from '../effects/CSS3DPanel';
 import { t, onLanguageChange } from '../core/i18n';
 import { camera, renderer } from '../core/Scene';
 import { playPostItStick, playUIButton } from '../core/Audio';
+import { setZoomExitLock } from '../core/Control';
 
 const DESIGN_W = 520;
 const DESIGN_H = 350;
@@ -145,6 +146,20 @@ function _noteHTML(n: PostIt, extraClass = ''): string {
         </div>`;
 }
 
+/** Note size as a fraction of the region — must match .pw-postit in the CSS. */
+const NOTE_U = 96 / DESIGN_W;
+const NOTE_V = 92 / DESIGN_H;
+/** Add button size as a fraction of the region — must match .pw-add. */
+const ADD_U = 52 / DESIGN_W;
+const ADD_V = 52 / DESIGN_H;
+
+/** Where the fixed example note lives, and where the add button sits BESIDE it.
+ *  The button belongs next to the note that explains what it makes — on its own
+ *  in a corner it is a plus sign on bare wood. */
+const SAMPLE_U = 0.17, SAMPLE_V = 0.30;
+const ADD_CU = SAMPLE_U + NOTE_U / 2 + ADD_U / 2 + 0.03;
+const ADD_CV = SAMPLE_V;
+
 /** The example note. Always present, never stored and never editable — without
  *  something already on the wall the add button is a button on bare wood, and
  *  what it makes is not obvious until after you press it. */
@@ -153,24 +168,45 @@ function _sampleNote(): PostIt {
         id: '__sample__',
         text: t('postit.sample'),
         color: POSTIT_COLORS[3],
-        u: 0.16, v: 0.30, rot: -6,
+        u: SAMPLE_U, v: SAMPLE_V, rot: -6,
     };
+}
+
+/** Boxes a visitor's note may not cover: the example and the add button. Both
+ *  are part of the scene rather than the visitor's, and burying either one
+ *  leaves the wall with no way to explain itself and no way to add to it. */
+const RESERVED: Array<{ cu: number; cv: number; w: number; h: number }> = [
+    { cu: SAMPLE_U, cv: SAMPLE_V, w: NOTE_U, h: NOTE_V },
+    { cu: ADD_CU,   cv: ADD_CV,   w: ADD_U,  h: ADD_V  },
+];
+
+/** True when a note dropped at (u,v) would overlap something reserved. */
+function _hitsReserved(u: number, v: number): boolean {
+    for (const r of RESERVED) {
+        if (Math.abs(u - r.cu) < (NOTE_U + r.w) / 2 &&
+            Math.abs(v - r.cv) < (NOTE_V + r.h) / 2) return true;
+    }
+    return false;
 }
 
 function _render(): void {
     if (!_wall || !_panel) return;
     const sample = _sampleNote();
+    const blocked = _mode === 'placing' && _hitsReserved(_draftU, _draftV);
     const ghost: string = _mode === 'placing'
-        ? _noteHTML({ id: '__ghost__', text: _draftText, color: _draftColor, u: _draftU, v: _draftV, rot: _draftRot }, 'pw-ghost')
+        ? _noteHTML({ id: '__ghost__', text: _draftText, color: _draftColor, u: _draftU, v: _draftV, rot: _draftRot },
+                    blocked ? 'pw-ghost pw-blocked' : 'pw-ghost')
         : '';
+    _syncConfirmState(blocked);
 
     _wall.innerHTML = `
         ${_noteHTML(sample, 'pw-sample')}
         ${_notes.map(n => _noteHTML(n)).join('')}
         ${ghost}
-        <button class="pw-add" type="button" title="${t('postit.add')}">
+        <button class="pw-add" type="button" title="${t('postit.add')}"
+                style="left:${ADD_CU * 100}%; top:${ADD_CV * 100}%;">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"
-                fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/></svg>
+                fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round"/></svg>
         </button>`;
 
     // Text goes in via textContent, never innerHTML — this is visitor input and
@@ -188,6 +224,16 @@ function _render(): void {
     });
 
     _panel.requestRepaint();
+}
+
+/** Grey out "stick it here" while the note is over something reserved, and say
+ *  why — a button that silently does nothing is worse than no button. */
+function _syncConfirmState(blocked: boolean): void {
+    if (!_placeBar) return;
+    const btn = _placeBar.querySelector<HTMLButtonElement>('.pp-confirm');
+    if (btn) btn.disabled = blocked;
+    const hint = _placeBar.querySelector('.pp-hint');
+    if (hint) hint.textContent = t(blocked ? 'postit.blocked' : 'postit.placeHint');
 }
 
 // ── Editor overlay (screen space) ────────────────────────────────────────────
@@ -256,6 +302,11 @@ function _paintEditorText(): void {
 export function openEditor(): void {
     if (_mode !== 'idle') return;
     _mode = 'editing';
+    // Held for the WHOLE flow — writing and placing — and released on every way
+    // out. A placement drag is a stream of move events, and without this the
+    // stuck-zoom safety valve reads it as the user trying to leave and pulls the
+    // camera off the board mid-drag.
+    setZoomExitLock(true);
     _draftText = '';
     _draftColor = POSTIT_COLORS[0];
     // A few degrees either way, decided once per note so it does not twitch
@@ -292,6 +343,7 @@ function closeEditor(accept: boolean): void {
         _render();
     } else {
         _mode = 'idle';
+        setZoomExitLock(false);
         playUIButton();
     }
 }
@@ -332,6 +384,15 @@ function _endPlacement(accept: boolean): void {
     renderer.domElement.style.touchAction = '';
     _placeBar?.classList.remove('pp-open');
     _mode = 'idle';
+    setZoomExitLock(false);
+
+    if (accept && _hitsReserved(_draftU, _draftV)) {
+        // Should be unreachable — the confirm button is disabled over a
+        // reserved box — but a note must never end up on top of the example.
+        playUIButton();
+        _render();
+        return;
+    }
 
     if (accept) {
         if (_notes.length >= MAX_NOTES) _notes.shift();
@@ -370,32 +431,36 @@ function _setupPlacementInput(): void {
     const canvas = renderer.domElement;
     if (!canvas) return;
 
-    let dragging = false;
-
-    const move = (e: PointerEvent) => {
+    // ── Touch ────────────────────────────────────────────────────────────────
+    // Touch events, NOT pointer events, and this is the whole reason dragging a
+    // note did nothing on a phone. While a zoom is active Input.ts calls
+    // preventDefault() on every touchmove to stop the page scrolling — and a
+    // prevented touchmove suppresses the pointermove that would have followed
+    // it and fires pointercancel instead, so the pointer-based drag died on the
+    // first frame of movement. The touch handler still runs regardless.
+    //
+    // stopPropagation keeps the gesture from reaching Input's document-level
+    // listener at all, so placement and the camera never contend for it.
+    const onTouch = (e: TouchEvent) => {
         if (_mode !== 'placing') return;
-        // Desktop tracks the cursor continuously; touch only while a finger is
-        // down, since there is no hover to track.
-        if (e.pointerType !== 'mouse' && !dragging) return;
+        const touch = e.touches[0] ?? e.changedTouches[0];
+        if (!touch) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (_pickAt(touch.clientX, touch.clientY)) _render();
+    };
+    canvas.addEventListener('touchstart', onTouch, { passive: false });
+    canvas.addEventListener('touchmove', onTouch, { passive: false });
+
+    // ── Mouse ────────────────────────────────────────────────────────────────
+    // Desktop tracks the cursor continuously — there is a hover to track, so the
+    // note follows without needing a button held down.
+    const onMouse = (e: PointerEvent) => {
+        if (_mode !== 'placing' || e.pointerType !== 'mouse') return;
         if (_pickAt(e.clientX, e.clientY)) _render();
     };
-
-    canvas.addEventListener('pointerdown', (e) => {
-        if (_mode !== 'placing') return;
-        dragging = true;
-        // Capture so a finger that slides past the board's edge — or off the
-        // canvas entirely — keeps reporting to us instead of silently dropping
-        // the drag half way.
-        try { canvas.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
-        if (_pickAt(e.clientX, e.clientY)) _render();
-    }, { passive: true });
-    canvas.addEventListener('pointermove', move, { passive: true });
-    const release = (e: PointerEvent) => {
-        dragging = false;
-        try { canvas.releasePointerCapture(e.pointerId); } catch { /* already gone */ }
-    };
-    canvas.addEventListener('pointerup', release);
-    canvas.addEventListener('pointercancel', release);
+    canvas.addEventListener('pointerdown', onMouse);
+    canvas.addEventListener('pointermove', onMouse);
 }
 
 // ── Panel ────────────────────────────────────────────────────────────────────

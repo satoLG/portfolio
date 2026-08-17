@@ -190,6 +190,7 @@ const translations: Record<Language, TranslationDict> = {
         'postit.cancel': 'Cancel',
         'postit.stick': 'Stick it here',
         'postit.placeHint': 'Tap or drag on the board to choose a spot',
+        'postit.blocked': 'Not there — that spot is taken',
     },
 
     'pt-br': {
@@ -373,6 +374,7 @@ const translations: Record<Language, TranslationDict> = {
         'postit.cancel': 'Cancelar',
         'postit.stick': 'Colar aqui',
         'postit.placeHint': 'Toque ou arraste no mural pra escolher o lugar',
+        'postit.blocked': 'Aí não — esse lugar já é ocupado',
     }
 };
 

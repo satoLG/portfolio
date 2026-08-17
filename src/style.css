@@ -4168,32 +4168,54 @@ body.day-mode .ach-toast {
     50%      { opacity: 1; }
 }
 
+/* Over the example note or the add button: both belong to the scene, and
+   burying either leaves the wall unable to explain itself or be added to. */
+.pw-blocked { animation: none; opacity: 0.55; }
+.pw-blocked::after { border-color: rgba(150, 40, 30, 0.9); }
+
+.pe-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Chunky, square, rounded — a sticker of a button rather than a UI control, to
+   sit next to the paper without looking like it came from a different app. The
+   heavy dark rule and the hard inner highlight are what make it read as drawn.
+
+   Centred with MARGINS for the same reason the notes are: CSS3DPanel punches its
+   hole from the layout box, and a transform would move only the paint. Size must
+   stay in step with ADD_U/ADD_V in PostItWall. */
 .pw-add {
     position: absolute;
-    right: 6px;
-    bottom: 6px;
-    width: 40px;
-    height: 40px;
+    width: 52px;
+    height: 52px;
+    margin-left: -26px;
+    margin-top: -26px;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0;
-    border: 2px solid rgba(243, 231, 201, 0.85);
-    border-radius: 50%;
-    background: rgba(141, 58, 44, 0.92);
-    color: #f3e7c9;
+    box-sizing: border-box;
+    border: 3px solid #4a2c1c;
+    border-radius: 14px;
+    background: linear-gradient(#e0713f, #c8562f);
+    box-shadow: inset 0 3px 0 rgba(255, 226, 190, 0.55),
+                inset 0 -4px 0 rgba(90, 36, 20, 0.4);
+    color: #fff3dd;
     cursor: default;
-    opacity: 0.6;
+    opacity: 0.72;
+    transform: rotate(-4deg);
     transition: opacity 0.18s ease, transform 0.12s ease;
 }
 
-.pw-add svg { width: 20px; height: 20px; }
+.pw-add svg { width: 26px; height: 26px; }
 
 /* Only a control once the camera has flown in — same rule as the notice's
    arrows. Until then it is a printed hint that the wall accepts notes. */
 .pw-interactive .pw-add { opacity: 1; cursor: pointer; }
-.pw-interactive .pw-add:hover { transform: scale(1.08); }
-.pw-interactive .pw-add:active { transform: scale(0.92); }
+.pw-interactive .pw-add:hover { transform: rotate(-4deg) scale(1.09); }
+.pw-interactive .pw-add:active { transform: rotate(-4deg) scale(0.93); }
 
 /* ── Editor overlay ───────────────────────────────────────────────────────
    Screen-space on purpose: this is a text field, and a text field wants a real
