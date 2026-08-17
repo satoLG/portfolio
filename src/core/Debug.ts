@@ -336,7 +336,7 @@ import {
     edgeFoamFadeEndZMobile as CFG_EF_FADE_END_Z_MOBILE,
 } from '../scene/config/OceanConfig';
 import { phoneZoomConfig, cabanaZoomConfig, cabanaRevealConfig, mainCameraConfig, noticeBoardZoomConfig, isWebPageMode, toggleCameraMode } from './Control';
-import { getNoticeSlide, setNoticeSlide, getNoticeSlideCount } from '../scene/NoticeBoardPanel';
+import { getNoticeSlide, setNoticeSlide, getNoticeSlideCount, noticePaperConfig } from '../scene/NoticeBoardPanel';
 import { cabanaDomeRadius } from '../scene/config/CabanaConfig';
 import { mobileFov, mobileBreakpointWidth, aboveWaterBottomY as CFG_ABOVE_BOTTOM, aboveWaterBottomYMobile as CFG_ABOVE_BOTTOM_MOBILE, underwaterTopY as CFG_UNDER_TOP, underwaterTopYMobile as CFG_UNDER_TOP_MOBILE } from '../scene/config/CameraConfig';
 import { SetFOV, scene as threeScene } from './Scene';
@@ -1772,6 +1772,11 @@ function buildGUI(): void {
     };
     noticeBoardFolder.add(noticeSlideProxy, 'slide', 0, Math.max(0, getNoticeSlideCount() - 1), 1)
         .name('Notice slide').listen();
+    // How the paper answers to the scene's light (see glassMode: 'paper').
+    const noticePaperFolder = noticeBoardFolder.addFolder('Paper light');
+    noticePaperFolder.add(noticePaperConfig, 'shade', 0, 1, 0.01).name('Night darkness').listen();
+    noticePaperFolder.add(noticePaperConfig, 'gain', 0, 3, 0.05).name('Light gain').listen();
+    noticePaperFolder.close();
 
     // ── Ocean Reflection ────────────────────────────────────────────────
     const reflProxy = {

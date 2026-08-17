@@ -42,6 +42,14 @@ const CHEVRON = (dir: 'l' | 'r') => `
         stroke-linecap="round" stroke-linejoin="round"/>
 </svg>`;
 
+/** Paper shading, mutable so the debug GUI can dial it against the real sky.
+ *  "Readable at night but clearly night" is a judgement that can only be made
+ *  on screen, against the campfire. */
+export const noticePaperConfig = {
+    shade: 0.66,   // how dark the sheet may go with no light at all
+    gain:  1.15,   // multiplier on measured light before it is inverted
+};
+
 // ── State ────────────────────────────────────────────────────────────────────
 
 let _panel: CSS3DPanel | null = null;
@@ -89,11 +97,15 @@ function _ensurePanel(): CSS3DPanel {
         inkPad: 2,
         inkRadius: 10,
         inkBorderBand: 0,
-        // The point of the exercise: a lit pane in front of the DOM so the
-        // notice dims with the rest of the island at night.
+        // A sheet of paper nailed to a board, not a screen: 'paper' makes the
+        // pane in front MULTIPLY the DOM by the light it measures, so the notice
+        // actually goes dim at dusk and warms up when the campfire throws light
+        // on the trunk. 'gloss' could only ever add a highlight on top.
         glass: true,
-        glassOpacity: 0.16,
-        glassRoughness: 0.42,
+        glassMode: 'paper',
+        glassRoughness: 0.96,     // matte — no specular sliding across a page
+        paperShadeStrength: noticePaperConfig.shade,
+        paperLightGain: noticePaperConfig.gain,
     });
 
     // .nb-host exists purely so .nb-note is a DESCENDANT of the hosted element.
@@ -163,6 +175,7 @@ export function syncNoticeBoardPanel(
         return;
     }
 
+    panel.setPaper(noticePaperConfig.shade, noticePaperConfig.gain);
     panel.setWorldPosition(wx, wy, wz);
     if (boardScale > 0) panel.setPxPerUnit(DESIGN_W / (NOTICE_WIDTH * boardScale));
     if (!panel.isOpen()) panel.open();

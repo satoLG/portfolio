@@ -217,8 +217,30 @@ export interface PanelOptions {
      *  as you orbit, which is what sells the pane. */
     glassRoughness?: number;
     /** Glass tint (THREE hex). A hair of blue reads as glass; pure white reads
-     *  as haze. */
+     *  as haze. Ignored in 'paper' mode, which drives alpha rather than colour. */
     glassColor?: number;
+    /**
+     * What the pane is made of.
+     *
+     * 'gloss' (default) — a sheet of glass. The pane DEPOSITS its lit colour
+     *   over the DOM, so bright light adds a sheen. Being additive, it can only
+     *   ever lighten: a 'gloss' panel at midnight looks like one at noon minus
+     *   the highlight.
+     *
+     * 'paper' — a matte sheet that is LIT rather than glazed. The pane deposits
+     *   near-black at an alpha of (1 − incident light), so the composite works
+     *   out to DOM × light: the notice genuinely darkens at dusk, and warms up
+     *   when the campfire is throwing light at it. Use for anything that should
+     *   read as a physical surface in the scene rather than a screen.
+     */
+    glassMode?: 'gloss' | 'paper';
+    /** 'paper' only: how far the shading can dim the DOM at zero light (0..1).
+     *  1 would take the sheet to black; ~0.7 keeps it readable at night. */
+    paperShadeStrength?: number;
+    /** 'paper' only: multiplier on measured light before it is inverted. Above 1
+     *  reaches full brightness sooner (a sheet that catches the light easily);
+     *  below 1 keeps it dim until the light is strong. */
+    paperLightGain?: number;
 }
 
 // easeOutBack — the subtle overshoot that gives the open/close a "pop".
@@ -252,6 +274,10 @@ export class CSS3DPanel {
     private cssObject: CSS3DObject;
     private occluder: Mesh;
     private glass: Mesh | null = null;
+    /** Live handle on the paper pane's light-gain uniform. Held here because the
+     *  uniform object is created inside onBeforeCompile, which runs once — the
+     *  debug GUI needs something it can keep writing to afterwards. */
+    private _paperGain: { value: number } | null = null;
     private maskCanvas: HTMLCanvasElement;
     private maskTexture: CanvasTexture;
 
@@ -423,13 +449,21 @@ export class CSS3DPanel {
         // depthWrite is off — it must not occlude anything; the punch behind it
         // already owns the panel's depth.
         if (opts.glass) {
+            const paper = opts.glassMode === 'paper';
             const glassMat = new MeshStandardMaterial({
-                color: opts.glassColor ?? 0xdcebff,
-                roughness: opts.glassRoughness ?? 0.35,
+                // Paper measures the light rather than tinting it, so the pane
+                // has to be neutral white — any tint here would bias the
+                // luminance read below and the sheet would answer to a colour
+                // it invented instead of to the scene.
+                color: paper ? 0xffffff : (opts.glassColor ?? 0xdcebff),
+                roughness: opts.glassRoughness ?? (paper ? 0.95 : 0.35),
                 metalness: 0.0,
                 alphaMap: this.maskTexture,
                 transparent: true,
-                opacity: MathUtils.clamp(opts.glassOpacity ?? 0.14, 0, 1),
+                opacity: MathUtils.clamp(
+                    opts.glassOpacity ?? (paper ? (opts.paperShadeStrength ?? 0.68) : 0.14),
+                    0, 1,
+                ),
                 depthWrite: false,
                 depthTest: true,
                 side: DoubleSide,
@@ -455,12 +489,42 @@ export class CSS3DPanel {
                     from,
                     '#ifdef USE_ALPHAMAP\n\tdiffuseColor.a *= texture2D( alphaMap, vAlphaMapUv ).a;\n#endif',
                 );
+
+                if (!paper) return;
+
+                // PAPER: turn the pane from something that deposits light into
+                // something that deposits SHADE.
+                //
+                // The canvas is cleared to (0,0,0,0) over the panel and the
+                // browser then composites  final = pane.rgb + DOM × (1 − pane.a).
+                // With pane.rgb ≈ 0 that collapses to DOM × (1 − pane.a), a plain
+                // multiply — so writing alpha = 1 − light gives DOM × light,
+                // which is what a lit matte surface does. The stock material
+                // would instead write its own lit colour and could only ever wash
+                // the DOM brighter.
+                //
+                // outgoingLight is read before tonemapping/colorspace, i.e. in
+                // linear space, which is the right place to measure incidence.
+                shader.uniforms.uShadeColor = { value: new Color(0x0d0a06) };
+                this._paperGain ??= { value: opts.paperLightGain ?? 1.0 };
+                shader.uniforms.uLightGain = this._paperGain;
+                shader.fragmentShader = shader.fragmentShader
+                    .replace('#include <common>', '#include <common>\nuniform vec3 uShadeColor;\nuniform float uLightGain;')
+                    .replace(
+                        '#include <opaque_fragment>',
+                        `#include <opaque_fragment>
+                        {
+                            float lum = dot( outgoingLight, vec3( 0.2126, 0.7152, 0.0722 ) );
+                            float shade = clamp( 1.0 - lum * uLightGain, 0.0, 1.0 );
+                            gl_FragColor = vec4( uShadeColor, gl_FragColor.a * shade );
+                        }`,
+                    );
             };
             // Distinct cache key: without it three may hand this material a
             // program compiled for an unpatched MeshStandardMaterial with the
             // same defines (or hand ours to one), and the patch above silently
             // applies to the wrong set of materials.
-            glassMat.customProgramCacheKey = () => 'css3d-panel-glass';
+            glassMat.customProgramCacheKey = () => (paper ? 'css3d-panel-paper' : 'css3d-panel-glass');
 
             this.glass = new Mesh(new PlaneGeometry(1, 1), glassMat);
             this.glass.visible = false;
@@ -619,6 +683,15 @@ export class CSS3DPanel {
         const m = this.glass.material as MeshStandardMaterial;
         m.opacity = MathUtils.clamp(opacity, 0, 1);
         m.roughness = MathUtils.clamp(roughness, 0, 1);
+    }
+
+    /** Paper-mode shading, live. `strength` is how dark the sheet may go with no
+     *  light at all; `gain` scales the measured light before it is inverted.
+     *  No-op on a panel that is not in 'paper' mode. */
+    setPaper(strength: number, gain: number): void {
+        if (!this.glass) return;
+        (this.glass.material as MeshStandardMaterial).opacity = MathUtils.clamp(strength, 0, 1);
+        if (this._paperGain) this._paperGain.value = Math.max(0, gain);
     }
 
     /** Current glass settings, or null when this panel has no glass. */
