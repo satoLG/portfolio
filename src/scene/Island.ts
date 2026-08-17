@@ -4844,7 +4844,7 @@ function _updateNoticeBoardPanel(): void {
         && noticeBoard.visible
         && camera.position.y >= UNDERWATER_Y_THRESHOLD;
 
-    syncNoticeBoardPanel(shown, isNoticeBoardZoomActive(), wx, wy, wz, scale);
+    syncNoticeBoardPanel(shown, isNoticeBoardZoomActive(), wx, wy, wz, scale, rotY);
 }
 
 const noticeBoardRaycaster = new Raycaster();

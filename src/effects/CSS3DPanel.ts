@@ -56,6 +56,7 @@ import {
     OneMinusSrcAlphaFactor,
     PerspectiveCamera,
     PlaneGeometry,
+    Quaternion,
     Raycaster,
     Scene as ThreeScene,
     ShaderMaterial,
@@ -81,6 +82,7 @@ const _raycaster = new Raycaster();
 const _ndc = new Vector2();
 const _cornerA = new Vector3();
 const _cornerB = new Vector3();
+const _fwd = new Vector3();
 
 /** The WebGL punch group — Scene.ts excludes it from the foam depth pre-pass. */
 export function getOccluderGroup(): Group {
@@ -274,6 +276,8 @@ export class CSS3DPanel {
     private cssObject: CSS3DObject;
     private occluder: Mesh;
     private glass: Mesh | null = null;
+    /** Non-null once setFixedYaw pins the panel's orientation — see there. */
+    private _fixedQuat: Quaternion | null = null;
     /** Live handle on the paper pane's light-gain uniform. Held here because the
      *  uniform object is created inside onBeforeCompile, which runs once — the
      *  debug GUI needs something it can keep writing to afterwards. */
@@ -567,6 +571,21 @@ export class CSS3DPanel {
         this._wx = x; this._wy = y; this._wz = z;
     }
 
+    /**
+     * Pin the panel to a fixed yaw instead of billboarding it at the camera.
+     *
+     * Billboarding is right for a label that belongs to the VIEWER — a tooltip,
+     * a floating player. It is wrong for anything that belongs to a SURFACE: a
+     * notice nailed to a board has one orientation, the board's, and turning to
+     * follow the camera makes it swing out of the wood it is supposed to be
+     * pinned to. Pass the surface's rotation.y; pass null to go back to
+     * billboarding.
+     */
+    setFixedYaw(rotY: number | null): void {
+        if (rotY === null) { this._fixedQuat = null; return; }
+        (this._fixedQuat ??= new Quaternion()).setFromAxisAngle(_fwd.set(0, 1, 0), rotY);
+    }
+
     /** CSS px per world unit — HIGHER = SMALLER panel in the scene. Live: the
      *  next _frame rebuilds the DOM/occluder/glass scales from it, and the punch
      *  mask is authored in design px so it needs no re-bake. */
@@ -811,10 +830,12 @@ export class CSS3DPanel {
 
         const cy = this._anchorCentreY(h2);
 
-        // Billboard the DOM (kept visible at scale 0 through the line phase so it
+        // Orient the DOM (kept visible at scale 0 through the line phase so it
         // stays measurable and the mask is baked before the panel pops in).
+        // Billboard at the camera unless a fixed yaw was pinned — see setFixedYaw.
+        const q = this._fixedQuat ?? cam.quaternion;
         this.cssObject.position.set(this._wx * CSS_SCALE, cy * CSS_SCALE, this._wz * CSS_SCALE);
-        this.cssObject.quaternion.copy(cam.quaternion);
+        this.cssObject.quaternion.copy(q);
         this.cssObject.scale.set(CSS_SCALE / this.pxPerUnit, CSS_SCALE / this.pxPerUnit, 1);
         this.cssObject.visible = true;
 
@@ -822,24 +843,25 @@ export class CSS3DPanel {
         const worldW = ((w2 + 2 * pad) / this.pxPerUnit) * s;
         const worldH = ((h2 + 2 * pad) / this.pxPerUnit) * s;
         this.occluder.position.set(this._wx, cy, this._wz);
-        this.occluder.quaternion.copy(cam.quaternion);
+        this.occluder.quaternion.copy(q);
         this.occluder.scale.set(worldW, worldH, 1);
         this.occluder.visible = s > 0.001;   // no punch while the line is still rising
 
-        // Glass rides the punch exactly, nudged toward the camera along its own
-        // view axis (matrixWorld's third column IS that axis for a billboarded
-        // plane). Coplanar would technically pass the depth test — depthFunc is
-        // LessEqual — but only until float error says otherwise on some GPU, and
-        // a pane that flickers out on one phone is worse than one that sits four
-        // thousandths of a unit proud on all of them.
+        // Glass rides the punch exactly, nudged forward along the PANEL's own
+        // normal. For a billboarded panel that is the camera's view axis, so
+        // this is unchanged for them; for a fixed one it is the only offset that
+        // stays in front. Coplanar would technically pass the depth test —
+        // depthFunc is LessEqual — but only until float error says otherwise on
+        // some GPU, and a pane that flickers out on one phone is worse than one
+        // that sits four thousandths of a unit proud on all of them.
         if (this.glass) {
-            const e = cam.matrixWorld.elements;
+            _fwd.set(0, 0, 1).applyQuaternion(q);
             this.glass.position.set(
-                this._wx + e[8] * GLASS_OFFSET,
-                cy + e[9] * GLASS_OFFSET,
-                this._wz + e[10] * GLASS_OFFSET,
+                this._wx + _fwd.x * GLASS_OFFSET,
+                cy + _fwd.y * GLASS_OFFSET,
+                this._wz + _fwd.z * GLASS_OFFSET,
             );
-            this.glass.quaternion.copy(cam.quaternion);
+            this.glass.quaternion.copy(q);
             this.glass.scale.set(worldW, worldH, 1);
             this.glass.visible = this.occluder.visible;
         }

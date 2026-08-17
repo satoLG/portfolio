@@ -157,12 +157,16 @@ function _ensurePanel(): CSS3DPanel {
  * @param wx/wy/wz   world position of the notice's centre
  * @param boardScale the board group's live scale, so the notice keeps its size
  *                   relative to the planks when the board is resized
+ * @param boardRotY  the board's yaw. The notice is pinned to it rather than
+ *                   billboarded — it is nailed to the wood, so it turns with the
+ *                   wood and with nothing else.
  */
 export function syncNoticeBoardPanel(
     shown: boolean,
     zoomed: boolean,
     wx: number, wy: number, wz: number,
     boardScale: number,
+    boardRotY: number,
 ): void {
     // Nothing to do — and nothing to build — until the board is first on screen.
     if (!shown && !_panel) return;
@@ -176,6 +180,7 @@ export function syncNoticeBoardPanel(
     }
 
     panel.setPaper(noticePaperConfig.shade, noticePaperConfig.gain);
+    panel.setFixedYaw(boardRotY);
     panel.setWorldPosition(wx, wy, wz);
     if (boardScale > 0) panel.setPxPerUnit(DESIGN_W / (NOTICE_WIDTH * boardScale));
     if (!panel.isOpen()) panel.open();

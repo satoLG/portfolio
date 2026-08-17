@@ -65,17 +65,16 @@ export const NOTICE_HALF_W = 0.33;
 export const NOTICE_WIDTH  = NOTICE_HALF_W * 2;
 export const NOTICE_HALF_H = NOTICE_HALF_W * (282 / 360);   // matches the panel's design aspect
 /**
- * Local Z of the notice plane. It stands clear of the planks rather than resting
- * on them, because the panel BILLBOARDS: it copies the camera's orientation, and
- * the board's does not follow. In normal play the two agree almost exactly (the
- * scroll camera holds yaw 0 and pitch 0, and the zoom pose is derived from the
- * board's own facing normal), but the intro descent pitches the camera up and a
- * free-roam camera can look from anywhere. At those angles a coplanar panel
- * dips a corner behind the wood. This clearance — about 6% of the notice's own
- * width — keeps the whole sheet in front through roughly 13° of mismatch, which
- * is far more than anything the shipped camera does once the intro has landed.
+ * Local Z of the notice plane — just proud of the planks.
+ *
+ * This used to need a much bigger gap because the panel billboarded: it copied
+ * the camera's orientation while the board kept its own, and at any mismatch a
+ * corner of the sheet swung back through the wood. The panel is pinned to the
+ * board's yaw now (setFixedYaw), so the two are parallel and a hair of
+ * clearance is enough — which also stops the notice reading as hovering off the
+ * board when seen from the side.
  */
-export const NOTICE_LOCAL_Z = PLANK_DEPTH / 2 + 0.035;
+export const NOTICE_LOCAL_Z = PLANK_DEPTH / 2 + 0.012;
 /** Local X/Y of the notice centre — pinned slightly off-centre, by hand. */
 export const NOTICE_LOCAL_X = 0.01;
 export const NOTICE_LOCAL_Y = 0.015;

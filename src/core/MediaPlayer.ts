@@ -190,6 +190,12 @@ const PLAYER_PUNCH = 0.80;
 // off the island by the max-height cap in CSS). 1.15 puts the top just under
 // the radio-zoom frustum ceiling (~1.46wu at fov 50.5, 1.5wu away).
 const PLAYER_ANCHOR_UP   = 0.90;  // world units above the radio (tweak height)
+// World units to pull the panel toward the camera, off the radio's own Z.
+// The notice board is nailed to the tree behind the radio and the player panel
+// billboards, so at the radio-zoom yaw (~28 degrees off the board's facing) a
+// panel this wide swings roughly 0.2 units back in Z and buries its edge in the
+// planks. This clears them without reading as a different distance.
+const PLAYER_ANCHOR_FWD  = 0.28;
 // Anchor to the radio's REST position (config), NOT radio.getWorldPosition():
 // the radio bounces to the music beat, and following the live transform made
 // the whole panel jitter, which made the buttons hard to hit.
@@ -1342,7 +1348,7 @@ function refreshConnectorColor(): void {
  *  rather than as a separate mark drawn over the island. */
 function syncPanelAnchor(): void {
     if (!playerPanel) return;
-    playerPanel.setWorldPosition(RADIO_REST_X, RADIO_REST_Y + PLAYER_ANCHOR_UP, RADIO_REST_Z);
+    playerPanel.setWorldPosition(RADIO_REST_X, RADIO_REST_Y + PLAYER_ANCHOR_UP, RADIO_REST_Z + PLAYER_ANCHOR_FWD);
     // Reach down into the radio body (was stopping above the antenna).
     playerPanel.setConnectorTarget(RADIO_REST_X, RADIO_REST_Y - 0.10, RADIO_REST_Z);
     playerPanel.setConnectorColor(_connectorHex);
