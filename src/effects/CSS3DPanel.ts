@@ -1059,7 +1059,7 @@ export class CSS3DPanel {
                     roundRectPathRotated(
                         ctx,
                         pad + box.left - ip, pad + box.top - ip, bw, bh,
-                        Math.min(this._inkRadius, bh / 2),
+                        Math.min(inkRadiusOf(el, this._inkRadius), bh / 2),
                         inkRotationOf(el),
                     );
                     ctx.fill();
@@ -1084,7 +1084,7 @@ export class CSS3DPanel {
                 const el = els[i];
                 const box = layoutRectWithin(el, panelEl);
                 sig = (sig * 31 + box.left + box.top * 7 + box.width * 13 + box.height * 17
-                       + inkRotationOf(el) * 23) | 0;
+                       + inkRotationOf(el) * 23 + inkRadiusOf(el, this._inkRadius) * 29) | 0;
             }
         }
         return sig;
@@ -1105,6 +1105,19 @@ function inkRotationOf(el: HTMLElement): number {
     if (!raw) return 0;
     const n = parseFloat(raw);
     return Number.isFinite(n) ? n : 0;
+}
+
+/** Corner radius this ink element wants for its hole, overriding the panel's
+ *  inkRadius. The hole has to match the element's own border-radius: punch a
+ *  square hole behind a rounded button and the four corners are canvas that has
+ *  been erased and nothing covers, i.e. page background showing through the
+ *  board. One panel can hold both square notes and a rounded button, so this
+ *  cannot be a single per-panel number. */
+function inkRadiusOf(el: HTMLElement, fallback: number): number {
+    const raw = el.dataset.inkRadius;
+    if (!raw) return fallback;
+    const n = parseFloat(raw);
+    return Number.isFinite(n) ? n : fallback;
 }
 
 function layoutRectWithin(el: HTMLElement, ancestor: HTMLElement): { left: number; top: number; width: number; height: number } {

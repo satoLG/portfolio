@@ -278,6 +278,24 @@ export const pugZoomConfig = {
     pitch:   0.1800,
 };
 
+/**
+ * How far back the camera has to stand to fit a focus target in frame.
+ *
+ * Both axes are checked, because which one binds depends on the viewport: a
+ * phone held upright is limited by WIDTH on a landscape sheet, a desktop window
+ * by HEIGHT. Taking the larger of the two distances means the whole thing is in
+ * frame either way, with a margin so it is not jammed against the edges.
+ */
+function _focusDistance(f: BoardFocus): number {
+    const fovDeg = _getResponsiveFov(noticeBoardZoomConfig.fov, noticeBoardZoomConfig.mobileFov);
+    const halfFov = (fovDeg * Math.PI) / 360;
+    const tan = Math.tan(halfFov);
+    const aspect = camera.aspect || 1;
+    const distH = (f.h / 2) / tan;
+    const distW = (f.w / 2) / (tan * aspect);
+    return Math.max(distH, distW) * 1.15;
+}
+
 /** Camera world position for the current pug framing (before the cutscene offset). */
 function _pugCamX(): number {
     return _pugWorldX + pugZoomConfig.dist * Math.sin(cfgPugRotY) + pugZoomConfig.lateral * Math.cos(cfgPugRotY);
@@ -342,6 +360,33 @@ let _noticeBoardPose: (() => { x: number; y: number; z: number; rotY: number }) 
 export function registerNoticeBoardPose(get: () => { x: number; y: number; z: number; rotY: number }): void {
     _noticeBoardPose = get;
 }
+
+/**
+ * A single thing on (or above) the board to frame closer than the board itself.
+ *
+ * The board zoom fits the WHOLE board, which is the right first stop but leaves
+ * the notice, the badge sheet and the photo too small to study. A focus is a
+ * second, nested step: same pinned orientation, just close enough to fill the
+ * frame with one of them. Clicking away clears the focus and drops back to the
+ * board rather than leaving the zoom outright — the visitor went in, not out.
+ */
+export interface BoardFocus {
+    /** World centre of the thing to frame. */
+    x: number; y: number; z: number;
+    /** Its facing yaw — the camera lines up square to it. */
+    rotY: number;
+    /** World size to fit in frame. */
+    w: number; h: number;
+}
+
+let _boardFocus: BoardFocus | null = null;
+
+export function setNoticeBoardFocus(f: BoardFocus | null): void {
+    // Only meaningful while the board owns the camera.
+    if (f && !noticeBoardZoomActive) return;
+    _boardFocus = f;
+}
+export function isNoticeBoardFocused(): boolean { return _boardFocus !== null; }
 
 /** Framing for the notice-board zoom — mutable so the debug GUI can dial it in. */
 export const noticeBoardZoomConfig = {
@@ -494,6 +539,7 @@ export function zoomToNoticeBoard(): void {
 export function zoomOutFromNoticeBoard(): void {
     if (!noticeBoardZoomActive || _zoomExitLocked) return;
     noticeBoardZoomActive = false;
+    _boardFocus = null;
     radioPugZoomSettling = true;
     zoomReturnSettling = true;
     targetY = aboveWaterTopY;
@@ -526,7 +572,7 @@ function forceExitZoom(): void {
     if (phoneZoomActive) { phoneZoomActive = false; }
     if (cabanaPhase !== 'outside'){ cabanaPhase = 'outside'; targetY = savedTargetY; unmountPhoneIframe(); }
     if (chestZoomActive) { chestZoomActive = false;  zoomReturnSettling = true; targetY = savedTargetY; _chestClose?.(); }
-    if (noticeBoardZoomActive) { noticeBoardZoomActive = false; radioPugZoomSettling = true; zoomReturnSettling = true; targetY = aboveWaterTopY; }
+    if (noticeBoardZoomActive) { noticeBoardZoomActive = false; _boardFocus = null; radioPugZoomSettling = true; zoomReturnSettling = true; targetY = aboveWaterTopY; }
 }
 
 // Get saved camera position (for calculating where radio will be after zoomout)
@@ -888,11 +934,21 @@ export function Update(): void
             } else if (noticeBoardZoomActive) {
                 // Stand out along the board's facing normal — same derivation as
                 // the radio, but read live from the scene so debug-GUI nudges to
-                // the board carry the camera with them.
-                const b = _noticeBoardPose!();
-                zoomTargetX = b.x + noticeBoardZoomConfig.dist * Math.sin(b.rotY);
-                zoomTargetY = b.y + noticeBoardZoomConfig.height;
-                zoomTargetZ = b.z + noticeBoardZoomConfig.dist * Math.cos(b.rotY);
+                // the board carry the camera with them. A focus swaps the board
+                // for one thing ON it, and derives its distance from the size of
+                // that thing rather than from a fixed number.
+                if (_boardFocus) {
+                    const f = _boardFocus;
+                    const d = _focusDistance(f);
+                    zoomTargetX = f.x + d * Math.sin(f.rotY);
+                    zoomTargetY = f.y;
+                    zoomTargetZ = f.z + d * Math.cos(f.rotY);
+                } else {
+                    const b = _noticeBoardPose!();
+                    zoomTargetX = b.x + noticeBoardZoomConfig.dist * Math.sin(b.rotY);
+                    zoomTargetY = b.y + noticeBoardZoomConfig.height;
+                    zoomTargetZ = b.z + noticeBoardZoomConfig.dist * Math.cos(b.rotY);
+                }
             } else {
                 zoomTargetX = RADIO_ZOOM_TARGET_X;
                 zoomTargetY = RADIO_ZOOM_TARGET_Y;
@@ -948,7 +1004,7 @@ export function Update(): void
                 zoomTetha = MathUtils.damp(zoomTetha, pugZoomConfig.pitch, ZOOM_SMOOTH, deltaTime);
             } else if (noticeBoardZoomActive) {
                 // phi = 2π − rotY looks along −frontNormal, straight at the notice.
-                const b = _noticeBoardPose!();
+                const b = _boardFocus ?? _noticeBoardPose!();
                 zoomPhi = MathUtils.damp(zoomPhi, Math.PI * 2 - b.rotY, ZOOM_SMOOTH, deltaTime);
                 zoomTetha = MathUtils.damp(zoomTetha, noticeBoardZoomConfig.pitch, ZOOM_SMOOTH, deltaTime);
                 // Telephoto so the notice fills the frame without shoving the

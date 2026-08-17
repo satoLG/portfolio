@@ -153,12 +153,13 @@ const NOTE_V = 92 / DESIGN_H;
 const ADD_U = 52 / DESIGN_W;
 const ADD_V = 52 / DESIGN_H;
 
-/** Where the fixed example note lives, and where the add button sits BESIDE it.
- *  The button belongs next to the note that explains what it makes — on its own
- *  in a corner it is a plus sign on bare wood. */
+/** Where the fixed example note lives, and where the add button tucks into its
+ *  BOTTOM-RIGHT corner. The example's text sits in its upper half, so the lower
+ *  corner is free — and a button overlapping the note that explains what it
+ *  makes reads as one object, which a button floating in a corner never did. */
 const SAMPLE_U = 0.17, SAMPLE_V = 0.30;
-const ADD_CU = SAMPLE_U + NOTE_U / 2 + ADD_U / 2 + 0.03;
-const ADD_CV = SAMPLE_V;
+const ADD_CU = SAMPLE_U + NOTE_U / 2 - ADD_U * 0.34;
+const ADD_CV = SAMPLE_V + NOTE_V / 2 - ADD_V * 0.34;
 
 /** The example note. Always present, never stored and never editable — without
  *  something already on the wall the add button is a button on bare wood, and
@@ -179,6 +180,19 @@ const RESERVED: Array<{ cu: number; cv: number; w: number; h: number }> = [
     { cu: SAMPLE_U, cv: SAMPLE_V, w: NOTE_U, h: NOTE_V },
     { cu: ADD_CU,   cv: ADD_CV,   w: ADD_U,  h: ADD_V  },
 ];
+
+/**
+ * How far past the region a note may hang.
+ *
+ * A note pinned near the edge should hang OFF it a little, the way a real one
+ * does — not stop dead at an invisible boundary. What was clipping it was the
+ * punch mask: its canvas is the design box plus maskPad, so anything beyond
+ * that simply has no hole and the paper vanishes at a hard line. The pad below
+ * is sized to cover this overhang, and the clamp keeps the overhang to about a
+ * fifth of the note so it still reads as stuck on rather than falling off.
+ */
+const OVERHANG_U = NOTE_U * 0.20;
+const OVERHANG_V = NOTE_V * 0.20;
 
 /** True when a note dropped at (u,v) would overlap something reserved. */
 function _hitsReserved(u: number, v: number): boolean {
@@ -204,6 +218,7 @@ function _render(): void {
         ${_notes.map(n => _noteHTML(n)).join('')}
         ${ghost}
         <button class="pw-add" type="button" title="${t('postit.add')}"
+                data-ink-rot="-4" data-ink-radius="16"
                 style="left:${ADD_CU * 100}%; top:${ADD_CV * 100}%;">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"
                 fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round"/></svg>
@@ -422,8 +437,12 @@ function _pickAt(clientX: number, clientY: number): boolean {
     // PlaneGeometry hands back uv directly, which IS the normalised position in
     // the region — no world-space maths and nothing to keep in step with the
     // board's transform. uv.y runs bottom-up; the DOM runs top-down.
-    _draftU = Math.min(0.97, Math.max(0.03, hit.uv.x));
-    _draftV = Math.min(0.94, Math.max(0.06, 1 - hit.uv.y));
+    // Centres may sit far enough out that the note hangs over the edge — see
+    // OVERHANG_U/V. Half the note minus the allowed overhang is the limit.
+    const maxU = 1 - NOTE_U / 2 + OVERHANG_U;
+    const maxV = 1 - NOTE_V / 2 + OVERHANG_V;
+    _draftU = Math.min(maxU, Math.max(1 - maxU, hit.uv.x));
+    _draftV = Math.min(maxV, Math.max(1 - maxV, 1 - hit.uv.y));
     return true;
 }
 
@@ -472,7 +491,10 @@ function _ensurePanel(): CSS3DPanel {
         pxPerUnit: DESIGN_W,
         initialSize: { w: DESIGN_W, h: DESIGN_H },
         modal: false,
-        maskPad: 8,
+        // Big enough to hold a note that hangs past the region — the mask canvas
+        // is the design box plus this, and a hole outside it is where the paper
+        // was being sliced off.
+        maskPad: 34,
         transparent: true,
         // NOT inkBounds: each note gets its own punched box so the planks show
         // between them. A single bounding region would paint a pale rectangle

@@ -19,6 +19,7 @@
 // next time rather than quietly spending them.
 
 import { CSS3DPanel } from '../effects/CSS3DPanel';
+import { setNoticeBoardFocus, isNoticeBoardFocused } from '../core/Control';
 import { t, onLanguageChange } from '../core/i18n';
 import { ACHIEVEMENTS, getPendingReveals, isUnlocked, markRevealed, type AchievementId } from '../core/Achievements';
 import { ACHIEVEMENT_ART } from '../core/AchievementArt';
@@ -39,6 +40,10 @@ let _panel: CSS3DPanel | null = null;
 let _sheet: HTMLDivElement | null = null;
 let _modal = false;
 let _onExit: (() => void) | null = null;
+/** The panel's own world rectangle, refreshed every frame. Clicking the sheet
+ *  frames THIS — a second, closer step inside the board zoom, because the board
+ *  zoom fits the whole board and leaves one sheet on it too small to read. */
+const _rect = { x: 0, y: 0, z: 0, rotY: 0, w: 0, h: 0 };
 /** Ids currently painted as lit. Starts as "everything already revealed" and
  *  grows as the reveal sequence runs — never read straight from isUnlocked, or
  *  the pop would be over before it started. */
@@ -140,7 +145,12 @@ function _ensurePanel(): CSS3DPanel {
     _panel.content.appendChild(host);
     _sheet = host.querySelector('.ach-sheet');
 
-    _sheet!.addEventListener('click', (e) => e.stopPropagation());
+    // Clicking the sheet studies it. stopPropagation either way, so the click
+    // never reaches the board's click-away and drops the camera out entirely.
+    _sheet!.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!isNoticeBoardFocused()) setNoticeBoardFocus({ ..._rect });
+    });
     _panel.setOnOutsideClick(() => { _onExit?.(); });
     onLanguageChange(() => _render());
     _render();
@@ -167,6 +177,7 @@ export function syncAchievementsPanel(
     interactive: boolean,
     wx: number, wy: number, wz: number,
     worldW: number,
+    worldH: number,
     rotY: number,
 ): void {
     if (!shown && !_panel) return;
@@ -179,6 +190,9 @@ export function syncAchievementsPanel(
         _cancelReveals();
         return;
     }
+
+    _rect.x = wx; _rect.y = wy; _rect.z = wz;
+    _rect.rotY = rotY; _rect.w = worldW; _rect.h = worldH;
 
     panel.setPaper(noticePaperConfig.shade, noticePaperConfig.gain);
     panel.setFixedYaw(rotY);

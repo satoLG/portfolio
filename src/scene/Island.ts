@@ -29,6 +29,7 @@ import { syncNoticeBoardPanel, setNoticeBoardExit } from './NoticeBoardPanel';
 import { syncAchievementsPanel, setAchievementsExit } from './AchievementsPanel';
 import { syncPostItWall, setPostItExit, registerPostItPickPlane, isPostItBusy } from './PostItWall';
 import { unlock as unlockAchievement } from '../core/Achievements';
+import { setNoticeBoardFocus, isNoticeBoardFocused } from '../core/Control';
 import { camera, renderer, scene as threeScene, isMobile } from "../core/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
 import * as PhoneScreen from '../core/PhoneScreen';
@@ -3575,12 +3576,19 @@ export function Start(): void {
     // predictable order; every handler below this line checks
     // _noticeBoardBlocksClick() so the board's click-away can't leak into them.
     setupNoticeBoardInteraction();
+
+    // Setup picture frame click → fly in and study the photo
+    setupPictureFrameInteraction();
     // While zoomed the notice is modal, so a click that misses it lands on the
     // CSS layer rather than the canvas — that is the path that backs the camera
     // out (the canvas handler above never sees it).
-    setNoticeBoardExit(zoomOutFromNoticeBoard);
-    setAchievementsExit(zoomOutFromNoticeBoard);
-    setPostItExit(zoomOutFromNoticeBoard);
+    // Backing out is LAYERED: a click away from a focused sheet returns to the
+    // board, and only a click away from the board itself leaves the zoom. One
+    // step per click — going two levels out on a single tap reads as the scene
+    // throwing you out.
+    setNoticeBoardExit(_boardBackOut);
+    setAchievementsExit(_boardBackOut);
+    setPostItExit(_boardBackOut);
 
     // Setup pug click/hover interaction
     setupPugInteraction();
@@ -4844,7 +4852,7 @@ function _buildNoticeBoard(loader: GLTFLoader): void {
  * all three panels with it — the same reason the zoom pose is read live.
  */
 function _regionWorld(region: BoardRegion, scale: number, sin: number, cos: number): {
-    x: number; y: number; z: number; w: number;
+    x: number; y: number; z: number; w: number; h: number;
 } {
     // Board-local → world: rotate about Y, then translate by the board's origin.
     const lx = region.cx * scale;
@@ -4855,6 +4863,7 @@ function _regionWorld(region: BoardRegion, scale: number, sin: number, cos: numb
         y: noticeBoard.position.y + ly,
         z: noticeBoard.position.z - lx * sin + lz * cos,
         w: region.w * scale,
+        h: region.h * scale,
     };
 }
 
@@ -4875,13 +4884,104 @@ function _updateNoticeBoardPanel(): void {
     const interactive = zoomed && !isPostItBusy();
 
     const ach = _regionWorld(REGION_ACHIEVEMENTS, scale, sin, cos);
-    syncAchievementsPanel(shown, zoomed, interactive, ach.x, ach.y, ach.z, ach.w, rotY);
+    syncAchievementsPanel(shown, zoomed, interactive, ach.x, ach.y, ach.z, ach.w, ach.h, rotY);
 
     const sld = _regionWorld(REGION_SLIDES, scale, sin, cos);
-    syncNoticeBoardPanel(shown, interactive, sld.x, sld.y, sld.z, sld.w, rotY);
+    syncNoticeBoardPanel(shown, interactive, sld.x, sld.y, sld.z, sld.w, sld.h, rotY);
 
     const pw = _regionWorld(REGION_POSTITS, scale, sin, cos);
     syncPostItWall(shown, zoomed, pw.x, pw.y, pw.z, pw.w, rotY);
+}
+
+// ============================================
+// PICTURE FRAME CLICK  (hung above the board)
+// ============================================
+const pictureFrameRaycaster = new Raycaster();
+const pictureFrameMouse = new Vector2();
+const _frameBox = new Box3();
+const _frameCenter = new Vector3();
+const _frameSize = new Vector3();
+let isPictureFrameHovered = false;
+
+/**
+ * The photo is a model rather than a panel, so it has no DOM to click — but it
+ * reads as part of the same wall as the board, and a visitor who can fly in to
+ * study the notice expects to be able to study the family photo too.
+ *
+ * Clicking it enters the board zoom (if it is not already on) and focuses the
+ * frame, so it lands at the same nested level as the two sheets, and a click
+ * away steps back to the board exactly as it does from them.
+ */
+function setupPictureFrameInteraction(): void {
+    const canvas = renderer.domElement;
+    if (!canvas) return;
+
+    const hitsFrame = (clientX: number, clientY: number): boolean => {
+        if (pictureFrame.children.length === 0) return false;
+        pictureFrameMouse.x = (clientX / window.innerWidth) * 2 - 1;
+        pictureFrameMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+        pictureFrameRaycaster.setFromCamera(pictureFrameMouse, camera);
+        return pictureFrameRaycaster.intersectObjects(pictureFrame.children, true).length > 0;
+    };
+
+    const onFrameClick = (clientX: number, clientY: number) => {
+        if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
+        if (isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive() || isChestZoomActive()) return;
+        if (isPostItBusy()) return;
+        // Already framing something — the click-away handlers own that step.
+        if (isNoticeBoardFocused()) return;
+        if (!hitsFrame(clientX, clientY)) return;
+
+        // Measured rather than derived from the config: the frame's world size
+        // is the model's bounds through its own transform, and reading it here
+        // means a rescale from the debug GUI reframes correctly with no second
+        // number to keep in step.
+        pictureFrame.updateMatrixWorld(true);
+        _frameBox.setFromObject(pictureFrame);
+        _frameBox.getCenter(_frameCenter);
+        _frameBox.getSize(_frameSize);
+
+        if (!isNoticeBoardZoomActive()) zoomToNoticeBoard();
+        setNoticeBoardFocus({
+            x: _frameCenter.x, y: _frameCenter.y, z: _frameCenter.z,
+            rotY: noticeBoard.rotation.y,   // square to the wall, not to the frame's own tilt
+            w: _frameSize.x, h: _frameSize.y,
+        });
+        isPictureFrameHovered = false;
+        canvas.style.cursor = '';
+    };
+
+    canvas.addEventListener('click', (e: MouseEvent) => { onFrameClick(e.clientX, e.clientY); });
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (_touchWasMulti || _touchDragged) return;
+        if (e.changedTouches.length > 0) {
+            const t = e.changedTouches[0];
+            onFrameClick(t.clientX, t.clientY);
+        }
+    });
+
+    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+        if (pictureFrame.children.length === 0 || isNoticeBoardFocused() ||
+            camera.position.y < UNDERWATER_Y_THRESHOLD) {
+            if (isPictureFrameHovered) { isPictureFrameHovered = false; canvas.style.cursor = ''; }
+            return;
+        }
+        if (hitsFrame(e.clientX, e.clientY)) {
+            if (!isPictureFrameHovered) { isPictureFrameHovered = true; canvas.style.cursor = 'pointer'; }
+        } else if (isPictureFrameHovered) {
+            isPictureFrameHovered = false; canvas.style.cursor = '';
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (isPictureFrameHovered) { isPictureFrameHovered = false; canvas.style.cursor = ''; }
+    });
+}
+
+/** One step out: focus → board, board → the scene. */
+function _boardBackOut(): void {
+    if (isNoticeBoardFocused()) { setNoticeBoardFocus(null); return; }
+    zoomOutFromNoticeBoard();
 }
 
 const noticeBoardRaycaster = new Raycaster();
@@ -4931,7 +5031,7 @@ function setupNoticeBoardInteraction(): void {
             // A post-it being written or placed owns the screen; a stray click
             // must not yank the camera out from under it.
             if (isPostItBusy()) return;
-            zoomOutFromNoticeBoard();
+            _boardBackOut();
             _claimClick();
             return;
         }

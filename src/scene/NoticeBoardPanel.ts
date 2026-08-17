@@ -25,6 +25,7 @@
 //                outside-click hook.
 
 import { CSS3DPanel } from '../effects/CSS3DPanel';
+import { setNoticeBoardFocus, isNoticeBoardFocused } from '../core/Control';
 import { onLanguageChange } from '../core/i18n';
 import { SLIDE_COUNT, buildSlideHTML, slideClass, wireSlide } from './NoticeBoardSlides';
 
@@ -56,6 +57,10 @@ let _stage: HTMLDivElement | null = null;
 let _index = 0;
 let _modal = false;
 let _onExit: (() => void) | null = null;
+/** The panel's own world rectangle, refreshed every frame. Clicking the sheet
+ *  frames THIS — a second, closer step inside the board zoom, because the board
+ *  zoom fits the whole board and leaves one sheet on it too small to read. */
+const _rect = { x: 0, y: 0, z: 0, rotY: 0, w: 0, h: 0 };
 
 /** Register what a click outside the notice should do while it is zoomed
  *  (Island wires this to the board's zoom-out). */
@@ -138,7 +143,12 @@ function _ensurePanel(): CSS3DPanel {
     // Clicking the paper itself (not an arrow) does nothing — but it must not
     // bubble out and back the camera out either, or the notice would be
     // impossible to read without dismissing it.
-    _stage!.addEventListener('click', (e) => e.stopPropagation());
+    // Clicking the paper (not an arrow) studies it. The arrows stop propagation
+    // of their own, so paging never changes the framing.
+    _stage!.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!isNoticeBoardFocused()) setNoticeBoardFocus({ ..._rect });
+    });
 
     _panel.setOnOutsideClick(() => { _onExit?.(); });
     onLanguageChange(() => _renderSlide());
@@ -165,6 +175,7 @@ export function syncNoticeBoardPanel(
     zoomed: boolean,
     wx: number, wy: number, wz: number,
     worldW: number,
+    worldH: number,
     boardRotY: number,
 ): void {
     // Nothing to do — and nothing to build — until the board is first on screen.
@@ -177,6 +188,9 @@ export function syncNoticeBoardPanel(
         if (_modal) { _modal = false; panel.setModal(false); }
         return;
     }
+
+    _rect.x = wx; _rect.y = wy; _rect.z = wz;
+    _rect.rotY = boardRotY; _rect.w = worldW; _rect.h = worldH;
 
     panel.setPaper(noticePaperConfig.shade, noticePaperConfig.gain);
     panel.setFixedYaw(boardRotY);
