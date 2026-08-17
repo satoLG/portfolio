@@ -1,0 +1,204 @@
+// ============================================
+// ACHIEVEMENTS PANEL — the badge sheet, top-left of the board
+// ============================================
+//
+// Same construction as the notice next to it: a CSS3DPanel in 'paper' mode, so
+// it is live DOM punched through the canvas with a lit pane in front that
+// multiplies it by the scene's light. No carousel — one sheet, six badges
+// scattered across it.
+//
+// THE REVEAL IS THE POINT. Achievements are earned out in the world, hours
+// before the visitor walks back to the board. If the sheet simply rendered
+// current state, arriving would mean finding the work already done — a status
+// screen. Instead the sheet only ever shows what has been REVEALED, and the
+// first zoom after earning something plays it in: each pending badge pops from
+// grey to lit, one after another, with its own note in a rising run.
+//
+// The sequence is committed (markRevealed) only as each badge actually
+// animates, so a zoom that gets interrupted halfway leaves the rest pending for
+// next time rather than quietly spending them.
+
+import { CSS3DPanel } from '../effects/CSS3DPanel';
+import { t, onLanguageChange } from '../core/i18n';
+import { ACHIEVEMENTS, getPendingReveals, isUnlocked, markRevealed, type AchievementId } from '../core/Achievements';
+import { ACHIEVEMENT_ART } from '../core/AchievementArt';
+import { playAchievementReveal } from '../core/Audio';
+import { noticePaperConfig } from './NoticeBoardPanel';
+
+const DESIGN_W = 360;
+const DESIGN_H = 282;
+
+/** Gap between one badge lighting up and the next. Long enough to read as
+ *  separate events, short enough that six of them is still a moment and not a
+ *  cutscene. */
+const REVEAL_STAGGER_MS = 260;
+/** Matches the .ach-badge-reveal animation in style.css. */
+const REVEAL_ANIM_MS = 620;
+
+let _panel: CSS3DPanel | null = null;
+let _sheet: HTMLDivElement | null = null;
+let _modal = false;
+let _onExit: (() => void) | null = null;
+/** Ids currently painted as lit. Starts as "everything already revealed" and
+ *  grows as the reveal sequence runs — never read straight from isUnlocked, or
+ *  the pop would be over before it started. */
+let _shown = new Set<AchievementId>();
+let _revealTimers: number[] = [];
+let _wasZoomed = false;
+
+export function setAchievementsExit(cb: () => void): void {
+    _onExit = cb;
+}
+
+function _badgeHTML(): string {
+    return ACHIEVEMENTS.map(a => `
+        <div class="ach-badge ${_shown.has(a.id) ? 'ach-badge-lit' : ''}"
+             data-ach="${a.id}"
+             style="left:${a.x}%; top:${a.y}%; --ach-rot:${a.rot}deg;"
+             title="${t(a.descKey)}">
+            <div class="ach-badge-art">${ACHIEVEMENT_ART[a.id] ?? ''}</div>
+            <span class="ach-badge-name">${t(a.titleKey)}</span>
+        </div>`).join('');
+}
+
+function _render(): void {
+    if (!_sheet || !_panel) return;
+    _sheet.innerHTML = `
+        <h3 class="ach-title">${t('ach.panel.title')}</h3>
+        <div class="ach-field">${_badgeHTML()}</div>
+        <p class="ach-count">${_shown.size} / ${ACHIEVEMENTS.length}</p>`;
+    _panel.requestRepaint();
+}
+
+function _cancelReveals(): void {
+    for (const id of _revealTimers) clearTimeout(id);
+    _revealTimers = [];
+}
+
+/**
+ * Play the pending badges in, one after another.
+ *
+ * Each step marks its own badge revealed as it fires rather than marking the
+ * whole batch up front: leaving the zoom mid-sequence should cost the visitor
+ * only what they actually saw.
+ */
+function _playReveals(): void {
+    _cancelReveals();
+    const pending = getPendingReveals();
+    if (pending.length === 0) return;
+
+    pending.forEach((id, i) => {
+        const timer = window.setTimeout(() => {
+            _shown.add(id);
+            markRevealed([id]);
+            const el = _sheet?.querySelector<HTMLElement>(`[data-ach="${id}"]`);
+            if (el) {
+                el.classList.add('ach-badge-lit', 'ach-badge-reveal');
+                // Drop the animation class once it has played so a later render
+                // (a language switch) does not replay it.
+                window.setTimeout(() => el.classList.remove('ach-badge-reveal'), REVEAL_ANIM_MS);
+            }
+            const count = _sheet?.querySelector('.ach-count');
+            if (count) count.textContent = `${_shown.size} / ${ACHIEVEMENTS.length}`;
+            playAchievementReveal(i);
+            _panel?.requestRepaint();
+        }, i * REVEAL_STAGGER_MS);
+        _revealTimers.push(timer);
+    });
+}
+
+function _ensurePanel(): CSS3DPanel {
+    if (_panel) return _panel;
+
+    // Anything already revealed in a previous visit is simply lit on arrival —
+    // only what is pending gets the animation.
+    _shown = new Set(ACHIEVEMENTS.map(a => a.id).filter(id => isUnlocked(id) && !getPendingReveals().includes(id)));
+
+    _panel = new CSS3DPanel({
+        pxPerUnit: DESIGN_W,
+        initialSize: { w: DESIGN_W, h: DESIGN_H },
+        modal: false,
+        maskPad: 10,
+        transparent: true,
+        inkBounds: true,
+        inkSelectors: ['.ach-sheet'],
+        inkPad: 2,
+        inkRadius: 10,
+        inkBorderBand: 0,
+        glass: true,
+        glassMode: 'paper',
+        glassRoughness: 0.96,
+        paperShadeStrength: noticePaperConfig.shade,
+        paperLightGain: noticePaperConfig.gain,
+    });
+
+    // .ach-host exists so .ach-sheet is a DESCENDANT of the hosted element —
+    // CSS3DPanel resolves ink selectors with querySelectorAll, which never
+    // matches the host itself. See the same note in NoticeBoardPanel.
+    const host = document.createElement('div');
+    host.className = 'ach-host';
+    host.innerHTML = `<div class="ach-sheet"></div>`;
+    _panel.content.appendChild(host);
+    _sheet = host.querySelector('.ach-sheet');
+
+    _sheet!.addEventListener('click', (e) => e.stopPropagation());
+    _panel.setOnOutsideClick(() => { _onExit?.(); });
+    onLanguageChange(() => _render());
+    _render();
+
+    return _panel;
+}
+
+/**
+ * Per-frame sync, driven from Island.Update.
+ *
+ * @param shown   the board is on screen
+ * @param zoomed  the board zoom is active. The RISING EDGE of this is what
+ *                starts the reveal sequence.
+ * @param worldW  the region's width in world units
+ * @param rotY    the board's yaw — pinned, never billboarded
+ */
+export function syncAchievementsPanel(
+    shown: boolean,
+    zoomed: boolean,
+    wx: number, wy: number, wz: number,
+    worldW: number,
+    rotY: number,
+): void {
+    if (!shown && !_panel) return;
+    const panel = _ensurePanel();
+
+    if (!shown) {
+        if (panel.isOpen()) panel.close();
+        if (_modal) { _modal = false; panel.setModal(false); }
+        _wasZoomed = false;
+        _cancelReveals();
+        return;
+    }
+
+    panel.setPaper(noticePaperConfig.shade, noticePaperConfig.gain);
+    panel.setFixedYaw(rotY);
+    panel.setWorldPosition(wx, wy, wz);
+    if (worldW > 0) panel.setPxPerUnit(DESIGN_W / worldW);
+    if (!panel.isOpen()) panel.open();
+
+    if (zoomed !== _modal) {
+        _modal = zoomed;
+        panel.setModal(zoomed);
+        panel.content.classList.toggle('ach-interactive', zoomed);
+        panel.requestRepaint();
+    }
+
+    // Rising edge: the visitor has just arrived at the board.
+    if (zoomed && !_wasZoomed) _playReveals();
+    if (!zoomed && _wasZoomed) _cancelReveals();
+    _wasZoomed = zoomed;
+}
+
+/** Repaint from scratch — used by the debug GUI after resetting progress. */
+export function refreshAchievementsPanel(): void {
+    _shown = new Set(ACHIEVEMENTS.map(a => a.id).filter(id => isUnlocked(id) && !getPendingReveals().includes(id)));
+    _cancelReveals();
+    _wasZoomed = false;
+    _render();
+}

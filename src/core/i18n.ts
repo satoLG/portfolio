@@ -165,6 +165,31 @@ const translations: Record<Language, TranslationDict> = {
         'board.lost.line1': 'one (1) sword, left in a bonfire',
         'board.lost.line2': 'owner may collect it at the tent',
         'board.lost.sign': '— the management',
+
+        // Achievements
+        'ach.panel.title': 'ACHIEVEMENTS',
+        'ach.unlocked': 'Achievement unlocked',
+        'ach.apple.title': 'Windfall',
+        'ach.apple.desc': 'Knocked an apple out of the tree.',
+        'ach.goldenApple.title': 'Gold Rush',
+        'ach.goldenApple.desc': 'Made a golden apple grow.',
+        'ach.coral.title': 'Reef Chorus',
+        'ach.coral.desc': 'Played all three corals.',
+        'ach.bonfire.title': 'Nightfall',
+        'ach.bonfire.desc': 'Stayed until the campfire was lit.',
+        'ach.music.title': 'Airwaves',
+        'ach.music.desc': 'Put a track on the radio.',
+        'ach.dialog.title': 'Good Listener',
+        'ach.dialog.desc': 'Heard every one of the pug\u2019s stories.',
+
+        // Post-it wall
+        'postit.add': 'Leave a note',
+        'postit.sample': 'leave a note on the board!',
+        'postit.placeholder': 'write something\u2026',
+        'postit.done': 'Done',
+        'postit.cancel': 'Cancel',
+        'postit.stick': 'Stick it here',
+        'postit.placeHint': 'Tap or drag on the board to choose a spot',
     },
 
     'pt-br': {
@@ -323,6 +348,31 @@ const translations: Record<Language, TranslationDict> = {
         'board.lost.line1': 'uma (1) espada, numa fogueira',
         'board.lost.line2': 'o dono pode retirar na barraca',
         'board.lost.sign': '— a gerência',
+
+        // Conquistas
+        'ach.panel.title': 'CONQUISTAS',
+        'ach.unlocked': 'Conquista desbloqueada',
+        'ach.apple.title': 'Queda Livre',
+        'ach.apple.desc': 'Derrubou uma ma\u00e7\u00e3 da \u00e1rvore.',
+        'ach.goldenApple.title': 'Corrida do Ouro',
+        'ach.goldenApple.desc': 'Fez nascer uma ma\u00e7\u00e3 dourada.',
+        'ach.coral.title': 'Coral em Coro',
+        'ach.coral.desc': 'Tocou os tr\u00eas corais.',
+        'ach.bonfire.title': 'Anoitecer',
+        'ach.bonfire.desc': 'Ficou at\u00e9 a fogueira acender.',
+        'ach.music.title': 'No Ar',
+        'ach.music.desc': 'Colocou uma m\u00fasica no r\u00e1dio.',
+        'ach.dialog.title': 'Bom Ouvinte',
+        'ach.dialog.desc': 'Ouviu todas as hist\u00f3rias do pug.',
+
+        // Mural de post-its
+        'postit.add': 'Deixar um recado',
+        'postit.sample': 'deixe um recado no mural!',
+        'postit.placeholder': 'escreva algo\u2026',
+        'postit.done': 'Pronto',
+        'postit.cancel': 'Cancelar',
+        'postit.stick': 'Colar aqui',
+        'postit.placeHint': 'Toque ou arraste no mural pra escolher o lugar',
     }
 };
 

@@ -26,7 +26,6 @@
 
 import { CSS3DPanel } from '../effects/CSS3DPanel';
 import { onLanguageChange } from '../core/i18n';
-import { NOTICE_WIDTH } from './NoticeBoard';
 import { SLIDE_COUNT, buildSlideHTML, slideClass, wireSlide } from './NoticeBoardSlides';
 
 // Design size of the hosted DOM, in CSS px. The panel's world size comes from
@@ -84,8 +83,8 @@ function _ensurePanel(): CSS3DPanel {
     if (_panel) return _panel;
 
     _panel = new CSS3DPanel({
-        // Overwritten every frame from the board's live scale (see sync).
-        pxPerUnit: DESIGN_W / NOTICE_WIDTH,
+        // Overwritten every frame from the region's live world width (see sync).
+        pxPerUnit: DESIGN_W,
         initialSize: { w: DESIGN_W, h: DESIGN_H },
         modal: false,          // flipped on only while the board zoom is active
         maskPad: 10,
@@ -155,8 +154,8 @@ function _ensurePanel(): CSS3DPanel {
  *                   notice is readable whenever this is true
  * @param zoomed     the board zoom is active → the arrows become clickable
  * @param wx/wy/wz   world position of the notice's centre
- * @param boardScale the board group's live scale, so the notice keeps its size
- *                   relative to the planks when the board is resized
+ * @param worldW     the region's live width in world units, so the notice keeps
+ *                   its size relative to the planks when the board is resized
  * @param boardRotY  the board's yaw. The notice is pinned to it rather than
  *                   billboarded — it is nailed to the wood, so it turns with the
  *                   wood and with nothing else.
@@ -165,7 +164,7 @@ export function syncNoticeBoardPanel(
     shown: boolean,
     zoomed: boolean,
     wx: number, wy: number, wz: number,
-    boardScale: number,
+    worldW: number,
     boardRotY: number,
 ): void {
     // Nothing to do — and nothing to build — until the board is first on screen.
@@ -182,7 +181,7 @@ export function syncNoticeBoardPanel(
     panel.setPaper(noticePaperConfig.shade, noticePaperConfig.gain);
     panel.setFixedYaw(boardRotY);
     panel.setWorldPosition(wx, wy, wz);
-    if (boardScale > 0) panel.setPxPerUnit(DESIGN_W / (NOTICE_WIDTH * boardScale));
+    if (worldW > 0) panel.setPxPerUnit(DESIGN_W / worldW);
     if (!panel.isOpen()) panel.open();
 
     if (zoomed !== _modal) {

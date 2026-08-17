@@ -1,5 +1,6 @@
 ﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setDPR, setShadowResolution, showOcean, getStartupProgress, setPropMaterials } from "./Scene";
 import { setCausticsScale } from "../materials/OceanMaterial";
+import { unlock as unlockAchievement } from './Achievements';
 import { guessInitialTier } from "./DeviceCapability";
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
@@ -907,6 +908,7 @@ export function Update(): void {
             } else {
                 document.body.classList.remove('day-mode');
                 document.body.classList.add('night-mode');
+                unlockAchievement('bonfire');
             }
         });
     }

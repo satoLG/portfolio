@@ -32,6 +32,7 @@
  */
 
 import { CSS3DPanel } from '../effects/CSS3DPanel';
+import { reportDialogOption } from './Achievements';
 import { playDialogSound, playDialogAppearSound, playDialogTypeSound } from './Audio';
 import { t, onLanguageChange } from './i18n';
 
@@ -372,6 +373,8 @@ function _showReplies(replies: ReplyOption[]): void {
             e.stopPropagation();
             e.preventDefault();
             _hideReplies();
+            // Every branch of the pug's tree earns the conversation badge.
+            reportDialogOption(reply.textKey);
             reply.onSelect();
         });
         _replyListEl.appendChild(optEl);

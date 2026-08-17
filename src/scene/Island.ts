@@ -21,8 +21,14 @@ import * as CoinTooltip from '../core/CoinTooltip';
 import type { DialogLine, ReplyOption } from "../core/Dialog";
 import { isBreezeActive, playAppleImpactSound, playChestCloseSound, playChestOpenSound, playPugSnoreOnce, stopPugSnore } from "../core/Audio";
 import { createGrassMesh, createPerlinTexture, createShadowFloorMesh, grassColorBase, grassColorTip, type GrassUniforms } from './ProceduralGrass';
-import { createNoticeBoard, NOTICE_LOCAL_X, NOTICE_LOCAL_Y, NOTICE_LOCAL_Z } from './NoticeBoard';
+import {
+    createNoticeBoard, PANEL_LOCAL_Z, POSTIT_PICK_NAME,
+    REGION_ACHIEVEMENTS, REGION_SLIDES, REGION_POSTITS, type BoardRegion,
+} from './NoticeBoard';
 import { syncNoticeBoardPanel, setNoticeBoardExit } from './NoticeBoardPanel';
+import { syncAchievementsPanel, setAchievementsExit } from './AchievementsPanel';
+import { syncPostItWall, setPostItExit, registerPostItPickPlane, isPostItBusy } from './PostItWall';
+import { unlock as unlockAchievement } from '../core/Achievements';
 import { camera, renderer, scene as threeScene, isMobile } from "../core/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
 import * as PhoneScreen from '../core/PhoneScreen';
@@ -1347,6 +1353,7 @@ function _startTreeAppleRespawn(treeIndex: number): void {
     if (goldenAppleConfig.interval > 0
         && _totalAppleRespawns % goldenAppleConfig.interval === 0
         && _countGoldenApples() < MAX_GOLDEN_APPLES) {
+        unlockAchievement('goldenApple');
         _applyGoldenTint(treeIndex);
     } else {
         _removeGoldenTint(treeIndex);
@@ -3572,6 +3579,8 @@ export function Start(): void {
     // CSS layer rather than the canvas — that is the path that backs the camera
     // out (the canvas handler above never sees it).
     setNoticeBoardExit(zoomOutFromNoticeBoard);
+    setAchievementsExit(zoomOutFromNoticeBoard);
+    setPostItExit(zoomOutFromNoticeBoard);
 
     // Setup pug click/hover interaction
     setupPugInteraction();
@@ -3739,6 +3748,7 @@ function setupAppleInteraction(): void {
 }
 
 function triggerAppleFall(index: number): void {
+    unlockAchievement('apple');
     const appleGroups = [apple1, apple2, apple3];
     const group = appleGroups[index];
     const st = appleStates[index];
@@ -4791,6 +4801,11 @@ function _buildNoticeBoard(loader: GLTFLoader): void {
             }
         });
 
+        // The post-it wall raycasts this quad to turn a pointer into a spot on
+        // the board; it only exists once the geometry has been built.
+        const pick = noticeBoard.getObjectByName(POSTIT_PICK_NAME);
+        if (pick) registerPostItPickPlane(pick);
+
         // Publish the pose only once there is something to look at, so a zoom can
         // never frame an empty group. The board is a top-level scene child with no
         // parent transform, so its local position IS its world position.
@@ -4821,30 +4836,46 @@ function _buildNoticeBoard(loader: GLTFLoader): void {
 }
 
 /**
- * Drive the CSS3D notice each frame: where it sits, whether it is on screen, and
- * whether its arrows are live.
+ * Drive the board's three CSS3D panels each frame: where each region sits, and
+ * whether it is on screen and interactive.
  *
- * The world anchor is recomputed from the board group's LIVE transform rather
- * than from IslandConfig, so moving or resizing the board from the debug GUI
- * carries the notice with it — the same reason the zoom pose is read live.
+ * Every anchor is recomputed from the board group's LIVE transform rather than
+ * from IslandConfig, so moving or resizing the board from the debug GUI carries
+ * all three panels with it — the same reason the zoom pose is read live.
  */
+function _regionWorld(region: BoardRegion, scale: number, sin: number, cos: number): {
+    x: number; y: number; z: number; w: number;
+} {
+    // Board-local → world: rotate about Y, then translate by the board's origin.
+    const lx = region.cx * scale;
+    const ly = region.cy * scale;
+    const lz = PANEL_LOCAL_Z * scale;
+    return {
+        x: noticeBoard.position.x + lx * cos + lz * sin,
+        y: noticeBoard.position.y + ly,
+        z: noticeBoard.position.z - lx * sin + lz * cos,
+        w: region.w * scale,
+    };
+}
+
 function _updateNoticeBoardPanel(): void {
     const scale = noticeBoard.scale.x;
     const rotY = noticeBoard.rotation.y;
     const sin = Math.sin(rotY), cos = Math.cos(rotY);
-    // Board-local notice offset → world (rotate about Y, then translate).
-    const lx = NOTICE_LOCAL_X * scale;
-    const ly = NOTICE_LOCAL_Y * scale;
-    const lz = NOTICE_LOCAL_Z * scale;
-    const wx = noticeBoard.position.x + lx * cos + lz * sin;
-    const wy = noticeBoard.position.y + ly;
-    const wz = noticeBoard.position.z - lx * sin + lz * cos;
 
     const shown = noticeBoard.children.length > 0
         && noticeBoard.visible
         && camera.position.y >= UNDERWATER_Y_THRESHOLD;
+    const zoomed = isNoticeBoardZoomActive();
 
-    syncNoticeBoardPanel(shown, isNoticeBoardZoomActive(), wx, wy, wz, scale, rotY);
+    const ach = _regionWorld(REGION_ACHIEVEMENTS, scale, sin, cos);
+    syncAchievementsPanel(shown, zoomed, ach.x, ach.y, ach.z, ach.w, rotY);
+
+    const sld = _regionWorld(REGION_SLIDES, scale, sin, cos);
+    syncNoticeBoardPanel(shown, zoomed, sld.x, sld.y, sld.z, sld.w, rotY);
+
+    const pw = _regionWorld(REGION_POSTITS, scale, sin, cos);
+    syncPostItWall(shown, zoomed, pw.x, pw.y, pw.z, pw.w, rotY);
 }
 
 const noticeBoardRaycaster = new Raycaster();
@@ -4891,6 +4922,9 @@ function setupNoticeBoardInteraction(): void {
         // read even a deliberate "click away" as a click on the board and trap
         // the user in the zoom (the same reasoning as the radio handler above).
         if (isNoticeBoardZoomActive()) {
+            // A post-it being written or placed owns the screen; a stray click
+            // must not yank the camera out from under it.
+            if (isPostItBusy()) return;
             zoomOutFromNoticeBoard();
             _claimClick();
             return;

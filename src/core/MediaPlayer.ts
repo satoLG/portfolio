@@ -3,6 +3,7 @@
 // ============================================
 
 import { camera, pixelSizeValue } from "./Scene";
+import { unlock as unlockAchievement } from './Achievements';
 import { radio } from "../scene/Island";
 import { Vector3 } from "three";
 import { CSS3DPanel } from "../effects/CSS3DPanel";
@@ -993,6 +994,7 @@ function initWavesurfer(): void {
     wavesurfer.on('play', () => {
         _songEndHandled = false;  // Reset guard — new song is playing
         isPlaying = true;
+        unlockAchievement('music');
         updatePlayButton();
         updateBubblePlayingState();
         connectMusicAnalyser();

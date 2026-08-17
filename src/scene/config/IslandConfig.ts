@@ -38,7 +38,7 @@ export const noticeBoardOffset      = { x: -0.4450, y: 1.7590, z: -0.0400 };
 // +X (its node carries a 90° X-rotation and a 100× scale), so it needs a
 // roughly -90° yaw to turn the photo toward the camera — the few degrees off
 // square are deliberate, it reads as hung by hand rather than mounted.
-export const pictureFrameOffset     = { x: -0.4450, y: 2.0000, z: -0.0400 };
+export const pictureFrameOffset     = { x: -0.4450, y: 2.2800, z: -0.0400 };
 
 // ── Scales ────────────────────────────────────────────────────────────────────
 export const islandScale      = 0.2500;
@@ -69,8 +69,12 @@ export const rugRoundScale         = 0.3500;
 export const lanternScale          = 0.3000;
 export const dogBowlScale          = 0.0400;
 export const dogBiscuitScale       = 3.5810;
-// The board's plank panel is 1.0 wide in local units, so this IS its world width.
-export const noticeBoardScale      = 0.3950;
+// The board's plank panel is BOARD_W (1.0) in local units, so this IS its world
+// width. It went up when the board grew from one notice to three regions: the
+// two top panels are each 0.44 local wide now, so at the old 0.395 the notice
+// would have rendered a third smaller than it used to. This keeps the top
+// panels at roughly the size they were.
+export const noticeBoardScale      = 0.5800;
 export const pictureFrameScale     = 0.1500;
 
 // ── Rotations ─────────────────────────────────────────────────────────────────
@@ -193,7 +197,7 @@ export const FIRE_LIGHT_FLICKER   = 0.30;   // 0 = steady, 1 = heavy flicker
 export const noticeBoardModelPath: string | null = null;
 // Zoom framing. The camera stands `dist` out along the board's facing normal, so
 // these are read the same way as the radio zoom.
-export const noticeBoardZoomDist      = 1.1600;
+export const noticeBoardZoomDist      = 1.7500;
 export const noticeBoardZoomHeight    = 0.0500;
 export const noticeBoardZoomFov       = 25.5000;
 export const noticeBoardZoomMobileFov = 45.0000;

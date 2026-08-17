@@ -3919,3 +3919,398 @@ body.night-mode .ocean-carousel {
    and the slide's vertical rhythm changes with the language toggle. */
 .nb-slide-lost .nb-title { font-size: 21px; }
 .nb-slide-lost .nb-line  { font-size: 15px; }
+
+/* ============================================================
+   ACHIEVEMENTS — the badge sheet on the board, and the toast that
+   fires out in the world when one is earned.
+
+   The sheet is hosted in a CSS3DPanel at a fixed 360×282 design box, same
+   as the notice beside it, so nothing in .ach-* is responsive. The toast
+   IS screen-space and does have to survive a phone.
+   ============================================================ */
+
+.ach-host { width: 360px; height: 282px; }
+
+.ach-sheet {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    position: relative;
+    padding: 8px 10px 4px;
+    border-radius: 10px;
+    /* Same stock as the notice — the two sheets are pinned to the same board
+       and reading as different paper would be worse than reading as identical. */
+    background-image:
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='g2'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='140' height='140' filter='url(%23g2)' opacity='0.42'/></svg>"),
+        radial-gradient(120% 90% at 0% 0%,   rgba(148, 108, 58, 0.30), transparent 62%),
+        radial-gradient(120% 90% at 100% 100%, rgba(148, 108, 58, 0.26), transparent 62%),
+        linear-gradient(#f3e7c9, #f3e7c9);
+    background-blend-mode: multiply, normal, normal, normal;
+    border: 3px solid #8d3a2c;
+    box-shadow: inset 0 0 0 2px rgba(243, 231, 201, 0.9),
+                inset 0 0 0 4px rgba(141, 58, 44, 0.4),
+                inset 0 14px 22px -16px rgba(74, 53, 32, 0.55),
+                inset 0 -14px 22px -16px rgba(74, 53, 32, 0.45);
+    font-family: 'Pangolin', cursive, sans-serif;
+    color: #4a3520;
+    user-select: none;
+}
+
+.ach-title {
+    margin: 0;
+    text-align: center;
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #7d2f1c;
+}
+
+/* The badges are absolutely placed from per-achievement percentages, so the
+   scatter is authored (see ACHIEVEMENTS in Achievements.ts) rather than
+   generated — a formula with jitter still reads as a grid. */
+.ach-field {
+    position: absolute;
+    inset: 34px 8px 22px;
+}
+
+.ach-badge {
+    position: absolute;
+    transform: translate(-50%, -50%) rotate(var(--ach-rot, 0deg));
+    width: 62px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    text-align: center;
+}
+
+.ach-badge-art {
+    width: 40px;
+    height: 40px;
+}
+
+.ach-badge-art svg { width: 100%; height: 100%; display: block; }
+
+.ach-badge-name {
+    font-size: 10px;
+    line-height: 1.05;
+    color: #6b4a2c;
+}
+
+/* LOCKED is a filter over the full-colour badge, never a second drawing —
+   one artwork per achievement, one place to change it. */
+.ach-badge {
+    opacity: 0.3;
+    filter: grayscale(1) contrast(0.75);
+    transition: opacity 0.35s ease, filter 0.35s ease;
+}
+
+.ach-badge-lit {
+    opacity: 1;
+    filter: none;
+}
+
+/* The reveal: a pop with a warm bloom behind it, fired one badge at a time as
+   the board is zoomed into. Duration must stay in step with REVEAL_ANIM_MS. */
+.ach-badge-reveal { animation: ach-pop 0.62s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.ach-badge-reveal .ach-badge-art { animation: ach-glow 0.62s ease-out; }
+
+@keyframes ach-pop {
+    0%   { transform: translate(-50%, -50%) rotate(var(--ach-rot, 0deg)) scale(0.7); }
+    55%  { transform: translate(-50%, -50%) rotate(var(--ach-rot, 0deg)) scale(1.28); }
+    100% { transform: translate(-50%, -50%) rotate(var(--ach-rot, 0deg)) scale(1); }
+}
+
+@keyframes ach-glow {
+    0%   { filter: drop-shadow(0 0 0 rgba(255, 214, 120, 0)); }
+    45%  { filter: drop-shadow(0 0 14px rgba(255, 198, 90, 0.95)); }
+    100% { filter: drop-shadow(0 0 0 rgba(255, 214, 120, 0)); }
+}
+
+.ach-count {
+    position: absolute;
+    left: 0; right: 0; bottom: 6px;
+    margin: 0;
+    text-align: center;
+    font-size: 12px;
+    color: rgba(74, 53, 32, 0.7);
+}
+
+/* ── Toast ─────────────────────────────────────────────────────────────────
+   Fires wherever the visitor is, so this one is screen-space and responsive. */
+#achievement-toasts {
+    position: fixed;
+    left: 50%;
+    bottom: 96px;
+    transform: translateX(-50%);
+    z-index: 2600;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+}
+
+.ach-toast {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 18px 10px 12px;
+    border-radius: 14px;
+    background: rgba(20, 40, 60, 0.82);
+    border: 1px solid rgba(243, 231, 201, 0.35);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+    color: #f3e7c9;
+    font-family: 'Pangolin', cursive, sans-serif;
+    opacity: 0;
+    transform: translateY(14px) scale(0.94);
+    transition: opacity 0.28s ease, transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+body.day-mode .ach-toast {
+    background: rgba(243, 231, 201, 0.92);
+    border-color: rgba(141, 58, 44, 0.45);
+    color: #4a3520;
+}
+
+.ach-toast-in  { opacity: 1; transform: translateY(0) scale(1); }
+.ach-toast-out { opacity: 0; transform: translateY(-10px) scale(0.96); }
+
+.ach-toast-badge { width: 40px; height: 40px; flex: 0 0 auto; }
+.ach-toast-badge svg { width: 100%; height: 100%; display: block; }
+
+.ach-toast-text { display: flex; flex-direction: column; line-height: 1.15; }
+.ach-toast-kicker { font-size: 11px; opacity: 0.75; letter-spacing: 0.5px; }
+.ach-toast-title { font-size: 17px; }
+
+@media (max-width: 600px) {
+    #achievement-toasts { bottom: 120px; }
+    .ach-toast { padding: 8px 14px 8px 10px; }
+    .ach-toast-title { font-size: 15px; }
+}
+
+/* ============================================================
+   POST-IT WALL — the lower board, plus the screen-space editor.
+   ============================================================ */
+
+.pw-host { width: 520px; height: 350px; }
+
+/* No background of its own: only the notes and the add button are punched
+   through the canvas, so the bare planks show between them. */
+.pw-wall {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    font-family: 'Pangolin', cursive, sans-serif;
+    user-select: none;
+}
+
+.pw-postit {
+    position: absolute;
+    transform: translate(-50%, -50%) rotate(var(--pw-rot, 0deg));
+    width: 96px;
+    min-height: 88px;
+    padding: 9px 9px 12px;
+    box-sizing: border-box;
+    background: var(--pw-color, #f7e06a);
+    /* A paper corner rather than a card: square, with the shadow pooling at the
+       bottom edge where a stuck note lifts away from the board. */
+    box-shadow: 0 5px 9px -5px rgba(40, 26, 12, 0.75),
+                inset 0 -10px 14px -12px rgba(90, 66, 20, 0.55);
+    color: #3d3320;
+    font-size: 13px;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+.pw-sample { opacity: 0.92; }
+
+/* The note being placed — visibly not stuck yet. */
+.pw-ghost {
+    opacity: 0.85;
+    box-shadow: 0 10px 16px -8px rgba(40, 26, 12, 0.8);
+    outline: 2px dashed rgba(61, 51, 32, 0.55);
+    outline-offset: 3px;
+    animation: pw-hover 1.4s ease-in-out infinite;
+}
+
+@keyframes pw-hover {
+    0%, 100% { transform: translate(-50%, -52%) rotate(var(--pw-rot, 0deg)) scale(1.04); }
+    50%      { transform: translate(-50%, -48%) rotate(var(--pw-rot, 0deg)) scale(1.06); }
+}
+
+.pw-add {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 2px solid rgba(243, 231, 201, 0.85);
+    border-radius: 50%;
+    background: rgba(141, 58, 44, 0.92);
+    color: #f3e7c9;
+    cursor: default;
+    opacity: 0.6;
+    transition: opacity 0.18s ease, transform 0.12s ease;
+}
+
+.pw-add svg { width: 20px; height: 20px; }
+
+/* Only a control once the camera has flown in — same rule as the notice's
+   arrows. Until then it is a printed hint that the wall accepts notes. */
+.pw-interactive .pw-add { opacity: 1; cursor: pointer; }
+.pw-interactive .pw-add:hover { transform: scale(1.08); }
+.pw-interactive .pw-add:active { transform: scale(0.92); }
+
+/* ── Editor overlay ───────────────────────────────────────────────────────
+   Screen-space on purpose: this is a text field, and a text field wants a real
+   focused element and the platform's own keyboard. */
+#postit-editor {
+    position: fixed;
+    inset: 0;
+    z-index: 2700;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Pangolin', cursive, sans-serif;
+}
+
+#postit-editor.pe-open { display: flex; }
+
+.pe-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(8, 18, 26, 0.55);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+}
+
+.pe-stage {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    animation: pe-in 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Comes at you rather than fading in — it should read as the note being lifted
+   up to the camera, which is what the flow says is happening. */
+@keyframes pe-in {
+    from { transform: scale(0.6) translateY(30px); opacity: 0; }
+    to   { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+.pe-note {
+    width: 260px;
+    height: 260px;
+    padding: 18px;
+    box-sizing: border-box;
+    position: relative;
+    background: var(--pw-color, #f7e06a);
+    box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.85);
+    transform: rotate(-2deg);
+    transition: background 0.2s ease;
+}
+
+.pe-input {
+    width: 100%;
+    height: 100%;
+    border: none;
+    outline: none;
+    resize: none;
+    background: transparent;
+    color: #3d3320;
+    font-family: inherit;
+    font-size: 22px;
+    line-height: 1.25;
+}
+
+.pe-input::placeholder { color: rgba(61, 51, 32, 0.45); }
+
+.pe-count {
+    position: absolute;
+    right: 12px;
+    bottom: 8px;
+    font-size: 12px;
+    color: rgba(61, 51, 32, 0.5);
+}
+
+.pe-swatches { display: flex; gap: 10px; }
+
+.pe-swatch {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 3px solid rgba(243, 231, 201, 0.5);
+    background: var(--pw-color);
+    cursor: pointer;
+    padding: 0;
+    transition: transform 0.14s ease, border-color 0.14s ease;
+}
+
+.pe-swatch:hover { transform: scale(1.1); }
+.pe-swatch-on { border-color: #f3e7c9; transform: scale(1.16); }
+
+.pe-actions, .pp-actions { display: flex; gap: 12px; }
+
+.pe-btn {
+    padding: 9px 22px;
+    border-radius: 12px;
+    border: 1px solid rgba(243, 231, 201, 0.4);
+    background: rgba(20, 40, 60, 0.86);
+    color: #f3e7c9;
+    font-family: inherit;
+    font-size: 16px;
+    cursor: pointer;
+    transition: transform 0.12s ease, background 0.18s ease;
+}
+
+.pe-btn:hover { transform: translateY(-1px); background: rgba(28, 55, 80, 0.92); }
+.pe-btn:active { transform: scale(0.96); }
+.pe-done, .pp-confirm { background: rgba(141, 58, 44, 0.92); }
+.pe-done:hover, .pp-confirm:hover { background: rgba(163, 70, 52, 0.95); }
+
+/* ── Placement bar ────────────────────────────────────────────────────────
+   Sits low and out of the way: the board is what the visitor is aiming at, and
+   this must not cover the half of it they are trying to reach. */
+#postit-place-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%) translateY(20px);
+    z-index: 2700;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    border-radius: 16px;
+    background: rgba(20, 40, 60, 0.82);
+    border: 1px solid rgba(243, 231, 201, 0.3);
+    font-family: 'Pangolin', cursive, sans-serif;
+    opacity: 0;
+    transition: opacity 0.24s ease, transform 0.24s ease;
+}
+
+#postit-place-bar.pp-open {
+    display: flex;
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.pp-hint { color: rgba(243, 231, 201, 0.85); font-size: 14px; text-align: center; }
+
+@media (max-width: 600px) {
+    .pe-note { width: 76vw; height: 76vw; max-width: 300px; max-height: 300px; }
+    .pe-input { font-size: 20px; }
+    #postit-place-bar { bottom: 18px; width: min(92vw, 420px); }
+}
+
+/* The scene must not scroll under a note being written — the wheel and touchmove
+   would drag the camera off the board the editor belongs to. */
+body.postit-editing { overscroll-behavior: none; }

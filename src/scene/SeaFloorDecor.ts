@@ -7,6 +7,7 @@
  * Add decorGroup to the Three.js scene from Scene.ts.
  */
 import { Group, Mesh, Uniform, Vector2, Vector3, Box3, Sphere, AnimationMixer, LoopRepeat, PointLight, MeshStandardMaterial } from "three";
+import { reportCoralHit } from '../core/Achievements';
 import { GLTFLoader }           from "three/examples/jsm/loaders/GLTFLoader";
 import { MeshoptDecoder }       from "three/examples/jsm/libs/meshopt_decoder.module.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -1157,6 +1158,7 @@ const CORAL_SOUNDS = [
 ];
 
 function _playCoralSound(idx: number): void {
+    reportCoralHit(idx);   // all three, in any order, earns the coral badge
     playCoralHitSound(idx);
 }
 
