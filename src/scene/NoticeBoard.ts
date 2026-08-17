@@ -48,7 +48,7 @@ const NAIL_METAL   = '#4c4a52';
 
 // ── Board size ───────────────────────────────────────────────────────────────
 export const BOARD_W = 1.0;     // the unit the group scale is expressed in
-export const BOARD_H = 1.125;   // taller than wide — three regions stacked
+export const BOARD_H = 0.935;   // taller than wide — three regions stacked
 
 // ── Region layout (local units, origin at the board's centre) ────────────────
 // One source of truth for where the three panels go. The panels convert a region
@@ -102,7 +102,7 @@ export const REGION_POSTITS: BoardRegion = {
 };
 
 // ── Planks ───────────────────────────────────────────────────────────────────
-const PLANK_COUNT = 6;
+const PLANK_COUNT = 5;
 const PLANK_DEPTH = 0.05;
 const PLANK_GAP   = 0.012;
 /** Derived from BOARD_H so the plank run always fills the board exactly —

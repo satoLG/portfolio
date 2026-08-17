@@ -155,12 +155,17 @@ function _ensurePanel(): CSS3DPanel {
  * @param shown   the board is on screen
  * @param zoomed  the board zoom is active. The RISING EDGE of this is what
  *                starts the reveal sequence.
+ * @param interactive whether this panel may hold the pointer. Separate from
+ *                `zoomed` because a post-it being placed needs the canvas back:
+ *                a modal panel sets canvas pointer-events:none, and placement is
+ *                built entirely on raycasting the canvas.
  * @param worldW  the region's width in world units
  * @param rotY    the board's yaw — pinned, never billboarded
  */
 export function syncAchievementsPanel(
     shown: boolean,
     zoomed: boolean,
+    interactive: boolean,
     wx: number, wy: number, wz: number,
     worldW: number,
     rotY: number,
@@ -182,10 +187,10 @@ export function syncAchievementsPanel(
     if (worldW > 0) panel.setPxPerUnit(DESIGN_W / worldW);
     if (!panel.isOpen()) panel.open();
 
-    if (zoomed !== _modal) {
-        _modal = zoomed;
-        panel.setModal(zoomed);
-        panel.content.classList.toggle('ach-interactive', zoomed);
+    if (interactive !== _modal) {
+        _modal = interactive;
+        panel.setModal(interactive);
+        panel.content.classList.toggle('ach-interactive', interactive);
         panel.requestRepaint();
     }
 

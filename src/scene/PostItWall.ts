@@ -124,9 +124,22 @@ const _ndc = new Vector2();
 
 // ── Rendering the wall ───────────────────────────────────────────────────────
 
+/**
+ * One note.
+ *
+ * `data-ink-rot` is not decoration — CSS3DPanel punches each note's hole from
+ * its LAYOUT box, which is transform-independent by design, so the mask has to
+ * be told about the tilt separately or a rotated note's corners come out as
+ * bare page background beside it.
+ *
+ * For the same reason the note is centred on its (u,v) with MARGINS rather than
+ * translate(-50%,-50%): margins move the layout box, transforms do not. With a
+ * translate the punched hole sat half a note away from the note — which is
+ * exactly the "only part of it shows" the wall was doing.
+ */
 function _noteHTML(n: PostIt, extraClass = ''): string {
     return `
-        <div class="pw-postit ${extraClass}" data-id="${n.id}"
+        <div class="pw-postit ${extraClass}" data-id="${n.id}" data-ink-rot="${n.rot}"
              style="left:${n.u * 100}%; top:${n.v * 100}%; --pw-rot:${n.rot}deg; --pw-color:${n.color};">
             <span class="pw-text"></span>
         </div>`;
@@ -303,6 +316,10 @@ function _buildPlacementBar(): HTMLDivElement {
 }
 
 function _openPlacementBar(): void {
+    // Hand the gesture to us for the duration. Without this the browser claims
+    // the touch for panning and fires pointercancel the moment a finger moves,
+    // which is why dragging a note did nothing on a phone.
+    renderer.domElement.style.touchAction = 'none';
     _placeBar ??= _buildPlacementBar();
     _placeBar.querySelector('.pp-hint')!.textContent = t('postit.placeHint');
     _placeBar.querySelector('.pp-cancel')!.textContent = t('postit.cancel');
@@ -312,6 +329,7 @@ function _openPlacementBar(): void {
 
 function _endPlacement(accept: boolean): void {
     if (_mode !== 'placing') return;
+    renderer.domElement.style.touchAction = '';
     _placeBar?.classList.remove('pp-open');
     _mode = 'idle';
 
@@ -365,11 +383,19 @@ function _setupPlacementInput(): void {
     canvas.addEventListener('pointerdown', (e) => {
         if (_mode !== 'placing') return;
         dragging = true;
+        // Capture so a finger that slides past the board's edge — or off the
+        // canvas entirely — keeps reporting to us instead of silently dropping
+        // the drag half way.
+        try { canvas.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
         if (_pickAt(e.clientX, e.clientY)) _render();
-    });
-    canvas.addEventListener('pointermove', move);
-    canvas.addEventListener('pointerup', () => { dragging = false; });
-    canvas.addEventListener('pointercancel', () => { dragging = false; });
+    }, { passive: true });
+    canvas.addEventListener('pointermove', move, { passive: true });
+    const release = (e: PointerEvent) => {
+        dragging = false;
+        try { canvas.releasePointerCapture(e.pointerId); } catch { /* already gone */ }
+    };
+    canvas.addEventListener('pointerup', release);
+    canvas.addEventListener('pointercancel', release);
 }
 
 // ── Panel ────────────────────────────────────────────────────────────────────
@@ -389,8 +415,10 @@ function _ensurePanel(): CSS3DPanel {
         // stuck to wood.
         inkBounds: false,
         inkSelectors: ['.pw-postit', '.pw-add'],
-        inkPad: 3,
-        inkRadius: 6,
+        // Tight: every punched pixel the note does not itself cover shows the
+        // page background through the board, so the hole has to be the note.
+        inkPad: 1,
+        inkRadius: 3,
         inkBorderBand: 0,
         glass: true,
         glassMode: 'paper',

@@ -4867,12 +4867,18 @@ function _updateNoticeBoardPanel(): void {
         && noticeBoard.visible
         && camera.position.y >= UNDERWATER_Y_THRESHOLD;
     const zoomed = isNoticeBoardZoomActive();
+    // While a note is being written or placed, EVERY panel has to hand the
+    // canvas back: a modal panel sets pointer-events:none on it, and placement
+    // is built entirely on raycasting the canvas. Without this the other two
+    // panels kept the pointer and placement could not receive a single event —
+    // which is why dragging a note did nothing.
+    const interactive = zoomed && !isPostItBusy();
 
     const ach = _regionWorld(REGION_ACHIEVEMENTS, scale, sin, cos);
-    syncAchievementsPanel(shown, zoomed, ach.x, ach.y, ach.z, ach.w, rotY);
+    syncAchievementsPanel(shown, zoomed, interactive, ach.x, ach.y, ach.z, ach.w, rotY);
 
     const sld = _regionWorld(REGION_SLIDES, scale, sin, cos);
-    syncNoticeBoardPanel(shown, zoomed, sld.x, sld.y, sld.z, sld.w, rotY);
+    syncNoticeBoardPanel(shown, interactive, sld.x, sld.y, sld.z, sld.w, rotY);
 
     const pw = _regionWorld(REGION_POSTITS, scale, sin, cos);
     syncPostItWall(shown, zoomed, pw.x, pw.y, pw.z, pw.w, rotY);

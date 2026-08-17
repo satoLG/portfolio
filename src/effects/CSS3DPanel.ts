@@ -1056,10 +1056,11 @@ export class CSS3DPanel {
                     const box = layoutRectWithin(el, panelEl);
                     const bw = box.width + 2 * ip;
                     const bh = box.height + 2 * ip;
-                    roundRectPath(
+                    roundRectPathRotated(
                         ctx,
                         pad + box.left - ip, pad + box.top - ip, bw, bh,
                         Math.min(this._inkRadius, bh / 2),
+                        inkRotationOf(el),
                     );
                     ctx.fill();
                     this._inkBakedBoxes++;
@@ -1082,7 +1083,8 @@ export class CSS3DPanel {
             for (let i = 0; i < els.length; i++) {
                 const el = els[i];
                 const box = layoutRectWithin(el, panelEl);
-                sig = (sig * 31 + box.left + box.top * 7 + box.width * 13 + box.height * 17) | 0;
+                sig = (sig * 31 + box.left + box.top * 7 + box.width * 13 + box.height * 17
+                       + inkRotationOf(el) * 23) | 0;
             }
         }
         return sig;
@@ -1093,6 +1095,18 @@ export class CSS3DPanel {
  *  `ancestor`'s LAYOUT space (transform-independent — the whole point). The
  *  hosted panel is forced position:relative, so it's in the chain. Punched
  *  elements aren't inside scrolled sub-regions, so scroll is ignored. */
+/** Degrees of rotation an ink element declares for its punched hole. Read from
+ *  a data attribute rather than from the computed transform: the transform can
+ *  also carry translation and scale that must NOT be baked into the mask, and
+ *  parsing a matrix back into "just the spin" is guesswork. The element states
+ *  what the hole should do. */
+function inkRotationOf(el: HTMLElement): number {
+    const raw = el.dataset.inkRot;
+    if (!raw) return 0;
+    const n = parseFloat(raw);
+    return Number.isFinite(n) ? n : 0;
+}
+
 function layoutRectWithin(el: HTMLElement, ancestor: HTMLElement): { left: number; top: number; width: number; height: number } {
     let left = 0, top = 0;
     let node: HTMLElement | null = el;
@@ -1105,6 +1119,23 @@ function layoutRectWithin(el: HTMLElement, ancestor: HTMLElement): { left: numbe
     return { left, top, width: el.offsetWidth, height: el.offsetHeight };
 }
 
+
+/** A rounded rect turned `rotDeg` about its own centre. Used for ink boxes whose
+ *  element carries a CSS rotation: layoutRectWithin is deliberately
+ *  transform-independent, so without this the punched hole would be the
+ *  element's UNROTATED box and the corners of a tilted note would come out as
+ *  bare page background beside it. */
+function roundRectPathRotated(
+    ctx: CanvasRenderingContext2D,
+    x: number, y: number, w: number, h: number, r: number, rotDeg: number,
+): void {
+    if (!rotDeg) { roundRectPath(ctx, x, y, w, h, r); return; }
+    ctx.save();
+    ctx.translate(x + w / 2, y + h / 2);
+    ctx.rotate((rotDeg * Math.PI) / 180);
+    roundRectPath(ctx, -w / 2, -h / 2, w, h, r);
+    ctx.restore();
+}
 
 function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
     const rr = Math.max(0, Math.min(r, w / 2, h / 2));
