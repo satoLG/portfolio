@@ -55,9 +55,8 @@ function _badgeHTML(): string {
         <div class="ach-badge ${_shown.has(a.id) ? 'ach-badge-lit' : ''}"
              data-ach="${a.id}"
              style="left:${a.x}%; top:${a.y}%; --ach-rot:${a.rot}deg;"
-             title="${t(a.descKey)}">
+             title="${t(a.titleKey)} — ${t(a.descKey)}">
             <div class="ach-badge-art">${ACHIEVEMENT_ART[a.id] ?? ''}</div>
-            <span class="ach-badge-name">${t(a.titleKey)}</span>
         </div>`).join('');
 }
 

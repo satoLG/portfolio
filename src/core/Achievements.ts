@@ -38,22 +38,32 @@ export interface AchievementDef {
     titleKey: string;
     /** i18n key for the one-line "how you got this". */
     descKey: string;
-    /** Where the badge sits on the paper, in % of the panel box, plus a few
-     *  degrees of tilt. Hand-placed rather than generated: the point is that the
-     *  sheet looks pinned-up by a person, and a formula reads as a grid however
-     *  much jitter is added to it. The two apples are deliberately at opposite
-     *  corners — they share a silhouette, and side by side they would read as
-     *  one badge in two states rather than two achievements. */
+    /**
+     * Where the badge sits on the paper, in % of the field box, plus a few
+     * degrees of tilt.
+     *
+     * Hand-placed, and placed ASYMMETRICALLY on purpose. The first pass laid
+     * these out as three columns by two rows with a little jitter, which is
+     * exactly what it looked like — a ring of icons around the middle of the
+     * sheet. Scatter has to be uneven to read as scatter: no two share a row or
+     * a column, the gaps between them vary widely, and a couple sit closer
+     * together than the rest so the eye finds a cluster and a space rather than
+     * a pattern.
+     *
+     * The two apples are deliberately at opposite ends — they share a
+     * silhouette, and near each other they read as one badge in two states
+     * rather than as two achievements.
+     */
     x: number; y: number; rot: number;
 }
 
 export const ACHIEVEMENTS: AchievementDef[] = [
-    { id: 'apple',       titleKey: 'ach.apple.title',       descKey: 'ach.apple.desc',       x: 13, y: 30, rot: -8 },
-    { id: 'coral',       titleKey: 'ach.coral.title',       descKey: 'ach.coral.desc',       x: 43, y: 20, rot:  6 },
-    { id: 'music',       titleKey: 'ach.music.title',       descKey: 'ach.music.desc',       x: 74, y: 32, rot: -5 },
-    { id: 'dialog',      titleKey: 'ach.dialog.title',      descKey: 'ach.dialog.desc',      x: 18, y: 68, rot:  7 },
-    { id: 'bonfire',     titleKey: 'ach.bonfire.title',     descKey: 'ach.bonfire.desc',     x: 47, y: 74, rot: -6 },
-    { id: 'goldenApple', titleKey: 'ach.goldenApple.title', descKey: 'ach.goldenApple.desc', x: 78, y: 66, rot:  9 },
+    { id: 'apple',       titleKey: 'ach.apple.title',       descKey: 'ach.apple.desc',       x: 12, y: 24, rot: -11 },
+    { id: 'music',       titleKey: 'ach.music.title',       descKey: 'ach.music.desc',       x: 37, y: 15, rot:   7 },
+    { id: 'coral',       titleKey: 'ach.coral.title',       descKey: 'ach.coral.desc',       x: 63, y: 31, rot:  -4 },
+    { id: 'dialog',      titleKey: 'ach.dialog.title',      descKey: 'ach.dialog.desc',      x: 26, y: 63, rot:   9 },
+    { id: 'bonfire',     titleKey: 'ach.bonfire.title',     descKey: 'ach.bonfire.desc',     x: 55, y: 79, rot:  -8 },
+    { id: 'goldenApple', titleKey: 'ach.goldenApple.title', descKey: 'ach.goldenApple.desc', x: 86, y: 57, rot:  13 },
 ];
 
 /** Every pug reply the visitor has to have chosen for the dialog badge. Taken
