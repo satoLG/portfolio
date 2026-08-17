@@ -96,14 +96,22 @@ function _ensurePanel(): CSS3DPanel {
         glassRoughness: 0.42,
     });
 
-    const note = document.createElement('div');
-    note.className = 'nb-note';
-    note.innerHTML = `
-        <button class="nb-arrow nb-arrow-prev" type="button">${CHEVRON('l')}</button>
-        <div class="nb-stage"></div>
-        <button class="nb-arrow nb-arrow-next" type="button">${CHEVRON('r')}</button>
+    // .nb-host exists purely so .nb-note is a DESCENDANT of the hosted element.
+    // CSS3DPanel resolves inkSelectors with panelEl.querySelectorAll(), which
+    // only ever looks at descendants — pointing an ink selector at the hosted
+    // element itself matches nothing, no boxes get punched, and the canvas stays
+    // opaque over DOM that is technically there but permanently invisible.
+    const host = document.createElement('div');
+    host.className = 'nb-host';
+    host.innerHTML = `
+        <div class="nb-note">
+            <button class="nb-arrow nb-arrow-prev" type="button">${CHEVRON('l')}</button>
+            <div class="nb-stage"></div>
+            <button class="nb-arrow nb-arrow-next" type="button">${CHEVRON('r')}</button>
+        </div>
     `;
-    _panel.content.appendChild(note);
+    _panel.content.appendChild(host);
+    const note = host.querySelector<HTMLElement>('.nb-note')!;
     _stage = note.querySelector('.nb-stage');
 
     const arrow = (sel: string, delta: number) => {

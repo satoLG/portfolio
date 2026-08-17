@@ -441,13 +441,19 @@ export class CSS3DPanel {
             // punch beneath it is already fading out. The alpha channel carries
             // the real coverage.
             glassMat.onBeforeCompile = (shader) => {
-                const from = 'diffuseColor.a *= texture2D( alphaMap, vAlphaMapUv ).g;';
+                // Replace the INCLUDE DIRECTIVE, not the chunk body. onBeforeCompile
+                // runs before three resolves #include, so the expanded
+                // 'diffuseColor.a *= texture2D( alphaMap, ... ).g;' is not in the
+                // source yet and matching on it never fired — every glass panel
+                // silently kept the hard-edged green-channel stencil.
+                const from = '#include <alphamap_fragment>';
                 if (!shader.fragmentShader.includes(from)) {
-                    console.warn('[CSS3DPanel] alphamap_fragment chunk changed shape — glass edge falls back to the green channel (hard rim).');
+                    console.warn('[CSS3DPanel] alphamap_fragment include missing — glass edge falls back to the green channel (hard rim).');
                     return;
                 }
                 shader.fragmentShader = shader.fragmentShader.replace(
-                    from, 'diffuseColor.a *= texture2D( alphaMap, vAlphaMapUv ).a;',
+                    from,
+                    '#ifdef USE_ALPHAMAP\n\tdiffuseColor.a *= texture2D( alphaMap, vAlphaMapUv ).a;\n#endif',
                 );
             };
             // Distinct cache key: without it three may hand this material a

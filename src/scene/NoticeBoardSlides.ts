@@ -63,11 +63,15 @@ const ISLAND_FALLBACK = `
         stroke="#8d3a2c" stroke-width="2" opacity="0.5"/>
 </svg>`;
 
-const ISLAND_MARK = `
-<div class="nb-figure">
-  <img class="nb-shot" src="${ISLAND_SHOT_SRC}" alt="">
-  ${ISLAND_FALLBACK}
-</div>`;
+// Flipped the first time the screenshot 404s. Without it every re-render (a
+// language switch, paging back to this slide) issues the same doomed request
+// and prints another console error.
+let _shotMissing = false;
+
+function islandMark(): string {
+    const img = _shotMissing ? '' : `<img class="nb-shot" src="${ISLAND_SHOT_SRC}" alt="">`;
+    return `<div class="nb-figure${_shotMissing ? ' nb-figure-missing' : ''}">${img}${ISLAND_FALLBACK}</div>`;
+}
 
 const LOST_MARK = `
 <svg class="nb-mark" viewBox="0 0 64 58" aria-hidden="true">
@@ -79,8 +83,9 @@ const LOST_MARK = `
 </svg>`;
 
 interface Slide {
-    /** Inline artwork above the copy. */
-    mark: string;
+    /** Inline artwork above the copy. A function when it depends on state that
+     *  can change after module load (the screenshot's presence). */
+    mark: string | (() => string);
     /** i18n keys. `lines` renders one <p> each. */
     titleKey: string;
     lineKeys: string[];
@@ -97,7 +102,7 @@ const SLIDES: Slide[] = [
         signKey: 'board.warn.sign',
     },
     {
-        mark: ISLAND_MARK,
+        mark: islandMark,
         titleKey: 'board.island.title',
         lineKeys: ['board.island.line1', 'board.island.line2'],
         signKey: 'board.island.sign',
@@ -133,7 +138,7 @@ export function wireSlide(stage: HTMLElement): void {
     const fig = stage.querySelector<HTMLElement>('.nb-figure');
     const img = fig?.querySelector<HTMLImageElement>('.nb-shot');
     if (!fig || !img) return;
-    const fail = () => fig.classList.add('nb-figure-missing');
+    const fail = () => { _shotMissing = true; fig.classList.add('nb-figure-missing'); };
     img.addEventListener('error', fail, { once: true });
     if (img.complete && img.naturalWidth === 0) fail();
 }
@@ -143,7 +148,7 @@ export function buildSlideHTML(i: number): string {
     const s = SLIDES[i];
     if (!s) return '';
     return `
-        ${s.mark}
+        ${typeof s.mark === 'function' ? s.mark() : s.mark}
         <h3 class="nb-title">${t(s.titleKey)}</h3>
         ${s.lineKeys.map(k => `<p class="nb-line">${t(k)}</p>`).join('')}
         <p class="nb-sign">${t(s.signKey)}</p>

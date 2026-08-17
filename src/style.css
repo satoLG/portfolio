@@ -3757,9 +3757,17 @@ body.night-mode .ocean-carousel {
        flat fills and the "lit glass" comes from the WebGL pane in front.
    ============================================================ */
 
-.nb-note {
+/* The measured host. CSS3DPanel sizes itself from this element and resolves its
+   ink selectors INSIDE it, so the visible paper has to live one level down —
+   see the note in NoticeBoardPanel. */
+.nb-host {
     width: 360px;
     height: 282px;
+}
+
+.nb-note {
+    width: 100%;
+    height: 100%;
     box-sizing: border-box;
     display: flex;
     align-items: center;

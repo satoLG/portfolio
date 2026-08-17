@@ -35,9 +35,10 @@ export const dogBiscuitOffset       = { x: 0.6300, y: 1.1900, z: -0.2200 };
 // with a 0.22 scale, so its top is around y=1.22 in this offset space.
 export const noticeBoardOffset      = { x: -0.4450, y: 1.7590, z: -0.0400 };
 // Hung on the trunk just above the board. picture_frame.glb is authored facing
-// -X and lands ~0.90 wide / 0.75 tall at scale 1, so pictureFrameScale is
-// "frame width in world units ÷ 0.90".
-export const pictureFrameOffset     = { x: -0.4450, y: 2.1000, z: -0.0500 };
+// +X (its node carries a 90° X-rotation and a 100× scale), so it needs a
+// roughly -90° yaw to turn the photo toward the camera — the few degrees off
+// square are deliberate, it reads as hung by hand rather than mounted.
+export const pictureFrameOffset     = { x: -0.4450, y: 2.0000, z: -0.0400 };
 
 // ── Scales ────────────────────────────────────────────────────────────────────
 export const islandScale      = 0.2500;
@@ -70,7 +71,7 @@ export const dogBowlScale          = 0.0400;
 export const dogBiscuitScale       = 3.5810;
 // The board's plank panel is 1.0 wide in local units, so this IS its world width.
 export const noticeBoardScale      = 0.3950;
-export const pictureFrameScale     = 0.3330;
+export const pictureFrameScale     = 0.1500;
 
 // ── Rotations ─────────────────────────────────────────────────────────────────
 export const treeRotY   = 0.0000;
@@ -101,8 +102,7 @@ export const dogBowlRot          = { x: 0.0000,          y: 0.0000,          z: 
 export const dogBiscuitRot       = { x: 0.0000,       y: 0.0000,       z: 0.0000 };
 // 0 = the notice faces +Z, straight at the default camera.
 export const noticeBoardRotY     = -0.0006;
-// +90° turns the model's -X facing photo toward +Z, same way the board faces.
-export const pictureFrameRotY    = 1.5708;
+export const pictureFrameRotY    = -1.4136;
 
 // ── Island surface grass filter ──────────────────────────────────────────────
 export const ISLAND_SURFACE_GRASS_COLOR = '#293c00'; // sRGB hex
