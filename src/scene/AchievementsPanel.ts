@@ -19,7 +19,7 @@
 // next time rather than quietly spending them.
 
 import { CSS3DPanel } from '../effects/CSS3DPanel';
-import { setNoticeBoardFocus, isNoticeBoardFocused } from '../core/Control';
+import { setNoticeBoardFocus, isNoticeBoardFocused, getNoticeBoardFocusKey } from '../core/Control';
 import { t, onLanguageChange } from '../core/i18n';
 import { ACHIEVEMENTS, getPendingReveals, isUnlocked, markRevealed, type AchievementId } from '../core/Achievements';
 import { ACHIEVEMENT_ART } from '../core/AchievementArt';
@@ -39,7 +39,7 @@ const REVEAL_ANIM_MS = 620;
 let _panel: CSS3DPanel | null = null;
 let _sheet: HTMLDivElement | null = null;
 let _modal = false;
-let _onExit: (() => void) | null = null;
+let _onExit: ((e?: PointerEvent) => void) | null = null;
 /** The panel's own world rectangle, refreshed every frame. Clicking the sheet
  *  frames THIS — a second, closer step inside the board zoom, because the board
  *  zoom fits the whole board and leaves one sheet on it too small to read. */
@@ -51,7 +51,7 @@ let _shown = new Set<AchievementId>();
 let _revealTimers: number[] = [];
 let _wasZoomed = false;
 
-export function setAchievementsExit(cb: () => void): void {
+export function setAchievementsExit(cb: (e?: PointerEvent) => void): void {
     _onExit = cb;
 }
 
@@ -126,8 +126,19 @@ function _ensurePanel(): CSS3DPanel {
         transparent: true,
         inkBounds: true,
         inkSelectors: ['.ach-sheet'],
-        inkPad: 2,
-        inkRadius: 10,
+        // NEGATIVE pad: the hole is punched three pixels INSIDE the paper.
+        //
+        // A hole the same size as its DOM is the bug that leaves a hairline of
+        // page background all round the sheet — the mask edge is antialiased and
+        // the punch reaches a fraction past where the paper actually paints. The
+        // media player never had it because its ink selectors are inner elements
+        // and inkPad grows outward INTO the panel's own fill, so the hole always
+        // lands strictly inside something opaque. Same idea from the other
+        // direction: shrink the hole instead of growing it. The sheet's outer
+        // 3px is then behind the canvas, so its visible edge is the inset rule
+        // below it in the CSS.
+        inkPad: -3,
+        inkRadius: 8,
         inkBorderBand: 0,
         glass: true,
         glassMode: 'paper',
@@ -147,11 +158,18 @@ function _ensurePanel(): CSS3DPanel {
 
     // Clicking the sheet studies it. stopPropagation either way, so the click
     // never reaches the board's click-away and drops the camera out entirely.
+    // Clicking THIS sheet studies it. Clicking it while a DIFFERENT one is
+    // framed counts as clicking outside that one, so it steps back to the board
+    // — the rule is the same wherever the click lands: outside the framed thing
+    // means back to the board, and only outside the board leaves the zoom.
+    // stopPropagation either way, so the board's own click-away never also runs.
     _sheet!.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (!isNoticeBoardFocused()) setNoticeBoardFocus({ ..._rect });
+        const focused = getNoticeBoardFocusKey();
+        if (focused === null) setNoticeBoardFocus({ key: 'achievements', ..._rect });
+        else if (focused !== 'achievements') setNoticeBoardFocus(null);
     });
-    _panel.setOnOutsideClick(() => { _onExit?.(); });
+    _panel.setOnOutsideClick((e) => { _onExit?.(e); });
     onLanguageChange(() => _render());
     _render();
 

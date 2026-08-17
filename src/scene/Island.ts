@@ -3259,6 +3259,7 @@ export function Start(): void {
             );
             pictureFrame.scale.setScalar(pictureFrameScale);
             pictureFrame.rotation.y = pictureFrameRotY;
+            _buildFramePickPlane();
             console.log('Picture frame loaded');
         },
         undefined,
@@ -4902,6 +4903,43 @@ const _frameBox = new Box3();
 const _frameCenter = new Vector3();
 const _frameSize = new Vector3();
 let isPictureFrameHovered = false;
+/** Invisible tap target over the photo — see hitsFrame. */
+let _framePickPlane: Mesh | null = null;
+
+/** How much bigger than the frame the tap target is. Generous on purpose: the
+ *  cost of overshooting is a click that flies in when you meant to miss, which
+ *  one click undoes; the cost of undershooting is a control that feels broken. */
+const FRAME_PICK_SCALE = 1.85;
+
+/**
+ * Build the tap target once the model is in. It is a CHILD of the frame group,
+ * so moving or rescaling the frame from the debug GUI carries it — but it is
+ * squared to the BOARD rather than to the frame's own few degrees of tilt, since
+ * that is the plane the visitor is actually aiming at.
+ */
+function _buildFramePickPlane(): void {
+    if (_framePickPlane || pictureFrame.children.length === 0) return;
+    pictureFrame.updateMatrixWorld(true);
+    _frameBox.setFromObject(pictureFrame);
+    _frameBox.getCenter(_frameCenter);
+    _frameBox.getSize(_frameSize);
+
+    const groupScale = pictureFrame.scale.x || 1;
+    const w = (_frameSize.x / groupScale) * FRAME_PICK_SCALE;
+    const h = (_frameSize.y / groupScale) * FRAME_PICK_SCALE;
+
+    const plane = new Mesh(
+        new PlaneGeometry(w, h),
+        new MeshBasicMaterial({ colorWrite: false, depthWrite: false, transparent: true, opacity: 0 }),
+    );
+    plane.name = 'pictureFramePick';
+    // Centre it on the frame, expressed in the group's own local space.
+    plane.position.copy(pictureFrame.worldToLocal(_frameCenter.clone()));
+    plane.rotation.y = noticeBoard.rotation.y - pictureFrame.rotation.y;
+    plane.renderOrder = -1;
+    pictureFrame.add(plane);
+    _framePickPlane = plane;
+}
 
 /**
  * The photo is a model rather than a panel, so it has no DOM to click — but it
@@ -4921,7 +4959,13 @@ function setupPictureFrameInteraction(): void {
         pictureFrameMouse.x = (clientX / window.innerWidth) * 2 - 1;
         pictureFrameMouse.y = -(clientY / window.innerHeight) * 2 + 1;
         pictureFrameRaycaster.setFromCamera(pictureFrameMouse, camera);
-        return pictureFrameRaycaster.intersectObjects(pictureFrame.children, true).length > 0;
+        // Against the PAD, not the model. The frame is a thin, ornate mesh only
+        // a few centimetres wide in world units — raycasting its actual geometry
+        // means the tap has to land on a moulding, which is hard with a mouse
+        // and close to impossible with a thumb. The pad is a plain quad well
+        // larger than the frame, so the target is the picture plus a margin.
+        const target = _framePickPlane ?? pictureFrame;
+        return pictureFrameRaycaster.intersectObject(target, target === pictureFrame).length > 0;
     };
 
     const onFrameClick = (clientX: number, clientY: number) => {
@@ -4943,6 +4987,7 @@ function setupPictureFrameInteraction(): void {
 
         if (!isNoticeBoardZoomActive()) zoomToNoticeBoard();
         setNoticeBoardFocus({
+            key: 'frame',
             x: _frameCenter.x, y: _frameCenter.y, z: _frameCenter.z,
             rotY: noticeBoard.rotation.y,   // square to the wall, not to the frame's own tilt
             w: _frameSize.x, h: _frameSize.y,
@@ -4978,8 +5023,22 @@ function setupPictureFrameInteraction(): void {
     });
 }
 
-/** One step out: focus → board, board → the scene. */
-function _boardBackOut(): void {
+/**
+ * One step out: focus → board, board → the scene.
+ *
+ * DEDUPED PER EVENT. CSS3DPanel's outside-click walks every visible modal panel
+ * and fires each one's handler for the SAME pointerdown — and all three board
+ * panels register this function. Undeduped, a single click away ran it three
+ * times: the first cleared the focus and the next two left the zoom outright,
+ * which is exactly the "one click exits everything" behaviour. timeStamp
+ * identifies the event; the panels pass it through.
+ */
+let _lastBackOutStamp = -1;
+function _boardBackOut(e?: PointerEvent): void {
+    if (e) {
+        if (e.timeStamp === _lastBackOutStamp) return;
+        _lastBackOutStamp = e.timeStamp;
+    }
     if (isNoticeBoardFocused()) { setNoticeBoardFocus(null); return; }
     zoomOutFromNoticeBoard();
 }

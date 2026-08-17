@@ -25,7 +25,7 @@
 //                outside-click hook.
 
 import { CSS3DPanel } from '../effects/CSS3DPanel';
-import { setNoticeBoardFocus, isNoticeBoardFocused } from '../core/Control';
+import { setNoticeBoardFocus, isNoticeBoardFocused, getNoticeBoardFocusKey } from '../core/Control';
 import { onLanguageChange } from '../core/i18n';
 import { SLIDE_COUNT, buildSlideHTML, slideClass, wireSlide } from './NoticeBoardSlides';
 
@@ -56,7 +56,7 @@ let _panel: CSS3DPanel | null = null;
 let _stage: HTMLDivElement | null = null;
 let _index = 0;
 let _modal = false;
-let _onExit: (() => void) | null = null;
+let _onExit: ((e?: PointerEvent) => void) | null = null;
 /** The panel's own world rectangle, refreshed every frame. Clicking the sheet
  *  frames THIS — a second, closer step inside the board zoom, because the board
  *  zoom fits the whole board and leaves one sheet on it too small to read. */
@@ -64,7 +64,7 @@ const _rect = { x: 0, y: 0, z: 0, rotY: 0, w: 0, h: 0 };
 
 /** Register what a click outside the notice should do while it is zoomed
  *  (Island wires this to the board's zoom-out). */
-export function setNoticeBoardExit(cb: () => void): void {
+export function setNoticeBoardExit(cb: (e?: PointerEvent) => void): void {
     _onExit = cb;
 }
 
@@ -98,8 +98,19 @@ function _ensurePanel(): CSS3DPanel {
         transparent: true,
         inkBounds: true,
         inkSelectors: ['.nb-note'],
-        inkPad: 2,
-        inkRadius: 10,
+        // NEGATIVE pad: the hole is punched three pixels INSIDE the paper.
+        //
+        // A hole the same size as its DOM is the bug that leaves a hairline of
+        // page background all round the sheet — the mask edge is antialiased and
+        // the punch reaches a fraction past where the paper actually paints. The
+        // media player never had it because its ink selectors are inner elements
+        // and inkPad grows outward INTO the panel's own fill, so the hole always
+        // lands strictly inside something opaque. Same idea from the other
+        // direction: shrink the hole instead of growing it. The sheet's outer
+        // 3px is then behind the canvas, so its visible edge is the inset rule
+        // below it in the CSS.
+        inkPad: -3,
+        inkRadius: 8,
         inkBorderBand: 0,
         // A sheet of paper nailed to a board, not a screen: 'paper' makes the
         // pane in front MULTIPLY the DOM by the light it measures, so the notice
@@ -145,12 +156,17 @@ function _ensurePanel(): CSS3DPanel {
     // impossible to read without dismissing it.
     // Clicking the paper (not an arrow) studies it. The arrows stop propagation
     // of their own, so paging never changes the framing.
+    // Same rule as the badge sheet next door: click me to study me, click me
+    // while something else is framed and that counts as clicking outside it.
+    // The arrows stop propagation of their own, so paging never reframes.
     _stage!.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (!isNoticeBoardFocused()) setNoticeBoardFocus({ ..._rect });
+        const focused = getNoticeBoardFocusKey();
+        if (focused === null) setNoticeBoardFocus({ key: 'slides', ..._rect });
+        else if (focused !== 'slides') setNoticeBoardFocus(null);
     });
 
-    _panel.setOnOutsideClick(() => { _onExit?.(); });
+    _panel.setOnOutsideClick((e) => { _onExit?.(e); });
     onLanguageChange(() => _renderSlide());
     _renderSlide();
 

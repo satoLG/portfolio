@@ -3790,11 +3790,15 @@ body.night-mode .ocean-carousel {
         radial-gradient(120% 90% at 100% 100%, rgba(148, 108, 58, 0.26), transparent 62%),
         linear-gradient(#f3e7c9, #f3e7c9);
     background-blend-mode: multiply, normal, normal, normal;
+    /* The outer 3px sits BEHIND the canvas — the hole is punched inside it (see
+       inkPad in NoticeBoardPanel), so this border is never seen. It is kept in
+       the sheet's own colour anyway, so that if the mask ever lands a pixel
+       wide the sliver reads as the sheet's edge and not as a hole.
+       Everything meant to be VISIBLE is inset past that line. */
     border: 3px solid #8d3a2c;
-    /* The double rule, plus a shallow vignette so the sheet reads as pressed
-       against the planks rather than printed onto them. */
-    box-shadow: inset 0 0 0 2px rgba(243, 231, 201, 0.9),
-                inset 0 0 0 4px rgba(141, 58, 44, 0.4),
+    box-shadow: inset 0 0 0 3px #8d3a2c,
+                inset 0 0 0 5px rgba(243, 231, 201, 0.9),
+                inset 0 0 0 7px rgba(141, 58, 44, 0.4),
                 inset 0 14px 22px -16px rgba(74, 53, 32, 0.55),
                 inset 0 -14px 22px -16px rgba(74, 53, 32, 0.45);
     font-family: 'Pangolin', cursive, sans-serif;
@@ -3946,9 +3950,11 @@ body.night-mode .ocean-carousel {
         radial-gradient(120% 90% at 100% 100%, rgba(148, 108, 58, 0.26), transparent 62%),
         linear-gradient(#f3e7c9, #f3e7c9);
     background-blend-mode: multiply, normal, normal, normal;
+    /* Outer 3px is behind the canvas — see the same note on .nb-note. */
     border: 3px solid #8d3a2c;
-    box-shadow: inset 0 0 0 2px rgba(243, 231, 201, 0.9),
-                inset 0 0 0 4px rgba(141, 58, 44, 0.4),
+    box-shadow: inset 0 0 0 3px #8d3a2c,
+                inset 0 0 0 5px rgba(243, 231, 201, 0.9),
+                inset 0 0 0 7px rgba(141, 58, 44, 0.4),
                 inset 0 14px 22px -16px rgba(74, 53, 32, 0.55),
                 inset 0 -14px 22px -16px rgba(74, 53, 32, 0.45);
     font-family: 'Pangolin', cursive, sans-serif;

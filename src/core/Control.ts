@@ -371,6 +371,8 @@ export function registerNoticeBoardPose(get: () => { x: number; y: number; z: nu
  * board rather than leaving the zoom outright — the visitor went in, not out.
  */
 export interface BoardFocus {
+    /** Which thing is framed, so a panel can tell "me" from "one of the others". */
+    key: string;
     /** World centre of the thing to frame. */
     x: number; y: number; z: number;
     /** Its facing yaw — the camera lines up square to it. */
@@ -387,6 +389,7 @@ export function setNoticeBoardFocus(f: BoardFocus | null): void {
     _boardFocus = f;
 }
 export function isNoticeBoardFocused(): boolean { return _boardFocus !== null; }
+export function getNoticeBoardFocusKey(): string | null { return _boardFocus?.key ?? null; }
 
 /** Framing for the notice-board zoom — mutable so the debug GUI can dial it in. */
 export const noticeBoardZoomConfig = {

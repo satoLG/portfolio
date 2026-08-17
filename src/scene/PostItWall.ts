@@ -39,7 +39,7 @@ import { CSS3DPanel } from '../effects/CSS3DPanel';
 import { t, onLanguageChange } from '../core/i18n';
 import { camera, renderer } from '../core/Scene';
 import { playPostItStick, playUIButton } from '../core/Audio';
-import { setZoomExitLock } from '../core/Control';
+import { setZoomExitLock, isNoticeBoardFocused, setNoticeBoardFocus } from '../core/Control';
 
 const DESIGN_W = 520;
 const DESIGN_H = 350;
@@ -101,14 +101,14 @@ let _panel: CSS3DPanel | null = null;
 let _wall: HTMLDivElement | null = null;
 let _modal = false;
 let _zoomed = false;
-let _onExit: (() => void) | null = null;
+let _onExit: ((e?: PointerEvent) => void) | null = null;
 
 /** The invisible quad over the region, handed over by Island once the board is
  *  built. Everything about placement is a raycast against this one object. */
 let _pickPlane: Object3D | null = null;
 export function registerPostItPickPlane(obj: Object3D): void { _pickPlane = obj; }
 
-export function setPostItExit(cb: () => void): void { _onExit = cb; }
+export function setPostItExit(cb: (e?: PointerEvent) => void): void { _onExit = cb; }
 
 /** Placement must not let the board's click-away fire underneath it. */
 export function isPostItBusy(): boolean { return _mode !== 'idle'; }
@@ -218,7 +218,7 @@ function _render(): void {
         ${_notes.map(n => _noteHTML(n)).join('')}
         ${ghost}
         <button class="pw-add" type="button" title="${t('postit.add')}"
-                data-ink-rot="-4" data-ink-radius="16"
+                data-ink-rot="-4" data-ink-radius="12"
                 style="left:${ADD_CU * 100}%; top:${ADD_CV * 100}%;">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"
                 fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round"/></svg>
@@ -502,9 +502,11 @@ function _ensurePanel(): CSS3DPanel {
         // stuck to wood.
         inkBounds: false,
         inkSelectors: ['.pw-postit', '.pw-add'],
-        // Tight: every punched pixel the note does not itself cover shows the
-        // page background through the board, so the hole has to be the note.
-        inkPad: 1,
+        // NEGATIVE: the hole is punched two pixels INSIDE each note, so the
+        // paper's own edge always covers the mask's antialiased boundary. A hole
+        // exactly the size of the note leaves a hairline of page background all
+        // round it — see the longer note in NoticeBoardPanel.
+        inkPad: -2,
         inkRadius: 3,
         inkBorderBand: 0,
         glass: true,
@@ -520,8 +522,13 @@ function _ensurePanel(): CSS3DPanel {
     _panel.content.appendChild(host);
     _wall = host.querySelector('.pw-wall');
 
-    _wall!.addEventListener('click', (e) => e.stopPropagation());
-    _panel.setOnOutsideClick(() => { if (_mode === 'idle') _onExit?.(); });
+    // The wall is never itself framed, so a click on it while a sheet is framed
+    // is a click outside that sheet: step back to the board.
+    _wall!.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (isNoticeBoardFocused()) setNoticeBoardFocus(null);
+    });
+    _panel.setOnOutsideClick((e) => { if (_mode === 'idle') _onExit?.(e); });
     onLanguageChange(() => { _paintEditorText(); _render(); });
     _setupPlacementInput();
     _render();
