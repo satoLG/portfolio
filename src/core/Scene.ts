@@ -598,6 +598,7 @@ export function Start(): void
     scene.add(Island.bushPug);
     scene.add(Island.radio);
     scene.add(Island.noticeBoard);
+    scene.add(Island.pictureFrame);
     scene.add(Island.sword);
     scene.add(Island.pug);
     scene.add(Island.tent);
@@ -940,7 +941,7 @@ let _matMode: MatMode = 'standard';
 function _matRoots(): Array<Object3D | null | undefined> {
     return [
         Island.firecamp, Island.tree, Island.bush, Island.bushRadio, Island.bushRadio2, Island.bushPug,
-        Island.radio, Island.noticeBoard, Island.sword, Island.pug, Island.dogBed,
+        Island.radio, Island.noticeBoard, Island.pictureFrame, Island.sword, Island.pug, Island.dogBed,
         Island.apple1, Island.apple2, Island.apple3,
         Island.mossRock1, Island.mossRock2a, Island.mossRock2b, Island.mossRock3a, Island.mossRock3b, Island.mossRock3c,
         Island.tent, Island.chest,
@@ -1104,6 +1105,7 @@ export function Update(): void
         Island.bushPug.visible = showOutside;
         Island.radio.visible = showOutside;
         Island.noticeBoard.visible = showOutside;
+        Island.pictureFrame.visible = showOutside;
         Island.sword.visible = showOutside;
         Island.pug.visible = showOutside;
         Island.dogBed.visible = showOutside;

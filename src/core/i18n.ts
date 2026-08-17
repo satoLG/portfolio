@@ -150,11 +150,21 @@ const translations: Record<Language, TranslationDict> = {
         'pug.day.leo.0': "well.. he's the guy who gives me water, food and brought me here for a walk",
         'pug.day.leo.1': 'he also does other stuff in his free time, like these... let me show you on my phone',
 
-        // Notice board nailed to the tree (drawn into a canvas texture)
-        'board.title': 'BEWARE',
-        'board.line1': 'wild pug roaming free',
-        'board.line2': 'apples fall without warning',
-        'board.sign': '— the management',
+        // Notice board nailed to the tree — the CSS3D carousel's three slides
+        'board.warn.title': 'BEWARE',
+        'board.warn.line1': 'wild pug roaming free',
+        'board.warn.line2': 'apples fall without warning',
+        'board.warn.sign': '— the management',
+
+        'board.island.title': 'THE INFLATABLE ISLAND',
+        'board.island.line1': 'Rayman Legends — Ubisoft',
+        'board.island.line2': '“The Mysterious Inflatable Island”',
+        'board.island.sign': '— where this island got its look',
+
+        'board.lost.title': 'LOST & FOUND',
+        'board.lost.line1': 'one (1) sword, left in a bonfire',
+        'board.lost.line2': 'owner may collect it at the tent',
+        'board.lost.sign': '— the management',
     },
 
     'pt-br': {
@@ -298,11 +308,21 @@ const translations: Record<Language, TranslationDict> = {
         'pug.day.leo.0': 'bom.. é o cara que me dá água, comida e me trouxe pra passear aqui',
         'pug.day.leo.1': 'ele faz outras coisas também no tempo livre, tipo essas aqui... deixa eu mostrar no meu celular',
 
-        // Placa pregada na árvore (desenhada numa textura de canvas)
-        'board.title': 'CUIDADO',
-        'board.line1': 'pug solto na ilha',
-        'board.line2': 'maçãs caem sem aviso',
-        'board.sign': '— a gerência',
+        // Placa pregada na árvore — os três slides do carrossel CSS3D
+        'board.warn.title': 'CUIDADO',
+        'board.warn.line1': 'pug solto na ilha',
+        'board.warn.line2': 'maçãs caem sem aviso',
+        'board.warn.sign': '— a gerência',
+
+        'board.island.title': 'A ILHA INFLÁVEL',
+        'board.island.line1': 'Rayman Legends — Ubisoft',
+        'board.island.line2': '“The Mysterious Inflatable Island”',
+        'board.island.sign': '— de onde veio o visual desta ilha',
+
+        'board.lost.title': 'ACHADOS E PERDIDOS',
+        'board.lost.line1': 'uma (1) espada, numa fogueira',
+        'board.lost.line2': 'o dono pode retirar na barraca',
+        'board.lost.sign': '— a gerência',
     }
 };
 

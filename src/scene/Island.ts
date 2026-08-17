@@ -21,7 +21,8 @@ import * as CoinTooltip from '../core/CoinTooltip';
 import type { DialogLine, ReplyOption } from "../core/Dialog";
 import { isBreezeActive, playAppleImpactSound, playChestCloseSound, playChestOpenSound, playPugSnoreOnce, stopPugSnore } from "../core/Audio";
 import { createGrassMesh, createPerlinTexture, createShadowFloorMesh, grassColorBase, grassColorTip, type GrassUniforms } from './ProceduralGrass';
-import { createNoticeBoard } from './NoticeBoard';
+import { createNoticeBoard, NOTICE_LOCAL_X, NOTICE_LOCAL_Y, NOTICE_LOCAL_Z } from './NoticeBoard';
+import { syncNoticeBoardPanel, setNoticeBoardExit } from './NoticeBoardPanel';
 import { camera, renderer, scene as threeScene, isMobile } from "../core/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
 import * as PhoneScreen from '../core/PhoneScreen';
@@ -31,15 +32,15 @@ import {
     pugOffset, tentOffset, dogBedOffset, phoneOffset,
     apple1Offset, apple2Offset, apple3Offset,
     mossRock2aOffset, mossRock2bOffset,
-    foldingTrayTableOffset, tentDogBedOffset, rugRoundOffset, lanternOffset, dogBowlOffset, dogBiscuitOffset, noticeBoardOffset,
+    foldingTrayTableOffset, tentDogBedOffset, rugRoundOffset, lanternOffset, dogBowlOffset, dogBiscuitOffset, noticeBoardOffset, pictureFrameOffset,
     islandScale, firecampScale, treeScale, bushScale, bushRadioScale, bushRadio2Scale, bushPugScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, phoneScale,
     apple1Scale, apple2Scale, apple3Scale,
     mossRock2aScale, mossRock2bScale,
-    foldingTrayTableScale, tentDogBedScale, rugRoundScale, lanternScale, dogBowlScale, dogBiscuitScale, noticeBoardScale,
+    foldingTrayTableScale, tentDogBedScale, rugRoundScale, lanternScale, dogBowlScale, dogBiscuitScale, noticeBoardScale, pictureFrameScale,
     treeRotY, bushRotY, bushRadioRotY, bushRadio2RotY, bushPugRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, phoneRot,
     apple1RotY, apple2RotY, apple3RotY,
     mossRock2aRot, mossRock2bRot,
-    foldingTrayTableRot, tentDogBedRot, rugRoundRot, lanternRot, dogBowlRot, dogBiscuitRot, noticeBoardRotY, noticeBoardModelPath,
+    foldingTrayTableRot, tentDogBedRot, rugRoundRot, lanternRot, dogBowlRot, dogBiscuitRot, noticeBoardRotY, noticeBoardModelPath, pictureFrameRotY,
     ISLAND_SURFACE_GRASS_COLOR,
     ISLAND_SURFACE_GRASS_STRENGTH,
     ISLAND_SURFACE_GRASS_GREEN_THRESHOLD,
@@ -105,6 +106,8 @@ export const radio = new Group();
 // Warning board nailed to the tree trunk, just above the radio. Its contents are
 // built procedurally (or loaded from noticeBoardModelPath) in _buildNoticeBoard().
 export const noticeBoard = new Group();
+// Family photo in a frame, hung on the same trunk just above the board.
+export const pictureFrame = new Group();
 export const sword = new Group();
 export const pug = new Group();
 export const tent = new Group();
@@ -3229,6 +3232,31 @@ export function Start(): void {
     // Nail the notice board to the tree trunk, just above the radio
     _buildNoticeBoard(loader);
 
+    // Hang the family photo on the same trunk, just above the board
+    loader.load(
+        'models/surface/picture_frame.glb',
+        (gltf) => {
+            applyOceanLightingToModel(gltf.scene);
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    (child as any).receiveShadow = true;
+                }
+            });
+            pictureFrame.add(gltf.scene);
+            pictureFrame.position.set(
+                islandPosition.x + pictureFrameOffset.x,
+                islandPosition.y + pictureFrameOffset.y,
+                islandPosition.z + pictureFrameOffset.z,
+            );
+            pictureFrame.scale.setScalar(pictureFrameScale);
+            pictureFrame.rotation.y = pictureFrameRotY;
+            console.log('Picture frame loaded');
+        },
+        undefined,
+        (error) => { console.error('Error loading picture_frame.glb:', error); },
+    );
+
     // Load sword stuck in the middle of the bonfire
     loader.load(
         'models/surface/sword.glb',
@@ -3540,6 +3568,10 @@ export function Start(): void {
     // predictable order; every handler below this line checks
     // _noticeBoardBlocksClick() so the board's click-away can't leak into them.
     setupNoticeBoardInteraction();
+    // While zoomed the notice is modal, so a click that misses it lands on the
+    // CSS layer rather than the canvas — that is the path that backs the camera
+    // out (the canvas handler above never sees it).
+    setNoticeBoardExit(zoomOutFromNoticeBoard);
 
     // Setup pug click/hover interaction
     setupPugInteraction();
@@ -4788,6 +4820,33 @@ function _buildNoticeBoard(loader: GLTFLoader): void {
     }
 }
 
+/**
+ * Drive the CSS3D notice each frame: where it sits, whether it is on screen, and
+ * whether its arrows are live.
+ *
+ * The world anchor is recomputed from the board group's LIVE transform rather
+ * than from IslandConfig, so moving or resizing the board from the debug GUI
+ * carries the notice with it — the same reason the zoom pose is read live.
+ */
+function _updateNoticeBoardPanel(): void {
+    const scale = noticeBoard.scale.x;
+    const rotY = noticeBoard.rotation.y;
+    const sin = Math.sin(rotY), cos = Math.cos(rotY);
+    // Board-local notice offset → world (rotate about Y, then translate).
+    const lx = NOTICE_LOCAL_X * scale;
+    const ly = NOTICE_LOCAL_Y * scale;
+    const lz = NOTICE_LOCAL_Z * scale;
+    const wx = noticeBoard.position.x + lx * cos + lz * sin;
+    const wy = noticeBoard.position.y + ly;
+    const wz = noticeBoard.position.z - lx * sin + lz * cos;
+
+    const shown = noticeBoard.children.length > 0
+        && noticeBoard.visible
+        && camera.position.y >= UNDERWATER_Y_THRESHOLD;
+
+    syncNoticeBoardPanel(shown, isNoticeBoardZoomActive(), wx, wy, wz, scale);
+}
+
 const noticeBoardRaycaster = new Raycaster();
 const noticeBoardMouse = new Vector2();
 let isNoticeBoardHovered = false;
@@ -4988,6 +5047,7 @@ const SURFACE_ANIM_FREEZE_Y = -3.0;
 
 export function Update(): void {
   const isUnderwater = camera.position.y < SURFACE_ANIM_FREEZE_Y;
+  _updateNoticeBoardPanel();
   _updateAppleImpacts();
   islandCampfireGroundCenterUniform.value.set(firecamp.position.x, firecamp.position.z);
   _updateGroundApples();

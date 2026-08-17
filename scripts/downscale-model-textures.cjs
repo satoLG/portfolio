@@ -30,6 +30,7 @@ const TARGETS = {
     'underwater/starfish.glb': 512,  // was 3× 2048² — absurd for a tiny prop (~48 MB VRAM)
     'surface/moss_rock1.glb':  512,  // was 1024²
     'surface/bush.glb':        512,  // was 1024² (cloned 4×, so the saving multiplies)
+    'surface/picture_frame.glb': 512,  // was 1536×1024 — the frame renders ~0.3 world units wide
 };
 
 async function main() {

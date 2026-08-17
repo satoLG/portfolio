@@ -234,6 +234,14 @@ const MODELS: CreditGroup = {
                 quaternius('Round rug', 'models/surface/rug_round.glb', null),
                 quaternius('Dog bowl', 'models/surface/dog_bowl.glb', null),
                 quaternius('Dog biscuit', 'models/surface/dog_biscuit.glb', null),
+                {
+                    name: 'Picture frame',
+                    file: 'models/surface/picture_frame.glb',
+                    note: {
+                        en: 'Supplied by the project author. The frame model carries no author metadata — fill it in if it came from a pack. The family photo inside it is the baked-in FamilyPhoto texture, generated with Microsoft Copilot.',
+                        pt: 'Enviado pelo autor do projeto. O modelo da moldura não traz metadados de autoria — preencher caso venha de algum pack. A foto de família dentro dele é a textura FamilyPhoto embutida, gerada com o Microsoft Copilot.',
+                    },
+                },
             ],
         },
         {
@@ -461,6 +469,17 @@ const IMAGES: CreditGroup = {
                 oceanScene('Sand', 'images/sand.webp'),
                 oceanScene('Checker (debug)', 'images/basicChecker.png'),
                 pending('Cloud sprite', 'images/cloud10.png'),
+                {
+                    name: 'Inspiration screenshot',
+                    file: 'images/inspiration/rayman-inflatable-island.webp',
+                    title: 'Rayman Legends — "The Mysterious Inflatable Island"',
+                    author: 'Ubisoft',
+                    authorUrl: 'https://www.ubisoft.com/',
+                    note: {
+                        en: 'Shown on the notice board as the acknowledged visual reference for this scene. Rayman Legends and its artwork belong to Ubisoft; used here as a credited reference, not as project artwork.',
+                        pt: 'Exibida na placa como a referência visual assumida desta cena. Rayman Legends e sua arte pertencem à Ubisoft; usada aqui como referência creditada, não como arte do projeto.',
+                    },
+                },
                 {
                     ...pending('Fire spritesheet', 'images/fire_spritesheet.png'),
                     note: {

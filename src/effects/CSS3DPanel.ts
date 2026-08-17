@@ -274,8 +274,11 @@ export class CSS3DPanel {
     private _connectorMat: LineBasicMaterial | null = null;
     private _hasConnectorTarget = false;
     private _ctx = 0; private _cty = 0; private _ctz = 0;   // target world pos
-    readonly dismissOnOutsideClick: boolean;
     private _modal: boolean;
+    /** Modal panels grab the pointer AND dismiss on an outside click — the two
+     *  always travel together, so this reads straight off _modal rather than
+     *  being frozen at construction (see setModal). */
+    get dismissOnOutsideClick(): boolean { return this._modal; }
 
     private _wx = 0; private _wy = 0; private _wz = 0;
     private _visible = false;
@@ -302,7 +305,6 @@ export class CSS3DPanel {
         this._inkBounds = opts.inkBounds ?? false;
         this._anchor = opts.anchor ?? 'center';
         this._modal = opts.modal ?? false;
-        this.dismissOnOutsideClick = this._modal;
         if (opts.initialSize) {
             this._lastW = opts.initialSize.w;
             this._lastH = opts.initialSize.h;
@@ -551,6 +553,14 @@ export class CSS3DPanel {
         this._openT = 0;
         this._applyHidden();
     }
+
+    /** Flip modal on/off at runtime. A panel that is on screen the whole time but
+     *  only INTERACTIVE some of the time (the notice board's carousel: readable
+     *  from across the island, clickable only once zoomed in) has to be able to
+     *  hand the pointer back — while it wants the pointer the canvas is set to
+     *  pointer-events:none, which would otherwise kill every other scene
+     *  interaction for as long as the panel is visible. */
+    setModal(v: boolean): void { this._modal = v; }
 
     isVisible(): boolean { return this._visible; }
     isOpen(): boolean { return this._openTarget === 1; }

@@ -3741,3 +3741,159 @@ body.night-mode .ocean-carousel {
     box-shadow: var(--oc-frame-shadow);
 }
 
+
+/* ============================================================
+   NOTICE BOARD — the paper pinned to the board on the tree.
+
+   Hosted inside a CSS3DPanel (see scene/NoticeBoardPanel.ts), so it is
+   composited BEHIND the WebGL canvas and shown through a punched hole. Two
+   consequences shape everything below:
+
+     • The design box is a fixed 360×282 px. The panel converts px → world
+       units, so this is a layout at a fixed size, never a responsive one — no
+       media queries, no percentage heights that depend on a viewport.
+     • backdrop-filter is useless here (there is nothing behind it in the DOM to
+       blur — the scene is in a different layer), so the paper is painted with
+       flat fills and the "lit glass" comes from the WebGL pane in front.
+   ============================================================ */
+
+.nb-note {
+    width: 360px;
+    height: 282px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 10px 6px;
+    border-radius: 10px;
+    /* Aged paper. The corner staining is two soft radial washes rather than a
+       texture — it survives any scale the board is set to. */
+    background:
+        radial-gradient(120% 90% at 0% 0%,   rgba(148, 108, 58, 0.30), transparent 62%),
+        radial-gradient(120% 90% at 100% 100%, rgba(148, 108, 58, 0.26), transparent 62%),
+        #f3e7c9;
+    border: 3px solid #8d3a2c;
+    box-shadow: inset 0 0 0 2px rgba(243, 231, 201, 0.9),
+                inset 0 0 0 4px rgba(141, 58, 44, 0.4);
+    font-family: 'Pangolin', cursive, sans-serif;
+    color: #4a3520;
+    user-select: none;
+}
+
+/* ── Arrows, one at each end of the strip ──────────────────────────────────── */
+.nb-arrow {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 62px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: #8d3a2c;
+    /* Not interactive until the camera has zoomed in — the panel adds
+       .nb-interactive then (see NoticeBoardPanel). Until it does, the arrows are
+       a printed hint that there is more to read, not a control. */
+    cursor: default;
+    opacity: 0.45;
+    transition: opacity 0.18s ease, background-color 0.18s ease, transform 0.12s ease;
+}
+
+.nb-arrow svg { width: 22px; height: 22px; display: block; }
+
+.nb-interactive .nb-arrow {
+    cursor: pointer;
+    opacity: 0.9;
+}
+
+.nb-interactive .nb-arrow:hover {
+    background: rgba(141, 58, 44, 0.12);
+    opacity: 1;
+}
+
+.nb-interactive .nb-arrow:active {
+    transform: scale(0.9);
+}
+
+/* ── The stage the arrows page through ─────────────────────────────────────── */
+.nb-stage {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    text-align: center;
+}
+
+.nb-mark {
+    width: 52px;
+    height: 47px;
+    flex: 0 0 auto;
+    margin-bottom: 2px;
+}
+
+/* The inspiration slide is a 16:9 picture, not a badge — it gets the width. The
+   drawn fallback is stacked in the same box and hidden unless the real
+   screenshot fails to load (see wireSlide). */
+.nb-figure {
+    width: 230px;
+    height: 129px;
+    flex: 0 0 auto;
+    margin-bottom: 4px;
+}
+
+.nb-shot,
+.nb-figure .nb-mark-drawn {
+    width: 100%;
+    height: 100%;
+    display: block;
+    border-radius: 8px;
+    border: 2px solid rgba(141, 58, 44, 0.5);
+    box-sizing: border-box;
+}
+
+.nb-shot { object-fit: cover; }
+
+.nb-figure .nb-mark-drawn { display: none; }
+.nb-figure-missing .nb-shot { display: none; }
+.nb-figure-missing .nb-mark-drawn { display: block; }
+
+.nb-title {
+    margin: 0;
+    font-size: 25px;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: 0.5px;
+    color: #7d2f1c;
+}
+
+.nb-line {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.28;
+    color: #4a3520;
+}
+
+.nb-sign {
+    margin: 5px 0 0;
+    font-size: 12px;
+    font-style: italic;
+    color: rgba(74, 53, 32, 0.72);
+}
+
+/* The island slide trades badge size for artwork size, so its title steps down
+   to keep all four lines inside the fixed paper height. */
+.nb-slide-island .nb-title { font-size: 20px; }
+.nb-slide-island .nb-line  { font-size: 14px; }
+
+/* "LOST & FOUND" is short in English and long in Portuguese ("ACHADOS E
+   PERDIDOS"). The stage is only ~276px wide, so the longer of the two decides
+   the type scale — otherwise the title wraps in one language and not the other
+   and the slide's vertical rhythm changes with the language toggle. */
+.nb-slide-lost .nb-title { font-size: 21px; }
+.nb-slide-lost .nb-line  { font-size: 15px; }

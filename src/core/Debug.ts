@@ -162,6 +162,7 @@ import {
     dogBowl,
     dogBiscuit,
     noticeBoard,
+    pictureFrame,
     clusterMainPatches,
     clusterTreePatches,
     proceduralGrassMesh,
@@ -335,6 +336,7 @@ import {
     edgeFoamFadeEndZMobile as CFG_EF_FADE_END_Z_MOBILE,
 } from '../scene/config/OceanConfig';
 import { phoneZoomConfig, cabanaZoomConfig, cabanaRevealConfig, mainCameraConfig, noticeBoardZoomConfig, isWebPageMode, toggleCameraMode } from './Control';
+import { getNoticeSlide, setNoticeSlide, getNoticeSlideCount } from '../scene/NoticeBoardPanel';
 import { cabanaDomeRadius } from '../scene/config/CabanaConfig';
 import { mobileFov, mobileBreakpointWidth, aboveWaterBottomY as CFG_ABOVE_BOTTOM, aboveWaterBottomYMobile as CFG_ABOVE_BOTTOM_MOBILE, underwaterTopY as CFG_UNDER_TOP, underwaterTopYMobile as CFG_UNDER_TOP_MOBILE } from '../scene/config/CameraConfig';
 import { SetFOV, scene as threeScene } from './Scene';
@@ -792,6 +794,7 @@ function buildGUI(): void {
                 `export const dogBowlOffset          = { x: ${f(dogBowl.position.x          - ip.x)}, y: ${f(dogBowl.position.y          - ip.y)}, z: ${f(dogBowl.position.z          - ip.z)} };`,
                 `export const dogBiscuitOffset       = { x: ${f(dogBiscuit.position.x       - ip.x)}, y: ${f(dogBiscuit.position.y       - ip.y)}, z: ${f(dogBiscuit.position.z       - ip.z)} };`,
                 `export const noticeBoardOffset      = { x: ${f(noticeBoard.position.x      - ip.x)}, y: ${f(noticeBoard.position.y      - ip.y)}, z: ${f(noticeBoard.position.z      - ip.z)} };`,
+                `export const pictureFrameOffset     = { x: ${f(pictureFrame.position.x     - ip.x)}, y: ${f(pictureFrame.position.y     - ip.y)}, z: ${f(pictureFrame.position.z     - ip.z)} };`,
                 ``,
                 `// ── Scales ────────────────────────────────────────────────────────────────────`,
                 `export const islandScale      = ${f(island.scale.x)};`,
@@ -823,6 +826,7 @@ function buildGUI(): void {
                 `export const dogBowlScale          = ${f(dogBowl.scale.x)};`,
                 `export const dogBiscuitScale       = ${f(dogBiscuit.scale.x)};`,
                 `export const noticeBoardScale      = ${f(noticeBoard.scale.x)};`,
+                `export const pictureFrameScale     = ${f(pictureFrame.scale.x)};`,
                 ``,
                 `// ── Rotations ─────────────────────────────────────────────────────────────────`,
                 `export const treeRotY   = ${f(tree.rotation.y)};`,
@@ -852,6 +856,7 @@ function buildGUI(): void {
                 `export const dogBowlRot          = { x: ${f(dogBowl.rotation.x)},          y: ${f(dogBowl.rotation.y)},          z: ${f(dogBowl.rotation.z)} };`,
                 `export const dogBiscuitRot       = { x: ${f(dogBiscuit.rotation.x)},       y: ${f(dogBiscuit.rotation.y)},       z: ${f(dogBiscuit.rotation.z)} };`,
                 `export const noticeBoardRotY     = ${f(noticeBoard.rotation.y)};`,
+                `export const pictureFrameRotY    = ${f(pictureFrame.rotation.y)};`,
                 ``,
                 `// ── Island surface grass filter ──────────────────────────────────────────────`,
                 `export const ISLAND_SURFACE_GRASS_COLOR = '${Island.islandSurfaceGrassColor}'; // sRGB hex`,
@@ -1751,6 +1756,7 @@ function buildGUI(): void {
     // Notice board — placement plus the framing its click-zoom uses. The zoom
     // target is derived from the group's live transform (see registerNoticeBoardPose),
     // so dragging the Pos sliders while zoomed in carries the camera along.
+    addObjectFolder(surfaceFolder, 'Picture Frame', pictureFrame, { scaleRange: [0.05, 1.5], rotAxes: ['y'] });
     const noticeBoardFolder = addObjectFolder(surfaceFolder, 'Notice Board', noticeBoard, { scaleRange: [0.05, 1.5], rotAxes: ['y'] });
     const noticeBoardZoomFolder = noticeBoardFolder.addFolder('Zoom');
     noticeBoardZoomFolder.add(noticeBoardZoomConfig, 'dist',      0.2,  4.0,  0.01).name('Zoom Dist').listen();
@@ -1759,6 +1765,13 @@ function buildGUI(): void {
     noticeBoardZoomFolder.add(noticeBoardZoomConfig, 'mobileFov',  5,   80,   0.5 ).name('Zoom FOV (mobile)').listen();
     noticeBoardZoomFolder.add(noticeBoardZoomConfig, 'pitch', -Math.PI / 2, Math.PI / 2, 0.01).name('Zoom Pitch').listen();
     noticeBoardZoomFolder.close();
+    // Page the notice's carousel without having to zoom in and click the arrows.
+    const noticeSlideProxy = {
+        get slide() { return getNoticeSlide(); },
+        set slide(v: number) { setNoticeSlide(v); },
+    };
+    noticeBoardFolder.add(noticeSlideProxy, 'slide', 0, Math.max(0, getNoticeSlideCount() - 1), 1)
+        .name('Notice slide').listen();
 
     // ── Ocean Reflection ────────────────────────────────────────────────
     const reflProxy = {
