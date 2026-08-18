@@ -422,20 +422,33 @@ export function Start(): void {
             : guessInitialTier(),
     };
 
+    /**
+     * The two tiers now differ by ONE thing: the prop material.
+     *
+     * 'low' used to drop the pixel ratio to 1, switch shadows off, shrink the
+     * shadow map to 256 and kill the caustics as well — five changes at once,
+     * which made it impossible to know what any of them was actually worth. The
+     * question worth answering is whether the cheap material alone is enough,
+     * and it can only be answered if the material is the only variable.
+     *
+     * So everything else is held at the high-tier values in both branches. If
+     * the answer turns out to be yes, this switch stops needing to exist and
+     * Lambert simply becomes the scene's material.
+     */
     function applyQualityPreset(preset: string): void {
+        // Held identical across both tiers — deliberately not folded into a
+        // shared call, so it stays obvious that the two branches differ by one
+        // line and nothing else.
+        setDPR(2);
+        setShadowsEnabled(true);
+        setShadowResolution(2048);
+        setCausticsScale(1);
+
         switch (preset) {
             case 'low':
-                setDPR(1);
-                setShadowsEnabled(false);
-                setShadowResolution(256);
-                setCausticsScale(0);
                 setPropMaterials('lambert');   // cheap diffuse lighting on props
                 break;
             case 'high':
-                setDPR(2);
-                setShadowsEnabled(true);
-                setShadowResolution(2048);
-                setCausticsScale(1);
                 setPropMaterials('standard');
                 break;
         }
