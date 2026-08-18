@@ -23,6 +23,7 @@ import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
 import * as PhoneScreen from './PhoneScreen';
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
+import * as StutterProbe from './StutterProbe';
 
 // Scene-ready flag — scene renders from the very first frame so the sky is
 // visible behind the loading button.  Kept as a no-op export for clarity.
@@ -85,6 +86,9 @@ export const staticCamera = new PerspectiveCamera();
     fish: Fish.getDiagState(),
 });
 
+// Frame-cost probe. Off unless ?probe=1 / __probe.enable() — see StutterProbe.
+StutterProbe.Start(renderer);
+
 // Single shared CSS3DRenderer + scene — one preserve-3d container matches Henry
 export const cssRenderer = new CSS3DRenderer();
 export const cssScene = new Scene();
@@ -104,6 +108,66 @@ export const cameraForward = new Vector3();
 const _scratchLightDir = new Vector3();
 const _underwaterTransparentTargets: Object3D[] = [];
 const _depthExcludedTargets: Object3D[] = [];
+
+// ── Per-frame scratch for the render path ────────────────────────────────────
+//
+// Everything below exists to keep the underwater render path from ALLOCATING.
+// It used to build, every single frame: two arrays of {obj, vis} literals (one
+// per hidden target, one per scene child — dozens of objects), a Set, a couple
+// of filter()/map() intermediates and a spread. Underwater that is a few
+// hundred short-lived objects per frame, which is thousands per second, which
+// is a garbage collection every few seconds — a pause that lands wherever it
+// lands and reads as the scene stuttering for no reason. Above water most of
+// this path is skipped, which is exactly why the stutter has always seemed to
+// start at the waterline.
+//
+// Nothing about what gets rendered changes; only where the bookkeeping lives.
+
+/** A save/restore of `visible` flags that reuses its storage. Parallel arrays
+ *  rather than objects so nothing is allocated after the first few frames —
+ *  the backing arrays grow to the high-water mark and stay there. */
+class VisSnapshot {
+    readonly objs: Object3D[] = [];
+    readonly vis: boolean[] = [];
+    n = 0;
+
+    clear(): void { this.n = 0; }
+
+    /** Record obj's current visibility and hide it. */
+    hide(obj: Object3D): void {
+        this.objs[this.n] = obj;
+        this.vis[this.n] = obj.visible;
+        this.n++;
+        obj.visible = false;
+    }
+
+    /** Record obj's current visibility and set it to `v`. */
+    set(obj: Object3D, v: boolean): void {
+        this.objs[this.n] = obj;
+        this.vis[this.n] = obj.visible;
+        this.n++;
+        obj.visible = v;
+    }
+
+    restore(): void {
+        for (let i = 0; i < this.n; i++) this.objs[i].visible = this.vis[i];
+        this.n = 0;
+    }
+}
+
+/** Targets moved after the ocean pass (fish/bubbles/particles), hidden for the
+ *  main render. Read back by renderOnlyUnderwaterTransparents to know which of
+ *  them were actually visible. */
+const _afterOceanVis = new VisSnapshot();
+/** Heavy geometry hidden for the depth pre-pass. */
+const _depthExcludedVis = new VisSnapshot();
+/** Every scene child, for the underwater-transparents pass. */
+const _childrenVis = new VisSnapshot();
+/** The after-ocean target list, copied (never aliased — getUnderwaterTransparent-
+ *  Targets rebuilds its own array later in the same frame). */
+const _afterOceanTargets: Object3D[] = [];
+const _bubbleTargets: Object3D[] = [];
+const _targetSet = new Set<Object3D>();
 
 // Fire shadow map refreshes every Nth frame (see throttle in Update).
 // Re-rendering a shadow map means re-drawing every caster under the cone; every 6th
@@ -226,21 +290,10 @@ function getUnderwaterTransparentTargets(): Object3D[] {
 // as underwater content seen THROUGH the surface and must stay in the main
 // render so the surface shader blurs/tints them.
 function getBubbleTargets(): Object3D[] {
+    _bubbleTargets.length = 0;
     const bubbles = Bubbles.getRenderable();
-    return bubbles ? [bubbles] : [];
-}
-
-function hideTargets(targets: Object3D[]): Array<{ obj: Object3D; vis: boolean }> {
-    const saved: Array<{ obj: Object3D; vis: boolean }> = [];
-    for (const obj of targets) {
-        saved.push({ obj, vis: obj.visible });
-        obj.visible = false;
-    }
-    return saved;
-}
-
-function restoreVisibility(saved: Array<{ obj: Object3D; vis: boolean }>): void {
-    for (const item of saved) item.obj.visible = item.vis;
+    if (bubbles) _bubbleTargets.push(bubbles);
+    return _bubbleTargets;
 }
 
 // Objects that are irrelevant to depth-intersection foam but expensive to draw
@@ -291,23 +344,30 @@ function getDepthPrePassExcluded(): Object3D[] {
     return _depthExcludedTargets;
 }
 
-function hideDepthPrePassExcluded(): Array<{ obj: Object3D; vis: boolean }> {
-    const saved: Array<{ obj: Object3D; vis: boolean }> = [];
-    for (const obj of getDepthPrePassExcluded()) {
+function hideDepthPrePassExcluded(): void {
+    _depthExcludedVis.clear();
+    const excluded = getDepthPrePassExcluded();
+    for (let i = 0; i < excluded.length; i++) {
+        const obj = excluded[i];
         if (!obj.visible) continue; // already hidden by visibility gating — nothing to restore
-        saved.push({ obj, vis: obj.visible });
-        obj.visible = false;
+        _depthExcludedVis.hide(obj);
     }
-    return saved;
 }
 
-function renderOnlyUnderwaterTransparents(savedTargets: Array<{ obj: Object3D; vis: boolean }>): void {
-    const targetSet = new Set(savedTargets.filter(item => item.vis).map(item => item.obj));
-    if (targetSet.size === 0) return;
+/** Re-render ONLY the after-ocean targets from _afterOceanVis — the ones that
+ *  were visible before the main render hid them. */
+function renderOnlyUnderwaterTransparents(): void {
+    _targetSet.clear();
+    for (let i = 0; i < _afterOceanVis.n; i++) {
+        if (_afterOceanVis.vis[i]) _targetSet.add(_afterOceanVis.objs[i]);
+    }
+    if (_targetSet.size === 0) return;
 
-    const savedChildren = scene.children.map(obj => ({ obj, vis: obj.visible }));
-    for (const child of scene.children) {
-        child.visible = (child as any).isLight === true || targetSet.has(child);
+    _childrenVis.clear();
+    const children = scene.children;
+    for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        _childrenVis.set(child, (child as any).isLight === true || _targetSet.has(child));
     }
 
     const prevAutoClear = renderer.autoClear;
@@ -323,7 +383,7 @@ function renderOnlyUnderwaterTransparents(savedTargets: Array<{ obj: Object3D; v
     renderer.shadowMap.autoUpdate = prevShadowAutoUpdate;
     renderer.autoClear = prevAutoClear;
 
-    restoreVisibility(savedChildren);
+    _childrenVis.restore();
 }
 
 function renderSceneFrame(deepUnderwater: boolean, effectOnScreen: boolean): void {
@@ -344,13 +404,22 @@ function renderSceneFrame(deepUnderwater: boolean, effectOnScreen: boolean): voi
     //    and tints them wherever the water sits behind them in screen space — the
     //    reported bug. getAboveWaterParticleTargets() returns [] while none are
     //    alive, so the extra pass is skipped when nothing is playing/sleeping.
-    const afterOceanTargets = deepUnderwater
-        ? getUnderwaterTransparentTargets()
-        : (effectOnScreen ? getBubbleTargets() : []);
-    const combinedAfterOcean = [...afterOceanTargets, ...Island.getAboveWaterParticleTargets()];
-    const underwaterTransparentVis = combinedAfterOcean.length > 0
-        ? hideTargets(combinedAfterOcean)
-        : null;
+    _afterOceanTargets.length = 0;
+    if (deepUnderwater) {
+        const t = getUnderwaterTransparentTargets();
+        for (let i = 0; i < t.length; i++) _afterOceanTargets.push(t[i]);
+    } else if (effectOnScreen) {
+        const t = getBubbleTargets();
+        for (let i = 0; i < t.length; i++) _afterOceanTargets.push(t[i]);
+    }
+    // COPIED, not aliased: getDepthPrePassExcluded() below rebuilds
+    // _underwaterTransparentTargets in this same frame, which would rewrite the
+    // list out from under us if this held a reference to it.
+    const above = Island.getAboveWaterParticleTargets();
+    for (let i = 0; i < above.length; i++) _afterOceanTargets.push(above[i]);
+
+    _afterOceanVis.clear();
+    for (let i = 0; i < _afterOceanTargets.length; i++) _afterOceanVis.hide(_afterOceanTargets[i]);
 
     // Pre-pass: capture opaque scene depth into SceneDepth's depth target so
     // the ocean shader can do depth-intersection foam in this frame. Must run
@@ -367,9 +436,9 @@ function renderSceneFrame(deepUnderwater: boolean, effectOnScreen: boolean): voi
     // needs this depth — it is a pure screen-space over/under line (PostProcess.ts).
     const depthPassActive = (edgeFoamIntensityUniform.value as number) > 0;
     if (depthPassActive) {
-        const depthExcludedVis = hideDepthPrePassExcluded();
+        hideDepthPrePassExcluded();
         SceneDepth.capture(renderer, scene, camera);
-        restoreVisibility(depthExcludedVis);
+        _depthExcludedVis.restore();
     }
     sceneDepthUniform.value = SceneDepth.getDepthTexture();
     updateSceneDepthCamera(camera);
@@ -378,9 +447,9 @@ function renderSceneFrame(deepUnderwater: boolean, effectOnScreen: boolean): voi
         // Skip the ocean surface pass while sealed inside the cabana — the dome
         // hides it and the camera is above water, so it's pure waste.
         if (!Island.isCabanaSealed()) Ocean.RenderSurface(renderer, camera);
-        if (underwaterTransparentVis) {
-            renderOnlyUnderwaterTransparents(underwaterTransparentVis);
-            restoreVisibility(underwaterTransparentVis);
+        if (_afterOceanVis.n > 0) {
+            renderOnlyUnderwaterTransparents();
+            _afterOceanVis.restore();
         }
     });
 }
@@ -1047,6 +1116,7 @@ export function Update(): void
     // (camera parked at introStartY, WebGL canvas behind the loading overlay).
     // This frees the GPU entirely for model downloads and decoding.
     if (!_sceneReady) return;
+    StutterProbe.beginFrame();
 
     const isUnderwater = getIsUnderwater();
 
@@ -1238,6 +1308,9 @@ export function Update(): void
     // Wind lines 3D update — moves ribbon meshes and updates vertex positions
     WindLines.Update(deltaTime, camera.position.x, camera.position.y, camera.position.z, camera.fov);
 
+    // Close the probe's frame — must be after every render call above, so the
+    // draw-call and upload counters cover the whole frame.
+    StutterProbe.endFrame(camera, isUnderwater);
 }
 
 // Shadow configuration helpers

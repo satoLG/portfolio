@@ -645,8 +645,14 @@ export const aboveWaterParticles = new Group();
 
 /** Targets that must be re-rendered on top of the ocean surface. Empty while no
  *  notes/Zs are alive so Scene.ts can skip the extra pass entirely. */
+// Reused across frames: this is called every frame from the render path, and a
+// fresh array each time is per-frame garbage for no reason. Treat the result as
+// read-only and don't hold on to it.
+const _aboveWaterTargets: Object3D[] = [];
 export function getAboveWaterParticleTargets(): Object3D[] {
-    return aboveWaterParticles.children.length > 0 ? [aboveWaterParticles] : [];
+    _aboveWaterTargets.length = 0;
+    if (aboveWaterParticles.children.length > 0) _aboveWaterTargets.push(aboveWaterParticles);
+    return _aboveWaterTargets;
 }
 
 // Music note particles for radio
