@@ -15,23 +15,28 @@
  * Adding more prewarm for the wrong one costs loading time and memory and fixes
  * nothing, which is roughly the history of this problem. So this measures.
  *
- * OFF by default and free when off — two boolean checks per frame, no
- * allocation, nothing rendered, nothing logged.
+ * OFF by default and nearly free when off — two boolean checks per frame, no
+ * allocation, nothing rendered, nothing drawn.
  *
- * ── Using it ────────────────────────────────────────────────────────────────
- *   Load the page with ?probe=1, or run __probe.enable() in the console at any
- *   time (it persists, so a reload keeps collecting). Then do the thing that
- *   stutters. Spikes print as they happen; afterwards:
+ * ── Opening it ──────────────────────────────────────────────────────────────
  *
- *     __probe.report()    the worst frames, with what jumped on each
- *     __probe.summary()   p50/p95/p99, and what the spikes are blamed on
- *     __probe.reset()     start a fresh measurement
- *     __probe.disable()
+ *   PHONE:    tap anywhere with THREE FINGERS. One finger drags the camera and
+ *             two scroll it, so three is the first gesture the scene does not
+ *             already own — and it works with no keyboard, no URL bar and no
+ *             console, which is the whole point.
+ *   DESKTOP:  the same three-finger tap, or ?probe=1, or __probe.enable().
  *
- * The verdict to read for: if spikes carry programs>0 the prewarm has a hole
- * and more preloading is the answer. If they carry uploads the same. If they
- * carry neither, preloading is NOT the lever and the fix is in the frame's own
- * work — which is a different job entirely.
+ * It stays on across reloads until switched off again, so a reload-and-repeat
+ * test does not need re-arming.
+ *
+ * ── Reading it ──────────────────────────────────────────────────────────────
+ *
+ * The verdict line is the answer. If the spikes are blamed on SHADER or UPLOAD
+ * the prewarm has a hole and preloading more is the fix. If they are blamed on
+ * frame cost or GC, preloading is NOT the lever and the work is elsewhere.
+ *
+ * Hit ZERAR at the top of the thing you want to measure (right before a dive),
+ * so page-load spikes don't drown out what you are actually looking at.
  */
 
 import type { PerspectiveCamera, WebGLRenderer } from 'three';
@@ -40,11 +45,13 @@ const STORAGE_KEY = 'portfolio-probe';
 /** A frame slower than this is a spike worth recording. ~2 dropped frames at
  *  60Hz — below that it is jitter, not something a person calls a stutter. */
 const DEFAULT_SPIKE_MS = 34;
-/** Worst frames kept for the report. */
+/** Worst frames kept. Only the top few are shown; the rest feed the verdict. */
 const RING = 64;
-/** Spike lines printed before going quiet, so a bad stretch cannot flood the
- *  console (and cost more than what it is measuring). */
-const MAX_LOGGED = 40;
+/** Spikes listed in the overlay. */
+const SHOWN = 6;
+/** The overlay repaints at this interval, not per frame — an instrument that
+ *  costs what it measures is worthless. */
+const REPAINT_MS = 250;
 
 interface FrameRecord {
     at: number;          // ms since probe start
@@ -55,47 +62,260 @@ interface FrameRecord {
     textures: number;    // net texture allocations
     calls: number;       // draw calls issued this frame (all passes)
     triangles: number;
-    heapMB: number;      // JS heap after the frame (Chrome only, else 0)
+    heapMB: number;      // JS heap after the frame (Chrome/Android only, else 0)
     heapDeltaMB: number; // negative = a GC ran
     camY: number;
     underwater: boolean;
-    verdict: string;
+    cause: Cause;
+    detail: string;
 }
+
+/** Deliberately coarse: these are the four things worth telling apart, because
+ *  each one points at a different fix. */
+type Cause = 'shader' | 'upload' | 'gc' | 'cpu' | 'gpu';
+
+const CAUSE_LABEL: Record<Cause, string> = {
+    shader: 'SHADER',
+    upload: 'UPLOAD',
+    gc:     'GC',
+    cpu:    'CPU',
+    gpu:    'FRAME',
+};
+
+/** What each verdict means for what to do next — the actionable half. */
+const CAUSE_VERDICT: Record<Cause, string> = {
+    shader: 'shader compilando em cena → falta prewarm',
+    upload: 'textura/geometria subindo → falta prewarm',
+    gc:     'coleta de lixo → algo aloca por frame',
+    cpu:    'CPU no Update() → trabalho por frame',
+    gpu:    'custo do frame → NÃO é preload',
+};
+
+/** Tie-break order for the verdict. A run with as many shader spikes as
+ *  expensive frames should report the SHADER — it is the one with a known fix,
+ *  and calling the tie the other way would send the reader off to rewrite a
+ *  render path when a prewarm line was missing. */
+const CAUSE_PRIORITY: Cause[] = ['shader', 'upload', 'gc', 'cpu', 'gpu'];
+
+const CAUSE_COLOR: Record<Cause, string> = {
+    shader: '#ff6b6b',
+    upload: '#ffa94d',
+    gc:     '#ffd43b',
+    cpu:    '#74c0fc',
+    gpu:    '#8ce99a',
+};
 
 let _enabled = false;
 let _renderer: WebGLRenderer | null = null;
 let _startedAt = 0;
 let _spikeMs = DEFAULT_SPIKE_MS;
-let _logged = 0;
 
 // Previous-frame counters, to turn absolutes into per-frame deltas.
-let _prevBegin = 0;
 let _beginAt = 0;
+
+/**
+ * The frame whose counters are known but whose duration is not yet.
+ *
+ * A frame's COST and a frame's COUNTERS land at different moments and pairing
+ * them naively blames the wrong frame — which is fatal for an instrument whose
+ * entire job is attribution. The counters for frame N are final when Update()
+ * returns (endFrame). But the frame's real duration only becomes measurable at
+ * the START of frame N+1: we issue draw calls and return, and the GPU is still
+ * working — a stall shows up as a long gap before the next rAF, not as time
+ * spent inside our own Update.
+ *
+ * So endFrame stashes the counters here and beginFrame closes the record one
+ * frame later, with the period that actually contains that frame's GPU work.
+ * One reused object; nothing allocates per frame.
+ */
+const _pending = {
+    live: false,
+    beganAt: 0,
+    cpuMs: 0,
+    programs: 0, geometries: 0, textures: 0,
+    calls: 0, triangles: 0,
+    heapMB: 0, heapDeltaMB: 0,
+    camY: 0, underwater: false,
+};
 let _prevPrograms = 0;
 let _prevGeometries = 0;
 let _prevTextures = 0;
 let _prevHeap = 0;
+let _lastPaint = 0;
+let _liveCalls = 0;
+let _liveHeap = 0;
 
-/** Every frame time seen, for percentiles. Plain number[] — a session's worth
- *  of frames is a few hundred KB and this only exists while probing. */
+/** Every frame time seen, for percentiles. */
 let _all: number[] = [];
-/** The worst frames, kept sorted worst-first, capped at RING. */
+/** The worst frames, sorted worst-first, capped at RING. */
 let _worst: FrameRecord[] = [];
+
+// ── Overlay ──────────────────────────────────────────────────────────────────
+
+let _root: HTMLDivElement | null = null;
+let _body: HTMLDivElement | null = null;
+
+function _buildOverlay(): void {
+    if (_root) return;
+
+    const root = document.createElement('div');
+    root.id = 'stutter-probe';
+    // pointer-events:none on the shell so the panel never eats a drag meant for
+    // the scene — only the two buttons opt back in.
+    root.style.cssText = [
+        'position:fixed',
+        'top:calc(8px + env(safe-area-inset-top,0px))',
+        'left:calc(8px + env(safe-area-inset-left,0px))',
+        'width:min(320px,86vw)',
+        'z-index:2147483000',
+        'pointer-events:none',
+        'font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace',
+        'color:#dfe9f5',
+        'background:rgba(8,12,18,0.86)',
+        '-webkit-backdrop-filter:blur(3px)',
+        'backdrop-filter:blur(3px)',
+        'border:1px solid rgba(255,255,255,0.16)',
+        'border-radius:9px',
+        'padding:8px 9px',
+        'box-shadow:0 4px 18px rgba(0,0,0,0.45)',
+        'user-select:none',
+        '-webkit-user-select:none',
+    ].join(';');
+
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:6px';
+
+    // Tapping the title collapses to the header line alone — a one-line HUD to
+    // play with, expanded when there is something to read.
+    const title = document.createElement('div');
+    title.textContent = 'PROBE ▾';
+    title.style.cssText = 'flex:1;letter-spacing:1px;opacity:0.65;font-weight:700;pointer-events:auto;cursor:pointer';
+    title.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        const hidden = _body!.style.display === 'none';
+        _body!.style.display = hidden ? '' : 'none';
+        title.textContent = hidden ? 'PROBE ▾' : 'PROBE ▸';
+    });
+
+    const mkBtn = (label: string, onTap: () => void) => {
+        const b = document.createElement('button');
+        b.textContent = label;
+        b.style.cssText = [
+            'pointer-events:auto',
+            'font:inherit',
+            'color:#dfe9f5',
+            'background:rgba(255,255,255,0.10)',
+            'border:1px solid rgba(255,255,255,0.20)',
+            'border-radius:6px',
+            'padding:4px 9px',
+            'touch-action:manipulation',
+            'cursor:pointer',
+        ].join(';');
+        // pointerdown, not click: the scene's own listeners are aggressive about
+        // swallowing taps, and the panel must respond even mid-interaction.
+        b.addEventListener('pointerdown', (e) => { e.stopPropagation(); onTap(); });
+        return b;
+    };
+
+    bar.append(title, mkBtn('zerar', reset), mkBtn('✕', disable));
+
+    const body = document.createElement('div');
+    _body = body;
+
+    root.append(bar, body);
+    document.body.appendChild(root);
+    _root = root;
+}
+
+function _pct(sorted: number[], p: number): number {
+    if (sorted.length === 0) return 0;
+    return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+}
+
+function _esc(s: string): string {
+    return s.replace(/[&<>]/g, c => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'));
+}
+
+function _paint(): void {
+    if (!_body) return;
+
+    const sorted = [..._all].sort((a, b) => a - b);
+    const p50 = _pct(sorted, 0.5);
+    const p95 = _pct(sorted, 0.95);
+    const p99 = _pct(sorted, 0.99);
+    const max = sorted.length > 0 ? sorted[sorted.length - 1] : 0;
+    const fps = p50 > 0 ? 1000 / p50 : 0;
+
+    // Tally across every spike, not just the shown ones — a run is usually a
+    // mixture, and which mixture it is IS the finding.
+    const tally = new Map<Cause, number>();
+    for (const r of _worst) tally.set(r.cause, (tally.get(r.cause) ?? 0) + 1);
+    let top: Cause | null = null;
+    let topN = 0;
+    for (const c of CAUSE_PRIORITY) {
+        const n = tally.get(c) ?? 0;
+        if (n > topN) { top = c; topN = n; }   // strict >, so priority order breaks ties
+    }
+    const mix = CAUSE_PRIORITY
+        .filter(c => tally.has(c))
+        .map(c => `<span style="color:${CAUSE_COLOR[c]}">${CAUSE_LABEL[c]} ${tally.get(c)}</span>`)
+        .join(' <span style="opacity:0.3">·</span> ');
+
+    const rows = _worst.slice(0, SHOWN).map(r => `
+        <div style="display:flex;gap:6px;white-space:nowrap">
+            <span style="width:52px;text-align:right;color:${CAUSE_COLOR[r.cause]}">${r.frameMs.toFixed(0)}ms</span>
+            <span style="width:56px;opacity:0.6">y ${r.camY.toFixed(1)}</span>
+            <span style="color:${CAUSE_COLOR[r.cause]};font-weight:700">${CAUSE_LABEL[r.cause]}</span>
+            <span style="opacity:0.6;overflow:hidden;text-overflow:ellipsis">${_esc(r.detail)}</span>
+        </div>`).join('');
+
+    const verdict = top
+        ? `<div style="margin-top:7px;padding:5px 6px;border-radius:5px;white-space:normal;
+                       background:${CAUSE_COLOR[top]}22;border-left:3px solid ${CAUSE_COLOR[top]}">
+             <b style="color:${CAUSE_COLOR[top]}">${topN}/${_worst.length}</b> ${CAUSE_VERDICT[top]}
+           </div>`
+        : `<div style="margin-top:7px;opacity:0.55">sem picos acima de ${_spikeMs}ms — mexa na cena</div>`;
+
+
+    _body.innerHTML = `
+        <div style="display:flex;gap:10px;margin-bottom:5px">
+            <span><b style="font-size:14px">${fps.toFixed(0)}</b> fps</span>
+            <span style="opacity:0.75">p50 ${p50.toFixed(0)}</span>
+            <span style="opacity:0.75">p95 ${p95.toFixed(0)}</span>
+            <span style="opacity:0.75">p99 ${p99.toFixed(0)}</span>
+            <span style="opacity:0.75">max ${max.toFixed(0)}</span>
+        </div>
+        <div style="opacity:0.55;margin-bottom:6px">
+            ${_all.length} frames · ${_liveCalls} draws${_liveHeap > 0 ? ` · ${_liveHeap.toFixed(0)}MB` : ''}
+        </div>
+        <div style="display:flex;gap:6px;opacity:0.65;letter-spacing:0.5px;margin-bottom:3px">
+            <span>PICOS &gt;${_spikeMs}ms (${_worst.length})</span>
+        </div>
+        ${rows || '<div style="opacity:0.4">—</div>'}
+        ${mix ? `<div style="margin-top:5px;white-space:normal">${mix}</div>` : ''}
+        ${verdict}`;
+}
+
+// ── Measurement ──────────────────────────────────────────────────────────────
 
 function _heapMB(): number {
     const mem = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
     return mem ? mem.usedJSHeapSize / (1024 * 1024) : 0;
 }
 
-/** What to blame this frame on, in priority order. The first three are things
- *  a prewarm can fix; the last two are not. */
-function _verdict(r: Omit<FrameRecord, 'verdict'>): string {
-    if (r.programs > 0)   return `SHADER COMPILE (${r.programs} program${r.programs > 1 ? 's' : ''}) — prewarm missed a variant`;
-    if (r.textures > 0)   return `TEXTURE UPLOAD (+${r.textures}) — asset not warmed`;
-    if (r.geometries > 0) return `GEOMETRY UPLOAD (+${r.geometries}) — asset not warmed`;
-    if (r.heapDeltaMB < -2) return `GC (heap dropped ${(-r.heapDeltaMB).toFixed(1)} MB)`;
-    if (r.cpuMs > r.frameMs * 0.6) return `CPU in Update() (${r.cpuMs.toFixed(1)} of ${r.frameMs.toFixed(1)} ms)`;
-    return `GPU / frame cost (${r.calls} draw calls, ${(r.triangles / 1000).toFixed(0)}k tris) — not a first-touch cost`;
+/** What to blame this frame on, in priority order. The first two are things a
+ *  prewarm can fix; the rest are not. */
+function _blame(r: Omit<FrameRecord, 'cause' | 'detail'>): { cause: Cause; detail: string } {
+    if (r.programs > 0) return { cause: 'shader', detail: `+${r.programs} prog` };
+    if (r.textures > 0 || r.geometries > 0) {
+        const parts: string[] = [];
+        if (r.textures > 0) parts.push(`+${r.textures} tex`);
+        if (r.geometries > 0) parts.push(`+${r.geometries} geo`);
+        return { cause: 'upload', detail: parts.join(' ') };
+    }
+    if (r.heapDeltaMB < -2) return { cause: 'gc', detail: `-${(-r.heapDeltaMB).toFixed(0)}MB` };
+    if (r.cpuMs > r.frameMs * 0.6) return { cause: 'cpu', detail: `${r.cpuMs.toFixed(0)}ms js` };
+    return { cause: 'gpu', detail: `${r.calls} draws` };
 }
 
 function _readCounters() {
@@ -109,8 +329,12 @@ function _readCounters() {
     };
 }
 
-function _activate(): void {
-    if (_enabled || !_renderer) return;
+// ── Public ───────────────────────────────────────────────────────────────────
+
+export function enable(): void {
+    if (!_renderer) return;
+    localStorage.setItem(STORAGE_KEY, '1');
+    if (_enabled) return;
     _enabled = true;
     // Draw calls reset at the top of every renderer.render(), and a frame here
     // issues several (depth pre-pass, main, ocean, the underwater transparent
@@ -118,42 +342,27 @@ function _activate(): void {
     // per FRAME rather than per last-pass. Nothing else in the project reads
     // renderer.info, and this only ever happens while probing.
     _renderer.info.autoReset = false;
+    _buildOverlay();
     reset();
-    console.log(
-        `%c[probe] on%c — spikes over ${_spikeMs}ms will print. __probe.report() / __probe.summary() when done.`,
-        'background:#2d7;color:#000;padding:1px 5px;border-radius:3px', '',
-    );
+    _paint();
 }
 
-/** Call once, from Scene.Start, as soon as the renderer exists. */
-export function Start(renderer: WebGLRenderer): void {
-    _renderer = renderer;
+export function disable(): void {
+    localStorage.removeItem(STORAGE_KEY);
+    _enabled = false;
+    if (_renderer) _renderer.info.autoReset = true;
+    _root?.remove();
+    _root = null;
+    _body = null;
+}
 
-    const params = new URLSearchParams(location.search);
-    const on = params.get('probe') === '1' || localStorage.getItem(STORAGE_KEY) === '1';
-
-    (window as unknown as { __probe: unknown }).__probe = {
-        enable() { localStorage.setItem(STORAGE_KEY, '1'); _activate(); },
-        disable() {
-            localStorage.removeItem(STORAGE_KEY);
-            _enabled = false;
-            if (_renderer) _renderer.info.autoReset = true;
-            console.log('[probe] off');
-        },
-        /** Change what counts as a spike (ms). */
-        threshold(ms: number) { _spikeMs = ms; console.log(`[probe] spike threshold = ${ms}ms`); },
-        reset,
-        report,
-        summary,
-    };
-
-    if (on) _activate();
+export function toggle(): void {
+    _enabled ? disable() : enable();
 }
 
 export function reset(): void {
     _startedAt = performance.now();
-    _prevBegin = 0;
-    _logged = 0;
+    _pending.live = false;
     _all = [];
     _worst = [];
     if (_renderer) {
@@ -163,12 +372,76 @@ export function reset(): void {
         _prevTextures = c.textures;
     }
     _prevHeap = _heapMB();
+    _paint();
+}
+
+/** Change what counts as a spike (ms). */
+export function threshold(ms: number): void { _spikeMs = ms; _paint(); }
+
+/** Call once, from Scene.ts, as soon as the renderer exists. */
+export function Start(renderer: WebGLRenderer): void {
+    _renderer = renderer;
+
+    (window as unknown as { __probe: unknown }).__probe = { enable, disable, toggle, reset, threshold };
+
+    // THREE-FINGER TAP opens it. One finger drags the camera, two scroll it —
+    // three is the first gesture nothing else in the scene claims, and unlike a
+    // corner hot-zone it cannot collide with UI that moves around. Passive and
+    // never preventDefault: this must not be able to break normal input even if
+    // the detection is wrong.
+    let armed = false;
+    window.addEventListener('touchstart', (e: TouchEvent) => {
+        if (e.touches.length === 3) armed = true;
+        else if (e.touches.length > 3) armed = false;
+    }, { passive: true, capture: true });
+    window.addEventListener('touchend', (e: TouchEvent) => {
+        // Fires as the fingers lift; only the transition out of a 3-touch state
+        // counts, so a 3-finger drag that ends anywhere still toggles once.
+        if (armed && e.touches.length === 0) { armed = false; toggle(); }
+    }, { passive: true, capture: true });
+
+    const params = new URLSearchParams(location.search);
+    if (params.get('probe') === '1' || localStorage.getItem(STORAGE_KEY) === '1') enable();
+}
+
+/** Close the previous frame's record now that its full period is known. */
+function _closePending(now: number): void {
+    if (!_pending.live) return;
+    _pending.live = false;
+
+    const frameMs = now - _pending.beganAt;
+    _all.push(frameMs);
+    if (frameMs < _spikeMs) return;
+
+    const base = {
+        at: now - _startedAt,
+        frameMs,
+        cpuMs: _pending.cpuMs,
+        programs: _pending.programs,
+        geometries: _pending.geometries,
+        textures: _pending.textures,
+        calls: _pending.calls,
+        triangles: _pending.triangles,
+        heapMB: _pending.heapMB,
+        heapDeltaMB: _pending.heapDeltaMB,
+        camY: _pending.camY,
+        underwater: _pending.underwater,
+    };
+    const rec: FrameRecord = { ...base, ..._blame(base) };
+
+    // Keep only the worst RING frames, worst first.
+    let i = _worst.length;
+    while (i > 0 && _worst[i - 1].frameMs < rec.frameMs) i--;
+    _worst.splice(i, 0, rec);
+    if (_worst.length > RING) _worst.length = RING;
 }
 
 /** Top of Update(), after the scene-ready gate. */
 export function beginFrame(): void {
     if (!_enabled || !_renderer) return;
-    _beginAt = performance.now();
+    const now = performance.now();
+    _closePending(now);
+    _beginAt = now;
     _renderer.info.reset();
 }
 
@@ -177,91 +450,32 @@ export function endFrame(camera: PerspectiveCamera, underwater: boolean): void {
     if (!_enabled || !_renderer) return;
 
     const now = performance.now();
-    const cpuMs = now - _beginAt;
-    // First frame has no predecessor to measure a period against.
-    const frameMs = _prevBegin > 0 ? _beginAt - _prevBegin : cpuMs;
-    _prevBegin = _beginAt;
-
     const c = _readCounters();
     const heapMB = _heapMB();
+    _liveCalls = c.calls;
+    _liveHeap = heapMB;
 
-    const base = {
-        at: now - _startedAt,
-        frameMs,
-        cpuMs,
-        programs:   c.programs   - _prevPrograms,
-        geometries: c.geometries - _prevGeometries,
-        textures:   c.textures   - _prevTextures,
-        calls: c.calls,
-        triangles: c.triangles,
-        heapMB,
-        heapDeltaMB: _prevHeap > 0 ? heapMB - _prevHeap : 0,
-        camY: camera.position.y,
-        underwater,
-    };
+    // Stash — the duration this belongs to is only known next frame.
+    _pending.live = true;
+    _pending.beganAt = _beginAt;
+    _pending.cpuMs = now - _beginAt;
+    _pending.programs   = c.programs   - _prevPrograms;
+    _pending.geometries = c.geometries - _prevGeometries;
+    _pending.textures   = c.textures   - _prevTextures;
+    _pending.calls = c.calls;
+    _pending.triangles = c.triangles;
+    _pending.heapMB = heapMB;
+    _pending.heapDeltaMB = _prevHeap > 0 ? heapMB - _prevHeap : 0;
+    _pending.camY = camera.position.y;
+    _pending.underwater = underwater;
+
     _prevPrograms = c.programs;
     _prevGeometries = c.geometries;
     _prevTextures = c.textures;
     _prevHeap = heapMB;
 
-    _all.push(frameMs);
-    if (frameMs < _spikeMs) return;
-
-    const rec: FrameRecord = { ...base, verdict: _verdict(base) };
-
-    // Keep only the worst RING frames, worst first.
-    let i = _worst.length;
-    while (i > 0 && _worst[i - 1].frameMs < rec.frameMs) i--;
-    _worst.splice(i, 0, rec);
-    if (_worst.length > RING) _worst.length = RING;
-
-    if (_logged < MAX_LOGGED) {
-        _logged++;
-        console.warn(
-            `[probe] ${frameMs.toFixed(1)}ms  (cpu ${cpuMs.toFixed(1)})  ` +
-            `y=${rec.camY.toFixed(2)}${underwater ? ' underwater' : ''}  →  ${rec.verdict}`,
-        );
-        if (_logged === MAX_LOGGED) console.warn('[probe] further spikes are recorded but no longer printed — __probe.report()');
-    }
-}
-
-/** The worst frames, with what jumped on each. */
-export function report(): void {
-    if (_worst.length === 0) { console.log('[probe] no spikes recorded'); return; }
-    console.table(_worst.map(r => ({
-        't (s)': (r.at / 1000).toFixed(1),
-        'frame ms': r.frameMs.toFixed(1),
-        'cpu ms': r.cpuMs.toFixed(1),
-        'new programs': r.programs,
-        'new textures': r.textures,
-        'new geoms': r.geometries,
-        'draw calls': r.calls,
-        'heap Δ MB': r.heapDeltaMB.toFixed(1),
-        'cam y': r.camY.toFixed(2),
-        verdict: r.verdict,
-    })));
-}
-
-/** Distribution, plus what the spikes are blamed on overall. */
-export function summary(): void {
-    if (_all.length === 0) { console.log('[probe] nothing recorded'); return; }
-    const sorted = [..._all].sort((a, b) => a - b);
-    const at = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
-
-    const causes = new Map<string, number>();
-    for (const r of _worst) {
-        const key = r.verdict.split(' (')[0].split(' —')[0];
-        causes.set(key, (causes.get(key) ?? 0) + 1);
-    }
-
-    console.log(
-        `[probe] ${_all.length} frames over ${((performance.now() - _startedAt) / 1000).toFixed(0)}s\n` +
-        `  p50 ${at(0.5).toFixed(1)}ms   p95 ${at(0.95).toFixed(1)}ms   ` +
-        `p99 ${at(0.99).toFixed(1)}ms   max ${sorted[sorted.length - 1].toFixed(1)}ms\n` +
-        `  spikes over ${_spikeMs}ms: ${_worst.length}${_worst.length === RING ? '+ (ring full)' : ''}`,
-    );
-    if (causes.size > 0) {
-        console.log('  worst frames blamed on:');
-        for (const [cause, n] of [...causes].sort((a, b) => b[1] - a[1])) console.log(`    ${n}x  ${cause}`);
+    if (now - _lastPaint >= REPAINT_MS) {
+        _lastPaint = now;
+        _paint();
     }
 }
