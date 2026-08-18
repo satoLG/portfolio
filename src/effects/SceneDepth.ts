@@ -113,8 +113,8 @@ export function capture(renderer: WebGLRenderer, scene: ThreeScene, camera: Came
     const prevOverride = scene.overrideMaterial;
     // This depth-only pass uses MeshDepthMaterial and receives no shadows, but
     // renderer.render() re-renders every shadow map at the top of the call when
-    // shadowMap.autoUpdate is on (the default). That would render the VSM maps
-    // (+ blur pass) a second time per frame for nothing. Suspend shadow updates
+    // shadowMap.autoUpdate is on (the default). That would render every shadow
+    // map a second time per frame for nothing. Suspend shadow updates
     // during the pre-pass; the main render right after re-enables and renders
     // them exactly once.
     const prevShadowAutoUpdate = renderer.shadowMap.autoUpdate;

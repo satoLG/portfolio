@@ -3777,15 +3777,22 @@ body.night-mode .ocean-carousel {
     position: relative;
     /* Aged paper, in three layers that all survive being scaled to any size the
        board is set to:
-         1. fibre grain — an feTurbulence tile, multiplied into the sheet so it
+         1. fibre grain — a seamless noise tile, multiplied into the sheet so it
             darkens the fill rather than fogging it;
          2. corner staining — two soft radial washes;
          3. the base stock colour.
+       The grain used to be an inline feTurbulence data URI. An SVG filter is not
+       an image — the browser RUNS it to rasterize the tile, and re-runs it at
+       every new resolution the tile is needed at, which for DOM inside a CSS3D
+       transform means on every zoom of the board. Four octaves of fractal noise,
+       recomputed live. It is the same noise, baked once by
+       scripts/render-paper-grain.cjs and committed, so the browser now decodes
+       an image and tiles it.
        The lighting is NOT here. It comes from the lit pane in front of this DOM
        (glassMode: 'paper'), which multiplies the whole sheet by the scene's
        light — see NoticeBoardPanel. */
     background-image:
-        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='140' height='140' filter='url(%23g)' opacity='0.42'/></svg>"),
+        url('/images/paper/grain-sheet.webp'),
         radial-gradient(120% 90% at 0% 0%,   rgba(148, 108, 58, 0.30), transparent 62%),
         radial-gradient(120% 90% at 100% 100%, rgba(148, 108, 58, 0.26), transparent 62%),
         linear-gradient(#f3e7c9, #f3e7c9);
@@ -3943,9 +3950,11 @@ body.night-mode .ocean-carousel {
     padding: 8px 10px 4px;
     border-radius: 10px;
     /* Same stock as the notice — the two sheets are pinned to the same board
-       and reading as different paper would be worse than reading as identical. */
+       and reading as different paper would be worse than reading as identical.
+       Literally the same tile, too: the two used identical turbulence and
+       differed only in their filter id. */
     background-image:
-        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='g2'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='140' height='140' filter='url(%23g2)' opacity='0.42'/></svg>"),
+        url('/images/paper/grain-sheet.webp'),
         radial-gradient(120% 90% at 0% 0%,   rgba(148, 108, 58, 0.30), transparent 62%),
         radial-gradient(120% 90% at 100% 100%, rgba(148, 108, 58, 0.26), transparent 62%),
         linear-gradient(#f3e7c9, #f3e7c9);
@@ -4132,9 +4141,12 @@ body.day-mode .ach-toast {
     box-sizing: border-box;
     /* Same paper recipe as the sheets above, tinted by the note's own colour
        instead of the cream stock: fibre grain multiplied in, then a soft
-       vignette so the sheet has a body rather than being a flat swatch. */
+       vignette so the sheet has a body rather than being a flat swatch. Its own
+       finer tile — see the note on .nb-note for why it is baked rather than
+       filtered live; with up to two dozen notes on the wall this is the one
+       that mattered most. */
     background-image:
-        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='90' height='90'><filter id='g3'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='90' height='90' filter='url(%23g3)' opacity='0.34'/></svg>"),
+        url('/images/paper/grain-postit.webp'),
         linear-gradient(160deg, rgba(255, 255, 255, 0.28), rgba(120, 90, 30, 0.16)),
         linear-gradient(var(--pw-color, #f7e06a), var(--pw-color, #f7e06a));
     background-blend-mode: multiply, normal, normal;

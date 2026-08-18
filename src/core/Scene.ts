@@ -106,7 +106,7 @@ const _underwaterTransparentTargets: Object3D[] = [];
 const _depthExcludedTargets: Object3D[] = [];
 
 // Fire shadow map refreshes every Nth frame (see throttle in Update).
-// On mobile with medium/high quality the VSM blur is expensive; every 6th
+// Re-rendering a shadow map means re-drawing every caster under the cone; every 6th
 // frame (≈10fps shadow updates at 60fps) is imperceptible for a near-static
 // caster (only the gently-breathing pug moves under the cone).
 const FIRE_SHADOW_UPDATE_INTERVAL = isMobile ? 6 : 3;
@@ -393,7 +393,9 @@ export function setShadowsEnabled(value: boolean): void
     
     // Dispose shadow map textures so Three.js recreates them fresh
     // VSM uses two render targets: shadow.map (main) and shadow.mapPass (blur pass).
-    // Both must be cleared — leaving mapPass causes size mismatch and shadows disappear.
+    // Both must be cleared — leaving mapPass causes size mismatch and shadows
+    // disappear. PCF never allocates mapPass, but the switch back to VSM is one
+    // runtime call away, so both are still cleared here.
     scene.traverse((obj) => {
         const light = obj as any;
         if (light.shadow?.map) {
@@ -444,7 +446,22 @@ export function Start(): void
     renderer.setSize(getViewportWidth(), getViewportHeight());
     renderer.setClearColor(0x000000, 0.0);
     renderer.shadowMap.enabled = shadowsEnabled;
-    renderer.shadowMap.type = VSMShadowMap;  // Variance shadows — real Gaussian blur
+    // PCF soft, not VSM.
+    //
+    // VSM gives the nicest edge in this scene — it is a real Gaussian blur — but
+    // it pays for it twice over on every shadow update: the map is a float
+    // target rather than a packed depth one, and three runs TWO extra full-screen
+    // blur passes over it (horizontal + vertical, blurSamples taps each) for the
+    // sun AND again for the campfire spot. On a phone that is the single most
+    // expensive thing the renderer does for something the viewer reads as "the
+    // palm casts a shadow".
+    //
+    // PCF-soft samples the depth map directly with a fixed kernel: no blur pass,
+    // no float target, one draw per shadow map. The trade is a firmer, slightly
+    // grainier shadow edge instead of a smooth falloff — accepted deliberately.
+    // setShadowMapType() below still switches back at runtime if the edge turns
+    // out to matter more than the frames.
+    renderer.shadowMap.type = PCFSoftShadowMap;
 
     // Disable automatic per-frame sorting — CPU savings for 250+ objects.
     // Use explicit renderOrder on key meshes instead.
@@ -561,10 +578,18 @@ export function Start(): void
     directionalLight.shadow.camera.top = 2;
     directionalLight.shadow.camera.bottom = -4;
     
-    // Shadow bias configuration — VSM uses positive bias
-    directionalLight.shadow.bias = 0.0005;
+    // Bias for PCF, which is the opposite sign convention to VSM's: VSM compares
+    // depth moments and wants a positive nudge, PCF compares raw depth and a
+    // positive one would push every caster off its own contact point (the
+    // "floating object" look). normalBias does the work here instead — 0.05
+    // world units is more than ten shadow texels at this map size, which is
+    // plenty to clear acne without detaching anything.
+    directionalLight.shadow.bias = 0.0;
     directionalLight.shadow.normalBias = 0.05;
-    directionalLight.shadow.radius = 4;  // VSM blur radius
+    // radius/blurSamples are VSM-only knobs — PCF-soft uses a fixed kernel and
+    // ignores them. Kept at their old values so switching the type back at
+    // runtime restores exactly the previous look.
+    directionalLight.shadow.radius = 4;
     directionalLight.shadow.blurSamples = 10;
     
     // Point at island center (firecamp is at z=-2.9)

@@ -34,12 +34,18 @@ fireShadowLight.shadow.mapSize.width = 512;
 fireShadowLight.shadow.mapSize.height = 512;
 fireShadowLight.shadow.camera.near = 0.05;
 fireShadowLight.shadow.camera.far = 6;
-fireShadowLight.shadow.bias = 0.0005;
-fireShadowLight.shadow.normalBias = 0.02;
+// Same sign flip as the sun's: PCF wants no positive bias (see Scene.ts).
+// normalBias is raised because this light's frustum is WIDE — a 72-degree cone
+// over 6 units into a 512 map puts a shadow texel at roughly 0.02 world units a
+// couple of metres out, so the old 0.02 was under one texel. VSM's blur pass
+// used to hide the acne that leaves behind; PCF has nothing to hide it with.
+fireShadowLight.shadow.bias = 0.0;
+fireShadowLight.shadow.normalBias = 0.06;
+// VSM-only knobs, inert under PCF-soft — kept so switching the type back at
+// runtime restores the old look exactly.
 fireShadowLight.shadow.radius = 2;
 fireShadowLight.shadow.blurSamples = 8;
-// This is the scene's second VSM shadow map (depth render + blur pass) and it
-// runs every frame. Its content is almost entirely static (logs, props) — the
+// This is the scene's second shadow map and it runs every frame. Its content is almost entirely static (logs, props) — the
 // only animated caster under the cone is the slowly-breathing pug. So don't
 // re-render it every frame: switch off per-light auto-update and let Scene.ts
 // flag needsUpdate on a throttle. Light intensity/color flicker is unaffected

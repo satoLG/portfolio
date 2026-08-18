@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "generate-icons": "node scripts/generate-icons.cjs",
     "generate-tech-icons": "node scripts/generate-tech-icons.cjs",
+    "render-paper-grain": "node scripts/render-paper-grain.cjs",
     "optimize-assets": "node scripts/optimize-assets.cjs",
     "optimize-assets:force": "node scripts/optimize-assets.cjs --force",
     "webkit": "node scripts/webkit-browser.cjs"
