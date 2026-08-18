@@ -86,8 +86,10 @@ export const staticCamera = new PerspectiveCamera();
     fish: Fish.getDiagState(),
 });
 
-// Frame-cost probe. Off unless ?probe=1 / __probe.enable() — see StutterProbe.
-StutterProbe.Start(renderer);
+/** Last DPR cap that was applied — setDPR has no getter, and devicePixelRatio is
+ *  the device's, not the cap we asked for. Seeded to the constructor default
+ *  below; the UI's quality preset overwrites it on startup. */
+let _probeDpr = 1.5;
 
 // Single shared CSS3DRenderer + scene — one preserve-3d container matches Henry
 export const cssRenderer = new CSS3DRenderer();
@@ -771,6 +773,23 @@ export function Start(): void
 
     CloudSprites.Start();
 
+    // Frame-cost probe. Off unless ?probe=1 / __probe.enable() — see StutterProbe.
+    // Started HERE, not at module scope: its A/B controls read module state
+    // (_matMode, shadowsEnabled, cssRenderer) that is still in the temporal dead
+    // zone while this module is evaluating, and a probe left enabled in
+    // localStorage builds its overlay — and therefore reads them — immediately.
+    //
+    // The controls exist because 'paint' time covers both browser DOM work and
+    // the GPU, and switching one suspect off is the only way to tell them apart
+    // on a device with no WebGL timer queries (i.e. any iPhone).
+    StutterProbe.Start(renderer, {
+        materials: { get: () => _matMode,       set: (v) => setPropMaterials(v) },
+        dpr:       { get: () => _probeDpr,      set: (v) => setDPR(v) },
+        shadows:   { get: () => shadowsEnabled, set: (v) => setShadowsEnabled(v) },
+        css3d:     { get: () => cssRenderer.domElement.style.display !== 'none',
+                     set: (v) => { cssRenderer.domElement.style.display = v ? '' : 'none'; } },
+    });
+
     // Register GPU prewarm to run after all models finish loading.
     // This compiles every shader program during the loading screen so the
     // first scroll and first underwater transition are stutter-free.
@@ -1435,6 +1454,7 @@ export function getShadowLight(): DirectionalLight {
 }
 
 export function setDPR(maxDpr: number): void {
+    _probeDpr = maxDpr;
     const dpr = Math.min(window.devicePixelRatio, maxDpr);
     renderer.setPixelRatio(dpr);
     renderer.setSize(window.innerWidth, window.innerHeight);

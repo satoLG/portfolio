@@ -47,6 +47,16 @@ const STORAGE_KEY = 'portfolio-probe';
 const DEFAULT_SPIKE_MS = 34;
 /** Worst frames kept. Only the top few are shown; the rest feed the verdict. */
 const RING = 64;
+/**
+ * Frames longer than this are discarded outright.
+ *
+ * Locking the phone or switching tabs suspends requestAnimationFrame, and the
+ * frame that spans the gap measures however long you were away — a 411-SECOND
+ * "spike" that pins `max`, takes the top of the ring and drowns out everything
+ * real. Nothing on a page that is actually being rendered takes two seconds, so
+ * anything above this is the tab having been away, not a stutter.
+ */
+const BOGUS_FRAME_MS = 2000;
 /** Spikes listed in the overlay. */
 const SHOWN = 6;
 /** The overlay repaints at this interval, not per frame — an instrument that
@@ -106,6 +116,25 @@ const CAUSE_COLOR: Record<Cause, string> = {
     cpu:    '#74c0fc',
     gpu:    '#8ce99a',
 };
+
+/**
+ * Live A/B switches, wired in by Scene.ts.
+ *
+ * The probe can say a frame was expensive but not WHY it was expensive — 'paint'
+ * covers both the browser laying out the CSS3D subtree and the GPU draining our
+ * draw calls, and no timer can separate those from inside the page (WebGL timer
+ * queries do not exist on iOS). What CAN separate them is turning one off and
+ * looking at p50 again. So the four biggest levers are one tap away, and
+ * flipping any of them resets the measurement so the next reading is clean.
+ */
+export interface ProbeControls {
+    materials: { get(): 'standard' | 'lambert'; set(v: 'standard' | 'lambert'): void };
+    dpr:       { get(): number;  set(v: number): void };
+    shadows:   { get(): boolean; set(v: boolean): void };
+    css3d:     { get(): boolean; set(v: boolean): void };
+}
+
+let _controls: ProbeControls | null = null;
 
 let _enabled = false;
 let _renderer: WebGLRenderer | null = null;
@@ -301,9 +330,50 @@ function _buildOverlay(): void {
     const body = document.createElement('div');
     _body = body;
 
-    root.append(bar, body);
+    root.append(bar, body, _buildToggles());
     document.body.appendChild(root);
     _root = root;
+}
+
+/** The A/B row: four taps that each remove one suspect from the frame. */
+function _buildToggles(): HTMLDivElement {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:5px;margin-top:7px;padding-top:7px;border-top:1px solid rgba(255,255,255,0.12)';
+    if (!_controls) {
+        row.style.display = 'none';
+        return row;
+    }
+    const c = _controls;
+
+    const add = (label: string, read: () => string, flip: () => void) => {
+        const b = document.createElement('button');
+        b.style.cssText = [
+            'pointer-events:auto', 'font:inherit', 'color:#dfe9f5',
+            'background:rgba(255,255,255,0.10)', 'border:1px solid rgba(255,255,255,0.20)',
+            'border-radius:6px', 'padding:4px 8px', 'touch-action:manipulation', 'cursor:pointer',
+        ].join(';');
+        const paint = () => { b.innerHTML = `<span style="opacity:0.55">${label}</span> ${read()}`; };
+        b.addEventListener('pointerdown', (e) => {
+            e.stopPropagation();
+            flip();
+            paint();
+            // A/B only means anything against a clean sample.
+            reset();
+        });
+        paint();
+        row.appendChild(b);
+    };
+
+    add('mat', () => (c.materials.get() === 'lambert' ? 'Lambert' : 'PBR'),
+        () => c.materials.set(c.materials.get() === 'lambert' ? 'standard' : 'lambert'));
+    add('dpr', () => String(c.dpr.get()),
+        () => c.dpr.set(c.dpr.get() > 1 ? 1 : 2));
+    add('sombra', () => (c.shadows.get() ? 'on' : 'off'),
+        () => c.shadows.set(!c.shadows.get()));
+    add('css3d', () => (c.css3d.get() ? 'on' : 'off'),
+        () => c.css3d.set(!c.css3d.get()));
+
+    return row;
 }
 
 function _pct(sorted: number[], p: number): number {
@@ -464,8 +534,9 @@ export function reset(): void {
 export function threshold(ms: number): void { _spikeMs = ms; _paint(); }
 
 /** Call once, from Scene.ts, as soon as the renderer exists. */
-export function Start(renderer: WebGLRenderer): void {
+export function Start(renderer: WebGLRenderer, controls?: ProbeControls): void {
     _renderer = renderer;
+    _controls = controls ?? null;
 
     (window as unknown as { __probe: unknown }).__probe = { enable, disable, toggle, reset, threshold };
 
@@ -485,6 +556,10 @@ export function Start(renderer: WebGLRenderer): void {
         if (armed && e.touches.length === 0) { armed = false; toggle(); }
     }, { passive: true, capture: true });
 
+    // Coming back from a locked screen leaves a frame that has been "open" for
+    // however long the phone was away. Drop it rather than measure it.
+    document.addEventListener('visibilitychange', () => { _pending.live = false; });
+
     const params = new URLSearchParams(location.search);
     if (params.get('probe') === '1' || localStorage.getItem(STORAGE_KEY) === '1') enable();
 }
@@ -495,6 +570,7 @@ function _closePending(now: number): void {
     _pending.live = false;
 
     const frameMs = now - _pending.beganAt;
+    if (frameMs > BOGUS_FRAME_MS) return;   // tab was backgrounded — not a stutter
     _all.push(frameMs);
     if (frameMs < _spikeMs) return;
 
