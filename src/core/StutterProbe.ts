@@ -58,6 +58,7 @@ interface FrameRecord {
     frameMs: number;     // wall clock between consecutive frame starts
     cpuMs: number;       // time inside Update() — the part we control
     programs: number;    // NEW shader programs compiled during this frame
+    progNames: string;   // and which materials they belong to
     geometries: number;  // net geometry allocations
     textures: number;    // net texture allocations
     calls: number;       // draw calls issued this frame (all passes)
@@ -133,6 +134,7 @@ const _pending = {
     beganAt: 0,
     cpuMs: 0,
     programs: 0, geometries: 0, textures: 0,
+    progNames: '',
     calls: 0, triangles: 0,
     heapMB: 0, heapDeltaMB: 0,
     camY: 0, underwater: false,
@@ -142,6 +144,30 @@ let _prevGeometries = 0;
 let _prevTextures = 0;
 let _prevHeap = 0;
 let _lastPaint = 0;
+
+// Which programs we have already accounted for. A count alone says "something
+// compiled"; the NAME says what, which is the difference between knowing there
+// is a prewarm hole and knowing where it is.
+let _seenPrograms = new WeakSet<object>();
+const _newNames: string[] = [];
+
+/** three names a program after its material's type. Trim the boilerplate so a
+ *  couple of them still fit on one phone-width line. */
+function _shortName(n: string): string {
+    return (n || '?').replace(/^Mesh/, '').replace(/Material$/, '') || '?';
+}
+
+/** Record programs not seen before. `collect` is false while seeding, so the
+ *  several hundred that exist at startup are not reported as a spike cause. */
+function _scanPrograms(list: readonly unknown[], collect: boolean): void {
+    if (collect) _newNames.length = 0;
+    for (let i = 0; i < list.length; i++) {
+        const prog = list[i] as object & { name?: string };
+        if (!prog || _seenPrograms.has(prog)) continue;
+        _seenPrograms.add(prog);
+        if (collect && _newNames.length < 3) _newNames.push(_shortName(prog.name ?? ''));
+    }
+}
 let _liveCalls = 0;
 let _liveHeap = 0;
 
@@ -305,8 +331,10 @@ function _heapMB(): number {
 
 /** What to blame this frame on, in priority order. The first two are things a
  *  prewarm can fix; the rest are not. */
-function _blame(r: Omit<FrameRecord, 'cause' | 'detail'>): { cause: Cause; detail: string } {
-    if (r.programs > 0) return { cause: 'shader', detail: `+${r.programs} prog` };
+function _blame(r: Omit<FrameRecord, 'cause' | 'detail'>): { cause: Cause; detail: string } {  // eslint-disable-line
+    if (r.programs > 0) {
+        return { cause: 'shader', detail: r.progNames ? `+${r.programs} ${r.progNames}` : `+${r.programs} prog` };
+    }
     if (r.textures > 0 || r.geometries > 0) {
         const parts: string[] = [];
         if (r.textures > 0) parts.push(`+${r.textures} tex`);
@@ -366,6 +394,8 @@ export function reset(): void {
     _all = [];
     _worst = [];
     if (_renderer) {
+        _seenPrograms = new WeakSet<object>();
+        _scanPrograms(_renderer.info.programs ?? [], false);
         const c = _readCounters();
         _prevPrograms = c.programs;
         _prevGeometries = c.geometries;
@@ -418,6 +448,7 @@ function _closePending(now: number): void {
         frameMs,
         cpuMs: _pending.cpuMs,
         programs: _pending.programs,
+        progNames: _pending.progNames,
         geometries: _pending.geometries,
         textures: _pending.textures,
         calls: _pending.calls,
@@ -460,6 +491,12 @@ export function endFrame(camera: PerspectiveCamera, underwater: boolean): void {
     _pending.beganAt = _beginAt;
     _pending.cpuMs = now - _beginAt;
     _pending.programs   = c.programs   - _prevPrograms;
+    if (c.programs > _prevPrograms) {
+        _scanPrograms(_renderer.info.programs ?? [], true);
+        _pending.progNames = _newNames.join(' ');
+    } else {
+        _pending.progNames = '';
+    }
     _pending.geometries = c.geometries - _prevGeometries;
     _pending.textures   = c.textures   - _prevTextures;
     _pending.calls = c.calls;

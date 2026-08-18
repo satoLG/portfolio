@@ -188,7 +188,7 @@ export function UpdateCameraRotation(): void
     cameraForward.copy(_basisZ.set(0, 0, -1).applyQuaternion(camera.quaternion));
 }
 
-import { defaultFov } from '../scene/config/CameraConfig';
+import { defaultFov, defaultCameraX, defaultCameraZ } from '../scene/config/CameraConfig';
 export let fov = defaultFov;
 export function SetFOV(value: number): void
 {
@@ -887,6 +887,7 @@ async function prewarmGPU(): Promise<void> {
         // renders exactly the region it illuminates.
         const restoreAnglerfishPrewarm = SeaFloorDecor.beginAnglerfishPrewarm();
         try {
+            await prewarmDescent();
             await prewarmChestCorridor();
 
             // Park every pooled fish/jelly clone in-frustum so their per-instance GPU
@@ -962,6 +963,71 @@ function initGpuTextures(root: Object3D): void {
             }
         }
     });
+}
+
+/**
+ * Render the actual descent, once, on the loading screen.
+ *
+ * THIS IS THE HOLE THE PROBE FOUND. Everything else in the prewarm renders a
+ * pose that is not the one the visitor is ever in: the surface passes look up
+ * at the sky or across at the island, the chest corridor LOOKS AT THE CHEST
+ * from three heights, and the creature grid stares at a parked formation. Real
+ * play is none of those — the camera sits at the rest X/Z, level with the
+ * horizon, and scrolls from the surface down to the sea floor looking straight
+ * ahead. Anything that only ever enters THAT frustum was still uploading and
+ * still compiling on first sight, mid-dive, which is exactly what the probe
+ * caught: two shader compiles of 268ms and 292ms just under the waterline, and
+ * a run of ~100ms geometry uploads between y −8 and y −11.
+ *
+ * So: walk the scroll range in the play pose and draw it. The ladder step is
+ * well inside what one frustum covers vertically at these distances, so nothing
+ * falls between two rungs.
+ *
+ * This costs LOADING TIME, not memory. Every byte drawn here was already in RAM
+ * — the models all finished downloading before the prewarm starts. The only
+ * thing that changes is WHEN it crosses to the GPU: during a loading screen
+ * where a stall is invisible, instead of mid-dive where it is the whole
+ * problem.
+ *
+ * Worth knowing when testing: browsers cache linked shader programs per origin
+ * on disk, so a SECOND visit never shows the compile spikes whether or not this
+ * function exists. Any before/after has to be done with the site's data cleared
+ * or in a private window.
+ */
+async function prewarmDescent(): Promise<void> {
+    // The scroll range, from Control.ts: aboveWaterTopY (1.4) down to
+    // underwaterBottomY (−12).
+    const TOP = 1.4;
+    const BOTTOM = -12;
+    const STEP = 1.8;
+
+    let lastPrograms = renderer.info.programs?.length ?? 0;
+
+    for (let y = TOP; y >= BOTTOM - 0.001; y -= STEP) {
+        camera.position.set(defaultCameraX, y, defaultCameraZ);
+        camera.lookAt(defaultCameraX, y, defaultCameraZ - 6);   // level, straight ahead
+        camera.updateProjectionMatrix();
+
+        // Materials are traversed whole by compile(), so this is only about
+        // catching a variant that this pose's light/shadow state produces.
+        // Cheap on a cache hit, which is what it is after the first rung.
+        renderer.compile(scene, camera);
+        const programs = renderer.info.programs?.length ?? 0;
+        if (programs > lastPrograms && typeof (renderer as any).compileAsync === 'function') {
+            // Only await when something actually had to be built — awaiting on
+            // every rung would add a round trip per rung for nothing.
+            await (renderer as any).compileAsync(scene, camera);
+            lastPrograms = renderer.info.programs?.length ?? programs;
+        }
+
+        // Drawing is the part that varies with the pose: programs are shared,
+        // but a geometry's buffers and a texture's bytes only cross to the GPU
+        // when the thing is actually rendered in-frustum.
+        const under = y < 0;
+        renderSceneFrame(under, true);
+    }
+
+    renderer.getContext().finish();
 }
 
 async function prewarmChestCorridor(): Promise<void> {
