@@ -59,6 +59,7 @@ interface FrameRecord {
     cpuMs: number;       // time inside Update() — the part we control
     programs: number;    // NEW shader programs compiled during this frame
     progNames: string;   // and which materials they belong to
+    topSection: string;  // the dominant slice of the frame, when there is one
     geometries: number;  // net geometry allocations
     textures: number;    // net texture allocations
     calls: number;       // draw calls issued this frame (all passes)
@@ -135,6 +136,7 @@ const _pending = {
     cpuMs: 0,
     programs: 0, geometries: 0, textures: 0,
     progNames: '',
+    topSection: '',
     calls: 0, triangles: 0,
     heapMB: 0, heapDeltaMB: 0,
     camY: 0, underwater: false,
@@ -171,6 +173,55 @@ function _scanPrograms(list: readonly unknown[], collect: boolean): void {
 let _liveCalls = 0;
 let _liveHeap = 0;
 
+// ── Section timing ───────────────────────────────────────────────────────────
+//
+// A frame blamed on "FRAME" is one where nothing compiled and nothing uploaded
+// — it just took long. That is a true statement and a useless one on its own:
+// it could be the island's per-frame work, the render passes, or the browser
+// laying out and rasterising the CSS3D subtree after our callback returns.
+// Update() calls section() at a handful of boundaries so the overlay can name
+// the biggest slice instead of shrugging.
+//
+// The tail — everything between the end of Update and the start of the next
+// frame — is tracked as 'paint': that is the browser's own style/layout/paint
+// and the GPU draining the commands we just queued, and it is invisible to any
+// timer inside our own code.
+
+const SECTIONS = ['world', 'render', 'css3d', 'paint'] as const;
+type Section = typeof SECTIONS[number];
+
+const _secMs: Record<string, number> = {};
+let _curSection: Section | null = null;
+let _curSectionAt = 0;
+
+/** Close the running section and open `name` (null just closes). Free when the
+ *  probe is off, which is the common case. */
+export function section(name: Section | null): void {
+    if (!_enabled) return;
+    const now = performance.now();
+    if (_curSection) _secMs[_curSection] = (_secMs[_curSection] ?? 0) + (now - _curSectionAt);
+    _curSection = name;
+    _curSectionAt = now;
+}
+
+/** The slowest section of the frame, as a short label, or '' if nothing stands
+ *  out. Only reported when one slice actually dominates — naming a winner in a
+ *  frame where the cost is spread evenly would be noise dressed as a finding. */
+function _topSection(totalMs: number): string {
+    let best = '';
+    let bestMs = 0;
+    for (const k of SECTIONS) {
+        const v = _secMs[k] ?? 0;
+        if (v > bestMs) { bestMs = v; best = k; }
+    }
+    if (!best || bestMs < totalMs * 0.4) return '';
+    return `${best} ${bestMs.toFixed(0)}ms`;
+}
+
+function _resetSections(): void {
+    for (const k of SECTIONS) _secMs[k] = 0;
+}
+
 /** Every frame time seen, for percentiles. */
 let _all: number[] = [];
 /** The worst frames, sorted worst-first, capped at RING. */
@@ -190,7 +241,9 @@ function _buildOverlay(): void {
     // the scene — only the two buttons opt back in.
     root.style.cssText = [
         'position:fixed',
-        'top:calc(8px + env(safe-area-inset-top,0px))',
+        // Below the page header, so it never covers the wordmark or the
+        // day/night control — those have to stay reachable while measuring.
+        'top:calc(72px + env(safe-area-inset-top,0px))',
         'left:calc(8px + env(safe-area-inset-left,0px))',
         'width:min(320px,86vw)',
         'z-index:2147483000',
@@ -342,8 +395,8 @@ function _blame(r: Omit<FrameRecord, 'cause' | 'detail'>): { cause: Cause; detai
         return { cause: 'upload', detail: parts.join(' ') };
     }
     if (r.heapDeltaMB < -2) return { cause: 'gc', detail: `-${(-r.heapDeltaMB).toFixed(0)}MB` };
-    if (r.cpuMs > r.frameMs * 0.6) return { cause: 'cpu', detail: `${r.cpuMs.toFixed(0)}ms js` };
-    return { cause: 'gpu', detail: `${r.calls} draws` };
+    if (r.cpuMs > r.frameMs * 0.6) return { cause: 'cpu', detail: r.topSection || `${r.cpuMs.toFixed(0)}ms js` };
+    return { cause: 'gpu', detail: r.topSection || `${r.calls} draws` };
 }
 
 function _readCounters() {
@@ -402,6 +455,8 @@ export function reset(): void {
         _prevTextures = c.textures;
     }
     _prevHeap = _heapMB();
+    _resetSections();
+    _curSection = null;
     _paint();
 }
 
@@ -449,6 +504,7 @@ function _closePending(now: number): void {
         cpuMs: _pending.cpuMs,
         programs: _pending.programs,
         progNames: _pending.progNames,
+        topSection: _pending.topSection,
         geometries: _pending.geometries,
         textures: _pending.textures,
         calls: _pending.calls,
@@ -471,7 +527,15 @@ function _closePending(now: number): void {
 export function beginFrame(): void {
     if (!_enabled || !_renderer) return;
     const now = performance.now();
+    // Close the 'paint' tail opened at the end of the previous frame BEFORE the
+    // record is finalised — it is the slice that record is about to be judged on.
+    if (_curSection) {
+        _secMs[_curSection] = (_secMs[_curSection] ?? 0) + (now - _curSectionAt);
+        _curSection = null;
+    }
+    _pending.topSection = _topSection(now - _pending.beganAt);
     _closePending(now);
+    _resetSections();
     _beginAt = now;
     _renderer.info.reset();
 }
@@ -510,6 +574,11 @@ export function endFrame(camera: PerspectiveCamera, underwater: boolean): void {
     _prevGeometries = c.geometries;
     _prevTextures = c.textures;
     _prevHeap = heapMB;
+
+    // Everything from here to the next frame is the browser's: style, layout,
+    // paint, compositing the CSS3D layer, and the GPU working through what we
+    // just queued.
+    section('paint');
 
     if (now - _lastPaint >= REPAINT_MS) {
         _lastPaint = now;

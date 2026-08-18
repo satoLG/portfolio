@@ -708,6 +708,9 @@ export function Start(): void
     Fire.Start();
     Island.firecamp.add(Fire.fire);
     // Shadow spotlight lives in the scene (not inside fire group which is scaled 0.25x)
+    // Both fire lights live at the scene ROOT so the light COUNT never changes
+    // with the fire's visibility — see the note on Fire.fireLight.
+    scene.add(Fire.fireLight);
     scene.add(Fire.fireShadowLight);
     scene.add(Fire.fireShadowLight.target);
 
@@ -806,6 +809,10 @@ async function prewarmGPU(): Promise<void> {
     // 'low' Lambert swap) BEFORE the compile pass below, so the right materials
     // get warmed and the first visible frame is already correct.
     reapplyPropMaterials();
+    // The prewarm renders frames without running Update(), so anything Update
+    // normally keeps in sync has to be placed by hand first.
+    Fire.syncLightPosition();
+    Island.syncChestGlowLightPosition();
     await Audio.preloadAudioBytes();
 
     // 1. Save visibility & camera state
@@ -1183,6 +1190,7 @@ export function Update(): void
     // This frees the GPU entirely for model downloads and decoding.
     if (!_sceneReady) return;
     StutterProbe.beginFrame();
+    StutterProbe.section('world');
 
     const isUnderwater = getIsUnderwater();
 
@@ -1314,6 +1322,7 @@ export function Update(): void
     ambientLight.intensity = 0.3 + sunVisible * lightIntensity * 0.9;  // TWEAK: Higher base = brighter scene
 
     // Sync occluder transforms BEFORE the render (so NoBlending holes are correct)
+    StutterProbe.section('css3d');
     PhoneScreen.preRender(Island.phone, camera);
     // Card carousel: advance the track, sync DOM + punch-mesh transforms and
     // update the post-process distortion quiet rect — also pre-render work.
@@ -1353,6 +1362,7 @@ export function Update(): void
     // the surface as soon as the over/under line is on screen — the same gate
     // they spawn on — so the surface never paints over them.
     const underwaterEffectOnScreen = PostProcess.getLineNdcY(camera.position.y) > -1.0;
+    StutterProbe.section('render');
     renderSceneFrame(isUnderwater, underwaterEffectOnScreen);
     // Clouds are sky-only — skip them while sealed inside the cabana.
     if (!Island.isCabanaSealed()) CloudSprites.Render(renderer, camera);
@@ -1363,6 +1373,7 @@ export function Update(): void
     renderer.autoClearColor = true;
 
     // Pointer-events + CSS3D update
+    StutterProbe.section('css3d');
     PhoneScreen.render(camera);
     // In-scene panels claim the canvas pointer-events last (after PhoneScreen,
     // the other writer) so a visible modal panel receives clicks.
@@ -1372,6 +1383,7 @@ export function Update(): void
     cssRenderer.render(cssScene, cssCamera);
 
     // Wind lines 3D update — moves ribbon meshes and updates vertex positions
+    StutterProbe.section('world');
     WindLines.Update(deltaTime, camera.position.x, camera.position.y, camera.position.z, camera.fov);
 
     // Close the probe's frame — must be after every render call above, so the

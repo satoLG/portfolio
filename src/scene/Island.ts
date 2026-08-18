@@ -335,6 +335,9 @@ let chestCloseAction: AnimationAction | null = null;
 let chestIsOpen = false;
 // Chest glow light (animates on open/close)
 let chestGlowLight: PointLight | null = null;
+/** Rides inside the chest; the glow light copies its world position. The light
+ *  itself lives at the SCENE ROOT — see syncChestGlowLightPosition. */
+let _chestGlowAnchor: Object3D | null = null;
 let _chestGlowTarget = 0;
 let _chestGlowReady  = false;  // true only after CHEST_GLOW_DELAY_MS has elapsed
 // Chest Zelda-style ray beams
@@ -496,9 +499,19 @@ function _getCoinWorldPos(i: number): { x: number; y: number; z: number } | null
 }
 
 export function updateChestGlowTransform(): void {
-    if (!chestGlowLight) return;
-    chestGlowLight.position.set(sfDecorConfig.chestGlowX, sfDecorConfig.chestGlowY, sfDecorConfig.chestGlowZ);
+    if (!chestGlowLight || !_chestGlowAnchor) return;
+    // The config offset is in the CHEST's space, which is what the anchor is
+    // for — the light is at the scene root and just copies the world result.
+    _chestGlowAnchor.position.set(sfDecorConfig.chestGlowX, sfDecorConfig.chestGlowY, sfDecorConfig.chestGlowZ);
     chestGlowLight.distance = sfDecorConfig.chestGlowDistance;
+    syncChestGlowLightPosition();
+}
+
+/** Pull the glow light onto its anchor's world position. Called every frame
+ *  from Update, and once from the prewarm (which renders without running it). */
+export function syncChestGlowLightPosition(): void {
+    if (!chestGlowLight || !_chestGlowAnchor) return;
+    _chestGlowAnchor.getWorldPosition(chestGlowLight.position);
 }
 
 export function rebuildChestRays(): void {
@@ -3460,13 +3473,20 @@ export function Start(): void {
             }
 
             // Interior glow light — smoothly animates to target intensity on open/close
+            // Light at the SCENE ROOT, anchor inside the chest.
+            //
+            // three counts only VISIBLE lights when it builds a program key, and
+            // the underwater pass re-renders the fish with every other scene
+            // child hidden — chest included. A light living inside the chest
+            // would drop out of that count and force a second program for every
+            // material drawn in the pass, which the frame probe caught as a
+            // stall at the waterline. Same contract the jellyfish and anglerfish
+            // lights already follow.
             chestGlowLight = new PointLight(0xFFCC33, 0, sfDecorConfig.chestGlowDistance);
-            chestGlowLight.position.set(
-                sfDecorConfig.chestGlowX,
-                sfDecorConfig.chestGlowY,
-                sfDecorConfig.chestGlowZ
-            );
-            chest.add(chestGlowLight);
+            _chestGlowAnchor = new Object3D();
+            chest.add(_chestGlowAnchor);
+            threeScene.add(chestGlowLight);
+            updateChestGlowTransform();
             _buildChestRays();
 
             console.log('Chest loaded with ocean lighting (' + gltf.animations.length + ' animations)');
@@ -5418,6 +5438,7 @@ export function Update(): void {
     }
     // Animate chest glow light
     if (chestGlowLight) {
+        syncChestGlowLightPosition();
         // Keep target in sync with live config (so debug slider works).
         // Only after the delay has elapsed (_chestGlowReady) so the glow
         // doesn't fire at the very first frame of the open animation.
