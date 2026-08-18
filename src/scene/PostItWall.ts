@@ -39,7 +39,7 @@ import { CSS3DPanel } from '../effects/CSS3DPanel';
 import { t, onLanguageChange } from '../core/i18n';
 import { camera, renderer } from '../core/Scene';
 import { playPostItStick, playUIButton } from '../core/Audio';
-import { setZoomExitLock, isNoticeBoardFocused, setNoticeBoardFocus } from '../core/Control';
+import { setZoomExitLock, isNoticeBoardFocused, setNoticeBoardFocus, isNoticeBoardZoomActive } from '../core/Control';
 
 const DESIGN_W = 520;
 const DESIGN_H = 350;
@@ -192,7 +192,12 @@ const RESERVED: Array<{ cu: number; cv: number; w: number; h: number }> = [
  * fifth of the note so it still reads as stuck on rather than falling off.
  */
 const OVERHANG_U = NOTE_U * 0.20;
-const OVERHANG_V = NOTE_V * 0.20;
+/** Downward only. Upward there is a sheet a few centimetres above this region,
+ *  and a note that reaches it both collides with its panel and lands coplanar
+ *  with it — two flat quads at the same depth, which is the z-fighting seen on
+ *  the badge sheet. A margin keeps the two apart in the first place. */
+const OVERHANG_V_BOTTOM = NOTE_V * 0.20;
+const TOP_MARGIN_V = NOTE_V * 0.18;
 
 /** True when a note dropped at (u,v) would overlap something reserved. */
 function _hitsReserved(u: number, v: number): boolean {
@@ -316,6 +321,11 @@ function _paintEditorText(): void {
 
 export function openEditor(): void {
     if (_mode !== 'idle') return;
+    // The wall only works from inside the board's zoom. The button is unclickable
+    // from outside anyway (the panel is non-modal there, so the canvas owns the
+    // pointer), but nothing about the wall should be reachable by any other
+    // route either — the whole feature belongs to that camera.
+    if (!isNoticeBoardZoomActive()) return;
     _mode = 'editing';
     // Held for the WHOLE flow — writing and placing — and released on every way
     // out. A placement drag is a stream of move events, and without this the
@@ -440,9 +450,10 @@ function _pickAt(clientX: number, clientY: number): boolean {
     // Centres may sit far enough out that the note hangs over the edge — see
     // OVERHANG_U/V. Half the note minus the allowed overhang is the limit.
     const maxU = 1 - NOTE_U / 2 + OVERHANG_U;
-    const maxV = 1 - NOTE_V / 2 + OVERHANG_V;
+    const maxV = 1 - NOTE_V / 2 + OVERHANG_V_BOTTOM;
+    const minV = NOTE_V / 2 + TOP_MARGIN_V;   // asymmetric: no overhang upward
     _draftU = Math.min(maxU, Math.max(1 - maxU, hit.uv.x));
-    _draftV = Math.min(maxV, Math.max(1 - maxV, 1 - hit.uv.y));
+    _draftV = Math.min(maxV, Math.max(minV, 1 - hit.uv.y));
     return true;
 }
 
@@ -474,12 +485,26 @@ function _setupPlacementInput(): void {
     // ── Mouse ────────────────────────────────────────────────────────────────
     // Desktop tracks the cursor continuously — there is a hover to track, so the
     // note follows without needing a button held down.
-    const onMouse = (e: PointerEvent) => {
+    // Desktop: PRESS to place, drag to adjust, release to leave it there.
+    //
+    // It used to follow the cursor free, with no button held — which made the
+    // confirm button unreachable: the note travelled with the pointer all the
+    // way to the bar, so there was no way to say "here" and then go press it.
+    // A held drag is the same gesture as touch and leaves the note where the
+    // button came up.
+    let mouseDown = false;
+    canvas.addEventListener('pointerdown', (e) => {
         if (_mode !== 'placing' || e.pointerType !== 'mouse') return;
+        mouseDown = true;
         if (_pickAt(e.clientX, e.clientY)) _render();
-    };
-    canvas.addEventListener('pointerdown', onMouse);
-    canvas.addEventListener('pointermove', onMouse);
+    });
+    canvas.addEventListener('pointermove', (e) => {
+        if (_mode !== 'placing' || e.pointerType !== 'mouse' || !mouseDown) return;
+        if (_pickAt(e.clientX, e.clientY)) _render();
+    });
+    const releaseMouse = (e: PointerEvent) => { if (e.pointerType === 'mouse') mouseDown = false; };
+    canvas.addEventListener('pointerup', releaseMouse);
+    canvas.addEventListener('pointercancel', releaseMouse);
 }
 
 // ── Panel ────────────────────────────────────────────────────────────────────

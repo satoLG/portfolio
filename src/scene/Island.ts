@@ -22,7 +22,7 @@ import type { DialogLine, ReplyOption } from "../core/Dialog";
 import { isBreezeActive, playAppleImpactSound, playChestCloseSound, playChestOpenSound, playPugSnoreOnce, stopPugSnore } from "../core/Audio";
 import { createGrassMesh, createPerlinTexture, createShadowFloorMesh, grassColorBase, grassColorTip, type GrassUniforms } from './ProceduralGrass';
 import {
-    createNoticeBoard, PANEL_LOCAL_Z, POSTIT_PICK_NAME,
+    createNoticeBoard, POSTIT_PICK_NAME,
     REGION_ACHIEVEMENTS, REGION_SLIDES, REGION_POSTITS, type BoardRegion,
 } from './NoticeBoard';
 import { syncNoticeBoardPanel, setNoticeBoardExit } from './NoticeBoardPanel';
@@ -3577,9 +3577,6 @@ export function Start(): void {
     // predictable order; every handler below this line checks
     // _noticeBoardBlocksClick() so the board's click-away can't leak into them.
     setupNoticeBoardInteraction();
-
-    // Setup picture frame click → fly in and study the photo
-    setupPictureFrameInteraction();
     // While zoomed the notice is modal, so a click that misses it lands on the
     // CSS layer rather than the canvas — that is the path that backs the camera
     // out (the canvas handler above never sees it).
@@ -4858,7 +4855,7 @@ function _regionWorld(region: BoardRegion, scale: number, sin: number, cos: numb
     // Board-local → world: rotate about Y, then translate by the board's origin.
     const lx = region.cx * scale;
     const ly = region.cy * scale;
-    const lz = PANEL_LOCAL_Z * scale;
+    const lz = region.z * scale;
     return {
         x: noticeBoard.position.x + lx * cos + lz * sin,
         y: noticeBoard.position.y + ly,
@@ -4873,9 +4870,14 @@ function _updateNoticeBoardPanel(): void {
     const rotY = noticeBoard.rotation.y;
     const sin = Math.sin(rotY), cos = Math.cos(rotY);
 
+    // Kept alive well past the waterline. UNDERWATER_Y_THRESHOLD is the surface
+    // itself, and cutting the panels there meant they blinked out while still
+    // plainly in shot through the water. SURFACE_ANIM_FREEZE_Y is where the rest
+    // of the island's surface work already stops — deep enough that nothing is
+    // legible any more, and it costs nothing to keep them until then.
     const shown = noticeBoard.children.length > 0
         && noticeBoard.visible
-        && camera.position.y >= UNDERWATER_Y_THRESHOLD;
+        && camera.position.y >= SURFACE_ANIM_FREEZE_Y;
     const zoomed = isNoticeBoardZoomActive();
     // While a note is being written or placed, EVERY panel has to hand the
     // canvas back: a modal panel sets pointer-events:none on it, and placement
@@ -4902,7 +4904,6 @@ const pictureFrameMouse = new Vector2();
 const _frameBox = new Box3();
 const _frameCenter = new Vector3();
 const _frameSize = new Vector3();
-let isPictureFrameHovered = false;
 /** Invisible tap target over the photo — see hitsFrame. */
 let _framePickPlane: Mesh | null = null;
 
@@ -4942,85 +4943,39 @@ function _buildFramePickPlane(): void {
 }
 
 /**
- * The photo is a model rather than a panel, so it has no DOM to click — but it
- * reads as part of the same wall as the board, and a visitor who can fly in to
- * study the notice expects to be able to study the family photo too.
+ * Try to frame the photo from a click at (clientX, clientY).
  *
- * Clicking it enters the board zoom (if it is not already on) and focuses the
- * frame, so it lands at the same nested level as the two sheets, and a click
- * away steps back to the board exactly as it does from them.
+ * Routed through the board's outside-click rather than a canvas listener of its
+ * own, and that is not a detail: while the board is zoomed its panels are modal,
+ * which puts the canvas at pointer-events:none — so a canvas handler here could
+ * only ever fire when the board was NOT zoomed, which is the opposite of what is
+ * wanted. Clicks that miss the panels land on the CSS3D layer instead, and this
+ * runs from there.
+ *
+ * Only reachable while the board zoom is active, so the photo is a step INSIDE
+ * the board rather than a separate thing to find from across the island.
  */
-function setupPictureFrameInteraction(): void {
-    const canvas = renderer.domElement;
-    if (!canvas) return;
+function _focusFrameAt(clientX: number, clientY: number): boolean {
+    if (!_framePickPlane || pictureFrame.children.length === 0) return false;
+    pictureFrameMouse.x = (clientX / window.innerWidth) * 2 - 1;
+    pictureFrameMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+    pictureFrameRaycaster.setFromCamera(pictureFrameMouse, camera);
+    if (pictureFrameRaycaster.intersectObject(_framePickPlane, false).length === 0) return false;
 
-    const hitsFrame = (clientX: number, clientY: number): boolean => {
-        if (pictureFrame.children.length === 0) return false;
-        pictureFrameMouse.x = (clientX / window.innerWidth) * 2 - 1;
-        pictureFrameMouse.y = -(clientY / window.innerHeight) * 2 + 1;
-        pictureFrameRaycaster.setFromCamera(pictureFrameMouse, camera);
-        // Against the PAD, not the model. The frame is a thin, ornate mesh only
-        // a few centimetres wide in world units — raycasting its actual geometry
-        // means the tap has to land on a moulding, which is hard with a mouse
-        // and close to impossible with a thumb. The pad is a plain quad well
-        // larger than the frame, so the target is the picture plus a margin.
-        const target = _framePickPlane ?? pictureFrame;
-        return pictureFrameRaycaster.intersectObject(target, target === pictureFrame).length > 0;
-    };
+    // Measured from the model's bounds rather than derived from config, so a
+    // rescale from the debug GUI reframes correctly with no second number.
+    pictureFrame.updateMatrixWorld(true);
+    _frameBox.setFromObject(pictureFrame);
+    _frameBox.getCenter(_frameCenter);
+    _frameBox.getSize(_frameSize);
 
-    const onFrameClick = (clientX: number, clientY: number) => {
-        if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
-        if (isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive() || isChestZoomActive()) return;
-        if (isPostItBusy()) return;
-        // Already framing something — the click-away handlers own that step.
-        if (isNoticeBoardFocused()) return;
-        if (!hitsFrame(clientX, clientY)) return;
-
-        // Measured rather than derived from the config: the frame's world size
-        // is the model's bounds through its own transform, and reading it here
-        // means a rescale from the debug GUI reframes correctly with no second
-        // number to keep in step.
-        pictureFrame.updateMatrixWorld(true);
-        _frameBox.setFromObject(pictureFrame);
-        _frameBox.getCenter(_frameCenter);
-        _frameBox.getSize(_frameSize);
-
-        if (!isNoticeBoardZoomActive()) zoomToNoticeBoard();
-        setNoticeBoardFocus({
-            key: 'frame',
-            x: _frameCenter.x, y: _frameCenter.y, z: _frameCenter.z,
-            rotY: noticeBoard.rotation.y,   // square to the wall, not to the frame's own tilt
-            w: _frameSize.x, h: _frameSize.y,
-        });
-        isPictureFrameHovered = false;
-        canvas.style.cursor = '';
-    };
-
-    canvas.addEventListener('click', (e: MouseEvent) => { onFrameClick(e.clientX, e.clientY); });
-    canvas.addEventListener('touchend', (e: TouchEvent) => {
-        if (_touchWasMulti || _touchDragged) return;
-        if (e.changedTouches.length > 0) {
-            const t = e.changedTouches[0];
-            onFrameClick(t.clientX, t.clientY);
-        }
+    setNoticeBoardFocus({
+        key: 'frame',
+        x: _frameCenter.x, y: _frameCenter.y, z: _frameCenter.z,
+        rotY: noticeBoard.rotation.y,   // square to the wall, not the frame's own tilt
+        w: _frameSize.x, h: _frameSize.y,
     });
-
-    canvas.addEventListener('mousemove', (e: MouseEvent) => {
-        if (pictureFrame.children.length === 0 || isNoticeBoardFocused() ||
-            camera.position.y < UNDERWATER_Y_THRESHOLD) {
-            if (isPictureFrameHovered) { isPictureFrameHovered = false; canvas.style.cursor = ''; }
-            return;
-        }
-        if (hitsFrame(e.clientX, e.clientY)) {
-            if (!isPictureFrameHovered) { isPictureFrameHovered = true; canvas.style.cursor = 'pointer'; }
-        } else if (isPictureFrameHovered) {
-            isPictureFrameHovered = false; canvas.style.cursor = '';
-        }
-    });
-
-    canvas.addEventListener('mouseleave', () => {
-        if (isPictureFrameHovered) { isPictureFrameHovered = false; canvas.style.cursor = ''; }
-    });
+    return true;
 }
 
 /**
@@ -5040,6 +4995,9 @@ function _boardBackOut(e?: PointerEvent): void {
         _lastBackOutStamp = e.timeStamp;
     }
     if (isNoticeBoardFocused()) { setNoticeBoardFocus(null); return; }
+    // Nothing framed yet: a click that landed on the photo frames THAT rather
+    // than leaving the board.
+    if (e && _focusFrameAt(e.clientX, e.clientY)) return;
     zoomOutFromNoticeBoard();
 }
 

@@ -25,7 +25,7 @@
 //                outside-click hook.
 
 import { CSS3DPanel } from '../effects/CSS3DPanel';
-import { setNoticeBoardFocus, isNoticeBoardFocused, getNoticeBoardFocusKey } from '../core/Control';
+import { setNoticeBoardFocus, getNoticeBoardFocusKey, isNoticeBoardZoomActive } from '../core/Control';
 import { onLanguageChange } from '../core/i18n';
 import { SLIDE_COUNT, buildSlideHTML, slideClass, wireSlide } from './NoticeBoardSlides';
 
@@ -161,6 +161,8 @@ function _ensurePanel(): CSS3DPanel {
     // The arrows stop propagation of their own, so paging never reframes.
     _stage!.addEventListener('click', (e) => {
         e.stopPropagation();
+        // Nothing on the board does anything from outside its zoom.
+        if (!isNoticeBoardZoomActive()) return;
         const focused = getNoticeBoardFocusKey();
         if (focused === null) setNoticeBoardFocus({ key: 'slides', ..._rect });
         else if (focused !== 'slides') setNoticeBoardFocus(null);

@@ -50,6 +50,23 @@ const NAIL_METAL   = '#4c4a52';
 export const BOARD_W = 1.0;     // the unit the group scale is expressed in
 export const BOARD_H = 0.935;   // taller than wide — three regions stacked
 
+// ── Planks ───────────────────────────────────────────────────────────────────
+const PLANK_COUNT = 5;
+const PLANK_DEPTH = 0.05;
+const PLANK_GAP   = 0.012;
+
+/**
+ * Local Z of the CSS3D panel planes — just proud of the planks.
+ *
+ * This used to need a much bigger gap because the panels billboarded: they
+ * copied the camera's orientation while the board kept its own, and at any
+ * mismatch a corner swung back through the wood. They are pinned to the board's
+ * yaw now (setFixedYaw), so everything is parallel and a hair of clearance is
+ * enough — which also stops the paper reading as hovering off the board when
+ * seen from the side.
+ */
+export const PANEL_LOCAL_Z = PLANK_DEPTH / 2 + 0.012;
+
 // ── Region layout (local units, origin at the board's centre) ────────────────
 // One source of truth for where the three panels go. The panels convert a region
 // into world space through the board's live transform, so nudging the board from
@@ -60,6 +77,11 @@ export interface BoardRegion {
     cx: number; cy: number;
     /** Size, in board-local units. */
     w: number; h: number;
+    /** How far proud of the planks this region's panel sits. Regions do not all
+     *  share one depth: a note may hang past the post-it region's edge, and if
+     *  it reached a sheet at the SAME depth the two flat quads would z-fight.
+     *  The wall is nudged forward so a note always wins that contest. */
+    z: number;
 }
 
 const SIDE_MARGIN   = 0.04;
@@ -80,6 +102,7 @@ export const REGION_ACHIEVEMENTS: BoardRegion = {
     cy: TOP_CY,
     w: COL_W,
     h: TOP_ROW_H,
+    z: PANEL_LOCAL_Z,
 };
 
 /** Top-right: the notice carousel. */
@@ -88,6 +111,7 @@ export const REGION_SLIDES: BoardRegion = {
     cy: TOP_CY,
     w: COL_W,
     h: TOP_ROW_H,
+    z: PANEL_LOCAL_Z,
 };
 
 /** Everything below: bare planks that visitors stick post-its onto. Deliberately
@@ -99,28 +123,15 @@ export const REGION_POSTITS: BoardRegion = {
     cy: (POSTIT_TOP + POSTIT_BOTTOM) / 2,
     w: BOARD_W - 2 * SIDE_MARGIN,
     h: POSTIT_TOP - POSTIT_BOTTOM,
+    // In front of the sheets: paper stuck on the board sits ON everything else
+    // pinned to it, and this is what settles the depth test if the two ever meet.
+    z: PANEL_LOCAL_Z + 0.006,
 };
 
-// ── Planks ───────────────────────────────────────────────────────────────────
-const PLANK_COUNT = 5;
-const PLANK_DEPTH = 0.05;
-const PLANK_GAP   = 0.012;
 /** Derived from BOARD_H so the plank run always fills the board exactly —
  *  changing the height above must not leave a strip of nothing at the bottom. */
 const PLANK_HEIGHT = (BOARD_H - (PLANK_COUNT - 1) * PLANK_GAP) / PLANK_COUNT;
 const PANEL_TOP = BOARD_H / 2;
-
-/**
- * Local Z of the CSS3D panel planes — just proud of the planks.
- *
- * This used to need a much bigger gap because the panels billboarded: they
- * copied the camera's orientation while the board kept its own, and at any
- * mismatch a corner swung back through the wood. They are pinned to the board's
- * yaw now (setFixedYaw), so everything is parallel and a hair of clearance is
- * enough — which also stops the paper reading as hovering off the board when
- * seen from the side.
- */
-export const PANEL_LOCAL_Z = PLANK_DEPTH / 2 + 0.012;
 
 // Per-plank shade + depth jitter. Hand-picked instead of Math.random() so the
 // board looks identical every reload (and identical between two players'

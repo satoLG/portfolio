@@ -19,7 +19,7 @@
 // next time rather than quietly spending them.
 
 import { CSS3DPanel } from '../effects/CSS3DPanel';
-import { setNoticeBoardFocus, isNoticeBoardFocused, getNoticeBoardFocusKey } from '../core/Control';
+import { setNoticeBoardFocus, getNoticeBoardFocusKey, isNoticeBoardZoomActive } from '../core/Control';
 import { t, onLanguageChange } from '../core/i18n';
 import { ACHIEVEMENTS, getPendingReveals, isUnlocked, markRevealed, type AchievementId } from '../core/Achievements';
 import { ACHIEVEMENT_ART } from '../core/AchievementArt';
@@ -165,6 +165,8 @@ function _ensurePanel(): CSS3DPanel {
     // stopPropagation either way, so the board's own click-away never also runs.
     _sheet!.addEventListener('click', (e) => {
         e.stopPropagation();
+        // Nothing on the board does anything from outside its zoom.
+        if (!isNoticeBoardZoomActive()) return;
         const focused = getNoticeBoardFocusKey();
         if (focused === null) setNoticeBoardFocus({ key: 'achievements', ..._rect });
         else if (focused !== 'achievements') setNoticeBoardFocus(null);
