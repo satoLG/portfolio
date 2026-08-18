@@ -29,14 +29,21 @@
 
 import {
     BoxGeometry,
+    BufferAttribute,
+    BufferGeometry,
     Color,
     CylinderGeometry,
+    Euler,
     Group,
+    Matrix4,
     Mesh,
     MeshBasicMaterial,
     MeshStandardMaterial,
     PlaneGeometry,
+    Quaternion,
+    Vector3,
 } from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 // Warm, desaturated woods that sit next to the Quaternius props without
@@ -154,13 +161,61 @@ function _shaded(base: string, amount: number): Color {
     return c;
 }
 
-function _woodMaterial(color: Color | string): MeshStandardMaterial {
-    return new MeshStandardMaterial({
-        color: color instanceof Color ? color : new Color(color),
-        roughness: 0.92,
-        metalness: 0.0,
-        flatShading: true,
-    });
+// ── Batching ─────────────────────────────────────────────────────────────────
+//
+// The board is nineteen little boxes and cylinders, and drawn one mesh at a
+// time that is nineteen draw calls — times two, because every one of them casts
+// a shadow and so is drawn again into the shadow map. For an object the size of
+// a poster on a tree, on a phone, that is a lot of per-object overhead for very
+// little geometry.
+//
+// So the pieces are welded into two meshes before they ever reach the renderer:
+// one for the wood, one for the metal. The wood pieces are not all the same
+// colour — that is the whole point of the plank jitter — so their colours move
+// out of the material and into a VERTEX COLOUR attribute, which a single white
+// material then multiplies through. Every piece keeps the exact colour it had:
+// material.color and a vertex colour are the same linear-space multiply in the
+// shader, and the numbers written below are read straight off the same Color
+// objects the per-piece materials used to be built from.
+//
+// Nothing about the look changes. Same geometry, same positions, same shading
+// model, same shadows — the board simply arrives at the GPU in two pieces
+// instead of nineteen.
+
+/** Stamp one flat colour across every vertex of a geometry, so it survives
+ *  being merged with differently-coloured neighbours. */
+function _tint(geo: BufferGeometry, color: Color): BufferGeometry {
+    const n = geo.attributes.position.count;
+    const arr = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+        arr[i * 3]     = color.r;
+        arr[i * 3 + 1] = color.g;
+        arr[i * 3 + 2] = color.b;
+    }
+    geo.setAttribute('color', new BufferAttribute(arr, 3));
+    return geo;
+}
+
+const _mat4 = new Matrix4();
+const _euler = new Euler();
+const _quat = new Quaternion();
+const _pos = new Vector3();
+const _one = new Vector3(1, 1, 1);
+
+/** Bake a piece's placement into its vertices — the merged mesh has no children
+ *  to carry transforms for it. */
+function _placed(geo: BufferGeometry, x: number, y: number, z: number, rotX = 0): BufferGeometry {
+    _quat.setFromEuler(_euler.set(rotX, 0, 0));
+    _mat4.compose(_pos.set(x, y, z), _quat, _one);
+    return geo.applyMatrix4(_mat4);
+}
+
+/** Weld a list of pieces into one geometry, disposing the parts. */
+function _weld(parts: BufferGeometry[], what: string): BufferGeometry {
+    const merged = mergeGeometries(parts, false);
+    if (!merged) throw new Error(`[NoticeBoard] could not merge ${what} — mismatched attributes`);
+    for (const g of parts) g.dispose();
+    return merged;
 }
 
 /** Name given to the invisible quad over the post-it region. PostItWall raycasts
@@ -175,85 +230,105 @@ export function createNoticeBoard(): Group {
     const group = new Group();
     group.name = 'noticeBoard';
 
+    // Every wooden piece, in board-local space, each carrying its own colour.
+    const wood: BufferGeometry[] = [];
+    const addWood = (
+        geo: BufferGeometry, color: Color | string,
+        x: number, y: number, z: number, rotX = 0,
+    ) => {
+        wood.push(_placed(_tint(geo, color instanceof Color ? color : new Color(color)), x, y, z, rotX));
+    };
+
     // ── Backing planks ───────────────────────────────────────────────────────
-    const plankGeo = new BoxGeometry(BOARD_W, PLANK_HEIGHT, PLANK_DEPTH);
     for (let i = 0; i < PLANK_COUNT; i++) {
         const tweak = PLANK_TWEAKS[i % PLANK_TWEAKS.length];
-        const plank = new Mesh(plankGeo, _woodMaterial(_shaded(WOOD_PLANK, tweak.shade)));
-        plank.position.set(
+        addWood(
+            new BoxGeometry(BOARD_W, PLANK_HEIGHT, PLANK_DEPTH),
+            _shaded(WOOD_PLANK, tweak.shade),
             0,
             PANEL_TOP - PLANK_HEIGHT / 2 - i * (PLANK_HEIGHT + PLANK_GAP) + tweak.dy,
             tweak.dz,
         );
-        group.add(plank);
     }
 
     // ── Battens across the back, holding the planks together ─────────────────
-    const battenGeo = new BoxGeometry(0.09, BOARD_H + 0.06, 0.035);
     for (const bx of [-0.34, 0.34]) {
-        const batten = new Mesh(battenGeo, _woodMaterial(WOOD_BATTEN));
-        batten.position.set(bx, 0, -(PLANK_DEPTH / 2 + 0.015));
-        group.add(batten);
+        addWood(
+            new BoxGeometry(0.09, BOARD_H + 0.06, 0.035), WOOD_BATTEN,
+            bx, 0, -(PLANK_DEPTH / 2 + 0.015),
+        );
     }
     // A third across the middle: at this height two would visibly sag.
-    const midBatten = new Mesh(new BoxGeometry(BOARD_W + 0.02, 0.07, 0.03), _woodMaterial(WOOD_BATTEN));
-    midBatten.position.set(0, REGION_POSTITS.cy + REGION_POSTITS.h / 2 + ROW_GAP / 2, -(PLANK_DEPTH / 2 + 0.012));
-    group.add(midBatten);
+    addWood(
+        new BoxGeometry(BOARD_W + 0.02, 0.07, 0.03), WOOD_BATTEN,
+        0,
+        REGION_POSTITS.cy + REGION_POSTITS.h / 2 + ROW_GAP / 2,
+        -(PLANK_DEPTH / 2 + 0.012),
+    );
 
     // ── Little rain roof ─────────────────────────────────────────────────────
     // Pushed forward in Z rather than centred: the board is nailed flat against a
     // trunk, so a roof centred on the panel would bury half its depth in the bark.
     const ROOF_TILT = -0.30;
-    const roof = new Mesh(new BoxGeometry(BOARD_W + 0.12, 0.04, 0.20), _woodMaterial(WOOD_ROOF));
-    roof.position.set(0, PANEL_TOP + 0.055, 0.085);
-    roof.rotation.x = ROOF_TILT;
-    group.add(roof);
+    addWood(
+        new BoxGeometry(BOARD_W + 0.12, 0.04, 0.20), WOOD_ROOF,
+        0, PANEL_TOP + 0.055, 0.085, ROOF_TILT,
+    );
 
     // Two brackets bridging panel top → roof underside, so the roof reads as
     // fixed to the board rather than hovering over it.
-    const bracketGeo = new BoxGeometry(0.04, 0.09, 0.04);
     for (const bx of [-0.30, 0.30]) {
-        const bracket = new Mesh(bracketGeo, _woodMaterial(WOOD_BATTEN));
-        bracket.position.set(bx, PANEL_TOP + 0.015, 0.055);
-        bracket.rotation.x = ROOF_TILT;
-        group.add(bracket);
+        addWood(
+            new BoxGeometry(0.04, 0.09, 0.04), WOOD_BATTEN,
+            bx, PANEL_TOP + 0.015, 0.055, ROOF_TILT,
+        );
     }
 
-    // ── Fixings ──────────────────────────────────────────────────────────────
-    const nailMat = new MeshStandardMaterial({
-        color: new Color(NAIL_METAL),
-        roughness: 0.55,
-        metalness: 0.65,
+    const woodMesh = new Mesh(_weld(wood, 'board woodwork'), new MeshStandardMaterial({
+        // White, so the vertex colours pass through untouched — see _tint.
+        color: 0xffffff,
+        vertexColors: true,
+        roughness: 0.92,
+        metalness: 0.0,
         flatShading: true,
-    });
+    }));
+    group.add(woodMesh);
+
+    // ── Fixings ──────────────────────────────────────────────────────────────
+    // One colour throughout, so no vertex colours are needed here.
+    const metal: BufferGeometry[] = [];
 
     // Nails holding the board to the trunk — the four outer corners.
-    const nailGeo = new CylinderGeometry(0.022, 0.022, 0.035, 6);
     for (const nx of [-0.34, 0.34]) {
         for (const ny of [PANEL_TOP - 0.05, -PANEL_TOP + 0.05]) {
-            const nail = new Mesh(nailGeo, nailMat);
-            nail.position.set(nx, ny, PLANK_DEPTH / 2 + 0.012);
-            nail.rotation.x = Math.PI / 2;
-            group.add(nail);
+            metal.push(_placed(
+                new CylinderGeometry(0.022, 0.022, 0.035, 6),
+                nx, ny, PLANK_DEPTH / 2 + 0.012, Math.PI / 2,
+            ));
         }
     }
 
     // Tacks for the two paper panels. They sit slightly in FRONT of the panel
     // plane so they overlap the sheets' top corners and the paper reads as
     // pinned rather than floating.
-    const tackGeo = new CylinderGeometry(0.013, 0.013, 0.02, 6);
     for (const region of [REGION_ACHIEVEMENTS, REGION_SLIDES]) {
         for (const side of [-1, 1]) {
-            const tack = new Mesh(tackGeo, nailMat);
-            tack.position.set(
+            metal.push(_placed(
+                new CylinderGeometry(0.013, 0.013, 0.02, 6),
                 region.cx + side * (region.w / 2 - 0.045),
                 region.cy + region.h / 2 - 0.03,
                 PANEL_LOCAL_Z + 0.017,
-            );
-            tack.rotation.x = Math.PI / 2;
-            group.add(tack);
+                Math.PI / 2,
+            ));
         }
     }
+
+    group.add(new Mesh(_weld(metal, 'board fixings'), new MeshStandardMaterial({
+        color: new Color(NAIL_METAL),
+        roughness: 0.55,
+        metalness: 0.65,
+        flatShading: true,
+    })));
 
     // ── Post-it pick plane ───────────────────────────────────────────────────
     // An invisible quad over the post-it region. PostItWall raycasts it to turn

@@ -246,6 +246,45 @@ function _render(): void {
     _panel.requestRepaint();
 }
 
+/**
+ * Move the ghost while it is being dragged — WITHOUT rebuilding the wall.
+ *
+ * Dragging used to call _render(), which throws away and re-creates every note
+ * on the board: two dozen elements, each with a filtered paper texture, plus
+ * the add button's SVG and a fresh listener, plus a forced double reflow from
+ * requestRepaint — all so that one note could move a few pixels. On a phone
+ * that is the difference between a drag that follows your finger and one that
+ * arrives a moment later.
+ *
+ * Only the ghost moves during a drag, so only the ghost is touched. Everything
+ * the visitor sees is identical: same position, same blocked styling, same
+ * disabled confirm, same repaint.
+ */
+function _syncGhost(): void {
+    if (_mode !== 'placing' || !_wall) return;
+    const el = _wall.querySelector<HTMLElement>('[data-id="__ghost__"]');
+    if (!el) { _render(); return; }   // shouldn't happen — placement always renders one
+    const blocked = _hitsReserved(_draftU, _draftV);
+    el.style.left = `${_draftU * 100}%`;
+    el.style.top = `${_draftV * 100}%`;
+    el.classList.toggle('pw-blocked', blocked);
+    _syncConfirmState(blocked);
+    _panel?.requestRepaint();
+}
+
+/** Coalesce drag updates to one per frame. A finger on a 120Hz screen produces
+ *  several touchmoves per displayed frame and a mouse can produce more; every
+ *  one of them past the first is work whose result is overwritten before it is
+ *  ever shown. */
+let _ghostRaf = 0;
+function _requestGhostSync(): void {
+    if (_ghostRaf) return;
+    _ghostRaf = requestAnimationFrame(() => { _ghostRaf = 0; _syncGhost(); });
+}
+function _cancelGhostSync(): void {
+    if (_ghostRaf) { cancelAnimationFrame(_ghostRaf); _ghostRaf = 0; }
+}
+
 /** Grey out "stick it here" while the note is over something reserved, and say
  *  why — a button that silently does nothing is worse than no button. */
 function _syncConfirmState(blocked: boolean): void {
@@ -406,6 +445,7 @@ function _openPlacementBar(): void {
 
 function _endPlacement(accept: boolean): void {
     if (_mode !== 'placing') return;
+    _cancelGhostSync();   // a queued frame would run against a wall that is gone
     renderer.domElement.style.touchAction = '';
     _placeBar?.classList.remove('pp-open');
     _mode = 'idle';
@@ -477,7 +517,7 @@ function _setupPlacementInput(): void {
         if (!touch) return;
         e.preventDefault();
         e.stopPropagation();
-        if (_pickAt(touch.clientX, touch.clientY)) _render();
+        if (_pickAt(touch.clientX, touch.clientY)) _requestGhostSync();
     };
     canvas.addEventListener('touchstart', onTouch, { passive: false });
     canvas.addEventListener('touchmove', onTouch, { passive: false });
@@ -496,11 +536,11 @@ function _setupPlacementInput(): void {
     canvas.addEventListener('pointerdown', (e) => {
         if (_mode !== 'placing' || e.pointerType !== 'mouse') return;
         mouseDown = true;
-        if (_pickAt(e.clientX, e.clientY)) _render();
+        if (_pickAt(e.clientX, e.clientY)) _requestGhostSync();
     });
     canvas.addEventListener('pointermove', (e) => {
         if (_mode !== 'placing' || e.pointerType !== 'mouse' || !mouseDown) return;
-        if (_pickAt(e.clientX, e.clientY)) _render();
+        if (_pickAt(e.clientX, e.clientY)) _requestGhostSync();
     });
     const releaseMouse = (e: PointerEvent) => { if (e.pointerType === 'mouse') mouseDown = false; };
     canvas.addEventListener('pointerup', releaseMouse);

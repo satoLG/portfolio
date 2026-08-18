@@ -110,6 +110,16 @@ export function Start(glScene: ThreeScene, cssScene: ThreeScene): void {
             if (p.isVisible() && p.dismissOnOutsideClick) p.fireOutsideClick(e);
         }
     });
+
+    // Layout changes that originate OUTSIDE the panels' own DOM, so no panel's
+    // MutationObserver can see them: a viewport resize (panels sized in vw/vh —
+    // the media player), and webfonts arriving, which re-flows every line of
+    // text without touching a single node.
+    const markAllDirty = () => { for (const p of _panels) p._markDirty(); };
+    window.addEventListener('resize', markAllDirty);
+    window.addEventListener('orientationchange', markAllDirty);
+    (document as Document & { fonts?: { ready?: Promise<unknown> } })
+        .fonts?.ready?.then(markAllDirty);
 }
 
 /** Per-frame, at PRE-RENDER time (before the WebGL scene is drawn, so the punch
@@ -263,6 +273,26 @@ function smoothstep(a: number, b: number, x: number): number {
 // World units the glass pane sits in front of the punch plane. See _frame.
 const GLASS_OFFSET = 0.004;
 
+/**
+ * How long after a change a panel keeps re-measuring its hosted DOM.
+ *
+ * Measuring means reading offsetWidth/offsetLeft, which forces the browser to
+ * flush layout, and in transparent mode it happens once per ink element per
+ * frame (the post-it wall alone has two dozen). Doing that every frame for six
+ * panels was pure waste: the notice on the board is static DOM that changes
+ * only when someone pages a slide.
+ *
+ * So measurement is now driven by CHANGE rather than by the clock — a
+ * MutationObserver, media `load`, `transitionend`/`animationend`, resize and
+ * font-ready all open this window. The window is not instantaneous because a
+ * mutation is only the START of a reflow: a class swap that kicks off a CSS
+ * transition keeps changing the layout for as long as the transition runs,
+ * with no further mutations to observe. 900ms comfortably outlives every
+ * transition in the project, and the panel is measured on every frame of it
+ * exactly as before.
+ */
+const DIRTY_WINDOW_MS = 900;
+
 const SEQ_DURATION = 0.7;
 const LINE_END = 0.5;
 const PANEL_START = 0.5;
@@ -316,6 +346,11 @@ export class CSS3DPanel {
     private _openT = 0;        // eased 0..1
     private _lastW = 0; private _lastH = 0;
     private _lastInkSig = -1;          // transparent mode: re-bake when ink layout shifts
+    /** performance.now() until which the DOM is re-measured every frame. See
+     *  DIRTY_WINDOW_MS — outside this window the panel's layout is known to be
+     *  settled and measuring it again would produce the same numbers. */
+    private _dirtyUntil = 0;
+    private _mutationObs: MutationObserver | null = null;
     private _rasterFlushed = false;    // hard re-raster already done for this open
     private _zeroMeasureFrames = 0;   // diagnostic — warn if DOM never measures
     private _warnedZero = false;
@@ -362,6 +397,26 @@ export class CSS3DPanel {
         const swallow = (e: Event) => e.stopPropagation();
         this.content.addEventListener('pointerdown', swallow);
         this.content.addEventListener('click', swallow);
+
+        // ── What makes the panel re-measure ──────────────────────────────────
+        // Between them these cover every way the hosted layout can move:
+        //   · MutationObserver — content swaps, class/style/text changes. This
+        //     is the one that catches "a slide was paged" or "a badge lit up".
+        //   · load (capture) — <img>/<video> resolving. Images do NOT mutate the
+        //     DOM when they finish, they just reflow around themselves, so a
+        //     slow-loading slide picture would otherwise keep the hole it was
+        //     baked with while empty. load/error don't bubble, hence capture.
+        //   · transitionend/animationend — a belt-and-braces re-check for
+        //     anything that finishes after the dirty window has closed.
+        const dirty = () => this._markDirty();
+        this._mutationObs = new MutationObserver(dirty);
+        this._mutationObs.observe(this.content, {
+            childList: true, subtree: true, attributes: true, characterData: true,
+        });
+        this.content.addEventListener('load', dirty, true);
+        this.content.addEventListener('error', dirty, true);
+        this.content.addEventListener('transitionend', dirty);
+        this.content.addEventListener('animationend', dirty);
 
         this.cssObject = new CSS3DObject(this.wrapper);
         // CSS3DObject forces pointerEvents:'auto' on the element; keep the
@@ -602,7 +657,18 @@ export class CSS3DPanel {
      *  compositor cannot batch away; no frame is rendered between the two
      *  writes, so there is no flash. Cheap enough for content swaps (a track
      *  change, moving between coins) — do NOT call it per frame. */
+    /** "My layout may be moving" — re-measure every frame for the next
+     *  DIRTY_WINDOW_MS. Called by the observers wired in the constructor, by
+     *  open(), by requestRepaint(), and by the window-level hooks in Start().
+     *  Anything that changes a panel's hosted DOM by a route none of those see
+     *  should call this; the only cost of calling it too often is doing the
+     *  work we used to do unconditionally. */
+    _markDirty(): void {
+        this._dirtyUntil = performance.now() + DIRTY_WINDOW_MS;
+    }
+
     requestRepaint(): void {
+        this._markDirty();
         if (!this._visible) return;   // hidden panel — the next open() flushes it
         const el = this.content;
         const prev = el.style.display;
@@ -614,6 +680,7 @@ export class CSS3DPanel {
     }
 
     open(): void {
+        this._markDirty();
         this._visible = true;
         this._openTarget = 1;
         this._rasterFlushed = false;
@@ -661,6 +728,8 @@ export class CSS3DPanel {
     dispose(): void {
         const i = _panels.indexOf(this);
         if (i >= 0) _panels.splice(i, 1);
+        this._mutationObs?.disconnect();
+        this._mutationObs = null;
         if (_cssScene) _cssScene.remove(this.cssObject);
         _occluderGroup.remove(this.occluder);
         (this.occluder.material as ShaderMaterial).dispose();
@@ -751,9 +820,31 @@ export class CSS3DPanel {
         // the DOM equivalent of the carousel's "known layout" that never measures
         // the rendered box.
         const measured = (this.content.firstElementChild as HTMLElement) ?? this.content;
-        const w = measured.offsetWidth;
-        const h = measured.offsetHeight;
-        if (w > 0 && h > 0) {
+
+        // ONLY measure when something can actually have moved (see
+        // DIRTY_WINDOW_MS). offsetWidth forces a layout flush, and in
+        // transparent mode the ink pass below reads offsetLeft/Top/Width/Height
+        // for every punched element — so on a settled panel this whole section
+        // used to re-derive, sixty times a second, numbers that had not changed
+        // since it opened. The four escapes below are the cases where "settled"
+        // is not yet true, and each of them behaves exactly as before:
+        //   · the open/close animation is still running;
+        //   · nothing has ever measured (no seeded size);
+        //   · a previous frame measured 0×0, so the zero-measure diagnostic is
+        //     mid-count and must keep counting to its 60-frame warning;
+        //   · the dirty window is open.
+        const settling = this._openT < 1;
+        const needMeasure =
+            settling ||
+            this._lastW <= 0 || this._lastH <= 0 ||
+            this._zeroMeasureFrames > 0 ||
+            performance.now() < this._dirtyUntil;
+
+        const w = needMeasure ? measured.offsetWidth : this._lastW;
+        const h = needMeasure ? measured.offsetHeight : this._lastH;
+        if (!needMeasure) {
+            // Skipped — the committed size stands.
+        } else if (w > 0 && h > 0) {
             this._zeroMeasureFrames = 0;
             if (Math.abs(w - this._lastW) > 0.5 || Math.abs(h - this._lastH) > 0.5) {
                 this._applySize(w, h);
@@ -783,7 +874,8 @@ export class CSS3DPanel {
         // OUTSIDE the measurement branch above: it must run off the seeded
         // size even when offset* measurement fails (the rect-ratio bake in
         // _bakeInkMask works on the rendered element regardless).
-        if (this._transparent && this._lastW > 0 && this._lastH > 0) {
+        if (this._transparent && this._lastW > 0 && this._lastH > 0 &&
+            (needMeasure || this._inkBakedBoxes === 0)) {
             const sig = this._inkSignature();
             if (sig !== this._lastInkSig || this._inkBakedBoxes === 0) {
                 this._bakeMask(this._lastW, this._lastH);
