@@ -580,6 +580,17 @@ export function zoomOutFromChest(): void {
 // Force-clear all zoom flags (safety valve for stuck zooms on mobile)
 function forceExitZoom(): void {
     _zoomScrollAttempts = 0;
+    // A stuck SETTLE is as unscrollable as a stuck zoom, and until now this
+    // valve could not clear one: with every zoom flag already false there was
+    // nothing left for the code below to reset, and the settling flags were only
+    // ever set here, never cleared. Whatever leaves them stuck in future, four
+    // scroll attempts now get the visitor out of it.
+    if (!(radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive ||
+          noticeBoardZoomActive || cabanaPhase !== 'outside')) {
+        zoomReturnSettling = false;
+        radioPugZoomSettling = false;
+        return;
+    }
     // A flow that owns the screen is not a stuck zoom — see setZoomExitLock.
     if (isZoomExitLocked()) return;
     if (radioZoomActive) { radioZoomActive = false; radioPugZoomSettling = true; zoomReturnSettling = true; targetY = aboveWaterTopY; }
@@ -1070,14 +1081,38 @@ export function Update(): void
                 camera.position.z = mainCameraConfig.z;
             }
 
-            // Smoothly return camera yaw to default after radio zoom
-            if (Math.abs(zoomPhi - Math.PI * 2) > 0.001) {
+            // Return camera yaw and pitch to neutral after a zoom.
+            //
+            // THE GUARD IS `!==`, NOT `abs(...) > epsilon`, AND THAT IS THE WHOLE
+            // POINT. It used to skip the block whenever the value was already
+            // within 0.001 of neutral — which sounds harmless and is not, because
+            // the SNAP that makes the value exactly neutral lives inside the
+            // block. A value parked inside that dead band never got snapped, and
+            // the zoom-out settle check below tests for EXACT equality:
+            //
+            //   zoomPhi === Math.PI * 2 && zoomTetha === 0 && ...
+            //
+            // so it could never become true, zoomReturnSettling stayed set
+            // forever, and handleScroll blocks scroll while it is set. A
+            // permanently unscrollable page.
+            //
+            // The notice board falls into the dead band on BOTH axes at once.
+            // Its yaw target is 2π − noticeBoardRotY with rotY = −0.0006, i.e.
+            // 0.0006 off neutral; its pitch target is 0.0000, and damp() is
+            // asymptotic so zoomTetha lands near zero without ever reaching it.
+            // Every other zoom (radio, pug, chest, phone) aims far enough away
+            // that the block ran and the snap fired, which is why this only ever
+            // showed up on the board.
+            //
+            // Damping a value that is already at its target is a no-op, so
+            // running the block unconditionally costs nothing and removes the
+            // trap: whatever the target, the value always reaches it exactly.
+            if (zoomPhi !== Math.PI * 2) {
                 zoomPhi = MathUtils.damp(zoomPhi, Math.PI * 2, ZOOM_SMOOTH, deltaTime);
                 if (Math.abs(zoomPhi - Math.PI * 2) < 0.001) zoomPhi = Math.PI * 2;
             }
 
-            // Smoothly return camera pitch to default after phone zoom
-            if (Math.abs(zoomTetha) > 0.001) {
+            if (zoomTetha !== 0) {
                 zoomTetha = MathUtils.damp(zoomTetha, 0, ZOOM_SMOOTH, deltaTime);
                 if (Math.abs(zoomTetha) < 0.001) zoomTetha = 0;
             }
