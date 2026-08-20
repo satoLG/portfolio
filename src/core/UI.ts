@@ -1,7 +1,6 @@
 ﻿import { webglContainer, pixelSizeValue, SetPixelSize, setShadowsEnabled, colorFilterValue, SetColorFilter, setDPR, setShadowResolution, showOcean, getStartupProgress, setPropMaterials } from "./Scene";
 import { setCausticsScale } from "../materials/OceanMaterial";
 import { unlock as unlockAchievement } from './Achievements';
-import { guessInitialTier } from "./DeviceCapability";
 import type { ColorFilter } from "./Scene";
 import { toggleDayNight, isDayTime, getDayNightBlend, setInitialDayNight } from "../scene/Skybox";
 import { startAudio, transitionFromIntroToScene, transitionToUnderwater, transitionToAboveWater, setNatureMuted, setMusicMuted, setInterfaceMuted, setCharacterMuted, setNatureVolume, setMusicVolume, setInterfaceVolume, setCharacterVolume, getNatureVolume, getMusicVolume, getInterfaceVolume, getCharacterVolume, isCharacterMuted, playUISwitchDay, playUISwitchNight, playUISpinOpen, playUISpinClose } from "./Audio";
@@ -413,13 +412,20 @@ export function Start(): void {
     function loadQ(key: string, def: string): string { return localStorage.getItem('portfolio-q-' + key) ?? def; }
     function saveQ(key: string, val: string): void  { localStorage.setItem('portfolio-q-' + key, val); }
 
-    // Initial tier: a remembered choice always wins; otherwise the device guess.
+    // Initial tier: a remembered choice always wins; otherwise LOW.
+    //
+    // Low is the scene's default now. The two tiers differ only by the prop
+    // material (see applyQualityPreset), and the cheap one is what the scene is
+    // tuned to look like — 'high' is the opt-in for PBR props on a machine with
+    // headroom. The device-capability guess no longer has a say: it existed to
+    // spare weak hardware the expensive settings, and there are no longer any
+    // expensive settings behind this switch to spare it from.
     // Guards against a stale 'medium' value from before that tier was removed.
     const _persistedQuality = localStorage.getItem('portfolio-q-quality');
     const curGfx: { quality: string } = {
         quality: (_persistedQuality === 'low' || _persistedQuality === 'high')
             ? _persistedQuality
-            : guessInitialTier(),
+            : 'low',
     };
 
     /**

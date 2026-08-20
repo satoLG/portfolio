@@ -56,6 +56,10 @@ export function getDeviceInfo(): DeviceInfo {
  * Best-effort starting (and only) tier, from static device signals alone.
  * Errs optimistic for devices we can't read (iOS, desktop, unknown Android).
  */
+// Currently UNUSED: the scene defaults everyone to the 'low' tier, which now
+// means nothing more than the cheap prop material (see UI.applyQualityPreset).
+// Kept because the heuristic is the hard part and is worth having on hand the
+// next time a setting is expensive enough to want gating by device.
 export function guessInitialTier(): Tier {
     if (!_isMobile) return 'high';   // desktop
     if (_isIOS) return 'high';       // Apple GPUs are strong; GPU model is masked on iOS Safari

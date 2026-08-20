@@ -613,6 +613,14 @@ export function syncPostItWall(
     const panel = _ensurePanel();
 
     if (!shown) {
+        // The board has gone off screen. Anything half-written or half-placed
+        // has to be torn down HERE — this used to return early, which left
+        // _mode stuck on 'editing'/'placing' with the zoom-exit lock latched
+        // and no code path left that would ever release it.
+        if (_mode === 'editing') closeEditor(false);
+        else if (_mode === 'placing') _endPlacement(false);
+        setZoomExitLock(false);
+        _zoomed = false;
         if (panel.isOpen()) panel.close();
         if (_modal) { _modal = false; panel.setModal(false); }
         return;
@@ -642,4 +650,13 @@ export function syncPostItWall(
         else _endPlacement(false);
     }
     _zoomed = zoomed;
+
+    // The mode is the single source of truth for the lock, re-asserted every
+    // frame rather than latched at the two ends of the flow.
+    //
+    // The lock suppresses the zoom-out, the scroll and the stuck-zoom safety
+    // valve — every way out of the board at once — so one exit path that forgets
+    // to release it leaves the visitor with a scene they cannot leave and a page
+    // that will not scroll. Derived state cannot be forgotten.
+    setZoomExitLock(_mode !== 'idle');
 }
