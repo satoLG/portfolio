@@ -16,8 +16,7 @@ import {
     BufferGeometry,
     Float32BufferAttribute,
     Points,
-    Vector3
-} from "three";
+    Vector3, Object3D} from "three";
 import { deltaTime, time } from "../core/Time";
 import { isMobile } from "../core/Scene";
 import { isDayTime } from "./Skybox";
@@ -25,8 +24,36 @@ import { FIRE_LIGHT_INTENSITY, FIRE_LIGHT_RANGE, FIRE_LIGHT_DECAY, FIRE_LIGHT_FL
 
 export const fire = new Group();
 
+/**
+ * The campfire's PointLight — parented to the SCENE ROOT (Scene.ts adds it), not
+ * to the `fire` group, and this is not a style choice.
+ *
+ * three counts only VISIBLE lights when it builds a material's program key. The
+ * underwater pass re-renders the fish with every other scene child hidden; the
+ * cabana hides the fire outright. Either way, a light living inside the fire
+ * group would drop out of the count, and every material drawn under that count
+ * has to compile a SECOND program — which is what the frame probe caught as a
+ * 60ms stall at the waterline, naming the clownfish's "Outline" and the generic
+ * fish's "Top" materials. The jellyfish and anglerfish lights already live at
+ * the root for exactly this reason (see Fish.ts / SeaFloorDecor.ts); this one
+ * was simply missed.
+ *
+ * Everything the light did through the hierarchy is reproduced explicitly:
+ * fireLightAnchor rides inside the fire group and syncLightPosition() copies its
+ * world position across (so the light still tracks the fire's scale-in), and
+ * Update() folds the fire's visibility into the intensity, so a hidden fire
+ * still casts no light — it just stays COUNTED while doing it.
+ */
 export const fireLight = new PointLight(0xff6622, 0, FIRE_LIGHT_RANGE, FIRE_LIGHT_DECAY);
 fireLight.castShadow = false;
+/** Rides inside the fire group; the light copies its world position. */
+const fireLightAnchor = new Object3D();
+
+/** Pull the light onto the anchor's world position. Called every Update, and
+ *  once from the prewarm (which renders frames without running Update). */
+export function syncLightPosition(): void {
+    fireLightAnchor.getWorldPosition(fireLight.position);
+}
 
 export const fireShadowLight = new SpotLight(0xff6622, 0, 12, Math.PI / 2.5, 0.5, 1.2);
 fireShadowLight.castShadow = true;
@@ -34,12 +61,18 @@ fireShadowLight.shadow.mapSize.width = 512;
 fireShadowLight.shadow.mapSize.height = 512;
 fireShadowLight.shadow.camera.near = 0.05;
 fireShadowLight.shadow.camera.far = 6;
-fireShadowLight.shadow.bias = 0.0005;
-fireShadowLight.shadow.normalBias = 0.02;
+// Same sign flip as the sun's: PCF wants no positive bias (see Scene.ts).
+// normalBias is raised because this light's frustum is WIDE — a 72-degree cone
+// over 6 units into a 512 map puts a shadow texel at roughly 0.02 world units a
+// couple of metres out, so the old 0.02 was under one texel. VSM's blur pass
+// used to hide the acne that leaves behind; PCF has nothing to hide it with.
+fireShadowLight.shadow.bias = 0.0;
+fireShadowLight.shadow.normalBias = 0.06;
+// VSM-only knobs, inert under PCF-soft — kept so switching the type back at
+// runtime restores the old look exactly.
 fireShadowLight.shadow.radius = 2;
 fireShadowLight.shadow.blurSamples = 8;
-// This is the scene's second VSM shadow map (depth render + blur pass) and it
-// runs every frame. Its content is almost entirely static (logs, props) — the
+// This is the scene's second shadow map and it runs every frame. Its content is almost entirely static (logs, props) — the
 // only animated caster under the cone is the slowly-breathing pug. So don't
 // re-render it every frame: switch off per-light auto-update and let Scene.ts
 // flag needsUpdate on a throttle. Light intensity/color flicker is unaffected
@@ -525,9 +558,11 @@ export function Start(): void {
     const embers = initEmbers();
     fire.add(embers);
 
-    fireLight.position.copy(fire.position);
-    fireLight.position.y += 0.05;
-    fire.add(fireLight);
+    // The light is NOT parented to the fire — see fireLightAnchor.
+    fireLightAnchor.position.copy(fire.position);
+    fireLightAnchor.position.y += 0.05;
+    fire.add(fireLightAnchor);
+    syncLightPosition();
 
     _currentScale   = 0.0;
     fireIntensity   = 0.0;
@@ -593,7 +628,12 @@ export function Update(): void {
 
     // Lights + flicker
     const flicker = 1.0 + (Math.sin(time * 15.0) * 0.3 + Math.sin(time * 23.0) * 0.2) * fireLightConfig.flicker;
-    fireLight.intensity       = fireIntensity * fireLightConfig.intensity * flicker;
+    // A hidden fire casts no light. This used to happen for free — an invisible
+    // parent culled the light — but the light is at the scene root now, so the
+    // gate has to be explicit. Same result, without the light count moving.
+    syncLightPosition();
+    const lit = fire.visible ? 1 : 0;
+    fireLight.intensity       = lit * fireIntensity * fireLightConfig.intensity * flicker;
     fireShadowLight.intensity = fireIntensity * fireLightConfig.intensity * flicker * 0.7;
     fireLight.distance        = fireLightConfig.range;
 

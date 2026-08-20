@@ -56,6 +56,7 @@ import {
     OneMinusSrcAlphaFactor,
     PerspectiveCamera,
     PlaneGeometry,
+    Quaternion,
     Raycaster,
     Scene as ThreeScene,
     ShaderMaterial,
@@ -81,6 +82,7 @@ const _raycaster = new Raycaster();
 const _ndc = new Vector2();
 const _cornerA = new Vector3();
 const _cornerB = new Vector3();
+const _fwd = new Vector3();
 
 /** The WebGL punch group — Scene.ts excludes it from the foam depth pre-pass. */
 export function getOccluderGroup(): Group {
@@ -108,6 +110,16 @@ export function Start(glScene: ThreeScene, cssScene: ThreeScene): void {
             if (p.isVisible() && p.dismissOnOutsideClick) p.fireOutsideClick(e);
         }
     });
+
+    // Layout changes that originate OUTSIDE the panels' own DOM, so no panel's
+    // MutationObserver can see them: a viewport resize (panels sized in vw/vh —
+    // the media player), and webfonts arriving, which re-flows every line of
+    // text without touching a single node.
+    const markAllDirty = () => { for (const p of _panels) p._markDirty(); };
+    window.addEventListener('resize', markAllDirty);
+    window.addEventListener('orientationchange', markAllDirty);
+    (document as Document & { fonts?: { ready?: Promise<unknown> } })
+        .fonts?.ready?.then(markAllDirty);
 }
 
 /** Per-frame, at PRE-RENDER time (before the WebGL scene is drawn, so the punch
@@ -217,8 +229,30 @@ export interface PanelOptions {
      *  as you orbit, which is what sells the pane. */
     glassRoughness?: number;
     /** Glass tint (THREE hex). A hair of blue reads as glass; pure white reads
-     *  as haze. */
+     *  as haze. Ignored in 'paper' mode, which drives alpha rather than colour. */
     glassColor?: number;
+    /**
+     * What the pane is made of.
+     *
+     * 'gloss' (default) — a sheet of glass. The pane DEPOSITS its lit colour
+     *   over the DOM, so bright light adds a sheen. Being additive, it can only
+     *   ever lighten: a 'gloss' panel at midnight looks like one at noon minus
+     *   the highlight.
+     *
+     * 'paper' — a matte sheet that is LIT rather than glazed. The pane deposits
+     *   near-black at an alpha of (1 − incident light), so the composite works
+     *   out to DOM × light: the notice genuinely darkens at dusk, and warms up
+     *   when the campfire is throwing light at it. Use for anything that should
+     *   read as a physical surface in the scene rather than a screen.
+     */
+    glassMode?: 'gloss' | 'paper';
+    /** 'paper' only: how far the shading can dim the DOM at zero light (0..1).
+     *  1 would take the sheet to black; ~0.7 keeps it readable at night. */
+    paperShadeStrength?: number;
+    /** 'paper' only: multiplier on measured light before it is inverted. Above 1
+     *  reaches full brightness sooner (a sheet that catches the light easily);
+     *  below 1 keeps it dim until the light is strong. */
+    paperLightGain?: number;
 }
 
 // easeOutBack — the subtle overshoot that gives the open/close a "pop".
@@ -239,6 +273,26 @@ function smoothstep(a: number, b: number, x: number): number {
 // World units the glass pane sits in front of the punch plane. See _frame.
 const GLASS_OFFSET = 0.004;
 
+/**
+ * How long after a change a panel keeps re-measuring its hosted DOM.
+ *
+ * Measuring means reading offsetWidth/offsetLeft, which forces the browser to
+ * flush layout, and in transparent mode it happens once per ink element per
+ * frame (the post-it wall alone has two dozen). Doing that every frame for six
+ * panels was pure waste: the notice on the board is static DOM that changes
+ * only when someone pages a slide.
+ *
+ * So measurement is now driven by CHANGE rather than by the clock — a
+ * MutationObserver, media `load`, `transitionend`/`animationend`, resize and
+ * font-ready all open this window. The window is not instantaneous because a
+ * mutation is only the START of a reflow: a class swap that kicks off a CSS
+ * transition keeps changing the layout for as long as the transition runs,
+ * with no further mutations to observe. 900ms comfortably outlives every
+ * transition in the project, and the panel is measured on every frame of it
+ * exactly as before.
+ */
+const DIRTY_WINDOW_MS = 900;
+
 const SEQ_DURATION = 0.7;
 const LINE_END = 0.5;
 const PANEL_START = 0.5;
@@ -252,6 +306,12 @@ export class CSS3DPanel {
     private cssObject: CSS3DObject;
     private occluder: Mesh;
     private glass: Mesh | null = null;
+    /** Non-null once setFixedYaw pins the panel's orientation — see there. */
+    private _fixedQuat: Quaternion | null = null;
+    /** Live handle on the paper pane's light-gain uniform. Held here because the
+     *  uniform object is created inside onBeforeCompile, which runs once — the
+     *  debug GUI needs something it can keep writing to afterwards. */
+    private _paperGain: { value: number } | null = null;
     private maskCanvas: HTMLCanvasElement;
     private maskTexture: CanvasTexture;
 
@@ -274,8 +334,11 @@ export class CSS3DPanel {
     private _connectorMat: LineBasicMaterial | null = null;
     private _hasConnectorTarget = false;
     private _ctx = 0; private _cty = 0; private _ctz = 0;   // target world pos
-    readonly dismissOnOutsideClick: boolean;
     private _modal: boolean;
+    /** Modal panels grab the pointer AND dismiss on an outside click — the two
+     *  always travel together, so this reads straight off _modal rather than
+     *  being frozen at construction (see setModal). */
+    get dismissOnOutsideClick(): boolean { return this._modal; }
 
     private _wx = 0; private _wy = 0; private _wz = 0;
     private _visible = false;
@@ -283,6 +346,11 @@ export class CSS3DPanel {
     private _openT = 0;        // eased 0..1
     private _lastW = 0; private _lastH = 0;
     private _lastInkSig = -1;          // transparent mode: re-bake when ink layout shifts
+    /** performance.now() until which the DOM is re-measured every frame. See
+     *  DIRTY_WINDOW_MS — outside this window the panel's layout is known to be
+     *  settled and measuring it again would produce the same numbers. */
+    private _dirtyUntil = 0;
+    private _mutationObs: MutationObserver | null = null;
     private _rasterFlushed = false;    // hard re-raster already done for this open
     private _zeroMeasureFrames = 0;   // diagnostic — warn if DOM never measures
     private _warnedZero = false;
@@ -302,7 +370,6 @@ export class CSS3DPanel {
         this._inkBounds = opts.inkBounds ?? false;
         this._anchor = opts.anchor ?? 'center';
         this._modal = opts.modal ?? false;
-        this.dismissOnOutsideClick = this._modal;
         if (opts.initialSize) {
             this._lastW = opts.initialSize.w;
             this._lastH = opts.initialSize.h;
@@ -330,6 +397,26 @@ export class CSS3DPanel {
         const swallow = (e: Event) => e.stopPropagation();
         this.content.addEventListener('pointerdown', swallow);
         this.content.addEventListener('click', swallow);
+
+        // ── What makes the panel re-measure ──────────────────────────────────
+        // Between them these cover every way the hosted layout can move:
+        //   · MutationObserver — content swaps, class/style/text changes. This
+        //     is the one that catches "a slide was paged" or "a badge lit up".
+        //   · load (capture) — <img>/<video> resolving. Images do NOT mutate the
+        //     DOM when they finish, they just reflow around themselves, so a
+        //     slow-loading slide picture would otherwise keep the hole it was
+        //     baked with while empty. load/error don't bubble, hence capture.
+        //   · transitionend/animationend — a belt-and-braces re-check for
+        //     anything that finishes after the dirty window has closed.
+        const dirty = () => this._markDirty();
+        this._mutationObs = new MutationObserver(dirty);
+        this._mutationObs.observe(this.content, {
+            childList: true, subtree: true, attributes: true, characterData: true,
+        });
+        this.content.addEventListener('load', dirty, true);
+        this.content.addEventListener('error', dirty, true);
+        this.content.addEventListener('transitionend', dirty);
+        this.content.addEventListener('animationend', dirty);
 
         this.cssObject = new CSS3DObject(this.wrapper);
         // CSS3DObject forces pointerEvents:'auto' on the element; keep the
@@ -421,13 +508,21 @@ export class CSS3DPanel {
         // depthWrite is off — it must not occlude anything; the punch behind it
         // already owns the panel's depth.
         if (opts.glass) {
+            const paper = opts.glassMode === 'paper';
             const glassMat = new MeshStandardMaterial({
-                color: opts.glassColor ?? 0xdcebff,
-                roughness: opts.glassRoughness ?? 0.35,
+                // Paper measures the light rather than tinting it, so the pane
+                // has to be neutral white — any tint here would bias the
+                // luminance read below and the sheet would answer to a colour
+                // it invented instead of to the scene.
+                color: paper ? 0xffffff : (opts.glassColor ?? 0xdcebff),
+                roughness: opts.glassRoughness ?? (paper ? 0.95 : 0.35),
                 metalness: 0.0,
                 alphaMap: this.maskTexture,
                 transparent: true,
-                opacity: MathUtils.clamp(opts.glassOpacity ?? 0.14, 0, 1),
+                opacity: MathUtils.clamp(
+                    opts.glassOpacity ?? (paper ? (opts.paperShadeStrength ?? 0.68) : 0.14),
+                    0, 1,
+                ),
                 depthWrite: false,
                 depthTest: true,
                 side: DoubleSide,
@@ -439,20 +534,56 @@ export class CSS3DPanel {
             // punch beneath it is already fading out. The alpha channel carries
             // the real coverage.
             glassMat.onBeforeCompile = (shader) => {
-                const from = 'diffuseColor.a *= texture2D( alphaMap, vAlphaMapUv ).g;';
+                // Replace the INCLUDE DIRECTIVE, not the chunk body. onBeforeCompile
+                // runs before three resolves #include, so the expanded
+                // 'diffuseColor.a *= texture2D( alphaMap, ... ).g;' is not in the
+                // source yet and matching on it never fired — every glass panel
+                // silently kept the hard-edged green-channel stencil.
+                const from = '#include <alphamap_fragment>';
                 if (!shader.fragmentShader.includes(from)) {
-                    console.warn('[CSS3DPanel] alphamap_fragment chunk changed shape — glass edge falls back to the green channel (hard rim).');
+                    console.warn('[CSS3DPanel] alphamap_fragment include missing — glass edge falls back to the green channel (hard rim).');
                     return;
                 }
                 shader.fragmentShader = shader.fragmentShader.replace(
-                    from, 'diffuseColor.a *= texture2D( alphaMap, vAlphaMapUv ).a;',
+                    from,
+                    '#ifdef USE_ALPHAMAP\n\tdiffuseColor.a *= texture2D( alphaMap, vAlphaMapUv ).a;\n#endif',
                 );
+
+                if (!paper) return;
+
+                // PAPER: turn the pane from something that deposits light into
+                // something that deposits SHADE.
+                //
+                // The canvas is cleared to (0,0,0,0) over the panel and the
+                // browser then composites  final = pane.rgb + DOM × (1 − pane.a).
+                // With pane.rgb ≈ 0 that collapses to DOM × (1 − pane.a), a plain
+                // multiply — so writing alpha = 1 − light gives DOM × light,
+                // which is what a lit matte surface does. The stock material
+                // would instead write its own lit colour and could only ever wash
+                // the DOM brighter.
+                //
+                // outgoingLight is read before tonemapping/colorspace, i.e. in
+                // linear space, which is the right place to measure incidence.
+                shader.uniforms.uShadeColor = { value: new Color(0x0d0a06) };
+                this._paperGain ??= { value: opts.paperLightGain ?? 1.0 };
+                shader.uniforms.uLightGain = this._paperGain;
+                shader.fragmentShader = shader.fragmentShader
+                    .replace('#include <common>', '#include <common>\nuniform vec3 uShadeColor;\nuniform float uLightGain;')
+                    .replace(
+                        '#include <opaque_fragment>',
+                        `#include <opaque_fragment>
+                        {
+                            float lum = dot( outgoingLight, vec3( 0.2126, 0.7152, 0.0722 ) );
+                            float shade = clamp( 1.0 - lum * uLightGain, 0.0, 1.0 );
+                            gl_FragColor = vec4( uShadeColor, gl_FragColor.a * shade );
+                        }`,
+                    );
             };
             // Distinct cache key: without it three may hand this material a
             // program compiled for an unpatched MeshStandardMaterial with the
             // same defines (or hand ours to one), and the patch above silently
             // applies to the wrong set of materials.
-            glassMat.customProgramCacheKey = () => 'css3d-panel-glass';
+            glassMat.customProgramCacheKey = () => (paper ? 'css3d-panel-paper' : 'css3d-panel-glass');
 
             this.glass = new Mesh(new PlaneGeometry(1, 1), glassMat);
             this.glass.visible = false;
@@ -495,6 +626,21 @@ export class CSS3DPanel {
         this._wx = x; this._wy = y; this._wz = z;
     }
 
+    /**
+     * Pin the panel to a fixed yaw instead of billboarding it at the camera.
+     *
+     * Billboarding is right for a label that belongs to the VIEWER — a tooltip,
+     * a floating player. It is wrong for anything that belongs to a SURFACE: a
+     * notice nailed to a board has one orientation, the board's, and turning to
+     * follow the camera makes it swing out of the wood it is supposed to be
+     * pinned to. Pass the surface's rotation.y; pass null to go back to
+     * billboarding.
+     */
+    setFixedYaw(rotY: number | null): void {
+        if (rotY === null) { this._fixedQuat = null; return; }
+        (this._fixedQuat ??= new Quaternion()).setFromAxisAngle(_fwd.set(0, 1, 0), rotY);
+    }
+
     /** CSS px per world unit — HIGHER = SMALLER panel in the scene. Live: the
      *  next _frame rebuilds the DOM/occluder/glass scales from it, and the punch
      *  mask is authored in design px so it needs no re-bake. */
@@ -511,7 +657,18 @@ export class CSS3DPanel {
      *  compositor cannot batch away; no frame is rendered between the two
      *  writes, so there is no flash. Cheap enough for content swaps (a track
      *  change, moving between coins) — do NOT call it per frame. */
+    /** "My layout may be moving" — re-measure every frame for the next
+     *  DIRTY_WINDOW_MS. Called by the observers wired in the constructor, by
+     *  open(), by requestRepaint(), and by the window-level hooks in Start().
+     *  Anything that changes a panel's hosted DOM by a route none of those see
+     *  should call this; the only cost of calling it too often is doing the
+     *  work we used to do unconditionally. */
+    _markDirty(): void {
+        this._dirtyUntil = performance.now() + DIRTY_WINDOW_MS;
+    }
+
     requestRepaint(): void {
+        this._markDirty();
         if (!this._visible) return;   // hidden panel — the next open() flushes it
         const el = this.content;
         const prev = el.style.display;
@@ -523,6 +680,7 @@ export class CSS3DPanel {
     }
 
     open(): void {
+        this._markDirty();
         this._visible = true;
         this._openTarget = 1;
         this._rasterFlushed = false;
@@ -552,6 +710,14 @@ export class CSS3DPanel {
         this._applyHidden();
     }
 
+    /** Flip modal on/off at runtime. A panel that is on screen the whole time but
+     *  only INTERACTIVE some of the time (the notice board's carousel: readable
+     *  from across the island, clickable only once zoomed in) has to be able to
+     *  hand the pointer back — while it wants the pointer the canvas is set to
+     *  pointer-events:none, which would otherwise kill every other scene
+     *  interaction for as long as the panel is visible. */
+    setModal(v: boolean): void { this._modal = v; }
+
     isVisible(): boolean { return this._visible; }
     isOpen(): boolean { return this._openTarget === 1; }
     wantsPointer(): boolean { return this._modal && this._visible; }
@@ -562,6 +728,8 @@ export class CSS3DPanel {
     dispose(): void {
         const i = _panels.indexOf(this);
         if (i >= 0) _panels.splice(i, 1);
+        this._mutationObs?.disconnect();
+        this._mutationObs = null;
         if (_cssScene) _cssScene.remove(this.cssObject);
         _occluderGroup.remove(this.occluder);
         (this.occluder.material as ShaderMaterial).dispose();
@@ -605,6 +773,15 @@ export class CSS3DPanel {
         m.roughness = MathUtils.clamp(roughness, 0, 1);
     }
 
+    /** Paper-mode shading, live. `strength` is how dark the sheet may go with no
+     *  light at all; `gain` scales the measured light before it is inverted.
+     *  No-op on a panel that is not in 'paper' mode. */
+    setPaper(strength: number, gain: number): void {
+        if (!this.glass) return;
+        (this.glass.material as MeshStandardMaterial).opacity = MathUtils.clamp(strength, 0, 1);
+        if (this._paperGain) this._paperGain.value = Math.max(0, gain);
+    }
+
     /** Current glass settings, or null when this panel has no glass. */
     getGlass(): { opacity: number; roughness: number } | null {
         if (!this.glass) return null;
@@ -643,9 +820,31 @@ export class CSS3DPanel {
         // the DOM equivalent of the carousel's "known layout" that never measures
         // the rendered box.
         const measured = (this.content.firstElementChild as HTMLElement) ?? this.content;
-        const w = measured.offsetWidth;
-        const h = measured.offsetHeight;
-        if (w > 0 && h > 0) {
+
+        // ONLY measure when something can actually have moved (see
+        // DIRTY_WINDOW_MS). offsetWidth forces a layout flush, and in
+        // transparent mode the ink pass below reads offsetLeft/Top/Width/Height
+        // for every punched element — so on a settled panel this whole section
+        // used to re-derive, sixty times a second, numbers that had not changed
+        // since it opened. The four escapes below are the cases where "settled"
+        // is not yet true, and each of them behaves exactly as before:
+        //   · the open/close animation is still running;
+        //   · nothing has ever measured (no seeded size);
+        //   · a previous frame measured 0×0, so the zero-measure diagnostic is
+        //     mid-count and must keep counting to its 60-frame warning;
+        //   · the dirty window is open.
+        const settling = this._openT < 1;
+        const needMeasure =
+            settling ||
+            this._lastW <= 0 || this._lastH <= 0 ||
+            this._zeroMeasureFrames > 0 ||
+            performance.now() < this._dirtyUntil;
+
+        const w = needMeasure ? measured.offsetWidth : this._lastW;
+        const h = needMeasure ? measured.offsetHeight : this._lastH;
+        if (!needMeasure) {
+            // Skipped — the committed size stands.
+        } else if (w > 0 && h > 0) {
             this._zeroMeasureFrames = 0;
             if (Math.abs(w - this._lastW) > 0.5 || Math.abs(h - this._lastH) > 0.5) {
                 this._applySize(w, h);
@@ -675,7 +874,8 @@ export class CSS3DPanel {
         // OUTSIDE the measurement branch above: it must run off the seeded
         // size even when offset* measurement fails (the rect-ratio bake in
         // _bakeInkMask works on the rendered element regardless).
-        if (this._transparent && this._lastW > 0 && this._lastH > 0) {
+        if (this._transparent && this._lastW > 0 && this._lastH > 0 &&
+            (needMeasure || this._inkBakedBoxes === 0)) {
             const sig = this._inkSignature();
             if (sig !== this._lastInkSig || this._inkBakedBoxes === 0) {
                 this._bakeMask(this._lastW, this._lastH);
@@ -722,10 +922,12 @@ export class CSS3DPanel {
 
         const cy = this._anchorCentreY(h2);
 
-        // Billboard the DOM (kept visible at scale 0 through the line phase so it
+        // Orient the DOM (kept visible at scale 0 through the line phase so it
         // stays measurable and the mask is baked before the panel pops in).
+        // Billboard at the camera unless a fixed yaw was pinned — see setFixedYaw.
+        const q = this._fixedQuat ?? cam.quaternion;
         this.cssObject.position.set(this._wx * CSS_SCALE, cy * CSS_SCALE, this._wz * CSS_SCALE);
-        this.cssObject.quaternion.copy(cam.quaternion);
+        this.cssObject.quaternion.copy(q);
         this.cssObject.scale.set(CSS_SCALE / this.pxPerUnit, CSS_SCALE / this.pxPerUnit, 1);
         this.cssObject.visible = true;
 
@@ -733,24 +935,25 @@ export class CSS3DPanel {
         const worldW = ((w2 + 2 * pad) / this.pxPerUnit) * s;
         const worldH = ((h2 + 2 * pad) / this.pxPerUnit) * s;
         this.occluder.position.set(this._wx, cy, this._wz);
-        this.occluder.quaternion.copy(cam.quaternion);
+        this.occluder.quaternion.copy(q);
         this.occluder.scale.set(worldW, worldH, 1);
         this.occluder.visible = s > 0.001;   // no punch while the line is still rising
 
-        // Glass rides the punch exactly, nudged toward the camera along its own
-        // view axis (matrixWorld's third column IS that axis for a billboarded
-        // plane). Coplanar would technically pass the depth test — depthFunc is
-        // LessEqual — but only until float error says otherwise on some GPU, and
-        // a pane that flickers out on one phone is worse than one that sits four
-        // thousandths of a unit proud on all of them.
+        // Glass rides the punch exactly, nudged forward along the PANEL's own
+        // normal. For a billboarded panel that is the camera's view axis, so
+        // this is unchanged for them; for a fixed one it is the only offset that
+        // stays in front. Coplanar would technically pass the depth test —
+        // depthFunc is LessEqual — but only until float error says otherwise on
+        // some GPU, and a pane that flickers out on one phone is worse than one
+        // that sits four thousandths of a unit proud on all of them.
         if (this.glass) {
-            const e = cam.matrixWorld.elements;
+            _fwd.set(0, 0, 1).applyQuaternion(q);
             this.glass.position.set(
-                this._wx + e[8] * GLASS_OFFSET,
-                cy + e[9] * GLASS_OFFSET,
-                this._wz + e[10] * GLASS_OFFSET,
+                this._wx + _fwd.x * GLASS_OFFSET,
+                cy + _fwd.y * GLASS_OFFSET,
+                this._wz + _fwd.z * GLASS_OFFSET,
             );
-            this.glass.quaternion.copy(cam.quaternion);
+            this.glass.quaternion.copy(q);
             this.glass.scale.set(worldW, worldH, 1);
             this.glass.visible = this.occluder.visible;
         }
@@ -945,10 +1148,11 @@ export class CSS3DPanel {
                     const box = layoutRectWithin(el, panelEl);
                     const bw = box.width + 2 * ip;
                     const bh = box.height + 2 * ip;
-                    roundRectPath(
+                    roundRectPathRotated(
                         ctx,
                         pad + box.left - ip, pad + box.top - ip, bw, bh,
-                        Math.min(this._inkRadius, bh / 2),
+                        Math.min(inkRadiusOf(el, this._inkRadius), bh / 2),
+                        inkRotationOf(el),
                     );
                     ctx.fill();
                     this._inkBakedBoxes++;
@@ -971,7 +1175,8 @@ export class CSS3DPanel {
             for (let i = 0; i < els.length; i++) {
                 const el = els[i];
                 const box = layoutRectWithin(el, panelEl);
-                sig = (sig * 31 + box.left + box.top * 7 + box.width * 13 + box.height * 17) | 0;
+                sig = (sig * 31 + box.left + box.top * 7 + box.width * 13 + box.height * 17
+                       + inkRotationOf(el) * 23 + inkRadiusOf(el, this._inkRadius) * 29) | 0;
             }
         }
         return sig;
@@ -982,6 +1187,31 @@ export class CSS3DPanel {
  *  `ancestor`'s LAYOUT space (transform-independent — the whole point). The
  *  hosted panel is forced position:relative, so it's in the chain. Punched
  *  elements aren't inside scrolled sub-regions, so scroll is ignored. */
+/** Degrees of rotation an ink element declares for its punched hole. Read from
+ *  a data attribute rather than from the computed transform: the transform can
+ *  also carry translation and scale that must NOT be baked into the mask, and
+ *  parsing a matrix back into "just the spin" is guesswork. The element states
+ *  what the hole should do. */
+function inkRotationOf(el: HTMLElement): number {
+    const raw = el.dataset.inkRot;
+    if (!raw) return 0;
+    const n = parseFloat(raw);
+    return Number.isFinite(n) ? n : 0;
+}
+
+/** Corner radius this ink element wants for its hole, overriding the panel's
+ *  inkRadius. The hole has to match the element's own border-radius: punch a
+ *  square hole behind a rounded button and the four corners are canvas that has
+ *  been erased and nothing covers, i.e. page background showing through the
+ *  board. One panel can hold both square notes and a rounded button, so this
+ *  cannot be a single per-panel number. */
+function inkRadiusOf(el: HTMLElement, fallback: number): number {
+    const raw = el.dataset.inkRadius;
+    if (!raw) return fallback;
+    const n = parseFloat(raw);
+    return Number.isFinite(n) ? n : fallback;
+}
+
 function layoutRectWithin(el: HTMLElement, ancestor: HTMLElement): { left: number; top: number; width: number; height: number } {
     let left = 0, top = 0;
     let node: HTMLElement | null = el;
@@ -994,6 +1224,23 @@ function layoutRectWithin(el: HTMLElement, ancestor: HTMLElement): { left: numbe
     return { left, top, width: el.offsetWidth, height: el.offsetHeight };
 }
 
+
+/** A rounded rect turned `rotDeg` about its own centre. Used for ink boxes whose
+ *  element carries a CSS rotation: layoutRectWithin is deliberately
+ *  transform-independent, so without this the punched hole would be the
+ *  element's UNROTATED box and the corners of a tilted note would come out as
+ *  bare page background beside it. */
+function roundRectPathRotated(
+    ctx: CanvasRenderingContext2D,
+    x: number, y: number, w: number, h: number, r: number, rotDeg: number,
+): void {
+    if (!rotDeg) { roundRectPath(ctx, x, y, w, h, r); return; }
+    ctx.save();
+    ctx.translate(x + w / 2, y + h / 2);
+    ctx.rotate((rotDeg * Math.PI) / 180);
+    roundRectPath(ctx, -w / 2, -h / 2, w, h, r);
+    ctx.restore();
+}
 
 function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
     const rr = Math.max(0, Math.min(r, w / 2, h / 2));

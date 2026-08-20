@@ -3741,3 +3741,663 @@ body.night-mode .ocean-carousel {
     box-shadow: var(--oc-frame-shadow);
 }
 
+
+/* ============================================================
+   NOTICE BOARD — the paper pinned to the board on the tree.
+
+   Hosted inside a CSS3DPanel (see scene/NoticeBoardPanel.ts), so it is
+   composited BEHIND the WebGL canvas and shown through a punched hole. Two
+   consequences shape everything below:
+
+     • The design box is a fixed 360×282 px. The panel converts px → world
+       units, so this is a layout at a fixed size, never a responsive one — no
+       media queries, no percentage heights that depend on a viewport.
+     • backdrop-filter is useless here (there is nothing behind it in the DOM to
+       blur — the scene is in a different layer), so the paper is painted with
+       flat fills and the "lit glass" comes from the WebGL pane in front.
+   ============================================================ */
+
+/* The measured host. CSS3DPanel sizes itself from this element and resolves its
+   ink selectors INSIDE it, so the visible paper has to live one level down —
+   see the note in NoticeBoardPanel. */
+.nb-host {
+    width: 360px;
+    height: 282px;
+}
+
+.nb-note {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 10px 6px;
+    border-radius: 10px;
+    position: relative;
+    /* Aged paper, in three layers that all survive being scaled to any size the
+       board is set to:
+         1. fibre grain — a seamless noise tile, multiplied into the sheet so it
+            darkens the fill rather than fogging it;
+         2. corner staining — two soft radial washes;
+         3. the base stock colour.
+       The grain used to be an inline feTurbulence data URI. An SVG filter is not
+       an image — the browser RUNS it to rasterize the tile, and re-runs it at
+       every new resolution the tile is needed at, which for DOM inside a CSS3D
+       transform means on every zoom of the board. Four octaves of fractal noise,
+       recomputed live. It is the same noise, baked once by
+       scripts/render-paper-grain.cjs and committed, so the browser now decodes
+       an image and tiles it.
+       The lighting is NOT here. It comes from the lit pane in front of this DOM
+       (glassMode: 'paper'), which multiplies the whole sheet by the scene's
+       light — see NoticeBoardPanel. */
+    background-image:
+        url('/images/paper/grain-sheet.webp'),
+        radial-gradient(120% 90% at 0% 0%,   rgba(148, 108, 58, 0.30), transparent 62%),
+        radial-gradient(120% 90% at 100% 100%, rgba(148, 108, 58, 0.26), transparent 62%),
+        linear-gradient(#f3e7c9, #f3e7c9);
+    background-blend-mode: multiply, normal, normal, normal;
+    /* The outer 3px sits BEHIND the canvas — the hole is punched inside it (see
+       inkPad in NoticeBoardPanel), so this border is never seen. It is kept in
+       the sheet's own colour anyway, so that if the mask ever lands a pixel
+       wide the sliver reads as the sheet's edge and not as a hole.
+       Everything meant to be VISIBLE is inset past that line. */
+    border: 3px solid #8d3a2c;
+    box-shadow: inset 0 0 0 3px #8d3a2c,
+                inset 0 0 0 5px rgba(243, 231, 201, 0.9),
+                inset 0 0 0 7px rgba(141, 58, 44, 0.4),
+                inset 0 14px 22px -16px rgba(74, 53, 32, 0.55),
+                inset 0 -14px 22px -16px rgba(74, 53, 32, 0.45);
+    font-family: 'Pangolin', cursive, sans-serif;
+    color: #4a3520;
+    user-select: none;
+}
+
+/* ── Arrows, one at each end of the strip ──────────────────────────────────── */
+.nb-arrow {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 62px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: #8d3a2c;
+    /* Not interactive until the camera has zoomed in — the panel adds
+       .nb-interactive then (see NoticeBoardPanel). Until it does, the arrows are
+       a printed hint that there is more to read, not a control. */
+    cursor: default;
+    opacity: 0.45;
+    transition: opacity 0.18s ease, background-color 0.18s ease, transform 0.12s ease;
+}
+
+.nb-arrow svg { width: 22px; height: 22px; display: block; }
+
+.nb-interactive .nb-arrow {
+    cursor: pointer;
+    opacity: 0.9;
+}
+
+.nb-interactive .nb-arrow:hover {
+    background: rgba(141, 58, 44, 0.12);
+    opacity: 1;
+}
+
+.nb-interactive .nb-arrow:active {
+    transform: scale(0.9);
+}
+
+/* ── The stage the arrows page through ─────────────────────────────────────── */
+.nb-stage {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    text-align: center;
+}
+
+.nb-mark {
+    width: 52px;
+    height: 47px;
+    flex: 0 0 auto;
+    margin-bottom: 2px;
+}
+
+/* The inspiration slide is a 16:9 picture, not a badge — it gets the width. The
+   drawn fallback is stacked in the same box and hidden unless the real
+   screenshot fails to load (see wireSlide). */
+.nb-figure {
+    width: 230px;
+    height: 129px;
+    flex: 0 0 auto;
+    margin-bottom: 4px;
+}
+
+.nb-shot,
+.nb-figure .nb-mark-drawn {
+    width: 100%;
+    height: 100%;
+    display: block;
+    border-radius: 8px;
+    border: 2px solid rgba(141, 58, 44, 0.5);
+    box-sizing: border-box;
+}
+
+.nb-shot { object-fit: cover; }
+
+.nb-figure .nb-mark-drawn { display: none; }
+.nb-figure-missing .nb-shot { display: none; }
+.nb-figure-missing .nb-mark-drawn { display: block; }
+
+.nb-title {
+    margin: 0;
+    font-size: 25px;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: 0.5px;
+    color: #7d2f1c;
+}
+
+.nb-line {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.28;
+    color: #4a3520;
+}
+
+.nb-sign {
+    margin: 5px 0 0;
+    font-size: 12px;
+    font-style: italic;
+    color: rgba(74, 53, 32, 0.72);
+}
+
+/* The island slide trades badge size for artwork size, so its title steps down
+   to keep all four lines inside the fixed paper height. */
+.nb-slide-island .nb-title { font-size: 20px; }
+.nb-slide-island .nb-line  { font-size: 14px; }
+
+/* "LOST & FOUND" is short in English and long in Portuguese ("ACHADOS E
+   PERDIDOS"). The stage is only ~276px wide, so the longer of the two decides
+   the type scale — otherwise the title wraps in one language and not the other
+   and the slide's vertical rhythm changes with the language toggle. */
+.nb-slide-lost .nb-title { font-size: 21px; }
+.nb-slide-lost .nb-line  { font-size: 15px; }
+
+/* ============================================================
+   ACHIEVEMENTS — the badge sheet on the board, and the toast that
+   fires out in the world when one is earned.
+
+   The sheet is hosted in a CSS3DPanel at a fixed 360×282 design box, same
+   as the notice beside it, so nothing in .ach-* is responsive. The toast
+   IS screen-space and does have to survive a phone.
+   ============================================================ */
+
+.ach-host { width: 360px; height: 282px; }
+
+.ach-sheet {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    position: relative;
+    padding: 8px 10px 4px;
+    border-radius: 10px;
+    /* Same stock as the notice — the two sheets are pinned to the same board
+       and reading as different paper would be worse than reading as identical.
+       Literally the same tile, too: the two used identical turbulence and
+       differed only in their filter id. */
+    background-image:
+        url('/images/paper/grain-sheet.webp'),
+        radial-gradient(120% 90% at 0% 0%,   rgba(148, 108, 58, 0.30), transparent 62%),
+        radial-gradient(120% 90% at 100% 100%, rgba(148, 108, 58, 0.26), transparent 62%),
+        linear-gradient(#f3e7c9, #f3e7c9);
+    background-blend-mode: multiply, normal, normal, normal;
+    /* Outer 3px is behind the canvas — see the same note on .nb-note. */
+    border: 3px solid #8d3a2c;
+    box-shadow: inset 0 0 0 3px #8d3a2c,
+                inset 0 0 0 5px rgba(243, 231, 201, 0.9),
+                inset 0 0 0 7px rgba(141, 58, 44, 0.4),
+                inset 0 14px 22px -16px rgba(74, 53, 32, 0.55),
+                inset 0 -14px 22px -16px rgba(74, 53, 32, 0.45);
+    font-family: 'Pangolin', cursive, sans-serif;
+    color: #4a3520;
+    user-select: none;
+}
+
+.ach-title {
+    margin: 0;
+    text-align: center;
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #7d2f1c;
+}
+
+/* The badges are absolutely placed from per-achievement percentages, so the
+   scatter is authored (see ACHIEVEMENTS in Achievements.ts) rather than
+   generated — a formula with jitter still reads as a grid. */
+.ach-field {
+    position: absolute;
+    inset: 34px 8px 22px;
+}
+
+/* No caption under the badge — the picture is the badge. The name still rides
+   along in the title attribute for a desktop hover. */
+.ach-badge {
+    position: absolute;
+    transform: translate(-50%, -50%) rotate(var(--ach-rot, 0deg));
+    width: 58px;
+    height: 58px;
+}
+
+.ach-badge-art {
+    width: 100%;
+    height: 100%;
+}
+
+.ach-badge-art svg,
+.ach-badge-art img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: contain;
+}
+
+/* LOCKED is a filter over the full-colour badge, never a second drawing —
+   one artwork per achievement, one place to change it. */
+.ach-badge {
+    opacity: 0.3;
+    filter: grayscale(1) contrast(0.75);
+    transition: opacity 0.35s ease, filter 0.35s ease;
+}
+
+.ach-badge-lit {
+    opacity: 1;
+    filter: none;
+}
+
+/* The reveal: a pop with a warm bloom behind it, fired one badge at a time as
+   the board is zoomed into. Duration must stay in step with REVEAL_ANIM_MS. */
+.ach-badge-reveal { animation: ach-pop 0.62s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.ach-badge-reveal .ach-badge-art { animation: ach-glow 0.62s ease-out; }
+
+@keyframes ach-pop {
+    0%   { transform: translate(-50%, -50%) rotate(var(--ach-rot, 0deg)) scale(0.7); }
+    55%  { transform: translate(-50%, -50%) rotate(var(--ach-rot, 0deg)) scale(1.28); }
+    100% { transform: translate(-50%, -50%) rotate(var(--ach-rot, 0deg)) scale(1); }
+}
+
+@keyframes ach-glow {
+    0%   { filter: drop-shadow(0 0 0 rgba(255, 214, 120, 0)); }
+    45%  { filter: drop-shadow(0 0 14px rgba(255, 198, 90, 0.95)); }
+    100% { filter: drop-shadow(0 0 0 rgba(255, 214, 120, 0)); }
+}
+
+.ach-count {
+    position: absolute;
+    left: 0; right: 0; bottom: 6px;
+    margin: 0;
+    text-align: center;
+    font-size: 12px;
+    color: rgba(74, 53, 32, 0.7);
+}
+
+/* ── Toast ─────────────────────────────────────────────────────────────────
+   Fires wherever the visitor is, so this one is screen-space and responsive. */
+#achievement-toasts {
+    position: fixed;
+    left: 50%;
+    bottom: 96px;
+    transform: translateX(-50%);
+    z-index: 2600;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+}
+
+.ach-toast {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 18px 10px 12px;
+    border-radius: 14px;
+    background: rgba(20, 40, 60, 0.82);
+    border: 1px solid rgba(243, 231, 201, 0.35);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+    color: #f3e7c9;
+    font-family: 'Pangolin', cursive, sans-serif;
+    opacity: 0;
+    transform: translateY(14px) scale(0.94);
+    transition: opacity 0.28s ease, transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+body.day-mode .ach-toast {
+    background: rgba(243, 231, 201, 0.92);
+    border-color: rgba(141, 58, 44, 0.45);
+    color: #4a3520;
+}
+
+.ach-toast-in  { opacity: 1; transform: translateY(0) scale(1); }
+.ach-toast-out { opacity: 0; transform: translateY(-10px) scale(0.96); }
+
+.ach-toast-badge { width: 40px; height: 40px; flex: 0 0 auto; }
+.ach-toast-badge svg,
+.ach-toast-badge img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: contain;
+}
+
+.ach-toast-text { display: flex; flex-direction: column; line-height: 1.15; }
+.ach-toast-kicker { font-size: 11px; opacity: 0.75; letter-spacing: 0.5px; }
+.ach-toast-title { font-size: 17px; }
+
+@media (max-width: 600px) {
+    #achievement-toasts { bottom: 120px; }
+    .ach-toast { padding: 8px 14px 8px 10px; }
+    .ach-toast-title { font-size: 15px; }
+}
+
+/* ============================================================
+   POST-IT WALL — the lower board, plus the screen-space editor.
+   ============================================================ */
+
+.pw-host { width: 520px; height: 350px; }
+
+/* No background of its own: only the notes and the add button are punched
+   through the canvas, so the bare planks show between them. */
+.pw-wall {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    font-family: 'Pangolin', cursive, sans-serif;
+    user-select: none;
+}
+
+/* CENTRING IS DONE WITH MARGINS, NOT translate(-50%,-50%).
+   CSS3DPanel punches each note's hole from its LAYOUT box — deliberately
+   transform-independent — and a transform moves only the paint. With a
+   translate the hole sat half a note away from the note, which is why only a
+   corner of each one was showing through. Margins move the layout box, so the
+   hole and the paper agree. Width/height must stay in step with these. */
+.pw-postit {
+    position: absolute;
+    width: 96px;
+    height: 92px;
+    margin-left: -48px;
+    margin-top: -46px;
+    transform: rotate(var(--pw-rot, 0deg));
+    padding: 9px 9px 12px;
+    box-sizing: border-box;
+    /* Same paper recipe as the sheets above, tinted by the note's own colour
+       instead of the cream stock: fibre grain multiplied in, then a soft
+       vignette so the sheet has a body rather than being a flat swatch. Its own
+       finer tile — see the note on .nb-note for why it is baked rather than
+       filtered live; with up to two dozen notes on the wall this is the one
+       that mattered most. */
+    background-image:
+        url('/images/paper/grain-postit.webp'),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.28), rgba(120, 90, 30, 0.16)),
+        linear-gradient(var(--pw-color, #f7e06a), var(--pw-color, #f7e06a));
+    background-blend-mode: multiply, normal, normal;
+    /* The shadow pools at the bottom edge, where a stuck note lifts off the
+       board. Inset only — an outer shadow would fall on unpunched canvas and be
+       cut off at the hole's edge. */
+    box-shadow: inset 0 -12px 16px -12px rgba(70, 48, 12, 0.6),
+                inset 0 6px 10px -10px rgba(255, 255, 255, 0.5);
+    color: #3d3320;
+    font-size: 13px;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+    overflow: hidden;
+}
+
+/* NOTHING ON THIS WALL MAY BE TRANSLUCENT.
+   Each of these sits over a hole punched clean through the canvas, so anything
+   under 100% opacity is not "slightly faded paper" — it is a window onto the
+   page background behind the whole scene. Every state below is expressed with
+   colour, not alpha. */
+.pw-sample { opacity: 1; }
+
+/* The note being placed — visibly not stuck yet.
+
+   Everything here is paint only. No transform, no outline: a transform would
+   walk the paper off its punched hole again, and an outline draws OUTSIDE the
+   box, i.e. on canvas that was never punched, so it would simply be cut away. */
+.pw-ghost {
+    animation: pw-ghost-pulse 1.3s ease-in-out infinite;
+}
+
+.pw-ghost::after {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    border: 2px dashed rgba(61, 51, 32, 0.5);
+    pointer-events: none;
+}
+
+/* Pulses its dashed edge rather than its alpha — see the note on .pw-sample. */
+@keyframes pw-ghost-pulse {
+    0%, 100% { box-shadow: inset 0 0 0 3px rgba(61, 51, 32, 0.16); }
+    50%      { box-shadow: inset 0 0 0 3px rgba(61, 51, 32, 0.42); }
+}
+
+/* Over the example note or the add button: both belong to the scene, and
+   burying either leaves the wall unable to explain itself or be added to. */
+.pw-blocked { animation: none; box-shadow: inset 0 0 0 3px rgba(150, 40, 30, 0.5); }
+.pw-blocked::after { border-color: rgba(150, 40, 30, 0.95); }
+
+.pe-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Chunky, square, rounded — a sticker of a button rather than a UI control, to
+   sit next to the paper without looking like it came from a different app. The
+   heavy dark rule and the hard inner highlight are what make it read as drawn.
+
+   Centred with MARGINS for the same reason the notes are: CSS3DPanel punches its
+   hole from the layout box, and a transform would move only the paint. Size must
+   stay in step with ADD_U/ADD_V in PostItWall. */
+.pw-add {
+    position: absolute;
+    width: 52px;
+    height: 52px;
+    margin-left: -26px;
+    margin-top: -26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    box-sizing: border-box;
+    border: 3px solid #4a2c1c;
+    border-radius: 14px;
+    background: linear-gradient(#e0713f, #c8562f);
+    box-shadow: inset 0 3px 0 rgba(255, 226, 190, 0.55),
+                inset 0 -4px 0 rgba(90, 36, 20, 0.4);
+    color: #fff3dd;
+    cursor: default;
+    /* Muted by COLOUR while it is not yet a control, never by opacity — it sits
+       over a punched hole and alpha would show the page through it. */
+    filter: saturate(0.45) brightness(0.82);
+    transform: rotate(-4deg);
+    transition: filter 0.18s ease, box-shadow 0.12s ease;
+}
+
+.pw-add svg { width: 26px; height: 26px; }
+
+/* Only a control once the camera has flown in — same rule as the notice's
+   arrows. Until then it is a printed hint that the wall accepts notes. */
+/* The transform stays FIXED in every state. The punched hole comes from the
+   layout box, so a hover that scales the button grows the paint past its hole
+   and the corners spill onto bare canvas. Press feedback is the inner shadow
+   flipping instead. */
+.pw-interactive .pw-add { filter: none; cursor: pointer; }
+.pw-interactive .pw-add:hover {
+    box-shadow: inset 0 3px 0 rgba(255, 240, 214, 0.75),
+                inset 0 -4px 0 rgba(90, 36, 20, 0.45);
+}
+.pw-interactive .pw-add:active {
+    box-shadow: inset 0 -3px 0 rgba(255, 226, 190, 0.4),
+                inset 0 4px 6px rgba(90, 36, 20, 0.55);
+}
+
+/* ── Editor overlay ───────────────────────────────────────────────────────
+   Screen-space on purpose: this is a text field, and a text field wants a real
+   focused element and the platform's own keyboard. */
+#postit-editor {
+    position: fixed;
+    inset: 0;
+    z-index: 2700;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Pangolin', cursive, sans-serif;
+}
+
+#postit-editor.pe-open { display: flex; }
+
+.pe-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(8, 18, 26, 0.55);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+}
+
+.pe-stage {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    animation: pe-in 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Comes at you rather than fading in — it should read as the note being lifted
+   up to the camera, which is what the flow says is happening. */
+@keyframes pe-in {
+    from { transform: scale(0.6) translateY(30px); opacity: 0; }
+    to   { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+.pe-note {
+    width: 260px;
+    height: 260px;
+    padding: 18px;
+    box-sizing: border-box;
+    position: relative;
+    background: var(--pw-color, #f7e06a);
+    box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.85);
+    transform: rotate(-2deg);
+    transition: background 0.2s ease;
+}
+
+.pe-input {
+    width: 100%;
+    height: 100%;
+    border: none;
+    outline: none;
+    resize: none;
+    background: transparent;
+    color: #3d3320;
+    font-family: inherit;
+    font-size: 22px;
+    line-height: 1.25;
+}
+
+.pe-input::placeholder { color: rgba(61, 51, 32, 0.45); }
+
+.pe-count {
+    position: absolute;
+    right: 12px;
+    bottom: 8px;
+    font-size: 12px;
+    color: rgba(61, 51, 32, 0.5);
+}
+
+.pe-swatches { display: flex; gap: 10px; }
+
+.pe-swatch {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 3px solid rgba(243, 231, 201, 0.5);
+    background: var(--pw-color);
+    cursor: pointer;
+    padding: 0;
+    transition: transform 0.14s ease, border-color 0.14s ease;
+}
+
+.pe-swatch:hover { transform: scale(1.1); }
+.pe-swatch-on { border-color: #f3e7c9; transform: scale(1.16); }
+
+.pe-actions, .pp-actions { display: flex; gap: 12px; }
+
+.pe-btn {
+    padding: 9px 22px;
+    border-radius: 12px;
+    border: 1px solid rgba(243, 231, 201, 0.4);
+    background: rgba(20, 40, 60, 0.86);
+    color: #f3e7c9;
+    font-family: inherit;
+    font-size: 16px;
+    cursor: pointer;
+    transition: transform 0.12s ease, background 0.18s ease;
+}
+
+.pe-btn:hover { transform: translateY(-1px); background: rgba(28, 55, 80, 0.92); }
+.pe-btn:active { transform: scale(0.96); }
+.pe-done, .pp-confirm { background: rgba(141, 58, 44, 0.92); }
+.pe-done:hover, .pp-confirm:hover { background: rgba(163, 70, 52, 0.95); }
+
+/* ── Placement bar ────────────────────────────────────────────────────────
+   Sits low and out of the way: the board is what the visitor is aiming at, and
+   this must not cover the half of it they are trying to reach. */
+#postit-place-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%) translateY(20px);
+    z-index: 2700;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    border-radius: 16px;
+    background: rgba(20, 40, 60, 0.82);
+    border: 1px solid rgba(243, 231, 201, 0.3);
+    font-family: 'Pangolin', cursive, sans-serif;
+    opacity: 0;
+    transition: opacity 0.24s ease, transform 0.24s ease;
+}
+
+#postit-place-bar.pp-open {
+    display: flex;
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.pp-hint { color: rgba(243, 231, 201, 0.85); font-size: 14px; text-align: center; }
+
+@media (max-width: 600px) {
+    .pe-note { width: 76vw; height: 76vw; max-width: 300px; max-height: 300px; }
+    .pe-input { font-size: 20px; }
+    #postit-place-bar { bottom: 18px; width: min(92vw, 420px); }
+}
+
+/* The scene must not scroll under a note being written — the wheel and touchmove
+   would drag the camera off the board the editor belongs to. */
+body.postit-editing { overscroll-behavior: none; }

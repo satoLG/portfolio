@@ -49,8 +49,22 @@ export function Start(): void
 {
     oceanMaterials.Start();
 
-    // Reduced from 512x512 to 256x256 for better mobile performance (4x fewer vertices)
-    const surfaceGeometry = new PlaneGeometry(oceanWidth, oceanDepth, 256, 256);
+    // 128x128, down from 256x256 — and this costs NOTHING visually, because
+    // every part of this mesh that is ever drawn is perfectly flat.
+    //
+    // The swell is a near-camera effect: surfaceVertex fades its displacement to
+    // exactly 0 at surfaceWaveRange, and surfaceFragment then discards this mesh
+    // entirely INSIDE that same radius, where the high-tessellation patch takes
+    // over (see the complementary discard in OceanShaders). So the only pixels
+    // this 400x400 plane contributes are outside the wave radius, i.e. a flat
+    // sheet — 66k vertices spent describing a plane that four would describe
+    // just as well. Foam, edge fade and the waterline are all fragment-side,
+    // computed from an interpolated world position that is exactly linear across
+    // a flat quad, so they are unaffected by how finely it is cut.
+    //
+    // 128 rather than something even coarser only to leave headroom if the
+    // displacement is ever given a long-range term.
+    const surfaceGeometry = new PlaneGeometry(oceanWidth, oceanDepth, 128, 128);
     surfaceGeometry.rotateX(-Math.PI / 2);
 
     surface.geometry = surfaceGeometry;

@@ -988,6 +988,75 @@ export function playUISpinOpen(): void { playUISound(uiSpinOpenSound); }
 export function playUISpinClose(): void { playUISound(uiSpinCloseSound); }
 
 // ============================================
+// ACHIEVEMENT STINGERS  (synthesised, not sampled)
+// ============================================
+// These are a few hundred milliseconds of bell each and there are three of them.
+// Shipping three more audio files for that would cost more download than the
+// sounds are worth, and every shipped asset also has to be sourced and credited.
+// Two oscillators through the SAME interfaceGain every other UI sound uses gives
+// identical mixer behaviour — the Interface volume slider and the mute toggle
+// apply for free — with nothing to download.
+//
+// Deliberately outside the UI_SOUND_THROTTLE: the reveal sequence fires one per
+// icon a hundred milliseconds apart, which is the whole point of it, and the
+// throttle exists to stop button mashing rather than to police a scripted
+// cadence.
+
+/** One plucked partial: a sine with a fast attack and an exponential tail. */
+function _ping(freq: number, atSec: number, dur: number, gain: number): void {
+    const ctx = _audioContext;
+    if (!ctx || !interfaceGain || interfaceMuted) return;
+    const t0 = ctx.currentTime + atSec;
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, t0);
+
+    // A touch of the octave above, quieter and shorter, is what separates a
+    // bell from a test tone.
+    const shimmer = ctx.createOscillator();
+    shimmer.type = 'sine';
+    shimmer.frequency.setValueAtTime(freq * 2, t0);
+
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t0);
+    env.gain.exponentialRampToValueAtTime(gain, t0 + 0.008);
+    env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+    const shimmerEnv = ctx.createGain();
+    shimmerEnv.gain.setValueAtTime(0.0001, t0);
+    shimmerEnv.gain.exponentialRampToValueAtTime(gain * 0.35, t0 + 0.006);
+    shimmerEnv.gain.exponentialRampToValueAtTime(0.0001, t0 + dur * 0.55);
+
+    osc.connect(env).connect(interfaceGain);
+    shimmer.connect(shimmerEnv).connect(interfaceGain);
+    osc.start(t0); shimmer.start(t0);
+    osc.stop(t0 + dur + 0.02); shimmer.stop(t0 + dur + 0.02);
+}
+
+/** Fired the moment an achievement is earned, alongside the toast. A rising
+ *  third — short, and resolved rather than open-ended. */
+export function playAchievementUnlock(): void {
+    _ping(784.0, 0,     0.28, UI_SOUND_VOLUME * 0.5);   // G5
+    _ping(1174.7, 0.07, 0.42, UI_SOUND_VOLUME * 0.42);  // D6
+}
+
+/** Fired per icon as the board reveals them. `step` walks up a pentatonic run,
+ *  so a row of four completions reads as one phrase instead of four identical
+ *  blips. Wraps after five so a full sweep never climbs out of hearing. */
+export function playAchievementReveal(step: number): void {
+    const SCALE = [587.3, 659.3, 784.0, 880.0, 1046.5];   // D5 E5 G5 A5 C6
+    _ping(SCALE[step % SCALE.length], 0, 0.30, UI_SOUND_VOLUME * 0.45);
+}
+
+/** A post-it going onto the board — duller and lower than the bells, so it
+ *  reads as paper rather than as another achievement. */
+export function playPostItStick(): void {
+    _ping(392.0, 0,     0.13, UI_SOUND_VOLUME * 0.34);   // G4
+    _ping(261.6, 0.035, 0.17, UI_SOUND_VOLUME * 0.26);   // C4
+}
+
+// ============================================
 // INITIALIZATION
 // ============================================
 async function initAudio(): Promise<void> {

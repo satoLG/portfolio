@@ -1,5 +1,5 @@
 import { AmbientLight, DirectionalLight, PerspectiveCamera, Scene, Vector2, Vector3, WebGLRenderer, PCFSoftShadowMap, BasicShadowMap, PCFShadowMap, VSMShadowMap, Object3D, Quaternion, MeshLambertMaterial } from "three";
-import { getIsUnderwater, isPugZoomActive, isRadioZoomActive, isRadioPugZoomSettling } from "./Control";
+import { getIsUnderwater, isPugZoomActive, isRadioZoomActive, isRadioPugZoomSettling, isNoticeBoardZoomActive } from "./Control";
 import * as Skybox from "../scene/Skybox";
 import * as Ocean from "../scene/Ocean";
 import * as SeaFloor from "../scene/SeaFloor";
@@ -23,6 +23,7 @@ import { deltaTime } from "./Time.ts";
 import { CSS3DRenderer } from 'three/examples/jsm/renderers/CSS3DRenderer';
 import * as PhoneScreen from './PhoneScreen';
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
+import * as StutterProbe from './StutterProbe';
 
 // Scene-ready flag — scene renders from the very first frame so the sky is
 // visible behind the loading button.  Kept as a no-op export for clarity.
@@ -85,6 +86,11 @@ export const staticCamera = new PerspectiveCamera();
     fish: Fish.getDiagState(),
 });
 
+/** Last DPR cap that was applied — setDPR has no getter, and devicePixelRatio is
+ *  the device's, not the cap we asked for. Seeded to the constructor default
+ *  below; the UI's quality preset overwrites it on startup. */
+let _probeDpr = 1.5;
+
 // Single shared CSS3DRenderer + scene — one preserve-3d container matches Henry
 export const cssRenderer = new CSS3DRenderer();
 export const cssScene = new Scene();
@@ -105,8 +111,68 @@ const _scratchLightDir = new Vector3();
 const _underwaterTransparentTargets: Object3D[] = [];
 const _depthExcludedTargets: Object3D[] = [];
 
+// ── Per-frame scratch for the render path ────────────────────────────────────
+//
+// Everything below exists to keep the underwater render path from ALLOCATING.
+// It used to build, every single frame: two arrays of {obj, vis} literals (one
+// per hidden target, one per scene child — dozens of objects), a Set, a couple
+// of filter()/map() intermediates and a spread. Underwater that is a few
+// hundred short-lived objects per frame, which is thousands per second, which
+// is a garbage collection every few seconds — a pause that lands wherever it
+// lands and reads as the scene stuttering for no reason. Above water most of
+// this path is skipped, which is exactly why the stutter has always seemed to
+// start at the waterline.
+//
+// Nothing about what gets rendered changes; only where the bookkeeping lives.
+
+/** A save/restore of `visible` flags that reuses its storage. Parallel arrays
+ *  rather than objects so nothing is allocated after the first few frames —
+ *  the backing arrays grow to the high-water mark and stay there. */
+class VisSnapshot {
+    readonly objs: Object3D[] = [];
+    readonly vis: boolean[] = [];
+    n = 0;
+
+    clear(): void { this.n = 0; }
+
+    /** Record obj's current visibility and hide it. */
+    hide(obj: Object3D): void {
+        this.objs[this.n] = obj;
+        this.vis[this.n] = obj.visible;
+        this.n++;
+        obj.visible = false;
+    }
+
+    /** Record obj's current visibility and set it to `v`. */
+    set(obj: Object3D, v: boolean): void {
+        this.objs[this.n] = obj;
+        this.vis[this.n] = obj.visible;
+        this.n++;
+        obj.visible = v;
+    }
+
+    restore(): void {
+        for (let i = 0; i < this.n; i++) this.objs[i].visible = this.vis[i];
+        this.n = 0;
+    }
+}
+
+/** Targets moved after the ocean pass (fish/bubbles/particles), hidden for the
+ *  main render. Read back by renderOnlyUnderwaterTransparents to know which of
+ *  them were actually visible. */
+const _afterOceanVis = new VisSnapshot();
+/** Heavy geometry hidden for the depth pre-pass. */
+const _depthExcludedVis = new VisSnapshot();
+/** Every scene child, for the underwater-transparents pass. */
+const _childrenVis = new VisSnapshot();
+/** The after-ocean target list, copied (never aliased — getUnderwaterTransparent-
+ *  Targets rebuilds its own array later in the same frame). */
+const _afterOceanTargets: Object3D[] = [];
+const _bubbleTargets: Object3D[] = [];
+const _targetSet = new Set<Object3D>();
+
 // Fire shadow map refreshes every Nth frame (see throttle in Update).
-// On mobile with medium/high quality the VSM blur is expensive; every 6th
+// Re-rendering a shadow map means re-drawing every caster under the cone; every 6th
 // frame (≈10fps shadow updates at 60fps) is imperceptible for a near-static
 // caster (only the gently-breathing pug moves under the cone).
 const FIRE_SHADOW_UPDATE_INTERVAL = isMobile ? 6 : 3;
@@ -124,7 +190,7 @@ export function UpdateCameraRotation(): void
     cameraForward.copy(_basisZ.set(0, 0, -1).applyQuaternion(camera.quaternion));
 }
 
-import { defaultFov } from '../scene/config/CameraConfig';
+import { defaultFov, defaultCameraX, defaultCameraZ } from '../scene/config/CameraConfig';
 export let fov = defaultFov;
 export function SetFOV(value: number): void
 {
@@ -226,21 +292,10 @@ function getUnderwaterTransparentTargets(): Object3D[] {
 // as underwater content seen THROUGH the surface and must stay in the main
 // render so the surface shader blurs/tints them.
 function getBubbleTargets(): Object3D[] {
+    _bubbleTargets.length = 0;
     const bubbles = Bubbles.getRenderable();
-    return bubbles ? [bubbles] : [];
-}
-
-function hideTargets(targets: Object3D[]): Array<{ obj: Object3D; vis: boolean }> {
-    const saved: Array<{ obj: Object3D; vis: boolean }> = [];
-    for (const obj of targets) {
-        saved.push({ obj, vis: obj.visible });
-        obj.visible = false;
-    }
-    return saved;
-}
-
-function restoreVisibility(saved: Array<{ obj: Object3D; vis: boolean }>): void {
-    for (const item of saved) item.obj.visible = item.vis;
+    if (bubbles) _bubbleTargets.push(bubbles);
+    return _bubbleTargets;
 }
 
 // Objects that are irrelevant to depth-intersection foam but expensive to draw
@@ -291,23 +346,30 @@ function getDepthPrePassExcluded(): Object3D[] {
     return _depthExcludedTargets;
 }
 
-function hideDepthPrePassExcluded(): Array<{ obj: Object3D; vis: boolean }> {
-    const saved: Array<{ obj: Object3D; vis: boolean }> = [];
-    for (const obj of getDepthPrePassExcluded()) {
+function hideDepthPrePassExcluded(): void {
+    _depthExcludedVis.clear();
+    const excluded = getDepthPrePassExcluded();
+    for (let i = 0; i < excluded.length; i++) {
+        const obj = excluded[i];
         if (!obj.visible) continue; // already hidden by visibility gating — nothing to restore
-        saved.push({ obj, vis: obj.visible });
-        obj.visible = false;
+        _depthExcludedVis.hide(obj);
     }
-    return saved;
 }
 
-function renderOnlyUnderwaterTransparents(savedTargets: Array<{ obj: Object3D; vis: boolean }>): void {
-    const targetSet = new Set(savedTargets.filter(item => item.vis).map(item => item.obj));
-    if (targetSet.size === 0) return;
+/** Re-render ONLY the after-ocean targets from _afterOceanVis — the ones that
+ *  were visible before the main render hid them. */
+function renderOnlyUnderwaterTransparents(): void {
+    _targetSet.clear();
+    for (let i = 0; i < _afterOceanVis.n; i++) {
+        if (_afterOceanVis.vis[i]) _targetSet.add(_afterOceanVis.objs[i]);
+    }
+    if (_targetSet.size === 0) return;
 
-    const savedChildren = scene.children.map(obj => ({ obj, vis: obj.visible }));
-    for (const child of scene.children) {
-        child.visible = (child as any).isLight === true || targetSet.has(child);
+    _childrenVis.clear();
+    const children = scene.children;
+    for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        _childrenVis.set(child, (child as any).isLight === true || _targetSet.has(child));
     }
 
     const prevAutoClear = renderer.autoClear;
@@ -323,7 +385,7 @@ function renderOnlyUnderwaterTransparents(savedTargets: Array<{ obj: Object3D; v
     renderer.shadowMap.autoUpdate = prevShadowAutoUpdate;
     renderer.autoClear = prevAutoClear;
 
-    restoreVisibility(savedChildren);
+    _childrenVis.restore();
 }
 
 function renderSceneFrame(deepUnderwater: boolean, effectOnScreen: boolean): void {
@@ -344,13 +406,22 @@ function renderSceneFrame(deepUnderwater: boolean, effectOnScreen: boolean): voi
     //    and tints them wherever the water sits behind them in screen space — the
     //    reported bug. getAboveWaterParticleTargets() returns [] while none are
     //    alive, so the extra pass is skipped when nothing is playing/sleeping.
-    const afterOceanTargets = deepUnderwater
-        ? getUnderwaterTransparentTargets()
-        : (effectOnScreen ? getBubbleTargets() : []);
-    const combinedAfterOcean = [...afterOceanTargets, ...Island.getAboveWaterParticleTargets()];
-    const underwaterTransparentVis = combinedAfterOcean.length > 0
-        ? hideTargets(combinedAfterOcean)
-        : null;
+    _afterOceanTargets.length = 0;
+    if (deepUnderwater) {
+        const t = getUnderwaterTransparentTargets();
+        for (let i = 0; i < t.length; i++) _afterOceanTargets.push(t[i]);
+    } else if (effectOnScreen) {
+        const t = getBubbleTargets();
+        for (let i = 0; i < t.length; i++) _afterOceanTargets.push(t[i]);
+    }
+    // COPIED, not aliased: getDepthPrePassExcluded() below rebuilds
+    // _underwaterTransparentTargets in this same frame, which would rewrite the
+    // list out from under us if this held a reference to it.
+    const above = Island.getAboveWaterParticleTargets();
+    for (let i = 0; i < above.length; i++) _afterOceanTargets.push(above[i]);
+
+    _afterOceanVis.clear();
+    for (let i = 0; i < _afterOceanTargets.length; i++) _afterOceanVis.hide(_afterOceanTargets[i]);
 
     // Pre-pass: capture opaque scene depth into SceneDepth's depth target so
     // the ocean shader can do depth-intersection foam in this frame. Must run
@@ -367,9 +438,9 @@ function renderSceneFrame(deepUnderwater: boolean, effectOnScreen: boolean): voi
     // needs this depth — it is a pure screen-space over/under line (PostProcess.ts).
     const depthPassActive = (edgeFoamIntensityUniform.value as number) > 0;
     if (depthPassActive) {
-        const depthExcludedVis = hideDepthPrePassExcluded();
+        hideDepthPrePassExcluded();
         SceneDepth.capture(renderer, scene, camera);
-        restoreVisibility(depthExcludedVis);
+        _depthExcludedVis.restore();
     }
     sceneDepthUniform.value = SceneDepth.getDepthTexture();
     updateSceneDepthCamera(camera);
@@ -378,9 +449,9 @@ function renderSceneFrame(deepUnderwater: boolean, effectOnScreen: boolean): voi
         // Skip the ocean surface pass while sealed inside the cabana — the dome
         // hides it and the camera is above water, so it's pure waste.
         if (!Island.isCabanaSealed()) Ocean.RenderSurface(renderer, camera);
-        if (underwaterTransparentVis) {
-            renderOnlyUnderwaterTransparents(underwaterTransparentVis);
-            restoreVisibility(underwaterTransparentVis);
+        if (_afterOceanVis.n > 0) {
+            renderOnlyUnderwaterTransparents();
+            _afterOceanVis.restore();
         }
     });
 }
@@ -393,7 +464,9 @@ export function setShadowsEnabled(value: boolean): void
     
     // Dispose shadow map textures so Three.js recreates them fresh
     // VSM uses two render targets: shadow.map (main) and shadow.mapPass (blur pass).
-    // Both must be cleared — leaving mapPass causes size mismatch and shadows disappear.
+    // Both must be cleared — leaving mapPass causes size mismatch and shadows
+    // disappear. PCF never allocates mapPass, but the switch back to VSM is one
+    // runtime call away, so both are still cleared here.
     scene.traverse((obj) => {
         const light = obj as any;
         if (light.shadow?.map) {
@@ -444,7 +517,22 @@ export function Start(): void
     renderer.setSize(getViewportWidth(), getViewportHeight());
     renderer.setClearColor(0x000000, 0.0);
     renderer.shadowMap.enabled = shadowsEnabled;
-    renderer.shadowMap.type = VSMShadowMap;  // Variance shadows — real Gaussian blur
+    // PCF soft, not VSM.
+    //
+    // VSM gives the nicest edge in this scene — it is a real Gaussian blur — but
+    // it pays for it twice over on every shadow update: the map is a float
+    // target rather than a packed depth one, and three runs TWO extra full-screen
+    // blur passes over it (horizontal + vertical, blurSamples taps each) for the
+    // sun AND again for the campfire spot. On a phone that is the single most
+    // expensive thing the renderer does for something the viewer reads as "the
+    // palm casts a shadow".
+    //
+    // PCF-soft samples the depth map directly with a fixed kernel: no blur pass,
+    // no float target, one draw per shadow map. The trade is a firmer, slightly
+    // grainier shadow edge instead of a smooth falloff — accepted deliberately.
+    // setShadowMapType() below still switches back at runtime if the edge turns
+    // out to matter more than the frames.
+    renderer.shadowMap.type = PCFSoftShadowMap;
 
     // Disable automatic per-frame sorting — CPU savings for 250+ objects.
     // Use explicit renderOrder on key meshes instead.
@@ -561,10 +649,18 @@ export function Start(): void
     directionalLight.shadow.camera.top = 2;
     directionalLight.shadow.camera.bottom = -4;
     
-    // Shadow bias configuration — VSM uses positive bias
-    directionalLight.shadow.bias = 0.0005;
+    // Bias for PCF, which is the opposite sign convention to VSM's: VSM compares
+    // depth moments and wants a positive nudge, PCF compares raw depth and a
+    // positive one would push every caster off its own contact point (the
+    // "floating object" look). normalBias does the work here instead — 0.05
+    // world units is more than ten shadow texels at this map size, which is
+    // plenty to clear acne without detaching anything.
+    directionalLight.shadow.bias = 0.0;
     directionalLight.shadow.normalBias = 0.05;
-    directionalLight.shadow.radius = 4;  // VSM blur radius
+    // radius/blurSamples are VSM-only knobs — PCF-soft uses a fixed kernel and
+    // ignores them. Kept at their old values so switching the type back at
+    // runtime restores exactly the previous look.
+    directionalLight.shadow.radius = 4;
     directionalLight.shadow.blurSamples = 10;
     
     // Point at island center (firecamp is at z=-2.9)
@@ -597,6 +693,8 @@ export function Start(): void
     scene.add(Island.bushRadio2);
     scene.add(Island.bushPug);
     scene.add(Island.radio);
+    scene.add(Island.noticeBoard);
+    scene.add(Island.pictureFrame);
     scene.add(Island.sword);
     scene.add(Island.pug);
     scene.add(Island.tent);
@@ -612,6 +710,9 @@ export function Start(): void
     Fire.Start();
     Island.firecamp.add(Fire.fire);
     // Shadow spotlight lives in the scene (not inside fire group which is scaled 0.25x)
+    // Both fire lights live at the scene ROOT so the light COUNT never changes
+    // with the fire's visibility — see the note on Fire.fireLight.
+    scene.add(Fire.fireLight);
     scene.add(Fire.fireShadowLight);
     scene.add(Fire.fireShadowLight.target);
 
@@ -672,6 +773,23 @@ export function Start(): void
 
     CloudSprites.Start();
 
+    // Frame-cost probe. Off unless ?probe=1 / __probe.enable() — see StutterProbe.
+    // Started HERE, not at module scope: its A/B controls read module state
+    // (_matMode, shadowsEnabled, cssRenderer) that is still in the temporal dead
+    // zone while this module is evaluating, and a probe left enabled in
+    // localStorage builds its overlay — and therefore reads them — immediately.
+    //
+    // The controls exist because 'paint' time covers both browser DOM work and
+    // the GPU, and switching one suspect off is the only way to tell them apart
+    // on a device with no WebGL timer queries (i.e. any iPhone).
+    StutterProbe.Start(renderer, {
+        materials: { get: () => _matMode,       set: (v) => setPropMaterials(v) },
+        dpr:       { get: () => _probeDpr,      set: (v) => setDPR(v) },
+        shadows:   { get: () => shadowsEnabled, set: (v) => setShadowsEnabled(v) },
+        css3d:     { get: () => cssRenderer.domElement.style.display !== 'none',
+                     set: (v) => { cssRenderer.domElement.style.display = v ? '' : 'none'; } },
+    });
+
     // Register GPU prewarm to run after all models finish loading.
     // This compiles every shader program during the loading screen so the
     // first scroll and first underwater transition are stutter-free.
@@ -710,6 +828,10 @@ async function prewarmGPU(): Promise<void> {
     // 'low' Lambert swap) BEFORE the compile pass below, so the right materials
     // get warmed and the first visible frame is already correct.
     reapplyPropMaterials();
+    // The prewarm renders frames without running Update(), so anything Update
+    // normally keeps in sync has to be placed by hand first.
+    Fire.syncLightPosition();
+    Island.syncChestGlowLightPosition();
     await Audio.preloadAudioBytes();
 
     // 1. Save visibility & camera state
@@ -791,6 +913,7 @@ async function prewarmGPU(): Promise<void> {
         // renders exactly the region it illuminates.
         const restoreAnglerfishPrewarm = SeaFloorDecor.beginAnglerfishPrewarm();
         try {
+            await prewarmDescent();
             await prewarmChestCorridor();
 
             // Park every pooled fish/jelly clone in-frustum so their per-instance GPU
@@ -868,6 +991,71 @@ function initGpuTextures(root: Object3D): void {
     });
 }
 
+/**
+ * Render the actual descent, once, on the loading screen.
+ *
+ * THIS IS THE HOLE THE PROBE FOUND. Everything else in the prewarm renders a
+ * pose that is not the one the visitor is ever in: the surface passes look up
+ * at the sky or across at the island, the chest corridor LOOKS AT THE CHEST
+ * from three heights, and the creature grid stares at a parked formation. Real
+ * play is none of those — the camera sits at the rest X/Z, level with the
+ * horizon, and scrolls from the surface down to the sea floor looking straight
+ * ahead. Anything that only ever enters THAT frustum was still uploading and
+ * still compiling on first sight, mid-dive, which is exactly what the probe
+ * caught: two shader compiles of 268ms and 292ms just under the waterline, and
+ * a run of ~100ms geometry uploads between y −8 and y −11.
+ *
+ * So: walk the scroll range in the play pose and draw it. The ladder step is
+ * well inside what one frustum covers vertically at these distances, so nothing
+ * falls between two rungs.
+ *
+ * This costs LOADING TIME, not memory. Every byte drawn here was already in RAM
+ * — the models all finished downloading before the prewarm starts. The only
+ * thing that changes is WHEN it crosses to the GPU: during a loading screen
+ * where a stall is invisible, instead of mid-dive where it is the whole
+ * problem.
+ *
+ * Worth knowing when testing: browsers cache linked shader programs per origin
+ * on disk, so a SECOND visit never shows the compile spikes whether or not this
+ * function exists. Any before/after has to be done with the site's data cleared
+ * or in a private window.
+ */
+async function prewarmDescent(): Promise<void> {
+    // The scroll range, from Control.ts: aboveWaterTopY (1.4) down to
+    // underwaterBottomY (−12).
+    const TOP = 1.4;
+    const BOTTOM = -12;
+    const STEP = 1.8;
+
+    let lastPrograms = renderer.info.programs?.length ?? 0;
+
+    for (let y = TOP; y >= BOTTOM - 0.001; y -= STEP) {
+        camera.position.set(defaultCameraX, y, defaultCameraZ);
+        camera.lookAt(defaultCameraX, y, defaultCameraZ - 6);   // level, straight ahead
+        camera.updateProjectionMatrix();
+
+        // Materials are traversed whole by compile(), so this is only about
+        // catching a variant that this pose's light/shadow state produces.
+        // Cheap on a cache hit, which is what it is after the first rung.
+        renderer.compile(scene, camera);
+        const programs = renderer.info.programs?.length ?? 0;
+        if (programs > lastPrograms && typeof (renderer as any).compileAsync === 'function') {
+            // Only await when something actually had to be built — awaiting on
+            // every rung would add a round trip per rung for nothing.
+            await (renderer as any).compileAsync(scene, camera);
+            lastPrograms = renderer.info.programs?.length ?? programs;
+        }
+
+        // Drawing is the part that varies with the pose: programs are shared,
+        // but a geometry's buffers and a texture's bytes only cross to the GPU
+        // when the thing is actually rendered in-frustum.
+        const under = y < 0;
+        renderSceneFrame(under, true);
+    }
+
+    renderer.getContext().finish();
+}
+
 async function prewarmChestCorridor(): Promise<void> {
     const chestCfg = SeaFloorDecor.config.chest;
     const target = new Vector3(chestCfg.x, chestCfg.y + 0.9, chestCfg.z);
@@ -939,7 +1127,7 @@ let _matMode: MatMode = 'standard';
 function _matRoots(): Array<Object3D | null | undefined> {
     return [
         Island.firecamp, Island.tree, Island.bush, Island.bushRadio, Island.bushRadio2, Island.bushPug,
-        Island.radio, Island.sword, Island.pug, Island.dogBed,
+        Island.radio, Island.noticeBoard, Island.pictureFrame, Island.sword, Island.pug, Island.dogBed,
         Island.apple1, Island.apple2, Island.apple3,
         Island.mossRock1, Island.mossRock2a, Island.mossRock2b, Island.mossRock3a, Island.mossRock3b, Island.mossRock3c,
         Island.tent, Island.chest,
@@ -1020,6 +1208,8 @@ export function Update(): void
     // (camera parked at introStartY, WebGL canvas behind the loading overlay).
     // This frees the GPU entirely for model downloads and decoding.
     if (!_sceneReady) return;
+    StutterProbe.beginFrame();
+    StutterProbe.section('world');
 
     const isUnderwater = getIsUnderwater();
 
@@ -1040,7 +1230,7 @@ export function Update(): void
     // default pose. The over/under line assumes a level scroll camera, so a zoom
     // (or its return trip) would smear the tint/distortion across dry land — and
     // you can never see below the ocean line during any of that anyway.
-    PostProcess.setUnderwaterEffectEnabled(!(isRadioZoomActive() || isPugZoomActive() || isRadioPugZoomSettling()));
+    PostProcess.setUnderwaterEffectEnabled(!(isRadioZoomActive() || isPugZoomActive() || isNoticeBoardZoomActive() || isRadioPugZoomSettling()));
 
     // ── Visibility gating ─────────────────────────────────────────────────────
     // Only update systems relevant to the current view (surface vs underwater).
@@ -1102,6 +1292,8 @@ export function Update(): void
         Island.bushRadio2.visible = showOutside;
         Island.bushPug.visible = showOutside;
         Island.radio.visible = showOutside;
+        Island.noticeBoard.visible = showOutside;
+        Island.pictureFrame.visible = showOutside;
         Island.sword.visible = showOutside;
         Island.pug.visible = showOutside;
         Island.dogBed.visible = showOutside;
@@ -1149,6 +1341,7 @@ export function Update(): void
     ambientLight.intensity = 0.3 + sunVisible * lightIntensity * 0.9;  // TWEAK: Higher base = brighter scene
 
     // Sync occluder transforms BEFORE the render (so NoBlending holes are correct)
+    StutterProbe.section('css3d');
     PhoneScreen.preRender(Island.phone, camera);
     // Card carousel: advance the track, sync DOM + punch-mesh transforms and
     // update the post-process distortion quiet rect — also pre-render work.
@@ -1188,6 +1381,7 @@ export function Update(): void
     // the surface as soon as the over/under line is on screen — the same gate
     // they spawn on — so the surface never paints over them.
     const underwaterEffectOnScreen = PostProcess.getLineNdcY(camera.position.y) > -1.0;
+    StutterProbe.section('render');
     renderSceneFrame(isUnderwater, underwaterEffectOnScreen);
     // Clouds are sky-only — skip them while sealed inside the cabana.
     if (!Island.isCabanaSealed()) CloudSprites.Render(renderer, camera);
@@ -1198,6 +1392,7 @@ export function Update(): void
     renderer.autoClearColor = true;
 
     // Pointer-events + CSS3D update
+    StutterProbe.section('css3d');
     PhoneScreen.render(camera);
     // In-scene panels claim the canvas pointer-events last (after PhoneScreen,
     // the other writer) so a visible modal panel receives clicks.
@@ -1207,8 +1402,12 @@ export function Update(): void
     cssRenderer.render(cssScene, cssCamera);
 
     // Wind lines 3D update — moves ribbon meshes and updates vertex positions
+    StutterProbe.section('world');
     WindLines.Update(deltaTime, camera.position.x, camera.position.y, camera.position.z, camera.fov);
 
+    // Close the probe's frame — must be after every render call above, so the
+    // draw-call and upload counters cover the whole frame.
+    StutterProbe.endFrame(camera, isUnderwater);
 }
 
 // Shadow configuration helpers
@@ -1255,6 +1454,7 @@ export function getShadowLight(): DirectionalLight {
 }
 
 export function setDPR(maxDpr: number): void {
+    _probeDpr = maxDpr;
     const dpr = Math.min(window.devicePixelRatio, maxDpr);
     renderer.setPixelRatio(dpr);
     renderer.setSize(window.innerWidth, window.innerHeight);

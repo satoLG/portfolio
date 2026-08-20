@@ -3,6 +3,7 @@
 // ============================================
 
 import { camera, pixelSizeValue } from "./Scene";
+import { unlock as unlockAchievement } from './Achievements';
 import { radio } from "../scene/Island";
 import { Vector3 } from "three";
 import { CSS3DPanel } from "../effects/CSS3DPanel";
@@ -190,6 +191,12 @@ const PLAYER_PUNCH = 0.80;
 // off the island by the max-height cap in CSS). 1.15 puts the top just under
 // the radio-zoom frustum ceiling (~1.46wu at fov 50.5, 1.5wu away).
 const PLAYER_ANCHOR_UP   = 0.90;  // world units above the radio (tweak height)
+// The panel rises STRAIGHT UP out of the radio — same X and Z, only Y changes.
+// It used to carry a forward offset to clear the notice board, which put it on a
+// diagonal from the thing it belongs to and read as crooked. The radio has since
+// moved clear of the board on its own, so the offset bought nothing and cost the
+// one alignment that matters: a panel that comes out of an object should look
+// like it came out of that object.
 // Anchor to the radio's REST position (config), NOT radio.getWorldPosition():
 // the radio bounces to the music beat, and following the live transform made
 // the whole panel jitter, which made the buttons hard to hit.
@@ -987,6 +994,7 @@ function initWavesurfer(): void {
     wavesurfer.on('play', () => {
         _songEndHandled = false;  // Reset guard — new song is playing
         isPlaying = true;
+        unlockAchievement('music');
         updatePlayButton();
         updateBubblePlayingState();
         connectMusicAnalyser();

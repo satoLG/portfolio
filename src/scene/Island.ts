@@ -14,13 +14,22 @@ import {
 import { lightUniform, sunVisibilityUniform } from "../materials/SkyboxMaterial";
 import { deltaTime, time } from "../core/Time";
 import { getIsPlaying, expandPlayer, collapsePlayer, getIsExpanded, getMusicIntensity, getBeatKick } from "../core/MediaPlayer";
-import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive, zoomToCabana, isCabanaZoomActive, getCabanaPhase, registerCabanaInterior, registerChestClose, touchControls } from "../core/Control";
+import { zoomToPug, zoomOutFromPug, isPugZoomActive, isRadioZoomActive, zoomToPhone, zoomOutFromPhone, isPhoneZoomActive, zoomToChest, zoomOutFromChest, isChestZoomActive, zoomToCabana, isCabanaZoomActive, getCabanaPhase, registerCabanaInterior, registerChestClose, zoomToNoticeBoard, zoomOutFromNoticeBoard, isNoticeBoardZoomActive, registerNoticeBoardPose, touchControls } from "../core/Control";
 import { cabanaShadeX, cabanaShadeY, cabanaShadeZ, cabanaShadeRadiusX, cabanaShadeRadiusY, cabanaShadeRadiusZ, cabanaShadeEdge, cabanaShadeColor, cabanaShadeStrength, cabanaShadeRevealSpeed, cabanaShadeCoverSpeed, cabanaDomeX, cabanaDomeY, cabanaDomeZ, cabanaDomeRadius, cabanaDomeColor, cabanaDomeOpacity } from "./config/CabanaConfig";
 import { showDialog, advanceDialog, dismissDialog, isDialogActive } from "../core/Dialog";
 import * as CoinTooltip from '../core/CoinTooltip';
 import type { DialogLine, ReplyOption } from "../core/Dialog";
 import { isBreezeActive, playAppleImpactSound, playChestCloseSound, playChestOpenSound, playPugSnoreOnce, stopPugSnore } from "../core/Audio";
 import { createGrassMesh, createPerlinTexture, createShadowFloorMesh, grassColorBase, grassColorTip, type GrassUniforms } from './ProceduralGrass';
+import {
+    createNoticeBoard, POSTIT_PICK_NAME,
+    REGION_ACHIEVEMENTS, REGION_SLIDES, REGION_POSTITS, type BoardRegion,
+} from './NoticeBoard';
+import { syncNoticeBoardPanel, setNoticeBoardExit } from './NoticeBoardPanel';
+import { syncAchievementsPanel, setAchievementsExit } from './AchievementsPanel';
+import { syncPostItWall, setPostItExit, registerPostItPickPlane, isPostItBusy } from './PostItWall';
+import { unlock as unlockAchievement } from '../core/Achievements';
+import { setNoticeBoardFocus, isNoticeBoardFocused } from '../core/Control';
 import { camera, renderer, scene as threeScene, isMobile } from "../core/Scene";
 import { generateFoamMask, getMaskTexture, getMaskCenter, getMaskSize } from "../effects/FoamMask";
 import * as PhoneScreen from '../core/PhoneScreen';
@@ -30,15 +39,15 @@ import {
     pugOffset, tentOffset, dogBedOffset, phoneOffset,
     apple1Offset, apple2Offset, apple3Offset,
     mossRock2aOffset, mossRock2bOffset,
-    foldingTrayTableOffset, tentDogBedOffset, rugRoundOffset, lanternOffset, dogBowlOffset, dogBiscuitOffset,
+    foldingTrayTableOffset, tentDogBedOffset, rugRoundOffset, lanternOffset, dogBowlOffset, dogBiscuitOffset, noticeBoardOffset, pictureFrameOffset,
     islandScale, firecampScale, treeScale, bushScale, bushRadioScale, bushRadio2Scale, bushPugScale, radioScale, swordScale, pugScale, tentScale, dogBedScale, phoneScale,
     apple1Scale, apple2Scale, apple3Scale,
     mossRock2aScale, mossRock2bScale,
-    foldingTrayTableScale, tentDogBedScale, rugRoundScale, lanternScale, dogBowlScale, dogBiscuitScale,
+    foldingTrayTableScale, tentDogBedScale, rugRoundScale, lanternScale, dogBowlScale, dogBiscuitScale, noticeBoardScale, pictureFrameScale,
     treeRotY, bushRotY, bushRadioRotY, bushRadio2RotY, bushPugRotY, radioRotY, swordRot, pugRotY, tentRotY, dogBedRotY, phoneRot,
     apple1RotY, apple2RotY, apple3RotY,
     mossRock2aRot, mossRock2bRot,
-    foldingTrayTableRot, tentDogBedRot, rugRoundRot, lanternRot, dogBowlRot, dogBiscuitRot,
+    foldingTrayTableRot, tentDogBedRot, rugRoundRot, lanternRot, dogBowlRot, dogBiscuitRot, noticeBoardRotY, noticeBoardModelPath, pictureFrameRotY,
     ISLAND_SURFACE_GRASS_COLOR,
     ISLAND_SURFACE_GRASS_STRENGTH,
     ISLAND_SURFACE_GRASS_GREEN_THRESHOLD,
@@ -101,6 +110,11 @@ export const bushRadio = new Group();
 export const bushRadio2 = new Group();
 export const bushPug = new Group();
 export const radio = new Group();
+// Warning board nailed to the tree trunk, just above the radio. Its contents are
+// built procedurally (or loaded from noticeBoardModelPath) in _buildNoticeBoard().
+export const noticeBoard = new Group();
+// Family photo in a frame, hung on the same trunk just above the board.
+export const pictureFrame = new Group();
 export const sword = new Group();
 export const pug = new Group();
 export const tent = new Group();
@@ -321,6 +335,9 @@ let chestCloseAction: AnimationAction | null = null;
 let chestIsOpen = false;
 // Chest glow light (animates on open/close)
 let chestGlowLight: PointLight | null = null;
+/** Rides inside the chest; the glow light copies its world position. The light
+ *  itself lives at the SCENE ROOT — see syncChestGlowLightPosition. */
+let _chestGlowAnchor: Object3D | null = null;
 let _chestGlowTarget = 0;
 let _chestGlowReady  = false;  // true only after CHEST_GLOW_DELAY_MS has elapsed
 // Chest Zelda-style ray beams
@@ -482,9 +499,19 @@ function _getCoinWorldPos(i: number): { x: number; y: number; z: number } | null
 }
 
 export function updateChestGlowTransform(): void {
-    if (!chestGlowLight) return;
-    chestGlowLight.position.set(sfDecorConfig.chestGlowX, sfDecorConfig.chestGlowY, sfDecorConfig.chestGlowZ);
+    if (!chestGlowLight || !_chestGlowAnchor) return;
+    // The config offset is in the CHEST's space, which is what the anchor is
+    // for — the light is at the scene root and just copies the world result.
+    _chestGlowAnchor.position.set(sfDecorConfig.chestGlowX, sfDecorConfig.chestGlowY, sfDecorConfig.chestGlowZ);
     chestGlowLight.distance = sfDecorConfig.chestGlowDistance;
+    syncChestGlowLightPosition();
+}
+
+/** Pull the glow light onto its anchor's world position. Called every frame
+ *  from Update, and once from the prewarm (which renders without running it). */
+export function syncChestGlowLightPosition(): void {
+    if (!chestGlowLight || !_chestGlowAnchor) return;
+    _chestGlowAnchor.getWorldPosition(chestGlowLight.position);
 }
 
 export function rebuildChestRays(): void {
@@ -631,8 +658,14 @@ export const aboveWaterParticles = new Group();
 
 /** Targets that must be re-rendered on top of the ocean surface. Empty while no
  *  notes/Zs are alive so Scene.ts can skip the extra pass entirely. */
+// Reused across frames: this is called every frame from the render path, and a
+// fresh array each time is per-frame garbage for no reason. Treat the result as
+// read-only and don't hold on to it.
+const _aboveWaterTargets: Object3D[] = [];
 export function getAboveWaterParticleTargets(): Object3D[] {
-    return aboveWaterParticles.children.length > 0 ? [aboveWaterParticles] : [];
+    _aboveWaterTargets.length = 0;
+    if (aboveWaterParticles.children.length > 0) _aboveWaterTargets.push(aboveWaterParticles);
+    return _aboveWaterTargets;
 }
 
 // Music note particles for radio
@@ -1340,6 +1373,7 @@ function _startTreeAppleRespawn(treeIndex: number): void {
     if (goldenAppleConfig.interval > 0
         && _totalAppleRespawns % goldenAppleConfig.interval === 0
         && _countGoldenApples() < MAX_GOLDEN_APPLES) {
+        unlockAchievement('goldenApple');
         _applyGoldenTint(treeIndex);
     } else {
         _removeGoldenTint(treeIndex);
@@ -3222,6 +3256,35 @@ export function Start(): void {
         }
     );
 
+    // Nail the notice board to the tree trunk, just above the radio
+    _buildNoticeBoard(loader);
+
+    // Hang the family photo on the same trunk, just above the board
+    loader.load(
+        'models/surface/picture_frame.glb',
+        (gltf) => {
+            applyOceanLightingToModel(gltf.scene);
+            gltf.scene.traverse((child) => {
+                if ((child as any).isMesh) {
+                    child.castShadow = true;
+                    (child as any).receiveShadow = true;
+                }
+            });
+            pictureFrame.add(gltf.scene);
+            pictureFrame.position.set(
+                islandPosition.x + pictureFrameOffset.x,
+                islandPosition.y + pictureFrameOffset.y,
+                islandPosition.z + pictureFrameOffset.z,
+            );
+            pictureFrame.scale.setScalar(pictureFrameScale);
+            pictureFrame.rotation.y = pictureFrameRotY;
+            _buildFramePickPlane();
+            console.log('Picture frame loaded');
+        },
+        undefined,
+        (error) => { console.error('Error loading picture_frame.glb:', error); },
+    );
+
     // Load sword stuck in the middle of the bonfire
     loader.load(
         'models/surface/sword.glb',
@@ -3410,13 +3473,20 @@ export function Start(): void {
             }
 
             // Interior glow light — smoothly animates to target intensity on open/close
+            // Light at the SCENE ROOT, anchor inside the chest.
+            //
+            // three counts only VISIBLE lights when it builds a program key, and
+            // the underwater pass re-renders the fish with every other scene
+            // child hidden — chest included. A light living inside the chest
+            // would drop out of that count and force a second program for every
+            // material drawn in the pass, which the frame probe caught as a
+            // stall at the waterline. Same contract the jellyfish and anglerfish
+            // lights already follow.
             chestGlowLight = new PointLight(0xFFCC33, 0, sfDecorConfig.chestGlowDistance);
-            chestGlowLight.position.set(
-                sfDecorConfig.chestGlowX,
-                sfDecorConfig.chestGlowY,
-                sfDecorConfig.chestGlowZ
-            );
-            chest.add(chestGlowLight);
+            _chestGlowAnchor = new Object3D();
+            chest.add(_chestGlowAnchor);
+            threeScene.add(chestGlowLight);
+            updateChestGlowTransform();
             _buildChestRays();
 
             console.log('Chest loaded with ocean lighting (' + gltf.animations.length + ' animations)');
@@ -3528,6 +3598,22 @@ export function Start(): void {
     // Setup radio click/hover interaction
     setupRadioInteraction();
 
+    // Setup notice board click/hover interaction → zoom in on the notice.
+    // Registered right after the radio so the two above-water zooms resolve in a
+    // predictable order; every handler below this line checks
+    // _noticeBoardBlocksClick() so the board's click-away can't leak into them.
+    setupNoticeBoardInteraction();
+    // While zoomed the notice is modal, so a click that misses it lands on the
+    // CSS layer rather than the canvas — that is the path that backs the camera
+    // out (the canvas handler above never sees it).
+    // Backing out is LAYERED: a click away from a focused sheet returns to the
+    // board, and only a click away from the board itself leaves the zoom. One
+    // step per click — going two levels out on a single tap reads as the scene
+    // throwing you out.
+    setNoticeBoardExit(_boardBackOut);
+    setAchievementsExit(_boardBackOut);
+    setPostItExit(_boardBackOut);
+
     // Setup pug click/hover interaction
     setupPugInteraction();
 
@@ -3570,6 +3656,7 @@ function setupAppleInteraction(): void {
         }
         if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
         if (isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive() || isChestZoomActive()) return;
+        if (_noticeBoardBlocksClick()) return;
 
         appleMouse.x = (clientX / window.innerWidth) * 2 - 1;
         appleMouse.y = -(clientY / window.innerHeight) * 2 + 1;
@@ -3614,6 +3701,7 @@ function setupAppleInteraction(): void {
         if (isMobile) return;   // Apple drag is desktop-only — taps on mobile still trigger the fall click handler
         if (_groundAppleDrag.active) return;
         if (isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive() || isChestZoomActive()) return;
+        if (isNoticeBoardZoomActive()) return;
         const ga = _findGroundAppleAtPointer(e.clientX, e.clientY);
         if (!ga) return;
 
@@ -3692,6 +3780,7 @@ function setupAppleInteraction(): void {
 }
 
 function triggerAppleFall(index: number): void {
+    unlockAchievement('apple');
     const appleGroups = [apple1, apple2, apple3];
     const group = appleGroups[index];
     const st = appleStates[index];
@@ -4057,8 +4146,8 @@ function setupPhoneInteraction(): void {
         if (!phone.visible) return;
         // Ignore interactions while underwater
         if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
-        // Ignore clicks while pug or radio zoom is active
-        if (isPugZoomActive() || isRadioZoomActive()) return;
+        // Ignore clicks while pug, radio or notice-board zoom is active
+        if (isPugZoomActive() || isRadioZoomActive() || _noticeBoardBlocksClick()) return;
 
         // If already zoomed into phone, zoom out only if the click missed the
         // phone model entirely — clicking on the model itself does nothing.
@@ -4659,7 +4748,7 @@ function setupPugInteraction(): void {
         // Ignore interactions while underwater — models are above water
         if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
         // Ignore clicks while another zoom is active — let that handler close itself first
-        if (isRadioZoomActive() || isPhoneZoomActive()) return;
+        if (isRadioZoomActive() || isPhoneZoomActive() || _noticeBoardBlocksClick()) return;
         // If already zoomed in: advance dialog (which calls zoomOut when done) or just zoom out
         if (isPugZoomActive()) {
             if (isDialogActive()) {
@@ -4715,6 +4804,328 @@ function setupPugInteraction(): void {
 }
 
 // ============================================
+// NOTICE BOARD  (nailed to the tree trunk, just above the radio)
+// ============================================
+
+/**
+ * Seat the notice board on the trunk and publish its pose to the zoom camera.
+ *
+ * Geometry comes from NoticeBoard.ts by default. Pointing `noticeBoardModelPath`
+ * (IslandConfig) at a GLB under public/ swaps in a downloaded model instead —
+ * a failed load there is not fatal, it falls back to the procedural board so the
+ * trunk is never left with a bare patch where the sign should be.
+ */
+function _buildNoticeBoard(loader: GLTFLoader): void {
+    const place = (content: Object3D) => {
+        noticeBoard.add(content);
+        noticeBoard.position.set(
+            islandPosition.x + noticeBoardOffset.x,
+            islandPosition.y + noticeBoardOffset.y,
+            islandPosition.z + noticeBoardOffset.z,
+        );
+        noticeBoard.scale.setScalar(noticeBoardScale);
+        noticeBoard.rotation.y = noticeBoardRotY;
+        applyOceanLightingToModel(noticeBoard);
+        noticeBoard.traverse((child) => {
+            if ((child as any).isMesh) {
+                child.castShadow = true;
+                (child as any).receiveShadow = true;
+            }
+        });
+
+        // The post-it wall raycasts this quad to turn a pointer into a spot on
+        // the board; it only exists once the geometry has been built.
+        const pick = noticeBoard.getObjectByName(POSTIT_PICK_NAME);
+        if (pick) registerPostItPickPlane(pick);
+
+        // Publish the pose only once there is something to look at, so a zoom can
+        // never frame an empty group. The board is a top-level scene child with no
+        // parent transform, so its local position IS its world position.
+        registerNoticeBoardPose(() => ({
+            x: noticeBoard.position.x,
+            y: noticeBoard.position.y,
+            z: noticeBoard.position.z,
+            rotY: noticeBoard.rotation.y,
+        }));
+    };
+
+    if (noticeBoardModelPath) {
+        loader.load(
+            noticeBoardModelPath,
+            (gltf) => {
+                place(gltf.scene);
+                console.log(`Notice board loaded from ${noticeBoardModelPath}`);
+            },
+            undefined,
+            (error) => {
+                console.error(`Error loading ${noticeBoardModelPath} — using the procedural board instead:`, error);
+                place(createNoticeBoard());
+            },
+        );
+    } else {
+        place(createNoticeBoard());
+    }
+}
+
+/**
+ * Drive the board's three CSS3D panels each frame: where each region sits, and
+ * whether it is on screen and interactive.
+ *
+ * Every anchor is recomputed from the board group's LIVE transform rather than
+ * from IslandConfig, so moving or resizing the board from the debug GUI carries
+ * all three panels with it — the same reason the zoom pose is read live.
+ */
+function _regionWorld(region: BoardRegion, scale: number, sin: number, cos: number): {
+    x: number; y: number; z: number; w: number; h: number;
+} {
+    // Board-local → world: rotate about Y, then translate by the board's origin.
+    const lx = region.cx * scale;
+    const ly = region.cy * scale;
+    const lz = region.z * scale;
+    return {
+        x: noticeBoard.position.x + lx * cos + lz * sin,
+        y: noticeBoard.position.y + ly,
+        z: noticeBoard.position.z - lx * sin + lz * cos,
+        w: region.w * scale,
+        h: region.h * scale,
+    };
+}
+
+function _updateNoticeBoardPanel(): void {
+    const scale = noticeBoard.scale.x;
+    const rotY = noticeBoard.rotation.y;
+    const sin = Math.sin(rotY), cos = Math.cos(rotY);
+
+    // Kept alive well past the waterline. UNDERWATER_Y_THRESHOLD is the surface
+    // itself, and cutting the panels there meant they blinked out while still
+    // plainly in shot through the water. SURFACE_ANIM_FREEZE_Y is where the rest
+    // of the island's surface work already stops — deep enough that nothing is
+    // legible any more, and it costs nothing to keep them until then.
+    const shown = noticeBoard.children.length > 0
+        && noticeBoard.visible
+        && camera.position.y >= SURFACE_ANIM_FREEZE_Y;
+    const zoomed = isNoticeBoardZoomActive();
+    // While a note is being written or placed, EVERY panel has to hand the
+    // canvas back: a modal panel sets pointer-events:none on it, and placement
+    // is built entirely on raycasting the canvas. Without this the other two
+    // panels kept the pointer and placement could not receive a single event —
+    // which is why dragging a note did nothing.
+    const interactive = zoomed && !isPostItBusy();
+
+    const ach = _regionWorld(REGION_ACHIEVEMENTS, scale, sin, cos);
+    syncAchievementsPanel(shown, zoomed, interactive, ach.x, ach.y, ach.z, ach.w, ach.h, rotY);
+
+    const sld = _regionWorld(REGION_SLIDES, scale, sin, cos);
+    syncNoticeBoardPanel(shown, interactive, sld.x, sld.y, sld.z, sld.w, sld.h, rotY);
+
+    const pw = _regionWorld(REGION_POSTITS, scale, sin, cos);
+    syncPostItWall(shown, zoomed, pw.x, pw.y, pw.z, pw.w, rotY);
+}
+
+// ============================================
+// PICTURE FRAME CLICK  (hung above the board)
+// ============================================
+const pictureFrameRaycaster = new Raycaster();
+const pictureFrameMouse = new Vector2();
+const _frameBox = new Box3();
+const _frameCenter = new Vector3();
+const _frameSize = new Vector3();
+/** Invisible tap target over the photo — see hitsFrame. */
+let _framePickPlane: Mesh | null = null;
+
+/** How much bigger than the frame the tap target is. Generous on purpose: the
+ *  cost of overshooting is a click that flies in when you meant to miss, which
+ *  one click undoes; the cost of undershooting is a control that feels broken. */
+const FRAME_PICK_SCALE = 1.85;
+
+/**
+ * Build the tap target once the model is in. It is a CHILD of the frame group,
+ * so moving or rescaling the frame from the debug GUI carries it — but it is
+ * squared to the BOARD rather than to the frame's own few degrees of tilt, since
+ * that is the plane the visitor is actually aiming at.
+ */
+function _buildFramePickPlane(): void {
+    if (_framePickPlane || pictureFrame.children.length === 0) return;
+    pictureFrame.updateMatrixWorld(true);
+    _frameBox.setFromObject(pictureFrame);
+    _frameBox.getCenter(_frameCenter);
+    _frameBox.getSize(_frameSize);
+
+    const groupScale = pictureFrame.scale.x || 1;
+    const w = (_frameSize.x / groupScale) * FRAME_PICK_SCALE;
+    const h = (_frameSize.y / groupScale) * FRAME_PICK_SCALE;
+
+    const plane = new Mesh(
+        new PlaneGeometry(w, h),
+        new MeshBasicMaterial({ colorWrite: false, depthWrite: false, transparent: true, opacity: 0 }),
+    );
+    plane.name = 'pictureFramePick';
+    // Centre it on the frame, expressed in the group's own local space.
+    plane.position.copy(pictureFrame.worldToLocal(_frameCenter.clone()));
+    plane.rotation.y = noticeBoard.rotation.y - pictureFrame.rotation.y;
+    plane.renderOrder = -1;
+    pictureFrame.add(plane);
+    _framePickPlane = plane;
+}
+
+/**
+ * Try to frame the photo from a click at (clientX, clientY).
+ *
+ * Routed through the board's outside-click rather than a canvas listener of its
+ * own, and that is not a detail: while the board is zoomed its panels are modal,
+ * which puts the canvas at pointer-events:none — so a canvas handler here could
+ * only ever fire when the board was NOT zoomed, which is the opposite of what is
+ * wanted. Clicks that miss the panels land on the CSS3D layer instead, and this
+ * runs from there.
+ *
+ * Only reachable while the board zoom is active, so the photo is a step INSIDE
+ * the board rather than a separate thing to find from across the island.
+ */
+function _focusFrameAt(clientX: number, clientY: number): boolean {
+    if (!_framePickPlane || pictureFrame.children.length === 0) return false;
+    pictureFrameMouse.x = (clientX / window.innerWidth) * 2 - 1;
+    pictureFrameMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+    pictureFrameRaycaster.setFromCamera(pictureFrameMouse, camera);
+    if (pictureFrameRaycaster.intersectObject(_framePickPlane, false).length === 0) return false;
+
+    // Measured from the model's bounds rather than derived from config, so a
+    // rescale from the debug GUI reframes correctly with no second number.
+    pictureFrame.updateMatrixWorld(true);
+    _frameBox.setFromObject(pictureFrame);
+    _frameBox.getCenter(_frameCenter);
+    _frameBox.getSize(_frameSize);
+
+    setNoticeBoardFocus({
+        key: 'frame',
+        x: _frameCenter.x, y: _frameCenter.y, z: _frameCenter.z,
+        rotY: noticeBoard.rotation.y,   // square to the wall, not the frame's own tilt
+        w: _frameSize.x, h: _frameSize.y,
+    });
+    return true;
+}
+
+/**
+ * One step out: focus → board, board → the scene.
+ *
+ * DEDUPED PER EVENT. CSS3DPanel's outside-click walks every visible modal panel
+ * and fires each one's handler for the SAME pointerdown — and all three board
+ * panels register this function. Undeduped, a single click away ran it three
+ * times: the first cleared the focus and the next two left the zoom outright,
+ * which is exactly the "one click exits everything" behaviour. timeStamp
+ * identifies the event; the panels pass it through.
+ */
+let _lastBackOutStamp = -1;
+function _boardBackOut(e?: PointerEvent): void {
+    if (e) {
+        if (e.timeStamp === _lastBackOutStamp) return;
+        _lastBackOutStamp = e.timeStamp;
+    }
+    if (isNoticeBoardFocused()) { setNoticeBoardFocus(null); return; }
+    // Nothing framed yet: a click that landed on the photo frames THAT rather
+    // than leaving the board.
+    if (e && _focusFrameAt(e.clientX, e.clientY)) return;
+    zoomOutFromNoticeBoard();
+}
+
+const noticeBoardRaycaster = new Raycaster();
+const noticeBoardMouse = new Vector2();
+let isNoticeBoardHovered = false;
+// Set for the duration of one click/tap when the board handler acted on it.
+// Every canvas 'click' listener fires for the same event, and the board's
+// "click anywhere to back out" clears the zoom flag partway down that list — so
+// handlers registered AFTER this one would otherwise see a clean, un-zoomed
+// scene and treat the same tap as a fresh interaction (tapping an apple that
+// happens to be behind the board, say). They check
+// _noticeBoardBlocksClick() instead, which stays true until the event is done.
+let _noticeBoardClaimedClick = false;
+
+/** True while the board owns this click — see _noticeBoardClaimedClick. */
+function _noticeBoardBlocksClick(): boolean {
+    return isNoticeBoardZoomActive() || _noticeBoardClaimedClick;
+}
+
+function setupNoticeBoardInteraction(): void {
+    const canvas = renderer.domElement;
+    if (!canvas) return;
+
+    const _claimClick = () => {
+        _noticeBoardClaimedClick = true;
+        // Cleared on the next task — after every listener for this event has run.
+        setTimeout(() => { _noticeBoardClaimedClick = false; }, 0);
+    };
+
+    const _hitsBoard = (clientX: number, clientY: number): boolean => {
+        noticeBoardMouse.x = (clientX / window.innerWidth) * 2 - 1;
+        noticeBoardMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+        noticeBoardRaycaster.setFromCamera(noticeBoardMouse, camera);
+        return noticeBoardRaycaster.intersectObjects(noticeBoard.children, true).length > 0;
+    };
+
+    const onNoticeBoardClick = (clientX: number, clientY: number) => {
+        if (noticeBoard.children.length === 0) return;   // not built yet
+        // Above-water prop — ignore everything below the surface
+        if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
+
+        // Already zoomed: ANY canvas click backs out. Don't raycast to decide —
+        // the board fills most of the frame at zoom distance, so a hit test would
+        // read even a deliberate "click away" as a click on the board and trap
+        // the user in the zoom (the same reasoning as the radio handler above).
+        if (isNoticeBoardZoomActive()) {
+            // A post-it being written or placed owns the screen; a stray click
+            // must not yank the camera out from under it.
+            if (isPostItBusy()) return;
+            _boardBackOut();
+            _claimClick();
+            return;
+        }
+
+        // Let whichever other zoom currently owns the camera close itself first
+        if (isPugZoomActive() || isRadioZoomActive() || isPhoneZoomActive() || isChestZoomActive() || isCabanaZoomActive()) return;
+        // Media player open — this click belongs to the player's collapse
+        if (getIsExpanded()) return;
+
+        if (_hitsBoard(clientX, clientY)) {
+            // Clear hover state so the cursor resets before the camera moves
+            isNoticeBoardHovered = false;
+            canvas.style.cursor = '';
+            zoomToNoticeBoard();
+            _claimClick();
+        }
+    };
+
+    canvas.addEventListener('click', (e: MouseEvent) => {
+        onNoticeBoardClick(e.clientX, e.clientY);
+    });
+
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+        if (_touchWasMulti || _touchDragged) return;  // was a scroll gesture — skip click
+        if (e.changedTouches.length > 0) {
+            const touch = e.changedTouches[0];
+            onNoticeBoardClick(touch.clientX, touch.clientY);
+        }
+    });
+
+    // Hover — cursor only. The board is nailed to a trunk, so the usual
+    // scale-up-on-hover affordance would visibly tear it off the tree.
+    canvas.addEventListener('mousemove', (e: MouseEvent) => {
+        if (noticeBoard.children.length === 0 || isNoticeBoardZoomActive() ||
+            camera.position.y < UNDERWATER_Y_THRESHOLD) {
+            if (isNoticeBoardHovered) { isNoticeBoardHovered = false; canvas.style.cursor = ''; }
+            return;
+        }
+        if (_hitsBoard(e.clientX, e.clientY)) {
+            if (!isNoticeBoardHovered) { isNoticeBoardHovered = true; canvas.style.cursor = 'pointer'; }
+        } else {
+            if (isNoticeBoardHovered) { isNoticeBoardHovered = false; canvas.style.cursor = ''; }
+        }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        if (isNoticeBoardHovered) { isNoticeBoardHovered = false; canvas.style.cursor = ''; }
+    });
+}
+
+// ============================================
 // RADIO CLICK/HOVER INTERACTION
 // ============================================
 const radioRaycaster = new Raycaster();
@@ -4733,7 +5144,7 @@ function setupRadioInteraction(): void {
         // Ignore interactions while underwater — models are above water
         if (camera.position.y < UNDERWATER_Y_THRESHOLD) return;
         // Ignore clicks while another zoom is active — let that handler close itself first
-        if (isPugZoomActive() || isPhoneZoomActive()) return;
+        if (isPugZoomActive() || isPhoneZoomActive() || isNoticeBoardZoomActive()) return;
 
         // Any canvas click while the player is open closes it.
         // Don't raycast here — the zoomed-in model fills most of the canvas so hitsRadio
@@ -4819,6 +5230,7 @@ const SURFACE_ANIM_FREEZE_Y = -3.0;
 
 export function Update(): void {
   const isUnderwater = camera.position.y < SURFACE_ANIM_FREEZE_Y;
+  _updateNoticeBoardPanel();
   _updateAppleImpacts();
   islandCampfireGroundCenterUniform.value.set(firecamp.position.x, firecamp.position.z);
   _updateGroundApples();
@@ -5026,6 +5438,7 @@ export function Update(): void {
     }
     // Animate chest glow light
     if (chestGlowLight) {
+        syncChestGlowLightPosition();
         // Keep target in sync with live config (so debug slider works).
         // Only after the delay has elapsed (_chestGlowReady) so the glow
         // doesn't fire at the very first frame of the open animation.

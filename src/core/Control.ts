@@ -3,7 +3,7 @@ import { deltaTime, time } from "./Time";
 import { camera, cameraRight, cameraForward, UpdateCameraRotation, renderer, staticCamera } from "./Scene.ts"; //body,
 import { KeyCodes, PointerPhase, PointerType, keysJustPressed, keysPressed, lastPointerLockChange, mouseMovement, pointers } from "./Input";
 import { spotLightDistance, spotLightDistanceUniform } from "../materials/OceanMaterial";
-import { islandPosition as cfgIslandPos, radioOffset as cfgRadioOffset, radioRotY as cfgRadioRotY, pugOffset as cfgPugOffset, pugRotY as cfgPugRotY, phoneOffset as cfgPhoneOffset } from '../scene/config/IslandConfig';
+import { islandPosition as cfgIslandPos, radioOffset as cfgRadioOffset, radioRotY as cfgRadioRotY, pugOffset as cfgPugOffset, pugRotY as cfgPugRotY, phoneOffset as cfgPhoneOffset, noticeBoardZoomDist, noticeBoardZoomHeight, noticeBoardZoomFov, noticeBoardZoomMobileFov, noticeBoardZoomPitch } from '../scene/config/IslandConfig';
 import { defaultCameraX, defaultCameraZ, defaultFov, mobileFov, mobileBreakpointWidth, aboveWaterBottomY as cfgAboveWaterBottomY, aboveWaterBottomYMobile as cfgAboveWaterBottomYMobile, underwaterTopY as cfgUnderwaterTopY, underwaterTopYMobile as cfgUnderwaterTopYMobile } from '../scene/config/CameraConfig';
 import { phoneZoomHeight, phoneZoomTilt, phoneZoomPitch, phoneZoomFov } from '../scene/config/PhoneConfig';
 import { cabanaCamX, cabanaCamY, cabanaCamZ, cabanaPhi, cabanaPitch, cabanaFov, cabanaCamXMobile, cabanaCamYMobile, cabanaCamZMobile, cabanaPhiMobile, cabanaPitchMobile, cabanaFovMobile, cabanaArriveDist } from '../scene/config/CabanaConfig';
@@ -114,6 +114,7 @@ let radioZoomActive = false;
 let pugZoomActive = false;
 let phoneZoomActive = false;
 let chestZoomActive = false;
+let noticeBoardZoomActive = false;
 // True from the instant zoomOutFromRadio/zoomOutFromPug is called until the camera has
 // fully eased back to its default pose (X/Z, yaw, pitch, FOV). radioZoomActive/pugZoomActive
 // flip false immediately when zoom-out starts, but the camera position/orientation are
@@ -164,6 +165,37 @@ export const cabanaRevealConfig = { arriveDist: cabanaArriveDist };
 
 // Counter for scroll attempts during zoom (stuck-zoom safety valve)
 let _zoomScrollAttempts = 0;
+
+/**
+ * Hard hold on every path that can end a zoom.
+ *
+ * Some flows own the screen while the camera is parked — writing a post-it,
+ * then dragging it around the board to place it. A drag is a long stream of
+ * move events, and the machinery that normally protects the user from a STUCK
+ * zoom (three scroll attempts and the camera bails out) reads that stream as
+ * "the user is trying to leave". It is not: they are using the thing the zoom
+ * exists for.
+ *
+ * While this is set, scroll does not accumulate attempts, the safety valve does
+ * nothing, and an explicit zoom-out is refused. The flow clears it when it
+ * finishes or is cancelled, and both of those paths are unconditional.
+ */
+/**
+ * Set while a board flow owns the screen (writing or placing a post-it): it
+ * suppresses the zoom-out paths so a placement drag is not read as "the user is
+ * trying to leave".
+ *
+ * READ THROUGH isZoomExitLocked(), never directly. The lock is only meaningful
+ * while the board actually owns the camera, and honouring a stale one outside
+ * that is how the scene ends up bricked: the lock blocks the zoom-out AND the
+ * scroll AND the stuck-zoom safety valve, which between them are every way out.
+ * A flag whose only release lives in another module's exit paths must not be
+ * able to take the whole scene with it if one of those paths is ever missed, so
+ * the board zoom's own state is the outer condition.
+ */
+let _zoomExitLocked = false;
+export function setZoomExitLock(locked: boolean): void { _zoomExitLocked = locked; }
+export function isZoomExitLocked(): boolean { return _zoomExitLocked && noticeBoardZoomActive; }
 
 // Saved camera state before zoom
 let savedCameraX = 0;
@@ -259,6 +291,24 @@ export const pugZoomConfig = {
     pitch:   0.1800,
 };
 
+/**
+ * How far back the camera has to stand to fit a focus target in frame.
+ *
+ * Both axes are checked, because which one binds depends on the viewport: a
+ * phone held upright is limited by WIDTH on a landscape sheet, a desktop window
+ * by HEIGHT. Taking the larger of the two distances means the whole thing is in
+ * frame either way, with a margin so it is not jammed against the edges.
+ */
+function _focusDistance(f: BoardFocus): number {
+    const fovDeg = _getResponsiveFov(noticeBoardZoomConfig.fov, noticeBoardZoomConfig.mobileFov);
+    const halfFov = (fovDeg * Math.PI) / 360;
+    const tan = Math.tan(halfFov);
+    const aspect = camera.aspect || 1;
+    const distH = (f.h / 2) / tan;
+    const distW = (f.w / 2) / (tan * aspect);
+    return Math.max(distH, distW) * 1.15;
+}
+
 /** Camera world position for the current pug framing (before the cutscene offset). */
 function _pugCamX(): number {
     return _pugWorldX + pugZoomConfig.dist * Math.sin(cfgPugRotY) + pugZoomConfig.lateral * Math.cos(cfgPugRotY);
@@ -313,6 +363,56 @@ const PHONE_ZOOM_PHI = Math.PI * 2;
 // Chest zoom — target is read live each frame from sfDecorConfig for debug-GUI responsiveness
 const CHEST_ZOOM_PHI = Math.PI * 2; // look straight ahead (-Z)
 
+// ── Notice board zoom ────────────────────────────────────────────────────────
+// Unlike the radio (whose target is baked from IslandConfig at module load), the
+// board's pose is read LIVE from the scene group through this bridge. The board
+// is meant to be nudged around the trunk from the debug GUI, and re-deriving the
+// camera pose every frame means the zoom framing follows it without a reload.
+// Island registers the provider; until then the zoom simply refuses to start.
+let _noticeBoardPose: (() => { x: number; y: number; z: number; rotY: number }) | null = null;
+export function registerNoticeBoardPose(get: () => { x: number; y: number; z: number; rotY: number }): void {
+    _noticeBoardPose = get;
+}
+
+/**
+ * A single thing on (or above) the board to frame closer than the board itself.
+ *
+ * The board zoom fits the WHOLE board, which is the right first stop but leaves
+ * the notice, the badge sheet and the photo too small to study. A focus is a
+ * second, nested step: same pinned orientation, just close enough to fill the
+ * frame with one of them. Clicking away clears the focus and drops back to the
+ * board rather than leaving the zoom outright — the visitor went in, not out.
+ */
+export interface BoardFocus {
+    /** Which thing is framed, so a panel can tell "me" from "one of the others". */
+    key: string;
+    /** World centre of the thing to frame. */
+    x: number; y: number; z: number;
+    /** Its facing yaw — the camera lines up square to it. */
+    rotY: number;
+    /** World size to fit in frame. */
+    w: number; h: number;
+}
+
+let _boardFocus: BoardFocus | null = null;
+
+export function setNoticeBoardFocus(f: BoardFocus | null): void {
+    // Only meaningful while the board owns the camera.
+    if (f && !noticeBoardZoomActive) return;
+    _boardFocus = f;
+}
+export function isNoticeBoardFocused(): boolean { return _boardFocus !== null; }
+export function getNoticeBoardFocusKey(): string | null { return _boardFocus?.key ?? null; }
+
+/** Framing for the notice-board zoom — mutable so the debug GUI can dial it in. */
+export const noticeBoardZoomConfig = {
+    dist:      noticeBoardZoomDist,       // world units out along the board's facing normal
+    height:    noticeBoardZoomHeight,     // camera Y above the board's origin
+    fov:       noticeBoardZoomFov,        // desktop FOV (telephoto — lower = tighter)
+    mobileFov: noticeBoardZoomMobileFov,  // FOV at or below mobileBreakpointWidth
+    pitch:     noticeBoardZoomPitch,      // camera pitch in radians
+};
+
 export function isRadioZoomActive(): boolean {
     return radioZoomActive;
 }
@@ -327,6 +427,10 @@ export function isPhoneZoomActive(): boolean {
 
 export function isChestZoomActive(): boolean {
     return chestZoomActive;
+}
+
+export function isNoticeBoardZoomActive(): boolean {
+    return noticeBoardZoomActive;
 }
 
 /** True while the camera is still easing back from a radio/pug zoom-out — see
@@ -365,7 +469,7 @@ function saveAndStartZoom(): void {
 
 // Zoom camera to focus on radio (called when expanding media player above water)
 export function zoomToRadio(): void {
-    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside' || isUnderwater) return;
+    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || noticeBoardZoomActive || cabanaPhase !== 'outside' || isUnderwater) return;
     saveAndStartZoom();
     radioZoomActive = true;
 }
@@ -373,7 +477,7 @@ export function zoomToRadio(): void {
 // Zoom camera INTO the cabana (tent interior). Outer level — the phone zoom nests
 // inside it. Mounts the phone iframe so the interior phone screen is already live.
 export function zoomToCabana(): void {
-    if (cabanaPhase !== 'outside' || radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || isUnderwater) return;
+    if (cabanaPhase !== 'outside' || radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || noticeBoardZoomActive || isUnderwater) return;
     saveAndStartZoom();
     cabanaPhase = 'entering';
     // Kick off the (idempotent) interior lazy-load; the dark dive masks it. The
@@ -406,7 +510,7 @@ export function zoomOutFromRadio(): void {
 
 // Zoom camera to focus on pug
 export function zoomToPug(): void {
-    if (pugZoomActive || radioZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside' || isUnderwater) return;
+    if (pugZoomActive || radioZoomActive || phoneZoomActive || chestZoomActive || noticeBoardZoomActive || cabanaPhase !== 'outside' || isUnderwater) return;
     saveAndStartZoom();
     pugZoomActive = true;
 }
@@ -437,9 +541,29 @@ export function zoomOutFromPhone(): void {
     phoneZoomActive = false;
 }
 
+// Zoom camera to focus on the notice board nailed to the tree. Above-water only,
+// same as the radio — so its zoom-out joins the radio/pug settling family below,
+// which keeps the underwater over/under effect suppressed through the return trip.
+export function zoomToNoticeBoard(): void {
+    if (noticeBoardZoomActive || radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside' || isUnderwater) return;
+    if (!_noticeBoardPose) return;  // Island hasn't built the board yet
+    saveAndStartZoom();
+    noticeBoardZoomActive = true;
+}
+
+// Zoom out from the notice board. Always snaps targetY to the scene's top — see zoomOutFromRadio.
+export function zoomOutFromNoticeBoard(): void {
+    if (!noticeBoardZoomActive || isZoomExitLocked()) return;
+    noticeBoardZoomActive = false;
+    _boardFocus = null;
+    radioPugZoomSettling = true;
+    zoomReturnSettling = true;
+    targetY = aboveWaterTopY;
+}
+
 // Zoom camera to focus on chest (underwater)
 export function zoomToChest(): void {
-    if (chestZoomActive || radioZoomActive || pugZoomActive || phoneZoomActive || cabanaPhase !== 'outside' || !isUnderwater) return;
+    if (chestZoomActive || radioZoomActive || pugZoomActive || phoneZoomActive || noticeBoardZoomActive || cabanaPhase !== 'outside' || !isUnderwater) return;
     saveAndStartZoom();
     chestZoomActive = true;
 }
@@ -456,12 +580,26 @@ export function zoomOutFromChest(): void {
 // Force-clear all zoom flags (safety valve for stuck zooms on mobile)
 function forceExitZoom(): void {
     _zoomScrollAttempts = 0;
+    // A stuck SETTLE is as unscrollable as a stuck zoom, and until now this
+    // valve could not clear one: with every zoom flag already false there was
+    // nothing left for the code below to reset, and the settling flags were only
+    // ever set here, never cleared. Whatever leaves them stuck in future, four
+    // scroll attempts now get the visitor out of it.
+    if (!(radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive ||
+          noticeBoardZoomActive || cabanaPhase !== 'outside')) {
+        zoomReturnSettling = false;
+        radioPugZoomSettling = false;
+        return;
+    }
+    // A flow that owns the screen is not a stuck zoom — see setZoomExitLock.
+    if (isZoomExitLocked()) return;
     if (radioZoomActive) { radioZoomActive = false; radioPugZoomSettling = true; zoomReturnSettling = true; targetY = aboveWaterTopY; }
     if (pugZoomActive)   { pugZoomActive = false;   radioPugZoomSettling = true; zoomReturnSettling = true; targetY = aboveWaterTopY; }
     // Phone is the inner level — the cabana below owns the restore + iframe teardown.
     if (phoneZoomActive) { phoneZoomActive = false; }
     if (cabanaPhase !== 'outside'){ cabanaPhase = 'outside'; targetY = savedTargetY; unmountPhoneIframe(); }
     if (chestZoomActive) { chestZoomActive = false;  zoomReturnSettling = true; targetY = savedTargetY; _chestClose?.(); }
+    if (noticeBoardZoomActive) { noticeBoardZoomActive = false; _boardFocus = null; radioPugZoomSettling = true; zoomReturnSettling = true; targetY = aboveWaterTopY; }
 }
 
 // Get saved camera position (for calculating where radio will be after zoomout)
@@ -511,7 +649,10 @@ export function handleScroll(deltaY: number): void {
     // Dragging the underwater card carousel — the horizontal swipe's vertical
     // component must not also scroll the camera (covers wheel + touch paths).
     if (isCarouselDragging()) return;
-    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside' || zoomReturnSettling) {
+    // Locked flows swallow scroll outright, WITHOUT counting it toward the
+    // stuck-zoom valve below — otherwise placing a note trips the escape hatch.
+    if (isZoomExitLocked()) return;
+    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || noticeBoardZoomActive || cabanaPhase !== 'outside' || zoomReturnSettling) {
         // Safety: user is trying to scroll while a zoom flag is active.
         // Increment a counter — if they keep scrolling, force-clear the stuck zoom.
         _zoomScrollAttempts++;
@@ -540,7 +681,7 @@ export function handleScroll(deltaY: number): void {
 export function scrollCameraToY(y: number): boolean {
     if (!scrollEnabled || !webPageMode) return false;
     if (isDialogActive()) return false;
-    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive
+    if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || noticeBoardZoomActive
         || cabanaPhase !== 'outside' || zoomReturnSettling) return false;
     targetY = MathUtils.clamp(y, underwaterBottomY, aboveWaterTopY);
     return true;
@@ -555,7 +696,7 @@ export function isSceneScrollEnabled(): boolean {
     // stopped the internal camera and let native scroll leak through for zooms
     // that don't open a dialog (radio, chest) or during the return trip.
     return scrollEnabled && !isDialogActive() &&
-        !(radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaPhase !== 'outside' || zoomReturnSettling);
+        !(radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || noticeBoardZoomActive || cabanaPhase !== 'outside' || zoomReturnSettling);
 }
 
 declare global {
@@ -796,7 +937,7 @@ export function Update(): void
         // The cabana drives the camera only while diving in / settled inside. On
         // 'exiting' it falls through to NORMAL MODE so the camera eases back out.
         const cabanaDrivingCamera = cabanaPhase === 'entering' || cabanaPhase === 'inside';
-        if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || cabanaDrivingCamera) {
+        if (radioZoomActive || pugZoomActive || phoneZoomActive || chestZoomActive || noticeBoardZoomActive || cabanaDrivingCamera) {
             // ZOOM MODE: Smoothly move camera to target position
             let zoomTargetX: number, zoomTargetY: number, zoomTargetZ: number;
             if (phoneZoomActive) {
@@ -817,6 +958,24 @@ export function Update(): void
                 zoomTargetX = sfDecorConfig.chest.x;
                 zoomTargetY = sfDecorConfig.chest.y + sfDecorConfig.chestZoomHeight;
                 zoomTargetZ = sfDecorConfig.chest.z + sfDecorConfig.chestZoomDist;
+            } else if (noticeBoardZoomActive) {
+                // Stand out along the board's facing normal — same derivation as
+                // the radio, but read live from the scene so debug-GUI nudges to
+                // the board carry the camera with them. A focus swaps the board
+                // for one thing ON it, and derives its distance from the size of
+                // that thing rather than from a fixed number.
+                if (_boardFocus) {
+                    const f = _boardFocus;
+                    const d = _focusDistance(f);
+                    zoomTargetX = f.x + d * Math.sin(f.rotY);
+                    zoomTargetY = f.y;
+                    zoomTargetZ = f.z + d * Math.cos(f.rotY);
+                } else {
+                    const b = _noticeBoardPose!();
+                    zoomTargetX = b.x + noticeBoardZoomConfig.dist * Math.sin(b.rotY);
+                    zoomTargetY = b.y + noticeBoardZoomConfig.height;
+                    zoomTargetZ = b.z + noticeBoardZoomConfig.dist * Math.cos(b.rotY);
+                }
             } else {
                 zoomTargetX = RADIO_ZOOM_TARGET_X;
                 zoomTargetY = RADIO_ZOOM_TARGET_Y;
@@ -870,6 +1029,16 @@ export function Update(): void
                 // sits bottom-right and the island fills the rest (pugZoomConfig).
                 zoomPhi = MathUtils.damp(zoomPhi, PUG_ZOOM_PHI + pugZoomConfig.yaw, ZOOM_SMOOTH, deltaTime);
                 zoomTetha = MathUtils.damp(zoomTetha, pugZoomConfig.pitch, ZOOM_SMOOTH, deltaTime);
+            } else if (noticeBoardZoomActive) {
+                // phi = 2π − rotY looks along −frontNormal, straight at the notice.
+                const b = _boardFocus ?? _noticeBoardPose!();
+                zoomPhi = MathUtils.damp(zoomPhi, Math.PI * 2 - b.rotY, ZOOM_SMOOTH, deltaTime);
+                zoomTetha = MathUtils.damp(zoomTetha, noticeBoardZoomConfig.pitch, ZOOM_SMOOTH, deltaTime);
+                // Telephoto so the notice fills the frame without shoving the
+                // near clip plane through the planks.
+                currentFov = MathUtils.damp(currentFov,
+                    _getResponsiveFov(noticeBoardZoomConfig.fov, noticeBoardZoomConfig.mobileFov),
+                    ZOOM_SMOOTH, deltaTime);
             } else if (chestZoomActive) {
                 zoomPhi = MathUtils.damp(zoomPhi, CHEST_ZOOM_PHI, ZOOM_SMOOTH, deltaTime);
                 // Tilt camera down to look at chest from above
@@ -912,14 +1081,38 @@ export function Update(): void
                 camera.position.z = mainCameraConfig.z;
             }
 
-            // Smoothly return camera yaw to default after radio zoom
-            if (Math.abs(zoomPhi - Math.PI * 2) > 0.001) {
+            // Return camera yaw and pitch to neutral after a zoom.
+            //
+            // THE GUARD IS `!==`, NOT `abs(...) > epsilon`, AND THAT IS THE WHOLE
+            // POINT. It used to skip the block whenever the value was already
+            // within 0.001 of neutral — which sounds harmless and is not, because
+            // the SNAP that makes the value exactly neutral lives inside the
+            // block. A value parked inside that dead band never got snapped, and
+            // the zoom-out settle check below tests for EXACT equality:
+            //
+            //   zoomPhi === Math.PI * 2 && zoomTetha === 0 && ...
+            //
+            // so it could never become true, zoomReturnSettling stayed set
+            // forever, and handleScroll blocks scroll while it is set. A
+            // permanently unscrollable page.
+            //
+            // The notice board falls into the dead band on BOTH axes at once.
+            // Its yaw target is 2π − noticeBoardRotY with rotY = −0.0006, i.e.
+            // 0.0006 off neutral; its pitch target is 0.0000, and damp() is
+            // asymptotic so zoomTetha lands near zero without ever reaching it.
+            // Every other zoom (radio, pug, chest, phone) aims far enough away
+            // that the block ran and the snap fired, which is why this only ever
+            // showed up on the board.
+            //
+            // Damping a value that is already at its target is a no-op, so
+            // running the block unconditionally costs nothing and removes the
+            // trap: whatever the target, the value always reaches it exactly.
+            if (zoomPhi !== Math.PI * 2) {
                 zoomPhi = MathUtils.damp(zoomPhi, Math.PI * 2, ZOOM_SMOOTH, deltaTime);
                 if (Math.abs(zoomPhi - Math.PI * 2) < 0.001) zoomPhi = Math.PI * 2;
             }
 
-            // Smoothly return camera pitch to default after phone zoom
-            if (Math.abs(zoomTetha) > 0.001) {
+            if (zoomTetha !== 0) {
                 zoomTetha = MathUtils.damp(zoomTetha, 0, ZOOM_SMOOTH, deltaTime);
                 if (Math.abs(zoomTetha) < 0.001) zoomTetha = 0;
             }
