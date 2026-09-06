@@ -1,4 +1,4 @@
-import { renderer, webglContainer } from "./Scene";
+import { renderer } from "./Scene";
 
 const STORAGE_KEY = "portfolio-mode-2d";
 
@@ -12,14 +12,14 @@ function initCanvas(): void {
 	if (canvas) return;
 	canvas = document.createElement("canvas");
 	canvas.id = "renderer2d";
-	canvas.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;display:none;z-index:10";
+	canvas.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;display:none;z-index:10;pointer-events:none";
+	document.body.appendChild(canvas);
 	ctx = canvas.getContext("2d")!;
-	webglContainer.appendChild(canvas);
 
 	const resize = () => {
 		if (!canvas) return;
-		canvas.width = webglContainer.clientWidth;
-		canvas.height = webglContainer.clientHeight;
+		canvas.width = window.innerWidth;
+		canvas.height = window.innerHeight;
 	};
 	resize();
 	window.addEventListener("resize", resize);
