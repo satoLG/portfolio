@@ -860,6 +860,47 @@ export function Start(): void {
         });
     });
 
+// ── 2D/3D Toggle Button ──────────────────────────────────────────────────────
+	const modeToggleBtn = document.createElement("button");
+	modeToggleBtn.id = "mode-toggle-btn";
+	modeToggleBtn.textContent = "🎨 2D";
+
+	modeToggleBtn.style.position = "fixed";
+	modeToggleBtn.style.bottom = "20px";
+	modeToggleBtn.style.right = "20px";
+	modeToggleBtn.style.zIndex = "9999";
+	modeToggleBtn.style.border = "2px solid #000";
+	modeToggleBtn.style.borderRadius = "8px";
+	modeToggleBtn.style.background = "#fff";
+	modeToggleBtn.style.color = "#000";
+	modeToggleBtn.style.fontWeight = "bold";
+	modeToggleBtn.style.fontSize = "14px";
+	modeToggleBtn.style.padding = "8px 14px";
+	modeToggleBtn.style.cursor = "pointer";
+	modeToggleBtn.style.boxShadow = "2px 2px 0 #000";
+	modeToggleBtn.style.transition = "all 0.15s ease";
+	modeToggleBtn.style.fontFamily = "system-ui, sans-serif";
+	modeToggleBtn.style.lineHeight = "1";
+
+	modeToggleBtn.addEventListener("mouseenter", () => {
+		modeToggleBtn.style.background = "#f0f0f0";
+		modeToggleBtn.style.transform = "translate(-1px, -1px)";
+		modeToggleBtn.style.boxShadow = "3px 3px 0 #000";
+	});
+	modeToggleBtn.addEventListener("mouseleave", () => {
+		modeToggleBtn.style.background = "#fff";
+		modeToggleBtn.style.transform = "none";
+		modeToggleBtn.style.boxShadow = "2px 2px 0 #000";
+	});
+
+	modeToggleBtn.addEventListener("click", () => {
+		void import("./Renderer2D").then((R2D) => {
+			R2D.toggle();
+			modeToggleBtn.textContent = R2D.isActive() ? "🌊 3D" : "🎨 2D";
+		});
+	});
+
+	document.body.appendChild(modeToggleBtn);
 }
 
 // Track previous blend class to avoid redundant DOM mutations

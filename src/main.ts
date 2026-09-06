@@ -27,6 +27,12 @@ SCENE.Start();
 INPUT.Start();
 CONTROL.Start();
 UI.Start();
+
+// Initialize 2D renderer (checks localStorage and auto-activates if saved)
+import("./core/Renderer2D").then((R2D) => {
+	R2D.init();
+});
+
 CABANA_EXIT.Start();
 DEBUG.Start();
 
